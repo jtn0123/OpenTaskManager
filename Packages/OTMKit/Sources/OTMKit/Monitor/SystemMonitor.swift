@@ -23,6 +23,7 @@ public actor SystemMonitor {
     private let disks = DiskSampler()
     private let network = NetworkSampler()
     private let gpu = GPUSampler()
+    private let power = PowerSampler()
     private let processes = ProcessSampler()
     private var lastSample: ContinuousClock.Instant?
     private var volumes: [VolumeInfo] = []
@@ -64,7 +65,7 @@ public actor SystemMonitor {
             volumes: volumes,
             network: network.sample(interval: interval),
             gpus: gpuResult.gpus,
-            power: PowerReader.read(),
+            power: power.sample(),
             processes: processList
         )
     }

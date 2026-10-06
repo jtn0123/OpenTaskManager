@@ -213,6 +213,35 @@ public struct BatterySample: Sendable, Codable {
     public let minutesRemaining: Int?
     public let voltage: Double?
     public let amperage: Double?
+
+    /// Power flowing into the battery: positive while charging, negative while discharging.
+    public var watts: Double? {
+        guard let voltage, let amperage else { return nil }
+        return voltage * amperage
+    }
+}
+
+/// Where `PowerSample.systemWatts` came from.
+public enum SystemPowerSource: String, Sendable, Codable {
+    /// The SMC's whole-system power key (PSTR), refreshed about once a second.
+    case smcSystemTotal
+    /// The battery gauge's `PowerTelemetryData` system load, refreshed roughly once a minute.
+    case batteryTelemetry
+    /// The SMC's DC-input power key (PDTR). Includes charging power when the battery is charging.
+    case smcInput
+    /// Battery voltage times discharge current, the last resort on battery power.
+    case batteryDischarge
+}
+
+/// The connected power adapter and the power flowing through it.
+public struct AdapterSample: Sendable, Codable {
+    /// The adapter's own name, such as "140W USB-C Power Adapter".
+    public let name: String?
+    public let ratedWatts: Double?
+    /// Live power drawn from the adapter.
+    public let inputWatts: Double?
+    /// Power flowing into the battery: positive while charging, negative while discharging.
+    public let batteryWatts: Double?
 }
 
 public struct PowerSample: Sendable, Codable {
@@ -221,4 +250,8 @@ public struct PowerSample: Sendable, Codable {
     public let battery: BatterySample?
     public let isLowPowerMode: Bool
     public let thermalState: ThermalState
+    /// nil when no adapter is connected or the Mac has no battery (desktops).
+    public let adapter: AdapterSample?
+    /// Which reading `systemWatts` came from.
+    public let systemWattsSource: SystemPowerSource?
 }

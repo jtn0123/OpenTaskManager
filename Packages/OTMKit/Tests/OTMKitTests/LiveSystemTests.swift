@@ -34,6 +34,31 @@ struct LiveSystemTests {
         #expect(snapshot.volumes.contains { $0.isRoot })
     }
 
+    /// CI runs in a VM that may have no SMC, battery or adapter, so these
+    /// checks only apply to the readings that exist.
+    @Test func powerReadingsAreSane() async throws {
+        if let smc = SMCConnection() {
+            if let total = smc.double("PSTR") { #expect(total.isFinite && total >= 0) }
+            #expect(smc.double("ZZZZ") == nil)
+            #expect(smc.double("ZZZZ") == nil, "a missing key stays missing once cached")
+        }
+
+        let monitor = SystemMonitor()
+        let power = try await monitor.measuredSample(over: .milliseconds(300)).power
+        if let watts = power.systemWatts {
+            #expect(watts.isFinite && watts > 0)
+            #expect(power.systemWattsSource != nil)
+        } else {
+            #expect(power.systemWattsSource == nil)
+        }
+        if let adapter = power.adapter {
+            #expect(adapter.ratedWatts.map { $0.isFinite && $0 > 0 } ?? true)
+            #expect(adapter.inputWatts.map { $0.isFinite && $0 >= 0 } ?? true)
+            #expect(adapter.batteryWatts.map(\.isFinite) ?? true)
+            #expect(power.battery?.isPluggedIn ?? true)
+        }
+    }
+
     @Test func processListIncludesSelfAndSystemProcesses() async throws {
         let monitor = SystemMonitor()
         let snapshot = try await monitor.measuredSample(over: .milliseconds(300))
