@@ -58,14 +58,15 @@ struct GPUHistory {
     var renderer = History<Double>(capacity: AppModel.historyCapacity)
     var tiler = History<Double>(capacity: AppModel.historyCapacity)
     var memoryInUse = History<Double>(capacity: AppModel.historyCapacity)
-    /// Average clock while powered on, in MHz; 0 while the GPU was off.
+    /// Average clock while powered on, in MHz. An idle interval has no clock,
+    /// so it repeats the last one rather than dropping the line to zero.
     var frequency = History<Double>(capacity: AppModel.historyCapacity)
 
     mutating func append(_ gpu: GPUSample) {
         renderer.append(gpu.rendererUtilization ?? 0)
         tiler.append(gpu.tilerUtilization ?? 0)
         memoryInUse.append(Double(gpu.memoryInUse ?? 0))
-        frequency.append(gpu.frequencyMHz ?? 0)
+        frequency.append(gpu.frequencyMHz ?? frequency.last ?? 0)
     }
 }
 
@@ -78,7 +79,8 @@ struct PowerHistory {
     /// The system figure minus the chip's parts: display, SSD, radios, fans,
     /// power conversion. Never negative, though the system figure lags a beat.
     var rest = History<Double>(capacity: AppModel.historyCapacity)
-    /// Per CPU cluster, keyed by name: watts, average clock (MHz) and share of time running.
+    /// Per CPU cluster, keyed by name: watts, average clock (MHz) and share of
+    /// time running. An idle cluster repeats its last clock, like `GPUHistory`.
     var clusterWatts: [String: History<Double>] = [:]
     var clusterFrequency: [String: History<Double>] = [:]
     var clusterActive: [String: History<Double>] = [:]
@@ -103,7 +105,9 @@ struct PowerHistory {
         }
         for cluster in parts?.clusters ?? [] {
             clusterWatts[cluster.name, default: Self.history()].append(cluster.watts ?? 0)
-            clusterFrequency[cluster.name, default: Self.history()].append(cluster.frequencyMHz ?? 0)
+            var clock = clusterFrequency[cluster.name] ?? Self.history()
+            clock.append(cluster.frequencyMHz ?? clock.last ?? 0)
+            clusterFrequency[cluster.name] = clock
             clusterActive[cluster.name, default: Self.history()].append(cluster.activeFraction ?? 0)
         }
         adapterInput.append(power.adapter?.inputWatts ?? 0)

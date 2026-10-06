@@ -46,6 +46,7 @@ struct PowerDetail: View {
         let name: String
         let color: Color
         let values: [Double]
+        /// nil when this Mac doesn't measure the part.
         let watts: Double?
     }
 
@@ -65,7 +66,9 @@ struct PowerDetail: View {
         let rest = model.powerDetail.rest.values
         let legend = chip.map { LegendItem(name: $0.name, color: $0.color, value: $0.watts.map(Format.watts) ?? "—") }
             + [LegendItem(name: "Rest of system", color: Theme.restOfSystem, value: Format.watts(rest.last ?? 0))]
-        let series = chip.map { GraphSeries(values: $0.values, color: $0.color) }
+        // Unmeasured parts stay in the legend as "—" but out of the stack,
+        // where they'd only draw flat lines over the band below.
+        let series = chip.filter { $0.watts != nil }.map { GraphSeries(values: $0.values, color: $0.color) }
             + [GraphSeries(values: rest, color: Theme.restOfSystem)]
         return ChartCard(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "",
                          tint: Theme.power, legend: legend) {

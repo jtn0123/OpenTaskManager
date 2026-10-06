@@ -22,7 +22,6 @@ struct OverviewView: View {
                         diskCard(snapshot)
                         networkCard(snapshot)
                         if let components = snapshot.power.components { powerCard(components) }
-                        StorageCard(volumes: snapshot.volumes)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                         TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
@@ -32,9 +31,11 @@ struct OverviewView: View {
                         TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
                                 metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
                     }
+                    StorageCard(volumes: snapshot.volumes)
                 }
                 .padding(20)
             }
+            .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -120,25 +121,28 @@ struct OverviewView: View {
     /// Where the power goes, stacked by part of the Mac.
     private func powerCard(_ components: PowerComponents) -> some View {
         let history = model.powerDetail
-        let rest = history.rest.values.last ?? 0
+        let cpu = Stat(label: "CPU", number: components.cpu, color: Theme.cpu, format: Format.watts)
+        let gpu = Stat(label: "GPU", number: components.gpu, color: Theme.gpu, format: Format.watts)
+        // Parts this Mac doesn't measure would only add flat lines over the band below.
+        let bands: [GraphSeries?] = [
+            components.isMeasured(.cpu) ? GraphSeries(values: history.cpu.values, color: Theme.cpu) : nil,
+            components.isMeasured(.gpu) ? GraphSeries(values: history.gpu.values, color: Theme.gpu) : nil,
+            components.isMeasured(.ane) ? GraphSeries(values: history.ane.values, color: Theme.neuralEngine) : nil,
+            components.isMeasured(.dram) ? GraphSeries(values: history.dram.values, color: Theme.dram) : nil,
+        ]
+        let series = bands.compactMap { $0 } + [GraphSeries(values: history.rest.values, color: Theme.restOfSystem)]
         return Card(tint: Theme.power) {
             Label("Power", systemImage: "bolt.fill").font(.headline)
-            HStack(spacing: 18) {
-                Stat(label: "CPU", number: components.cpu, color: Theme.cpu, format: Format.watts)
-                Stat(label: "GPU", number: components.gpu, color: Theme.gpu, format: Format.watts)
-                Stat(label: "Rest", number: rest, color: Theme.restOfSystem, format: Format.watts)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 18) {
+                    cpu
+                    gpu
+                    Stat(label: "Rest", number: history.rest.values.last ?? 0, color: Theme.restOfSystem, format: Format.watts)
+                }
+                HStack(spacing: 18) { cpu; gpu }
             }
-            GraphView(
-                series: [
-                    GraphSeries(values: history.cpu.values, color: Theme.cpu),
-                    GraphSeries(values: history.gpu.values, color: Theme.gpu),
-                    GraphSeries(values: history.ane.values, color: Theme.neuralEngine),
-                    GraphSeries(values: history.dram.values, color: Theme.dram),
-                    GraphSeries(values: history.rest.values, color: Theme.restOfSystem),
-                ],
-                capacity: 120, showsGrid: false, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts
-            )
-            .frame(height: 72)
+            GraphView(series: series, capacity: 120, showsGrid: false, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts)
+                .frame(height: 72)
         }
     }
 }
@@ -288,7 +292,7 @@ private struct StorageCard: View {
     var body: some View {
         Card(tint: .indigo) {
             Label("Storage", systemImage: "externaldrive").font(.headline)
-            VStack(alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 24, alignment: .top)], alignment: .leading, spacing: 10) {
                 ForEach(volumes.prefix(4)) { volume in
                     let used = Double(volume.usedBytes) / Double(max(volume.totalBytes, 1))
                     VStack(alignment: .leading, spacing: 4) {
