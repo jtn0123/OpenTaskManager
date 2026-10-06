@@ -7,6 +7,15 @@ struct OpenTaskManagerApp: App {
     @State private var model = AppModel()
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
 
+    init() {
+        // `--args -openPage Processes` picks the starting page. It's copied into the
+        // saved value once, because passing `-page` itself would pin that setting
+        // for the whole run and the sidebar would stop switching pages.
+        if let start = UserDefaults.standard.string(forKey: "openPage"), Page(rawValue: start) != nil {
+            UserDefaults.standard.set(start, forKey: "page")
+        }
+    }
+
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
             ContentView()
@@ -62,7 +71,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(Page.allCases, selection: Binding(get: { page }, set: { page = $0 ?? .processes })) { page in
+            List(Page.allCases, selection: Binding(get: { page }, set: { if let new = $0 { page = new } })) { page in
                 Label(page.rawValue, systemImage: page.symbol).tag(page)
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)

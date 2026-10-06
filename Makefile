@@ -12,6 +12,7 @@ export DEVELOPER_DIR
 PROJECT   := OpenTaskManager.xcodeproj
 SCHEME    := OpenTaskManager
 DERIVED   := .build/xcode
+DEST      := platform=macOS,arch=$(shell uname -m)
 APP_DEBUG := $(DERIVED)/Build/Products/Debug/OpenTaskManager.app
 APP_REL   := $(DERIVED)/Build/Products/Release/OpenTaskManager.app
 KIT       := Packages/OTMKit
@@ -33,10 +34,10 @@ generate:
 	xcodegen generate --quiet
 
 build: generate
-	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Debug -derivedDataPath $(DERIVED) -quiet build
+	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Debug -derivedDataPath $(DERIVED) -destination "$(DEST)" -quiet build
 
 release: generate
-	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Release -derivedDataPath $(DERIVED) -quiet build
+	xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Release -derivedDataPath $(DERIVED) -destination "$(DEST)" -quiet build
 	@echo "Built $(APP_REL)"
 
 run: build

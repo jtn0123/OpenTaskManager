@@ -47,11 +47,13 @@ Never click or script the UI while the user is at the machine, and never bring
 the app to the front. Launch it in the background, then capture its window by ID:
 
 ```sh
-open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -page Overview
+open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPage Overview
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-page Overview|Processes|Performance` overrides the saved page. Get the
+`-openPage Overview|Processes|Performance` sets the starting page. Don't pass
+`-page` itself: a launch argument pins that setting for the whole run, so the
+sidebar stops working in that instance. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
 
