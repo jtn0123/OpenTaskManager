@@ -55,7 +55,8 @@ final class CPUSampler {
 }
 
 enum CPUTopologyReader {
-    static func read() -> CPUTopology {
+    /// - Parameter clusterTypes: the device tree's cluster type for each logical CPU.
+    static func read(clusterTypes: [Int: String] = deviceTreeClusterTypes()) -> CPUTopology {
         let logical = Sysctl.int("hw.logicalcpu") ?? ProcessInfo.processInfo.processorCount
         let physical = Sysctl.int("hw.physicalcpu") ?? logical
         #if arch(x86_64)
@@ -88,7 +89,7 @@ enum CPUTopologyReader {
             physicalCores: physical,
             logicalCores: logical,
             tiers: tiers,
-            tierForCPU: tierMap(logical: logical, tiers: tiers),
+            tierForCPU: tierMap(logical: logical, tiers: tiers, clusterTypes: clusterTypes),
             l1DataCacheBytes: Sysctl.int("hw.l1dcachesize"),
             l1InstructionCacheBytes: Sysctl.int("hw.l1icachesize"),
             l2CacheBytes: Sysctl.int("hw.l2cachesize"),
@@ -100,35 +101,42 @@ enum CPUTopologyReader {
     /// Maps each logical CPU to its tier. The device tree labels every CPU
     /// with a cluster type; when that is unavailable we fall back to the
     /// kernel's ordering, which lists the slowest tier's CPUs first.
-    private static func tierMap(logical: Int, tiers: [CPUTopology.Tier]) -> [Int] {
+    private static func tierMap(logical: Int, tiers: [CPUTopology.Tier], clusterTypes: [Int: String]) -> [Int] {
         let fallback: [Int] = tiers.sorted { $0.level > $1.level }.flatMap { tier in
             [Int](repeating: tier.level, count: tier.logicalCPUs)
-        }
-
-        var clusterTypes: [Int: String] = [:]
-        if let cpus = IORegistry.entry(path: "IODeviceTree:/cpus") {
-            defer { IOObjectRelease(cpus) }
-            IORegistry.forEachChild(of: cpus, plane: "IODeviceTree") { cpu in
-                let properties = IORegistry.properties(of: cpu)
-                guard let id = logicalID(properties["logical-cpu-id"]),
-                      let type = properties.string("cluster-type") else { return }
-                clusterTypes[id] = type
-            }
         }
         guard clusterTypes.count == logical, tiers.count > 1 else {
             return fallback.count == logical ? fallback : [Int](repeating: 0, count: logical)
         }
+        guard let levelForType = levels(forClusterTypes: clusterTypes, tierCount: tiers.count) else { return fallback }
+        return (0..<logical).map { levelForType[clusterTypes[$0] ?? ""] ?? 0 }
+    }
 
-        // Rank cluster types by how many tiers sit below them: the type whose
-        // CPUs come last in the kernel's ordering is the fastest tier.
+    /// The cluster type ("P", "M", "E") of each logical CPU, from the device tree.
+    static func deviceTreeClusterTypes() -> [Int: String] {
+        var clusterTypes: [Int: String] = [:]
+        guard let cpus = IORegistry.entry(path: "IODeviceTree:/cpus") else { return clusterTypes }
+        defer { IOObjectRelease(cpus) }
+        IORegistry.forEachChild(of: cpus, plane: "IODeviceTree") { cpu in
+            let properties = IORegistry.properties(of: cpu)
+            guard let id = logicalID(properties["logical-cpu-id"]),
+                  let type = properties.string("cluster-type") else { return }
+            clusterTypes[id] = type
+        }
+        return clusterTypes
+    }
+
+    /// The tier level of each cluster type. The kernel numbers CPUs from the
+    /// slowest tier up, so the type whose CPUs come last is tier 0. nil when
+    /// the number of types doesn't match the number of tiers.
+    static func levels(forClusterTypes clusterTypes: [Int: String], tierCount: Int) -> [String: Int]? {
         var firstIndex: [String: Int] = [:]
         for id in clusterTypes.keys.sorted() {
             if let type = clusterTypes[id], firstIndex[type] == nil { firstIndex[type] = id }
         }
         let orderedTypes = firstIndex.sorted { $0.value > $1.value }.map(\.key)
-        guard orderedTypes.count == tiers.count else { return fallback }
-        let levelForType = Dictionary(uniqueKeysWithValues: orderedTypes.enumerated().map { ($1, $0) })
-        return (0..<logical).map { levelForType[clusterTypes[$0] ?? ""] ?? 0 }
+        guard !orderedTypes.isEmpty, orderedTypes.count == tierCount else { return nil }
+        return Dictionary(uniqueKeysWithValues: orderedTypes.enumerated().map { ($1, $0) })
     }
 
     private static func logicalID(_ value: Any?) -> Int? {

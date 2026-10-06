@@ -11,6 +11,10 @@ public actor SystemMonitor {
         public var includeRestrictedProcesses = true
         /// Attribute GPU time to processes (walks the IORegistry each tick).
         public var includeProcessGPU = true
+        /// Per-component power, CPU cluster clocks and GPU clocks from
+        /// IOReport. Costs about 6 ms of CPU per sample on an M5 Pro, most of
+        /// it the power manager driver's kernel work.
+        public var includeComponentPower = true
 
         public init() {}
     }
@@ -23,13 +27,20 @@ public actor SystemMonitor {
     private let disks = DiskSampler()
     private let network = NetworkSampler()
     private let gpu = GPUSampler()
+    private let power: PowerSampler
     private let processes = ProcessSampler()
     private var lastSample: ContinuousClock.Instant?
     private var volumes: [VolumeInfo] = []
     private var volumesRead = Date.distantPast
 
     public init(options: Options = Options()) {
-        topology = CPUTopologyReader.read()
+        let clusterTypes = CPUTopologyReader.deviceTreeClusterTypes()
+        let topology = CPUTopologyReader.read(clusterTypes: clusterTypes)
+        self.topology = topology
+        power = PowerSampler(
+            topology: topology,
+            levelForClusterType: CPUTopologyReader.levels(forClusterTypes: clusterTypes, tierCount: topology.tiers.count) ?? [:]
+        )
         self.options = options
     }
 
@@ -43,6 +54,7 @@ public actor SystemMonitor {
         lastSample = now
 
         let gpuResult = gpu.sample(includeProcesses: options.includeProcesses && options.includeProcessGPU)
+        let powerResult = power.sample(includeComponents: options.includeComponentPower)
         processes.includeRestricted = options.includeRestrictedProcesses
         let processList = options.includeProcesses
             ? processes.sample(interval: interval, gpuTime: gpuResult.processGPUTime)
@@ -59,12 +71,12 @@ public actor SystemMonitor {
             interval: interval,
             uptime: Self.uptime(),
             cpu: cpu.sample(),
-            memory: memory.sample(),
+            memory: memory.sample(interval: interval),
             disks: disks.sample(interval: interval),
             volumes: volumes,
             network: network.sample(interval: interval),
-            gpus: gpuResult.gpus,
-            power: PowerReader.read(),
+            gpus: GPUActivity.merge(gpuResult.gpus, powerResult.gpus),
+            power: powerResult.power,
             processes: processList
         )
     }

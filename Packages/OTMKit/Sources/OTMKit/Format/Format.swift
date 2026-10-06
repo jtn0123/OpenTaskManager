@@ -54,6 +54,13 @@ public enum Format {
         return "\(fixed(value, value >= 10 ? 1 : 2)) W"
     }
 
+    /// "338 MHz", "4.51 GHz".
+    public static func frequency(megahertz value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "—" }
+        if value.rounded() < 1000 { return "\(Int(value.rounded())) MHz" }
+        return "\(fixed(value / 1000, 2)) GHz"
+    }
+
     /// "3d 4h", "2h 05m", "4m 12s".
     public static func duration(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }

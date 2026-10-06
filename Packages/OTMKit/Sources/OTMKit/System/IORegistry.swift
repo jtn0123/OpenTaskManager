@@ -7,8 +7,18 @@ enum IORegistry {
     /// Calls `body` with each service matching `className`. The service object
     /// is released after `body` returns.
     static func forEachService(matching className: String, _ body: (io_registry_entry_t) -> Void) {
+        forEachService(matchingDictionary: IOServiceMatching(className), body)
+    }
+
+    /// Like `forEachService(matching:)`, but matches the entry's name
+    /// (device-tree nodes such as "pmgr") instead of its class.
+    static func forEachService(named name: String, _ body: (io_registry_entry_t) -> Void) {
+        forEachService(matchingDictionary: IOServiceNameMatching(name), body)
+    }
+
+    private static func forEachService(matchingDictionary: CFMutableDictionary?, _ body: (io_registry_entry_t) -> Void) {
         var iterator: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching(className), &iterator) == KERN_SUCCESS else {
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matchingDictionary, &iterator) == KERN_SUCCESS else {
             return
         }
         defer { IOObjectRelease(iterator) }

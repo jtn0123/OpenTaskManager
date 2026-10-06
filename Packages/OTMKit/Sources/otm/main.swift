@@ -11,6 +11,8 @@ USAGE:
   otm ps [-n COUNT] [--sort cpu|mem|power|gpu|disk|pid|name] [--json]
   otm top [-n COUNT] [--sort KEY] [--interval SECONDS]
   otm system [--json]
+  otm power [--json]             System, CPU/GPU/ANE/DRAM and cluster power,
+                                 clocks, adapter and battery flow
   otm ports [--json]             Listening TCP/UDP ports of your processes
   otm inspect PID [--json]       Arguments, environment and open files
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
@@ -118,9 +120,13 @@ func systemSummary(_ snapshot: SystemSnapshot, topology: CPUTopology) -> String 
     lines.append("  app \(Format.bytes(memory.app))  wired \(Format.bytes(memory.wired))"
         + "  compressed \(Format.bytes(memory.compressed))  cached \(Format.bytes(memory.cached))"
         + "  swap \(Format.bytes(memory.swapUsed))")
+    lines.append("  page in \(Format.bytesPerSecond(memory.pageInRate))  out \(Format.bytesPerSecond(memory.pageOutRate))"
+        + "  swap in \(Format.bytesPerSecond(memory.swapInRate))  out \(Format.bytesPerSecond(memory.swapOutRate))"
+        + "  compress \(Format.bytesPerSecond(memory.compressionRate))  decompress \(Format.bytesPerSecond(memory.decompressionRate))")
     for gpu in snapshot.gpus {
         let cores = gpu.coreCount.map { " (\($0) cores)" } ?? ""
-        lines.append("GPU     \(Format.percent(gpu.deviceUtilization)) \(gpu.name)\(cores)")
+        let clock = gpu.frequencyMHz.map { "  \(Format.frequency(megahertz: $0))" } ?? ""
+        lines.append("GPU     \(Format.percent(gpu.deviceUtilization)) \(gpu.name)\(cores)\(clock)")
     }
     for disk in snapshot.disks {
         lines.append("Disk    \(disk.bsdName) \(disk.model ?? "")"
@@ -143,6 +149,78 @@ func systemSummary(_ snapshot: SystemSnapshot, topology: CPUTopology) -> String 
         if let cycles = battery.cycleCount { powerLine += "  \(cycles) cycles" }
     }
     lines.append(powerLine)
+    return lines.joined(separator: "\n")
+}
+
+struct PowerReport: Encodable {
+    let interval: TimeInterval
+    let power: PowerSample
+    let gpus: [GPUSample]
+}
+
+func describe(_ source: SystemPowerSource) -> String {
+    switch source {
+    case .smcSystemTotal: "SMC system total"
+    case .batteryTelemetry: "battery gauge"
+    case .smcInput: "SMC DC input"
+    case .batteryDischarge: "battery discharge"
+    }
+}
+
+/// Signed battery flow: "+12.0 W charging", "-8.21 W discharging".
+func batteryFlow(_ watts: Double) -> String {
+    if abs(watts) < 0.05 { return "idle" }
+    return (watts > 0 ? "+" : "-") + Format.watts(abs(watts)) + (watts > 0 ? " charging" : " discharging")
+}
+
+func powerSummary(_ snapshot: SystemSnapshot) -> String {
+    let power = snapshot.power
+    var lines: [String] = []
+    if let watts = power.systemWatts {
+        lines.append("System    \(Format.watts(watts))" + (power.systemWattsSource.map { " (\(describe($0)))" } ?? ""))
+    } else {
+        lines.append("System    unavailable")
+    }
+    if let adapter = power.adapter {
+        var line = "Adapter   \(adapter.name ?? "connected")"
+        if let rated = adapter.ratedWatts { line += ", rated " + (rated == rated.rounded() ? "\(Int(rated)) W" : Format.watts(rated)) }
+        if let input = adapter.inputWatts { line += ", drawing \(Format.watts(input))" }
+        lines.append(line)
+    }
+    if let battery = power.battery {
+        let flow = battery.watts.map { ", \(batteryFlow($0))" } ?? ""
+        lines.append("Battery   \(battery.percent)%\(flow)")
+    }
+
+    if let components = power.components {
+        lines.append("Components (measured total \(Format.watts(components.total)))")
+        let names: [(PowerComponent, String)] = [(.cpu, "CPU"), (.gpu, "GPU"), (.ane, "ANE"), (.dram, "DRAM")]
+        for (component, name) in names {
+            guard let watts = components.watts(component) else {
+                lines.append("  \(pad(name, 6))—  not measured")
+                continue
+            }
+            let note = components.sources[component] == .smc ? "  (SMC)" : ""
+            lines.append("  \(pad(name, 6))\(Format.watts(watts))\(note)")
+        }
+        if !components.clusters.isEmpty {
+            lines.append("  " + pad("CLUSTER", 24) + pad("POWER", 9, right: true) + pad("CLOCK", 11, right: true) + pad("ACTIVE", 8, right: true))
+            for cluster in components.clusters {
+                lines.append("  " + pad("\(cluster.name) (\(cluster.channel))", 24)
+                    + pad(cluster.watts.map(Format.watts) ?? "—", 9, right: true)
+                    + pad(cluster.frequencyMHz.map { Format.frequency(megahertz: $0) } ?? "—", 11, right: true)
+                    + pad(cluster.activeFraction.map { Format.percent($0, digits: 1) } ?? "—", 8, right: true))
+            }
+        }
+    } else {
+        lines.append("Components unavailable (no IOReport energy data)")
+    }
+    for gpu in snapshot.gpus {
+        let clock = gpu.frequencyMHz.map { Format.frequency(megahertz: $0) } ?? "—"
+        let active = gpu.activeResidency.map { Format.percent($0, digits: 1) } ?? "—"
+        lines.append("GPU       \(gpu.name): clock \(clock), active \(active)")
+    }
+    lines.append("Thermal   \(power.thermalState.rawValue)" + (power.isLowPowerMode ? ", Low Power Mode on" : ""))
     return lines.joined(separator: "\n")
 }
 
@@ -209,6 +287,18 @@ case "system":
         printJSON(snapshot.withoutProcesses())
     } else {
         print(systemSummary(snapshot, topology: monitor.topology))
+    }
+
+case "power":
+    // The process list isn't shown, so don't pay for it.
+    var sampling = SystemMonitor.Options()
+    sampling.includeProcesses = false
+    await monitor.setOptions(sampling)
+    let snapshot = try await monitor.measuredSample(over: .seconds(options.interval))
+    if options.json {
+        printJSON(PowerReport(interval: snapshot.interval, power: snapshot.power, gpus: snapshot.gpus))
+    } else {
+        print(powerSummary(snapshot))
     }
 
 case "ports":

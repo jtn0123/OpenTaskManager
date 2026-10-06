@@ -26,8 +26,71 @@ struct LiveSystemTests {
         #expect((0...1).contains(snapshot.cpu.usage))
         #expect(snapshot.memory.physical > 0)
         #expect(snapshot.memory.used <= snapshot.memory.physical)
+        let memory = snapshot.memory
+        let rates = [memory.pageInRate, memory.pageOutRate, memory.swapInRate, memory.swapOutRate,
+                     memory.compressionRate, memory.decompressionRate]
+        #expect(rates.allSatisfy { $0.isFinite && $0 >= 0 })
         #expect(snapshot.network.contains { $0.kind == .loopback })
         #expect(snapshot.volumes.contains { $0.isRoot })
+    }
+
+    /// CI runs in a VM that may have no SMC, battery or adapter, so these
+    /// checks only apply to the readings that exist.
+    @Test func powerReadingsAreSane() async throws {
+        if let smc = SMCConnection() {
+            if let total = smc.double("PSTR") { #expect(total.isFinite && total >= 0) }
+            #expect(smc.double("ZZZZ") == nil)
+            #expect(smc.double("ZZZZ") == nil, "a missing key stays missing once cached")
+        }
+
+        let monitor = SystemMonitor()
+        let power = try await monitor.measuredSample(over: .milliseconds(300)).power
+        if let watts = power.systemWatts {
+            #expect(watts.isFinite && watts > 0)
+            #expect(power.systemWattsSource != nil)
+        } else {
+            #expect(power.systemWattsSource == nil)
+        }
+        if let adapter = power.adapter {
+            #expect(adapter.ratedWatts.map { $0.isFinite && $0 > 0 } ?? true)
+            #expect(adapter.inputWatts.map { $0.isFinite && $0 >= 0 } ?? true)
+            #expect(adapter.batteryWatts.map(\.isFinite) ?? true)
+            #expect(power.battery?.isPluggedIn ?? true)
+        }
+    }
+
+    /// IOReport and its power channels may be missing (CI VMs, Intel), so
+    /// only check what this Mac reports.
+    @Test func componentPowerIsSane() async throws {
+        let monitor = SystemMonitor()
+        let first = await monitor.sample()
+        #expect(first.power.components == nil, "the first sample has no interval")
+        try await Task.sleep(for: .milliseconds(300))
+        let snapshot = await monitor.sample()
+
+        if let components = snapshot.power.components {
+            let limit = SoCPowerAnalyzer.limitWatts(systemWatts: snapshot.power.systemWatts)
+            for component in PowerComponent.allCases {
+                if let watts = components.watts(component) {
+                    #expect(watts.isFinite && watts >= 0 && watts <= limit, "\(component): \(watts) W")
+                }
+            }
+            #expect(components.total.isFinite)
+            let levels = Set(monitor.topology.tiers.map(\.level))
+            #expect(Set(components.clusters.map(\.id)).count == components.clusters.count)
+            let order = components.clusters.map { $0.tierLevel ?? .max }
+            #expect(order == order.sorted())
+            for cluster in components.clusters {
+                #expect(cluster.tierLevel.map(levels.contains) ?? true)
+                #expect(cluster.activeFraction.map { (0...1).contains($0) } ?? true)
+                #expect(cluster.frequencyMHz.map { (100...10_000).contains($0) } ?? true)
+                #expect(cluster.watts.map { $0.isFinite && $0 >= 0 } ?? true)
+            }
+        }
+        for gpu in snapshot.gpus {
+            #expect(gpu.activeResidency.map { (0...1).contains($0) } ?? true)
+            #expect(gpu.frequencyMHz.map { (100...10_000).contains($0) } ?? true)
+        }
     }
 
     @Test func processListIncludesSelfAndSystemProcesses() async throws {
