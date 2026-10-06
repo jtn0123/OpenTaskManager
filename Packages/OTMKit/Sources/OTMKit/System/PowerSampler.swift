@@ -77,6 +77,10 @@ enum PowerSourceSelection {
     /// SMC is their only source. PDTR (DC input) is the same figure while the
     /// battery isn't charging, but includes charging power, so it ranks below
     /// the gauge. Battery discharge (volts times amps) is the last resort.
+    /// While the battery is idle, PSTR repeats PDTR's previous reading, so it
+    /// trails the live SMC and IOReport figures by one update (about a
+    /// second): for that long after a load step the components can add up to
+    /// more than the system figure.
     static func systemPower(
         smcSystemTotal: Double?, smcInput: Double?, reading: BatteryReading?
     ) -> (watts: Double, source: SystemPowerSource)? {

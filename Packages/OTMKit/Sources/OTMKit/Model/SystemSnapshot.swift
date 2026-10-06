@@ -229,7 +229,8 @@ public struct BatterySample: Sendable, Codable {
 
 /// Where `PowerSample.systemWatts` came from.
 public enum SystemPowerSource: String, Sendable, Codable {
-    /// The SMC's whole-system power key (PSTR), refreshed about once a second.
+    /// The SMC's whole-system power key (PSTR), refreshed about once a second
+    /// and one refresh behind the SMC's other power keys.
     case smcSystemTotal
     /// The battery gauge's `PowerTelemetryData` system load, refreshed roughly once a minute.
     case batteryTelemetry
