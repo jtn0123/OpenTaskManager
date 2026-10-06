@@ -26,6 +26,10 @@ struct LiveSystemTests {
         #expect((0...1).contains(snapshot.cpu.usage))
         #expect(snapshot.memory.physical > 0)
         #expect(snapshot.memory.used <= snapshot.memory.physical)
+        let memory = snapshot.memory
+        let rates = [memory.pageInRate, memory.pageOutRate, memory.swapInRate, memory.swapOutRate,
+                     memory.compressionRate, memory.decompressionRate]
+        #expect(rates.allSatisfy { $0.isFinite && $0 >= 0 })
         #expect(snapshot.network.contains { $0.kind == .loopback })
         #expect(snapshot.volumes.contains { $0.isRoot })
     }

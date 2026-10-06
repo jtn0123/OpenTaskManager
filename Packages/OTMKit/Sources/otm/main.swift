@@ -118,6 +118,9 @@ func systemSummary(_ snapshot: SystemSnapshot, topology: CPUTopology) -> String 
     lines.append("  app \(Format.bytes(memory.app))  wired \(Format.bytes(memory.wired))"
         + "  compressed \(Format.bytes(memory.compressed))  cached \(Format.bytes(memory.cached))"
         + "  swap \(Format.bytes(memory.swapUsed))")
+    lines.append("  page in \(Format.bytesPerSecond(memory.pageInRate))  out \(Format.bytesPerSecond(memory.pageOutRate))"
+        + "  swap in \(Format.bytesPerSecond(memory.swapInRate))  out \(Format.bytesPerSecond(memory.swapOutRate))"
+        + "  compress \(Format.bytesPerSecond(memory.compressionRate))  decompress \(Format.bytesPerSecond(memory.decompressionRate))")
     for gpu in snapshot.gpus {
         let cores = gpu.coreCount.map { " (\($0) cores)" } ?? ""
         lines.append("GPU     \(Format.percent(gpu.deviceUtilization)) \(gpu.name)\(cores)")

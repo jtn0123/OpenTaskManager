@@ -91,10 +91,19 @@ public struct MemorySample: Sendable, Codable {
     public let pressure: MemoryPressure
     /// The kernel's own "memory available" percentage (`kern.memorystatus_level`).
     public let availablePercent: Int?
+    /// Cumulative page counts since boot.
     public let pageIns: UInt64
     public let pageOuts: UInt64
     public let swapIns: UInt64
     public let swapOuts: UInt64
+    /// Bytes per second over the last interval (0 on the first sample).
+    public let pageInRate: Double
+    public let pageOutRate: Double
+    public let swapInRate: Double
+    public let swapOutRate: Double
+    /// Bytes per second of pages moved into and out of the compressor.
+    public let compressionRate: Double
+    public let decompressionRate: Double
 
     public var usedFraction: Double {
         physical == 0 ? 0 : Double(used) / Double(physical)

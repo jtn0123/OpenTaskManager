@@ -59,7 +59,7 @@ public actor SystemMonitor {
             interval: interval,
             uptime: Self.uptime(),
             cpu: cpu.sample(),
-            memory: memory.sample(),
+            memory: memory.sample(interval: interval),
             disks: disks.sample(interval: interval),
             volumes: volumes,
             network: network.sample(interval: interval),
