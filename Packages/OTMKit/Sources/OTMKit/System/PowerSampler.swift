@@ -98,12 +98,40 @@ enum PowerSourceSelection {
     }
 }
 
-/// Reads whole-system power, the battery and the adapter. Owns one SMC
-/// connection for its lifetime.
+/// Reads whole-system power, the battery, the adapter and per-component
+/// power. Owns one SMC connection and one IOReport subscription for its lifetime.
 final class PowerSampler {
-    private let smc = SMCConnection()
+    struct Result {
+        let power: PowerSample
+        /// GPU clocks and residency, keyed by the accelerator's registry ID.
+        let gpus: [UInt64: GPUActivity]
+    }
 
-    func sample() -> PowerSample {
+    /// SMC key for the CPU clusters' power, used when the IOReport energy
+    /// model can't give a live CPU figure. On an M5 Pro it rose by 25 W within
+    /// one SMC update when six `yes` processes started (DC input rose 34 W) and
+    /// fell back when they stopped, while GPU load left it alone. Over three
+    /// windows between the energy model's batch updates (30 to 228 s) it
+    /// integrated to 1.22 to 1.24 times the model's "CPU Energy", so it reads
+    /// about a quarter higher than powermetrics would.
+    static let smcCPUKey = "PPMC"
+
+    private let smc = SMCConnection()
+    private let topology: CPUTopology
+    private let levelForClusterType: [String: Int]
+    /// Created on first use: finding IOReport's channels walks every driver
+    /// and takes about 100 ms, which shouldn't land on whoever creates the monitor.
+    private var soc: SoCPowerSampler?
+    private var socCreated = false
+
+    init(topology: CPUTopology, levelForClusterType: [String: Int]) {
+        self.topology = topology
+        self.levelForClusterType = levelForClusterType
+    }
+
+    /// - Parameter includeComponents: read IOReport. Turning it off drops the
+    ///   subscription; turning it back on starts a fresh baseline.
+    func sample(includeComponents: Bool = true) -> Result {
         var reading: BatteryReading?
         IORegistry.forEachService(matching: "AppleSmartBattery") { service in
             reading = BatteryReading.parse(IORegistry.properties(of: service))
@@ -112,14 +140,25 @@ final class PowerSampler {
         let smcInput = smc?.double("PDTR")
         let system = PowerSourceSelection.systemPower(smcSystemTotal: smcSystemTotal, smcInput: smcInput, reading: reading)
 
+        if includeComponents, !socCreated {
+            soc = SoCPowerSampler(topology: topology, levelForClusterType: levelForClusterType)
+            socCreated = true
+        } else if !includeComponents, socCreated {
+            soc = nil
+            socCreated = false
+        }
+        let soc = soc?.sample(systemWatts: system?.watts) { [smc] in smc?.double(Self.smcCPUKey) }
+
         let info = ProcessInfo.processInfo
-        return PowerSample(
+        let power = PowerSample(
             systemWatts: system?.watts,
             battery: reading?.battery,
             isLowPowerMode: info.isLowPowerModeEnabled,
             thermalState: ThermalState(info.thermalState),
             adapter: PowerSourceSelection.adapter(reading: reading, smcInput: smcInput),
-            systemWattsSource: system?.source
+            systemWattsSource: system?.source,
+            components: soc?.components
         )
+        return Result(power: power, gpus: soc?.gpus ?? [:])
     }
 }

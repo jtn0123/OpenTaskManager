@@ -59,6 +59,40 @@ struct LiveSystemTests {
         }
     }
 
+    /// IOReport and its power channels may be missing (CI VMs, Intel), so
+    /// only check what this Mac reports.
+    @Test func componentPowerIsSane() async throws {
+        let monitor = SystemMonitor()
+        let first = await monitor.sample()
+        #expect(first.power.components == nil, "the first sample has no interval")
+        try await Task.sleep(for: .milliseconds(300))
+        let snapshot = await monitor.sample()
+
+        if let components = snapshot.power.components {
+            let limit = SoCPowerAnalyzer.limitWatts(systemWatts: snapshot.power.systemWatts)
+            for component in PowerComponent.allCases {
+                if let watts = components.watts(component) {
+                    #expect(watts.isFinite && watts >= 0 && watts <= limit, "\(component): \(watts) W")
+                }
+            }
+            #expect(components.total.isFinite)
+            let levels = Set(monitor.topology.tiers.map(\.level))
+            #expect(Set(components.clusters.map(\.id)).count == components.clusters.count)
+            let order = components.clusters.map { $0.tierLevel ?? .max }
+            #expect(order == order.sorted())
+            for cluster in components.clusters {
+                #expect(cluster.tierLevel.map(levels.contains) ?? true)
+                #expect(cluster.activeFraction.map { (0...1).contains($0) } ?? true)
+                #expect(cluster.frequencyMHz.map { (100...10_000).contains($0) } ?? true)
+                #expect(cluster.watts.map { $0.isFinite && $0 >= 0 } ?? true)
+            }
+        }
+        for gpu in snapshot.gpus {
+            #expect(gpu.activeResidency.map { (0...1).contains($0) } ?? true)
+            #expect(gpu.frequencyMHz.map { (100...10_000).contains($0) } ?? true)
+        }
+    }
+
     @Test func processListIncludesSelfAndSystemProcesses() async throws {
         let monitor = SystemMonitor()
         let snapshot = try await monitor.measuredSample(over: .milliseconds(300))

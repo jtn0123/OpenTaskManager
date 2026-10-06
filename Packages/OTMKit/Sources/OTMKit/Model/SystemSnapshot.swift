@@ -182,6 +182,12 @@ public struct GPUSample: Sendable, Codable, Identifiable {
     public let tilerUtilization: Double?
     public let memoryInUse: UInt64?
     public let memoryAllocated: UInt64?
+    /// Residency-weighted average clock while the GPU was powered on, from
+    /// IOReport. nil when the GPU stayed off, IOReport is unavailable, or the
+    /// clock of a state it used can't be read from the device tree.
+    public var frequencyMHz: Double?
+    /// Share of the interval the GPU spent in a powered-on performance state.
+    public var activeResidency: Double?
 }
 
 // MARK: - Power
@@ -244,6 +250,71 @@ public struct AdapterSample: Sendable, Codable {
     public let batteryWatts: Double?
 }
 
+/// A part of the chip whose power IOReport can break out.
+public enum PowerComponent: String, Sendable, Codable, CaseIterable, CodingKeyRepresentable {
+    case cpu, gpu, ane, dram
+}
+
+/// Where a component's power figure came from.
+public enum ComponentPowerSource: String, Sendable, Codable {
+    /// IOReport's "Energy Model" counters: energy used over the interval.
+    case energyModel
+    /// An SMC power key. Used for the CPU when the energy model's counters
+    /// don't update live (an M5 Pro on macOS 27 batches them for minutes).
+    case smc
+}
+
+/// One CPU cluster: a group of cores of the same tier that share a clock.
+public struct ClusterPower: Sendable, Codable, Identifiable, Hashable {
+    public var id: String { name }
+    /// "Super 0", "Performance 1": the tier name and the cluster's position
+    /// within its tier. The IOReport channel name when the tier is unknown.
+    public let name: String
+    /// The `CPUTopology` tier level the cluster belongs to.
+    public let tierLevel: Int?
+    /// nil when the energy model can't attribute power to clusters.
+    public let watts: Double?
+    /// Residency-weighted average clock while the cluster was running. nil
+    /// when it stayed idle or its clock table can't be read.
+    public let frequencyMHz: Double?
+    /// Share of the interval the cluster was running rather than idle or powered down.
+    public let activeFraction: Double?
+    /// The IOReport channel the figures came from, such as "PCPU" or "MCPU1".
+    public let channel: String
+}
+
+/// Power broken out by part of the chip, from IOReport.
+public struct PowerComponents: Sendable, Codable {
+    public let cpu: Double
+    public let gpu: Double
+    /// Apple Neural Engine.
+    public let ane: Double
+    public let dram: Double?
+    /// Ordered by tier level (fastest first), then by position within the tier.
+    public let clusters: [ClusterPower]
+    /// Where each component's figure came from. A component missing here
+    /// wasn't measured this interval: its figure above is 0 (or nil for
+    /// `dram`), and a UI should show it as unknown rather than as 0 W.
+    public let sources: [PowerComponent: ComponentPowerSource]
+
+    public var total: Double { cpu + gpu + ane + (dram ?? 0) }
+
+    public func isMeasured(_ component: PowerComponent) -> Bool {
+        sources[component] != nil
+    }
+
+    /// The component's watts, or nil when it wasn't measured.
+    public func watts(_ component: PowerComponent) -> Double? {
+        guard isMeasured(component) else { return nil }
+        switch component {
+        case .cpu: return cpu
+        case .gpu: return gpu
+        case .ane: return ane
+        case .dram: return dram
+        }
+    }
+}
+
 public struct PowerSample: Sendable, Codable {
     /// Whole-system power draw in watts, when the hardware reports it.
     public let systemWatts: Double?
@@ -254,4 +325,7 @@ public struct PowerSample: Sendable, Codable {
     public let adapter: AdapterSample?
     /// Which reading `systemWatts` came from.
     public let systemWattsSource: SystemPowerSource?
+    /// Per-component power. nil when IOReport is unavailable and on the first
+    /// sample, which has no interval to measure over.
+    public var components: PowerComponents?
 }
