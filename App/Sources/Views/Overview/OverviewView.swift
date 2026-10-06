@@ -8,7 +8,7 @@ struct OverviewView: View {
 
     var body: some View {
         if let snapshot = model.snapshot {
-            let groups = appGroups(snapshot)
+            let groups = model.appGroups
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 16)], spacing: 16) {
@@ -24,11 +24,11 @@ struct OverviewView: View {
                         StorageCard(volumes: snapshot.volumes)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
-                        TopCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
+                        TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
                                 metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
-                        TopCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
+                        TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
                                 metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
-                        TopCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
+                        TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
                                 metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
                     }
                 }
@@ -39,18 +39,12 @@ struct OverviewView: View {
         }
     }
 
-    /// Apps with their helpers folded in, so "Safari" includes its web content processes.
-    private func appGroups(_ snapshot: SystemSnapshot) -> [ProcessNode] {
-        ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(model.regularApps.keys))
-            .flatMap(\.children)
-    }
-
     // MARK: Gauges
 
     private func cpuGauge(_ snapshot: SystemSnapshot) -> some View {
         let topology = model.topology
         return GaugeCard(
-            title: "CPU", value: Format.fixed(snapshot.cpu.usage * 100, 0), unit: "%",
+            title: "CPU", value: snapshot.cpu.usage * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: snapshot.cpu.usage, color: Theme.cpu,
             detail: "\(topology.logicalCores) cores · load \(Format.fixed(snapshot.cpu.loadAverage.first ?? 0, 2))",
             history: model.cpuHistory.values, historyMax: 1
@@ -65,7 +59,7 @@ struct OverviewView: View {
         case .critical: .red
         }
         return GaugeCard(
-            title: "Memory", value: Format.fixed(memory.usedFraction * 100, 0), unit: "%",
+            title: "Memory", value: memory.usedFraction * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: memory.usedFraction, color: color,
             detail: "\(Format.bytes(memory.used)) of \(Format.bytes(memory.physical)) · \(memory.pressure.rawValue) pressure",
             history: model.memoryHistory.values, historyMax: 1
@@ -74,7 +68,7 @@ struct OverviewView: View {
 
     private func gpuGauge(_ gpu: GPUSample) -> some View {
         GaugeCard(
-            title: "GPU", value: Format.fixed(gpu.deviceUtilization * 100, 0), unit: "%",
+            title: "GPU", value: gpu.deviceUtilization * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: gpu.deviceUtilization, color: Theme.gpu,
             detail: gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name,
             history: model.gpuHistory[gpu.id]?.values ?? [], historyMax: 1
@@ -88,10 +82,10 @@ struct OverviewView: View {
         let ceiling = max(model.peakSystemWatts, 20)
         let source = power.battery.map { "Battery \($0.percent)%" + ($0.isPluggedIn ? " · plugged in" : "") } ?? "AC power"
         return GaugeCard(
-            title: "Power", value: Format.fixed(watts, watts < 10 ? 1 : 0), unit: "W",
+            title: "Power", value: watts, format: { Format.fixed($0, $0 < 10 ? 1 : 0) }, unit: "W",
             fraction: watts / ceiling, color: Theme.power,
             detail: "\(source) · thermal \(power.thermalState.rawValue)",
-            history: history, historyMax: GraphView.niceCeiling(max(history.max() ?? 0, 1))
+            history: history, historyMax: nil
         )
     }
 
@@ -103,9 +97,9 @@ struct OverviewView: View {
             title: "Disk", symbol: "internaldrive", color: Theme.disk, secondaryColor: Theme.diskSecondary,
             labels: ("Read", "Write"),
             rates: (snapshot.disks.reduce(0) { $0 + $1.readBytesPerSecond }, snapshot.disks.reduce(0) { $0 + $1.writeBytesPerSecond }),
-            histories: (tailSum(ids.map { model.diskReadHistory[$0]?.values ?? [] }),
-                        tailSum(ids.map { model.diskWriteHistory[$0]?.values ?? [] })),
-            format: Format.bytesPerSecond
+            histories: (AppModel.tailSum(ids.map { model.diskReadHistory[$0]?.values ?? [] }),
+                        AppModel.tailSum(ids.map { model.diskWriteHistory[$0]?.values ?? [] })),
+            format: Format.bytesPerSecond, minimumScale: 1_048_576, units: .binaryBytes
         )
     }
 
@@ -116,35 +110,22 @@ struct OverviewView: View {
             title: "Network", symbol: "network", color: Theme.network, secondaryColor: Theme.networkSecondary,
             labels: ("Receive", "Send"),
             rates: (links.reduce(0) { $0 + $1.receivedBytesPerSecond }, links.reduce(0) { $0 + $1.sentBytesPerSecond }),
-            histories: (tailSum(ids.map { model.networkInHistory[$0]?.values ?? [] }),
-                        tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
-            format: Format.bitsPerSecond
+            histories: (AppModel.tailSum(ids.map { model.networkInHistory[$0]?.values ?? [] }),
+                        AppModel.tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
+            format: Format.bitsPerSecond, minimumScale: 125_000, units: .bits
         )
     }
 
-    /// Adds histories element-wise, aligned on their newest values.
-    private func tailSum(_ series: [[Double]]) -> [Double] {
-        let length = series.map(\.count).max() ?? 0
-        return (0..<length).map { index in
-            series.reduce(0) { total, values in
-                let offset = index - (length - values.count)
-                return offset >= 0 ? total + values[offset] : total
-            }
-        }
-    }
 }
 
 // MARK: - Pieces
 
-/// Stretches a short history across the graph until it has enough points to
-/// scroll, so a fresh launch shows a line rather than a squiggle at the edge.
-private func fillingCapacity(_ count: Int, upTo limit: Int) -> Int {
-    min(max(count, 2), limit)
-}
-
 private struct GaugeCard: View {
+    private static let valueFont = NSFont.numeric(size: 26, weight: .semibold, rounded: true)
+
     var title: String
-    var value: String
+    var value: Double
+    var format: (Double) -> String
     var unit: String
     var fraction: Double
     var color: Color
@@ -153,14 +134,12 @@ private struct GaugeCard: View {
     var historyMax: Double?
 
     var body: some View {
-        Card(tint: color) {
+        Card(tint: color, glow: fraction) {
             HStack(spacing: 14) {
                 ZStack {
                     RingGauge(fraction: fraction, color: color, lineWidth: 10)
                     VStack(spacing: -2) {
-                        Text(value)
-                            .font(.system(size: 26, weight: .semibold, design: .rounded))
-                            .monospacedDigit()
+                        AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
                         Text(unit).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                     }
                 }
@@ -175,8 +154,8 @@ private struct GaugeCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 4)
                     GraphView(series: [GraphSeries(values: history, color: color)], maxValue: historyMax,
-                              capacity: fillingCapacity(history.count, upTo: 90), showsGrid: false, lineWidth: 1.2)
-                        .frame(height: 30)
+                              capacity: 60, showsGrid: false, lineWidth: 1.4, glows: true)
+                        .frame(height: 34)
                 }
             }
             .frame(height: 96)
@@ -195,7 +174,7 @@ private struct CoreMap: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Cores").font(.headline)
                 Spacer()
-                Text(topology.brand).font(.caption).foregroundStyle(.secondary)
+                Text("\(topology.brand) · load by core type").font(.caption).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: 24) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -215,14 +194,9 @@ private struct CoreMap: View {
         let series = topology.tiers.map { tier in
             GraphSeries(values: model.tierHistory(level: tier.level), color: Theme.tier(tier.level), fill: tier.level == 0)
         }
-        let count = series.map(\.values.count).max() ?? 0
-        return GraphView(series: series, maxValue: 1, capacity: fillingCapacity(count, upTo: 120), glows: true)
-            .background(Theme.cpu.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        return GraphView(series: series, maxValue: 1, capacity: 120, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
+            .background(Theme.cpu.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.cpu.opacity(0.18)))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(alignment: .topLeading) {
-                Text("Load by core type").font(.caption2).foregroundStyle(.secondary).padding(6)
-            }
     }
 
     private func tierRow(_ tier: CPUTopology.Tier, topology: CPUTopology) -> some View {
@@ -259,28 +233,25 @@ private struct ThroughputCard: View {
     var rates: (Double, Double)
     var histories: ([Double], [Double])
     var format: (Double) -> String
+    /// Keeps a quiet link from magnifying noise to full height.
+    var minimumScale: Double
+    var units: GraphMath.AxisUnits
 
     var body: some View {
-        let scale = GraphView.niceCeiling(max(histories.0.suffix(120).max() ?? 0, histories.1.suffix(120).max() ?? 0))
         Card(tint: color) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(title, systemImage: symbol).font(.headline)
-                Spacer()
-                Text("scale \(format(scale))").font(.caption).foregroundStyle(.secondary).monospacedDigit()
-            }
+            Label(title, systemImage: symbol).font(.headline)
             HStack(spacing: 24) {
-                Stat(label: labels.0, value: format(rates.0), color: color)
-                Stat(label: labels.1, value: format(rates.1), color: secondaryColor)
+                Stat(label: labels.0, number: rates.0, color: color, format: format)
+                Stat(label: labels.1, number: rates.1, color: secondaryColor, format: format)
             }
             GraphView(
                 series: [
                     GraphSeries(values: histories.0, color: color),
                     GraphSeries(values: histories.1, color: secondaryColor, fill: false, dashed: true),
                 ],
-                maxValue: scale, capacity: fillingCapacity(max(histories.0.count, histories.1.count), upTo: 120),
-                showsGrid: false, glows: true
+                capacity: 120, showsGrid: false, glows: true, minimumCeiling: minimumScale, axis: format, axisUnits: units
             )
-            .frame(height: 64)
+            .frame(height: 72)
         }
     }
 }
@@ -305,45 +276,6 @@ private struct StorageCard: View {
                         StackedBar(segments: [.init(label: "Used", value: used, color: Theme.pressure(used))], total: 1, height: 8)
                         Text("\(Format.bytes(volume.usedBytes)) of \(Format.bytes(volume.totalBytes)) used")
                             .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// The apps using the most of one resource, with bars relative to the leader.
-private struct TopCard: View {
-    @Environment(AppModel.self) private var model
-    var title: String
-    var symbol: String
-    var color: Color
-    var groups: [ProcessNode]
-    var metric: (ProcessTotals) -> Double
-    var format: (ProcessTotals) -> String
-    /// Values below this round to zero and aren't worth a row.
-    var minimum: Double = 0
-
-    var body: some View {
-        let top = groups.filter { metric($0.totals) > minimum }.sorted { metric($0.totals) > metric($1.totals) }.prefix(6)
-        let peak = top.first.map { metric($0.totals) } ?? 1
-        Card {
-            Label("Top \(title)", systemImage: symbol)
-                .font(.headline)
-                .foregroundStyle(color)
-            if top.isEmpty {
-                Text("Quiet right now.").font(.callout).foregroundStyle(.secondary)
-            }
-            VStack(spacing: 4) {
-                ForEach(Array(top), id: \.id) { group in
-                    if let process = group.process {
-                        ProcessBarRow(
-                            icon: IconCache.icon(for: process, app: model.regularApps[process.pid]),
-                            name: model.displayName(for: process),
-                            value: format(group.totals),
-                            fraction: metric(group.totals) / max(peak, .leastNonzeroMagnitude),
-                            color: color
-                        )
                     }
                 }
             }

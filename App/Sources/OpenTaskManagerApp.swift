@@ -6,6 +6,7 @@ struct OpenTaskManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
+    @AppStorage("streamGraphs") private var streamGraphs = true
 
     init() {
         // `--args -openPage Processes` picks the starting page. It's copied into the
@@ -20,6 +21,8 @@ struct OpenTaskManagerApp: App {
         Window("OpenTaskManager", id: "main") {
             ContentView()
                 .environment(model)
+                .environment(\.sampleInterval, model.updateSpeed.rawValue)
+                .environment(\.streamsGraphs, streamGraphs)
                 .frame(minWidth: 820, minHeight: 480)
         }
         .defaultSize(width: 1180, height: 760)
@@ -40,6 +43,8 @@ struct OpenTaskManagerApp: App {
         MenuBarExtra(isInserted: $showMenuBarExtra) {
             MenuBarView()
                 .environment(model)
+                .environment(\.sampleInterval, model.updateSpeed.rawValue)
+                .environment(\.streamsGraphs, streamGraphs)
         } label: {
             MenuBarLabel()
                 .environment(model)
@@ -186,6 +191,7 @@ struct SettingsView: View {
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
     @AppStorage("globalHotKeyEnabled") private var globalHotKeyEnabled = true
     @AppStorage("heatmap") private var heatmap = true
+    @AppStorage("streamGraphs") private var streamGraphs = true
 
     var body: some View {
         @Bindable var model = model
@@ -194,6 +200,7 @@ struct SettingsView: View {
                 Picker("Update speed", selection: $model.updateSpeed) {
                     ForEach(UpdateSpeed.allCases) { Text($0.label).tag($0) }
                 }
+                Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
             Section("Processes") {
                 Toggle("Include system and other users' processes", isOn: $model.includeSystemProcesses)

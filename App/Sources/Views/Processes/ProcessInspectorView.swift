@@ -68,15 +68,20 @@ struct ProcessInspectorView: View {
                 title: "CPU",
                 trailing: model.cpuScale.format(process.cpuPercent),
                 series: [GraphSeries(values: history.map { model.cpuScale.value($0.cpuPercent) }, color: Theme.cpu)],
-                maxValue: model.cpuScale.graphCeiling(for: history.map(\.cpuPercent)),
-                height: 70
+                height: 80,
+                minimumCeiling: model.cpuScale.relativeToSystem ? 2 : 10,
+                axis: { Format.fixed($0, $0 < 10 ? 1 : 0) + "%" },
+                capacity: AppModel.processHistoryCapacity - 2
             )
             GraphPanel(
                 title: process.isRestricted ? "Memory (resident)" : "Memory",
                 trailing: Format.bytes(process.memory),
                 series: [GraphSeries(values: history.map { Double($0.memory) }, color: Theme.memory)],
-                maxValue: nil,
-                height: 70
+                height: 80,
+                minimumCeiling: 1_048_576,
+                axis: { Format.bytes(UInt64(max($0, 0))) },
+                axisUnits: .binaryBytes,
+                capacity: AppModel.processHistoryCapacity - 2
             )
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {

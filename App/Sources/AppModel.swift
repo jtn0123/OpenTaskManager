@@ -2,10 +2,55 @@ import AppKit
 import Observation
 import OTMKit
 
-/// Per-process values kept for the inspector's mini graphs.
+/// Per-process values kept for the inspector's graphs and the "by app" charts.
 struct ProcessPoint: Sendable {
     let cpuPercent: Double
     let memory: UInt64
+    let gpuFraction: Double
+    let powerWatts: Double
+}
+
+/// One app's use of a resource over time, for the stacked "by app" graphs.
+struct AppSeries: Identifiable {
+    let id: Int64
+    let name: String
+    let icon: NSImage
+    let values: [Double]
+
+    var current: Double { values.last ?? 0 }
+}
+
+/// Memory composition over time, one history per kind of page.
+struct MemoryHistory {
+    var app = History<Double>(capacity: AppModel.historyCapacity)
+    var wired = History<Double>(capacity: AppModel.historyCapacity)
+    var compressed = History<Double>(capacity: AppModel.historyCapacity)
+    var cached = History<Double>(capacity: AppModel.historyCapacity)
+    var swapUsed = History<Double>(capacity: AppModel.historyCapacity)
+    /// 0...1, from the kernel's "memory available" level.
+    var pressure = History<Double>(capacity: AppModel.historyCapacity)
+
+    mutating func append(_ memory: MemorySample) {
+        app.append(Double(memory.app))
+        wired.append(Double(memory.wired))
+        compressed.append(Double(memory.compressed))
+        cached.append(Double(memory.cached))
+        swapUsed.append(Double(memory.swapUsed))
+        pressure.append(memory.availablePercent.map { 1 - Double($0) / 100 } ?? memory.usedFraction)
+    }
+}
+
+/// Renderer, tiler and memory history for one GPU.
+struct GPUHistory {
+    var renderer = History<Double>(capacity: AppModel.historyCapacity)
+    var tiler = History<Double>(capacity: AppModel.historyCapacity)
+    var memoryInUse = History<Double>(capacity: AppModel.historyCapacity)
+
+    mutating func append(_ gpu: GPUSample) {
+        renderer.append(gpu.rendererUtilization ?? 0)
+        tiler.append(gpu.tilerUtilization ?? 0)
+        memoryInUse.append(Double(gpu.memoryInUse ?? 0))
+    }
 }
 
 enum UpdateSpeed: Double, CaseIterable, Identifiable {
@@ -41,18 +86,17 @@ struct CPUScale: Equatable {
     func format(_ percentOfCore: Double) -> String {
         Format.fixed(value(percentOfCore), 1) + "%"
     }
-
-    /// Top of a graph of this process's CPU.
-    func graphCeiling(for values: [Double]) -> Double {
-        relativeToSystem ? 100 : max(100, GraphView.niceCeiling(values.max() ?? 0))
-    }
 }
 
 /// Live state shared by every window: the latest snapshot plus graph history.
 @Observable
 @MainActor
 final class AppModel {
-    static let historyCapacity = 300
+    /// Samples across a full-width graph.
+    nonisolated static let graphSpan = 300
+    /// Two more than a graph shows, so its left edge stays filled while it scrolls.
+    nonisolated static let historyCapacity = graphSpan + 2
+    nonisolated static let processHistoryCapacity = 122
 
     let monitor = SystemMonitor()
     let topology: CPUTopology
@@ -61,6 +105,14 @@ final class AppModel {
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
     private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
+    private(set) var memoryDetail = MemoryHistory()
+    private(set) var gpuDetail: [String: GPUHistory] = [:]
+    /// Sum over every process each tick, so "by app" graphs can show the rest as "Other".
+    private(set) var processGPUHistory = History<Double>(capacity: processHistoryCapacity)
+    private(set) var processPowerHistory = History<Double>(capacity: processHistoryCapacity)
+    private(set) var processMemoryHistory = History<Double>(capacity: processHistoryCapacity)
+    /// Apps with their helpers folded in (Safari includes its web content processes).
+    private(set) var appGroups: [ProcessNode] = []
     private(set) var gpuHistory: [String: History<Double>] = [:]
     private(set) var powerHistory = History<Double>(capacity: historyCapacity)
     private(set) var diskReadHistory: [String: History<Double>] = [:]
@@ -119,11 +171,16 @@ final class AppModel {
         guard samplingTask == nil, !isPaused else { return }
         let interval = updateSpeed.rawValue
         samplingTask = Task { [weak self, monitor] in
+            // Keep a steady cadence (sleep until the next deadline rather than
+            // for a fixed time) so the graphs scroll at an even speed.
+            let clock = ContinuousClock()
+            var deadline = clock.now
             while !Task.isCancelled {
                 let snapshot = await monitor.sample()
                 guard let self else { return }
                 self.ingest(snapshot)
-                try? await Task.sleep(for: .seconds(interval))
+                deadline = max(deadline.advanced(by: .seconds(interval)), clock.now)
+                try? await Task.sleep(until: deadline, clock: clock)
             }
         }
     }
@@ -167,6 +224,7 @@ final class AppModel {
             coreHistory[index].append(usage)
         }
         memoryHistory.append(snapshot.memory.usedFraction)
+        memoryDetail.append(snapshot.memory)
         powerHistory.append(snapshot.power.systemWatts ?? 0)
         if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
             peakSystemWatts = watts
@@ -174,6 +232,7 @@ final class AppModel {
         }
         for gpu in snapshot.gpus {
             gpuHistory[gpu.id, default: History(capacity: Self.historyCapacity)].append(gpu.deviceUtilization)
+            gpuDetail[gpu.id, default: GPUHistory()].append(gpu)
         }
         for disk in snapshot.disks {
             diskReadHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.readBytesPerSecond)
@@ -186,12 +245,25 @@ final class AppModel {
 
         var processes: [Int32: History<ProcessPoint>] = [:]
         processes.reserveCapacity(snapshot.processes.count)
+        var totalGPU = 0.0
+        var totalPower = 0.0
+        var totalMemory = 0.0
         for process in snapshot.processes {
-            var history = processHistory[process.pid] ?? History(capacity: 120)
-            history.append(ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory))
+            var history = processHistory[process.pid] ?? History(capacity: Self.processHistoryCapacity)
+            let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
+                                     gpuFraction: process.gpuFraction ?? 0, powerWatts: process.powerWatts ?? 0)
+            history.append(point)
             processes[process.pid] = history
+            totalGPU += point.gpuFraction
+            totalPower += point.powerWatts
+            totalMemory += Double(point.memory)
         }
         processHistory = processes
+        processGPUHistory.append(totalGPU)
+        processPowerHistory.append(totalPower)
+        processMemoryHistory.append(totalMemory)
+        appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
+            .flatMap(\.children)
     }
 
     // MARK: - Queries
@@ -202,6 +274,48 @@ final class AppModel {
 
     func displayName(for process: ProcessSample) -> String {
         regularApps[process.pid]?.localizedName ?? process.name
+    }
+
+    /// The `count` apps that used the most of a resource over the last
+    /// `window` samples, each with its history summed over the app's processes.
+    func topApps(by metric: (ProcessPoint) -> Double, count: Int, window: Int = processHistoryCapacity) -> [AppSeries] {
+        var ranked: [(score: Double, series: AppSeries)] = []
+        for group in appGroups {
+            guard let process = group.process else { continue }
+            var pids: [Int32] = []
+            func collect(_ node: ProcessNode) {
+                if let pid = node.process?.pid { pids.append(pid) }
+                node.children.forEach(collect)
+            }
+            collect(group)
+            let values = Self.tailSum(pids.compactMap { processHistory[$0]?.values.suffix(window).map(metric) })
+            let score = values.reduce(0, +)
+            guard score > 0 else { continue }
+            let series = AppSeries(id: group.id, name: displayName(for: process),
+                                   icon: IconCache.icon(for: process, app: regularApps[process.pid]), values: values)
+            ranked.append((score, series))
+        }
+        return ranked.sorted { $0.score > $1.score }.prefix(count).map(\.series)
+    }
+
+    /// Adds histories element-wise, aligned on their newest values.
+    static func tailSum(_ series: [[Double]]) -> [Double] {
+        let length = series.map(\.count).max() ?? 0
+        var result = [Double](repeating: 0, count: length)
+        for values in series {
+            let offset = length - values.count
+            for (index, value) in values.enumerated() { result[offset + index] += value }
+        }
+        return result
+    }
+
+    /// `total` minus the sum of `parts`, aligned on the newest value and never negative.
+    static func remainder(of total: [Double], minus parts: [[Double]]) -> [Double] {
+        let used = tailSum(parts)
+        return total.enumerated().map { index, value in
+            let offset = index - (total.count - used.count)
+            return max(value - (offset >= 0 ? used[offset] : 0), 0)
+        }
     }
 
     /// Average load of one core tier over time, aligned on the newest sample.
