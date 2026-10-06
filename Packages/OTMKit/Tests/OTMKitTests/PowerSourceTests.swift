@@ -55,6 +55,19 @@ struct PowerSourceTests {
         #expect(battery.temperatureCelsius == 30.5)
     }
 
+    @Test func readsCapacitiesFromBatteryData() throws {
+        // macOS 27 only reports the capacities inside BatteryData.
+        var properties = Self.onAdapter
+        properties["DesignCapacity"] = nil
+        properties["AppleRawMaxCapacity"] = nil
+        properties["BatteryData"] = ["DesignCapacity": 8579, "AppleRawMaxCapacity": 8802, "NominalChargeCapacity": 9046] as [String: Any]
+        let health = try #require(BatteryReading.parse(properties).battery?.health)
+        #expect(abs(health - 8802.0 / 8579.0) < 1e-9)
+
+        properties["BatteryData"] = ["DesignCapacity": 8579] as [String: Any]
+        #expect(BatteryReading.parse(properties).battery?.health == nil)
+    }
+
     @Test func batteryWattsAreSignedByCurrentDirection() throws {
         var charging = Self.onAdapter
         charging["Amperage"] = 2000

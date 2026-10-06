@@ -33,8 +33,11 @@ struct BatteryReading {
         }
 
         guard properties.bool("BatteryInstalled") != false else { return reading }
-        let design = properties.double("DesignCapacity")
-        let rawMax = properties.double("AppleRawMaxCapacity") ?? properties.double("NominalChargeCapacity")
+        // macOS 27 moved the capacities into the `BatteryData` dictionary.
+        let batteryData = properties.dictionary("BatteryData") ?? [:]
+        func capacity(_ key: String) -> Double? { properties.double(key) ?? batteryData.double(key) }
+        let design = capacity("DesignCapacity")
+        let rawMax = capacity("AppleRawMaxCapacity") ?? capacity("NominalChargeCapacity")
         let remaining = properties.int("TimeRemaining") ?? properties.int("AvgTimeToEmpty")
         var health: Double?
         if let rawMax, let design, design > 0 {
