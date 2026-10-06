@@ -1,0 +1,215 @@
+import Foundation
+
+/// Everything the monitor learned in one sampling pass. Rates are computed
+/// against the previous pass, so the first snapshot reports zero rates.
+public struct SystemSnapshot: Sendable, Codable {
+    public let timestamp: Date
+    /// Seconds since the previous snapshot (0 for the first one).
+    public let interval: TimeInterval
+    public let uptime: TimeInterval
+    public let cpu: CPUSample
+    public let memory: MemorySample
+    public let disks: [DiskSample]
+    public let volumes: [VolumeInfo]
+    public let network: [NetworkInterfaceSample]
+    public let gpus: [GPUSample]
+    public let power: PowerSample
+    public let processes: [ProcessSample]
+
+    public var threadCount: Int { processes.reduce(0) { $0 + $1.threadCount } }
+
+    /// The machine-level part of the snapshot, for callers that do not need the process list.
+    public func withoutProcesses() -> SystemSnapshot {
+        SystemSnapshot(
+            timestamp: timestamp, interval: interval, uptime: uptime, cpu: cpu, memory: memory, disks: disks,
+            volumes: volumes, network: network, gpus: gpus, power: power, processes: []
+        )
+    }
+}
+
+// MARK: - CPU
+
+public struct CPUTopology: Sendable, Codable, Hashable {
+    /// A performance tier ("Super", "Performance", "Efficiency"). Tier 0 is the
+    /// fastest, matching the kernel's `hw.perflevelN` numbering.
+    public struct Tier: Sendable, Codable, Hashable {
+        public let level: Int
+        public let name: String
+        public let logicalCPUs: Int
+        public let physicalCPUs: Int
+        public let l2CacheBytes: Int?
+    }
+
+    public let brand: String
+    public let architecture: String
+    public let physicalCores: Int
+    public let logicalCores: Int
+    public let tiers: [Tier]
+    /// Tier level for each logical CPU, indexed by CPU number.
+    public let tierForCPU: [Int]
+    public let l1DataCacheBytes: Int?
+    public let l1InstructionCacheBytes: Int?
+    public let l2CacheBytes: Int?
+    public let l3CacheBytes: Int?
+    public let isAppleSilicon: Bool
+
+    public func tier(level: Int) -> Tier? {
+        tiers.first { $0.level == level }
+    }
+}
+
+public struct CPUSample: Sendable, Codable {
+    /// Busy fraction across all logical CPUs, 0...1.
+    public let usage: Double
+    public let user: Double
+    public let system: Double
+    /// Busy fraction per logical CPU, indexed by CPU number.
+    public let coreUsage: [Double]
+    public let loadAverage: [Double]
+
+    public static let zero = CPUSample(usage: 0, user: 0, system: 0, coreUsage: [], loadAverage: [0, 0, 0])
+}
+
+// MARK: - Memory
+
+public enum MemoryPressure: String, Sendable, Codable {
+    case normal, warning, critical
+}
+
+public struct MemorySample: Sendable, Codable {
+    public let physical: UInt64
+    /// App + wired + compressed, matching Activity Monitor's "Memory Used".
+    public let used: UInt64
+    public let app: UInt64
+    public let wired: UInt64
+    public let compressed: UInt64
+    /// File-backed and purgeable pages the system can reclaim instantly.
+    public let cached: UInt64
+    public let free: UInt64
+    public let swapUsed: UInt64
+    public let swapTotal: UInt64
+    public let pressure: MemoryPressure
+    /// The kernel's own "memory available" percentage (`kern.memorystatus_level`).
+    public let availablePercent: Int?
+    public let pageIns: UInt64
+    public let pageOuts: UInt64
+    public let swapIns: UInt64
+    public let swapOuts: UInt64
+
+    public var usedFraction: Double {
+        physical == 0 ? 0 : Double(used) / Double(physical)
+    }
+}
+
+// MARK: - Storage
+
+public struct DiskSample: Sendable, Codable, Identifiable {
+    public var id: String { bsdName }
+    public let bsdName: String
+    public let model: String?
+    public let isInternal: Bool?
+    public let isSolidState: Bool?
+    public let size: UInt64?
+    public let readBytesPerSecond: Double
+    public let writeBytesPerSecond: Double
+    public let readOperationsPerSecond: Double
+    public let writeOperationsPerSecond: Double
+    public let totalRead: UInt64
+    public let totalWritten: UInt64
+    /// Share of the interval the device spent servicing I/O, clamped to 0...1.
+    public let activeFraction: Double
+}
+
+public struct VolumeInfo: Sendable, Codable, Identifiable, Hashable {
+    public var id: String { mountPoint }
+    public let name: String
+    public let mountPoint: String
+    public let fileSystem: String?
+    public let totalBytes: UInt64
+    public let availableBytes: UInt64
+    public let isInternal: Bool
+    public let isRemovable: Bool
+    public let isRoot: Bool
+
+    public var usedBytes: UInt64 { totalBytes > availableBytes ? totalBytes - availableBytes : 0 }
+}
+
+// MARK: - Network
+
+public enum NetworkInterfaceKind: String, Sendable, Codable {
+    case wifi, ethernet, cellular, vpn, bridge, loopback, other
+}
+
+public struct NetworkInterfaceSample: Sendable, Codable, Identifiable {
+    public var id: String { name }
+    public let name: String
+    public let displayName: String
+    public let kind: NetworkInterfaceKind
+    public let isUp: Bool
+    public let addresses: [String]
+    /// Link speed in bits per second, when the driver reports one.
+    public let linkSpeed: UInt64?
+    public let receivedBytesPerSecond: Double
+    public let sentBytesPerSecond: Double
+    public let totalReceived: UInt64
+    public let totalSent: UInt64
+
+    /// Interfaces worth showing by default: real links that are up.
+    public var isPrimary: Bool {
+        isUp && (kind == .wifi || kind == .ethernet || kind == .cellular)
+            && (!addresses.isEmpty || totalReceived > 0)
+    }
+}
+
+// MARK: - GPU
+
+public struct GPUSample: Sendable, Codable, Identifiable {
+    public var id: String { name + String(registryID) }
+    public let registryID: UInt64
+    public let name: String
+    public let coreCount: Int?
+    public let deviceUtilization: Double
+    public let rendererUtilization: Double?
+    public let tilerUtilization: Double?
+    public let memoryInUse: UInt64?
+    public let memoryAllocated: UInt64?
+}
+
+// MARK: - Power
+
+public enum ThermalState: String, Sendable, Codable {
+    case nominal, fair, serious, critical
+
+    init(_ state: ProcessInfo.ThermalState) {
+        switch state {
+        case .nominal: self = .nominal
+        case .fair: self = .fair
+        case .serious: self = .serious
+        case .critical: self = .critical
+        @unknown default: self = .nominal
+        }
+    }
+}
+
+public struct BatterySample: Sendable, Codable {
+    public let percent: Int
+    public let isCharging: Bool
+    public let isPluggedIn: Bool
+    public let isFullyCharged: Bool
+    public let cycleCount: Int?
+    /// Current full-charge capacity as a share of design capacity.
+    public let health: Double?
+    public let temperatureCelsius: Double?
+    /// Minutes until empty (or full when charging), when the system has an estimate.
+    public let minutesRemaining: Int?
+    public let voltage: Double?
+    public let amperage: Double?
+}
+
+public struct PowerSample: Sendable, Codable {
+    /// Whole-system power draw in watts, when the hardware reports it.
+    public let systemWatts: Double?
+    public let battery: BatterySample?
+    public let isLowPowerMode: Bool
+    public let thermalState: ThermalState
+}

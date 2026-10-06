@@ -1,0 +1,42 @@
+name: CI
+
+# While the repository is private, macOS minutes bill at 10x, so CI runs on
+# pull requests and on demand rather than on every push.
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Lint
+        run: swiftlint lint --strict --quiet
+
+      - name: Test OTMKit
+        run: swift test --package-path Packages/OTMKit
+
+      - name: Build otm (release)
+        run: swift build --package-path Packages/OTMKit -c release --product otm
+
+      - name: Build app
+        run: |
+          brew install xcodegen
+          xcodegen generate --quiet
+          xcodebuild -project OpenTaskManager.xcodeproj -scheme OpenTaskManager -configuration Release \
+            -derivedDataPath .build/xcode -quiet CODE_SIGNING_ALLOWED=NO build

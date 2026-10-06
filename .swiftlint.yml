@@ -1,0 +1,42 @@
+included:
+  - App/Sources
+  - Packages/OTMKit/Sources
+  - Packages/OTMKit/Tests
+  - scripts
+
+disabled_rules:
+  # Multi-line literals end with a trailing comma so diffs stay one line.
+  - trailing_comma
+  # Kernel strings (paths, process arguments) are decoded lossily on purpose:
+  # a stray invalid byte shouldn't hide a whole process name.
+  - optional_data_string_conversion
+
+line_length:
+  warning: 150
+  error: 200
+  ignores_comments: true
+  ignores_urls: true
+
+identifier_name:
+  min_length:
+    warning: 2
+  excluded: [a, b, x, y, i, id, fd, me, to, at, l1, l2, l3, ok, os]
+
+nesting:
+  type_level: 2
+
+cyclomatic_complexity:
+  warning: 15
+  ignores_case_statements: true
+
+function_body_length:
+  warning: 80
+  error: 150
+
+type_body_length:
+  warning: 500
+  error: 800
+
+file_length:
+  warning: 900
+  error: 1500

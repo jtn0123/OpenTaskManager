@@ -1,0 +1,68 @@
+name: OpenTaskManager
+options:
+  bundleIdPrefix: io.github.jtn0123
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    # Ad-hoc signing: runs locally without an Apple Developer account.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  OTMKit:
+    path: Packages/OTMKit
+
+targets:
+  OpenTaskManager:
+    type: application
+    platform: macOS
+    sources:
+      - App/Sources
+      - App/Resources
+    dependencies:
+      - package: OTMKit
+        product: OTMKit
+      - sdk: Carbon.framework
+    entitlements:
+      path: App/OpenTaskManager.entitlements
+      properties:
+        # A task manager has to see other processes, which the sandbox forbids.
+        com.apple.security.app-sandbox: false
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: OpenTaskManager
+        CFBundleName: OpenTaskManager
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.utilities
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: "Copyright © 2026 OpenTaskManager contributors. Licensed under GPL-3.0."
+        NSAppleEventsUsageDescription: "OpenTaskManager asks for administrator rights only when you end or reprioritize a system process."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.jtn0123.OpenTaskManager
+        PRODUCT_NAME: OpenTaskManager
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_HARDENED_RUNTIME: NO
+
+schemes:
+  OpenTaskManager:
+    build:
+      targets:
+        OpenTaskManager: all
+    run:
+      config: Debug
+    archive:
+      config: Release

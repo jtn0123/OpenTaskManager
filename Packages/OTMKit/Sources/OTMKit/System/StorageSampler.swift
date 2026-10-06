@@ -1,0 +1,107 @@
+import Foundation
+import IOKit
+
+final class DiskSampler {
+    private struct Counters {
+        let read: UInt64
+        let written: UInt64
+        let readOps: UInt64
+        let writeOps: UInt64
+        let busyNanoseconds: UInt64
+    }
+
+    private var previous: [String: Counters] = [:]
+
+    func sample(interval: TimeInterval) -> [DiskSample] {
+        var disks: [DiskSample] = []
+        var seen: [String: Counters] = [:]
+
+        IORegistry.forEachService(matching: "IOBlockStorageDriver") { driver in
+            guard let stats = IORegistry.properties(of: driver).dictionary("Statistics") else { return }
+
+            var bsdName: String?
+            var size: UInt64?
+            IORegistry.forEachChild(of: driver) { media in
+                guard bsdName == nil, let name = IORegistry.property("BSD Name", of: media) as? String else { return }
+                bsdName = name
+                size = (IORegistry.property("Size", of: media) as? NSNumber)?.uint64Value
+            }
+            guard let bsdName else { return }
+
+            var model: String?
+            var isInternal: Bool?
+            var isSolidState: Bool?
+            if let device = IORegistry.parent(of: driver) {
+                let properties = IORegistry.properties(of: device)
+                let characteristics = properties.dictionary("Device Characteristics")
+                model = characteristics?.string("Product Name")?.trimmingCharacters(in: .whitespaces)
+                isSolidState = characteristics?.string("Medium Type").map { $0 == "Solid State" }
+                isInternal = properties.dictionary("Protocol Characteristics")?
+                    .string("Physical Interconnect Location").map { $0 == "Internal" }
+                IOObjectRelease(device)
+            }
+
+            let counters = Counters(
+                read: stats.uint64("Bytes (Read)") ?? 0,
+                written: stats.uint64("Bytes (Write)") ?? 0,
+                readOps: stats.uint64("Operations (Read)") ?? 0,
+                writeOps: stats.uint64("Operations (Write)") ?? 0,
+                busyNanoseconds: (stats.uint64("Total Time (Read)") ?? 0) + (stats.uint64("Total Time (Write)") ?? 0)
+            )
+            seen[bsdName] = counters
+
+            let before = previous[bsdName]
+            func rate(_ keyPath: KeyPath<Counters, UInt64>) -> Double {
+                guard let before, interval > 0, counters[keyPath: keyPath] >= before[keyPath: keyPath] else { return 0 }
+                return Double(counters[keyPath: keyPath] - before[keyPath: keyPath]) / interval
+            }
+
+            disks.append(DiskSample(
+                bsdName: bsdName,
+                model: model,
+                isInternal: isInternal,
+                isSolidState: isSolidState,
+                size: size,
+                readBytesPerSecond: rate(\.read),
+                writeBytesPerSecond: rate(\.written),
+                readOperationsPerSecond: rate(\.readOps),
+                writeOperationsPerSecond: rate(\.writeOps),
+                totalRead: counters.read,
+                totalWritten: counters.written,
+                activeFraction: min(rate(\.busyNanoseconds) / 1_000_000_000, 1)
+            ))
+        }
+
+        previous = seen
+        return disks.sorted { $0.bsdName.localizedStandardCompare($1.bsdName) == .orderedAscending }
+    }
+}
+
+enum VolumeReader {
+    private static let keys: [URLResourceKey] = [
+        .volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
+        .volumeAvailableCapacityKey, .volumeIsInternalKey, .volumeIsRemovableKey,
+        .volumeLocalizedFormatDescriptionKey, .volumeIsRootFileSystemKey, .volumeIsBrowsableKey,
+    ]
+
+    static func read() -> [VolumeInfo] {
+        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
+        return urls.compactMap { url -> VolumeInfo? in
+            guard let values = try? url.resourceValues(forKeys: Set(keys)),
+                  values.volumeIsBrowsable != false,
+                  let total = values.volumeTotalCapacity, total > 0 else { return nil }
+            let available = values.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) }
+                ?? UInt64(max(values.volumeAvailableCapacity ?? 0, 0))
+            return VolumeInfo(
+                name: values.volumeName ?? url.lastPathComponent,
+                mountPoint: url.path,
+                fileSystem: values.volumeLocalizedFormatDescription,
+                totalBytes: UInt64(total),
+                availableBytes: available,
+                isInternal: values.volumeIsInternal ?? false,
+                isRemovable: values.volumeIsRemovable ?? false,
+                isRoot: values.volumeIsRootFileSystem ?? false
+            )
+        }
+    }
+}
