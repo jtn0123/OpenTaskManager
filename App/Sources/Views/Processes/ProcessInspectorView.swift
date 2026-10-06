@@ -61,7 +61,7 @@ struct ProcessInspectorView: View {
         }
     }
 
-    private func overview(_ process: ProcessSample) -> some View {
+    private func graphs(_ process: ProcessSample) -> some View {
         let history = model.processHistory[pid]?.values ?? []
         return VStack(alignment: .leading, spacing: 12) {
             GraphPanel(
@@ -83,6 +83,37 @@ struct ProcessInspectorView: View {
                 axisUnits: .binaryBytes,
                 capacity: AppModel.processHistoryCapacity - 2
             )
+            if !process.isRestricted {
+                HStack(spacing: 12) {
+                    GraphPanel(
+                        title: "Power",
+                        trailing: process.powerWatts.map(Format.watts) ?? "—",
+                        series: [GraphSeries(values: history.map(\.powerWatts), color: Theme.power)],
+                        height: 60,
+                        minimumCeiling: 0.5,
+                        axis: Format.watts,
+                        capacity: AppModel.processHistoryCapacity - 2
+                    )
+                    if process.gpuTime != nil {
+                        GraphPanel(
+                            title: "GPU",
+                            trailing: Format.percent(process.gpuFraction ?? 0, digits: 1),
+                            series: [GraphSeries(values: history.map(\.gpuFraction), color: Theme.gpu)],
+                            height: 60,
+                            minimumCeiling: 0.05,
+                            maximumCeiling: 1,
+                            axis: { Format.percent($0) },
+                            capacity: AppModel.processHistoryCapacity - 2
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func overview(_ process: ProcessSample) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            graphs(process)
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                 FactRow(label: "CPU time", value: Format.cpuTime(process.cpuTime))

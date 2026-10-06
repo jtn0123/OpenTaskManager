@@ -58,6 +58,7 @@ struct GraphPanel: View {
     var height: CGFloat = 200
     var stacked = false
     var minimumCeiling: Double = 0
+    var maximumCeiling: Double = .infinity
     /// Labels the scale inside the graph; nil hides it.
     var axis: ((Double) -> String)?
     var axisUnits: GraphMath.AxisUnits = .plain
@@ -72,7 +73,7 @@ struct GraphPanel: View {
                 Text(trailing).font(.caption).foregroundStyle(.secondary).monospacedDigit()
             }
             GraphView(series: series, maxValue: maxValue, capacity: capacity, glows: true, stacked: stacked,
-                      minimumCeiling: minimumCeiling, axis: axis, axisUnits: axisUnits, cornerRadius: 8)
+                      minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits, cornerRadius: 8)
                 .frame(height: height)
                 .background(LinearGradient(colors: [tint.opacity(0.12), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom),
                             in: RoundedRectangle(cornerRadius: 8))

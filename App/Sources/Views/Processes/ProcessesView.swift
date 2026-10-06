@@ -24,6 +24,7 @@ struct ProcessesView: View {
                 )
                 Divider()
                 StatusBar(snapshot: snapshot)
+                    .onAppear(perform: selectRequestedProcess)
             } else {
                 ProgressView("Reading processes…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -72,6 +73,14 @@ struct ProcessesView: View {
             }
             .inspectorColumnWidth(min: 280, ideal: 320, max: 480)
         }
+    }
+
+    /// `--args -openProcess <pid>` selects that process once, for screenshots.
+    private func selectRequestedProcess() {
+        guard selection.isEmpty, let pid = LaunchArgument.string("openProcess").flatMap(Int32.init),
+              model.process(pid) != nil else { return }
+        selection = [pid]
+        showInspector = true
     }
 
     private func configuration(for snapshot: SystemSnapshot) -> ProcessTableConfiguration {

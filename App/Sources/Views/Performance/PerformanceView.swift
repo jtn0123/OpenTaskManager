@@ -29,7 +29,7 @@ struct PerformanceView: View {
                         .padding(20)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .defaultScrollAnchor(Self.launchArgument("openScroll") == "bottom" ? .bottom : .top)
+                .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
                 .frame(minWidth: 480)
             }
             .onAppear { openRequestedResource(snapshot) }
@@ -42,7 +42,7 @@ struct PerformanceView: View {
     /// picks the first matching resource once, for screenshots. With
     /// `-openScroll bottom` the detail starts scrolled to the end.
     private func openRequestedResource(_ snapshot: SystemSnapshot) {
-        guard !opened, let name = Self.launchArgument("openResource") else { return }
+        guard !opened, let name = LaunchArgument.string("openResource") else { return }
         opened = true
         let match = resources(snapshot).first { resource in
             switch resource {
@@ -55,10 +55,6 @@ struct PerformanceView: View {
             }
         }
         if let match { selected = match }
-    }
-
-    private static func launchArgument(_ key: String) -> String? {
-        UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)[key] as? String
     }
 
     private func resources(_ snapshot: SystemSnapshot) -> [Resource] {

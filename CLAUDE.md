@@ -51,7 +51,10 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance` sets the starting page. Don't pass
+`-openPage Overview|Processes|Performance` sets the starting page, and
+`-openResource cpu|memory|gpu|disk|network|power` the Performance detail
+(`-openScroll bottom` starts it scrolled to the end), and `-openProcess <pid>`
+selects a process so its inspector shows. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
 sidebar stops working in that instance. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
