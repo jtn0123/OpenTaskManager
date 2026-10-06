@@ -66,9 +66,37 @@ struct CPUDetail: View {
                 }
             }
 
+            if let clusters = snapshot.power.components?.clusters, clusters.contains(where: { $0.activeFraction != nil }) {
+                clusterClocks(clusters)
+            }
             byApp()
             TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: model.appGroups,
                         metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+        }
+    }
+
+    /// Each cluster's average clock while it ran. Clusters of one tier share a
+    /// colour; the second and later are dashed.
+    private func clusterClocks(_ clusters: [ClusterPower]) -> some View {
+        let history = model.powerDetail.clusterFrequency
+        let styled = clusters.enumerated().map { index, cluster in
+            let color = cluster.tierLevel.map(Theme.tier) ?? Theme.series(index)
+            let repeated = clusters[..<index].contains { $0.tierLevel != nil && $0.tierLevel == cluster.tierLevel }
+            return (cluster: cluster, color: color, dashed: repeated)
+        }
+        let legend = styled.map { item in
+            let busy = item.cluster.activeFraction.map { " · \(Format.percent($0)) running" } ?? ""
+            return LegendItem(name: item.cluster.name, color: item.color,
+                              value: (item.cluster.frequencyMHz.map { Format.frequency(megahertz: $0) } ?? "Idle") + busy)
+        }
+        return ChartCard(title: "Clock speed by cluster", trailing: "average while running", tint: Theme.cpu, legend: legend) {
+            GraphView(
+                series: styled.map {
+                    GraphSeries(values: history[$0.cluster.name]?.values ?? [], color: $0.color, fill: !$0.dashed, dashed: $0.dashed)
+                },
+                glows: true, minimumCeiling: 1_000, axis: { Format.frequency(megahertz: $0) }, cornerRadius: 8
+            )
+            .chartFrame(height: 160, tint: Theme.cpu)
         }
     }
 

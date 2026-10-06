@@ -8,14 +8,16 @@ struct GPUDetail: View {
 
     private static let renderer = Color(red: 0.58, green: 0.92, blue: 0.96)
     private static let tiler = Color(red: 0.36, green: 0.62, blue: 1.00)
+    private static let clock = Color(red: 0.45, green: 0.95, blue: 0.75)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "GPU", subtitle: gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name)
             utilization()
             byApp()
-            if let memory = gpu.memoryInUse {
-                memoryCard(memory)
+            HStack(alignment: .top, spacing: 16) {
+                if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }
+                if let memory = gpu.memoryInUse { memoryCard(memory) }
             }
             stats()
             TopAppsCard(title: "GPU", symbol: "cpu.fill", color: Theme.gpu, groups: model.appGroups,
@@ -57,6 +59,22 @@ struct GPUDetail: View {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
                 .chartFrame(height: 200, tint: Theme.gpu)
+        }
+    }
+
+    private func clock() -> some View {
+        let history = model.gpuDetail[gpu.id]?.frequency.values ?? []
+        var legend = [LegendItem(name: "Clock", color: Self.clock, value: gpu.frequencyMHz.map { Format.frequency(megahertz: $0) } ?? "Idle")]
+        if let active = gpu.activeResidency {
+            legend.append(LegendItem(name: "Powered on", color: Theme.gpu, value: Format.percent(active)))
+        }
+        if let watts = snapshot.power.components?.watts(.gpu) {
+            legend.append(LegendItem(name: "Power", color: Theme.power, value: Format.watts(watts)))
+        }
+        return ChartCard(title: "Clock speed", trailing: "average while powered on", tint: Self.clock, legend: legend) {
+            GraphView(series: [GraphSeries(values: history, color: Self.clock)], glows: true, minimumCeiling: 500,
+                      axis: { Format.frequency(megahertz: $0) }, cornerRadius: 8)
+                .chartFrame(height: 120, tint: Self.clock)
         }
     }
 

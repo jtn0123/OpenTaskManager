@@ -21,6 +21,7 @@ struct OverviewView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
                         diskCard(snapshot)
                         networkCard(snapshot)
+                        if let components = snapshot.power.components { powerCard(components) }
                         StorageCard(volumes: snapshot.volumes)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
@@ -116,6 +117,30 @@ struct OverviewView: View {
         )
     }
 
+    /// Where the power goes, stacked by part of the Mac.
+    private func powerCard(_ components: PowerComponents) -> some View {
+        let history = model.powerDetail
+        let rest = history.rest.values.last ?? 0
+        return Card(tint: Theme.power) {
+            Label("Power", systemImage: "bolt.fill").font(.headline)
+            HStack(spacing: 18) {
+                Stat(label: "CPU", number: components.cpu, color: Theme.cpu, format: Format.watts)
+                Stat(label: "GPU", number: components.gpu, color: Theme.gpu, format: Format.watts)
+                Stat(label: "Rest", number: rest, color: Theme.restOfSystem, format: Format.watts)
+            }
+            GraphView(
+                series: [
+                    GraphSeries(values: history.cpu.values, color: Theme.cpu),
+                    GraphSeries(values: history.gpu.values, color: Theme.gpu),
+                    GraphSeries(values: history.ane.values, color: Theme.neuralEngine),
+                    GraphSeries(values: history.dram.values, color: Theme.dram),
+                    GraphSeries(values: history.rest.values, color: Theme.restOfSystem),
+                ],
+                capacity: 120, showsGrid: false, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts
+            )
+            .frame(height: 72)
+        }
+    }
 }
 
 // MARK: - Pieces

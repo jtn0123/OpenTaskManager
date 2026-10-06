@@ -6,6 +6,9 @@ struct MemoryDetail: View {
     var snapshot: SystemSnapshot
 
     static let bytesAxis: (Double) -> String = { Format.bytes(max($0, 0)) }
+    static let rateAxis: (Double) -> String = { Format.bytesPerSecond(max($0, 0)) }
+    private static let pageIn = Color(red: 0.32, green: 0.70, blue: 0.86)
+    private static let pageOut = Color(red: 0.64, green: 0.42, blue: 0.96)
 
     var body: some View {
         let memory = snapshot.memory
@@ -15,6 +18,10 @@ struct MemoryDetail: View {
             HStack(alignment: .top, spacing: 16) {
                 pressure(memory)
                 swap(memory)
+            }
+            HStack(alignment: .top, spacing: 16) {
+                paging(memory)
+                compressor(memory)
             }
             byApp()
             stats(memory)
@@ -82,6 +89,46 @@ struct MemoryDetail: View {
                 glows: true, minimumCeiling: 1_073_741_824, axis: Self.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8
             )
             .chartFrame(height: 130, tint: Theme.swap)
+        }
+    }
+
+    /// Pages read from and written to disk: mapped files and swap.
+    private func paging(_ memory: MemorySample) -> some View {
+        let history = model.memoryDetail
+        return ChartCard(title: "Paging", trailing: "", tint: Self.pageIn, legend: [
+            LegendItem(name: "Page-ins", color: Self.pageIn, value: Format.bytesPerSecond(memory.pageInRate)),
+            LegendItem(name: "Page-outs", color: Self.pageOut, value: Format.bytesPerSecond(memory.pageOutRate)),
+            LegendItem(name: "Swap-ins", color: Theme.swap, value: Format.bytesPerSecond(memory.swapInRate)),
+            LegendItem(name: "Swap-outs", color: Theme.compressed, value: Format.bytesPerSecond(memory.swapOutRate)),
+        ]) {
+            GraphView(
+                series: [
+                    GraphSeries(values: history.pageIns.values, color: Self.pageIn),
+                    GraphSeries(values: history.pageOuts.values, color: Self.pageOut),
+                    GraphSeries(values: history.swapIns.values, color: Theme.swap, fill: false, dashed: true),
+                    GraphSeries(values: history.swapOuts.values, color: Theme.compressed, fill: false, dashed: true),
+                ],
+                glows: true, minimumCeiling: 1_048_576, axis: Self.rateAxis, axisUnits: .binaryBytes, cornerRadius: 8
+            )
+            .chartFrame(height: 130, tint: Self.pageIn)
+        }
+    }
+
+    /// Pages squeezed into and pulled out of the compressor.
+    private func compressor(_ memory: MemorySample) -> some View {
+        let history = model.memoryDetail
+        return ChartCard(title: "Compressor", trailing: "", tint: Theme.compressed, legend: [
+            LegendItem(name: "Compressing", color: Theme.compressed, value: Format.bytesPerSecond(memory.compressionRate)),
+            LegendItem(name: "Decompressing", color: Theme.cached, value: Format.bytesPerSecond(memory.decompressionRate)),
+        ]) {
+            GraphView(
+                series: [
+                    GraphSeries(values: history.compressions.values, color: Theme.compressed),
+                    GraphSeries(values: history.decompressions.values, color: Theme.cached),
+                ],
+                glows: true, minimumCeiling: 1_048_576, axis: Self.rateAxis, axisUnits: .binaryBytes, cornerRadius: 8
+            )
+            .chartFrame(height: 130, tint: Theme.compressed)
         }
     }
 

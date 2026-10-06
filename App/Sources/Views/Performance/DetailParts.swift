@@ -116,3 +116,25 @@ extension View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.25)))
     }
 }
+
+/// A bar split into coloured segments by share of the total.
+struct ShareBar: View {
+    var segments: [(color: Color, value: Double)]
+
+    var body: some View {
+        let total = segments.reduce(0) { $0 + max($1.value, 0) }
+        GeometryReader { geometry in
+            HStack(spacing: 2) {
+                ForEach(segments.indices, id: \.self) { index in
+                    let segment = segments[index]
+                    let share = total > 0 ? max(segment.value, 0) / total : 0
+                    if share > 0.002 {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(LinearGradient(colors: [segment.color, segment.color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: max((geometry.size.width - CGFloat(segments.count - 1) * 2) * share, 2))
+                    }
+                }
+            }
+        }
+    }
+}

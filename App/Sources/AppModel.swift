@@ -29,6 +29,13 @@ struct MemoryHistory {
     var swapUsed = History<Double>(capacity: AppModel.historyCapacity)
     /// 0...1, from the kernel's "memory available" level.
     var pressure = History<Double>(capacity: AppModel.historyCapacity)
+    /// Bytes per second.
+    var pageIns = History<Double>(capacity: AppModel.historyCapacity)
+    var pageOuts = History<Double>(capacity: AppModel.historyCapacity)
+    var swapIns = History<Double>(capacity: AppModel.historyCapacity)
+    var swapOuts = History<Double>(capacity: AppModel.historyCapacity)
+    var compressions = History<Double>(capacity: AppModel.historyCapacity)
+    var decompressions = History<Double>(capacity: AppModel.historyCapacity)
 
     mutating func append(_ memory: MemorySample) {
         app.append(Double(memory.app))
@@ -37,6 +44,12 @@ struct MemoryHistory {
         cached.append(Double(memory.cached))
         swapUsed.append(Double(memory.swapUsed))
         pressure.append(memory.availablePercent.map { 1 - Double($0) / 100 } ?? memory.usedFraction)
+        pageIns.append(memory.pageInRate)
+        pageOuts.append(memory.pageOutRate)
+        swapIns.append(memory.swapInRate)
+        swapOuts.append(memory.swapOutRate)
+        compressions.append(memory.compressionRate)
+        decompressions.append(memory.decompressionRate)
     }
 }
 
@@ -45,11 +58,71 @@ struct GPUHistory {
     var renderer = History<Double>(capacity: AppModel.historyCapacity)
     var tiler = History<Double>(capacity: AppModel.historyCapacity)
     var memoryInUse = History<Double>(capacity: AppModel.historyCapacity)
+    /// Average clock while powered on, in MHz; 0 while the GPU was off.
+    var frequency = History<Double>(capacity: AppModel.historyCapacity)
 
     mutating func append(_ gpu: GPUSample) {
         renderer.append(gpu.rendererUtilization ?? 0)
         tiler.append(gpu.tilerUtilization ?? 0)
         memoryInUse.append(Double(gpu.memoryInUse ?? 0))
+        frequency.append(gpu.frequencyMHz ?? 0)
+    }
+}
+
+/// Whole-system power split into parts of the chip, and energy used since launch.
+struct PowerHistory {
+    var cpu = History<Double>(capacity: AppModel.historyCapacity)
+    var gpu = History<Double>(capacity: AppModel.historyCapacity)
+    var ane = History<Double>(capacity: AppModel.historyCapacity)
+    var dram = History<Double>(capacity: AppModel.historyCapacity)
+    /// The system figure minus the chip's parts: display, SSD, radios, fans,
+    /// power conversion. Never negative, though the system figure lags a beat.
+    var rest = History<Double>(capacity: AppModel.historyCapacity)
+    /// Per CPU cluster, keyed by name: watts, average clock (MHz) and share of time running.
+    var clusterWatts: [String: History<Double>] = [:]
+    var clusterFrequency: [String: History<Double>] = [:]
+    var clusterActive: [String: History<Double>] = [:]
+    var adapterInput = History<Double>(capacity: AppModel.historyCapacity)
+    /// Into the battery; negative while it discharges.
+    var battery = History<Double>(capacity: AppModel.historyCapacity)
+    /// Joules since launch, for the whole system and for each measured part.
+    private(set) var energy = 0.0
+    private(set) var componentEnergy: [PowerComponent: Double] = [:]
+    private(set) var seconds = 0.0
+
+    mutating func append(_ power: PowerSample, interval: TimeInterval) {
+        let parts = power.components
+        cpu.append(parts?.watts(.cpu) ?? 0)
+        gpu.append(parts?.watts(.gpu) ?? 0)
+        ane.append(parts?.watts(.ane) ?? 0)
+        dram.append(parts?.watts(.dram) ?? 0)
+        if let system = power.systemWatts, let parts {
+            rest.append(max(system - parts.total, 0))
+        } else {
+            rest.append(0)
+        }
+        for cluster in parts?.clusters ?? [] {
+            clusterWatts[cluster.name, default: Self.history()].append(cluster.watts ?? 0)
+            clusterFrequency[cluster.name, default: Self.history()].append(cluster.frequencyMHz ?? 0)
+            clusterActive[cluster.name, default: Self.history()].append(cluster.activeFraction ?? 0)
+        }
+        adapterInput.append(power.adapter?.inputWatts ?? 0)
+        battery.append(power.adapter?.batteryWatts ?? power.battery?.watts ?? 0)
+
+        if let system = power.systemWatts {
+            energy += system * interval
+            seconds += interval
+        }
+        for component in PowerComponent.allCases {
+            if let watts = parts?.watts(component) { componentEnergy[component, default: 0] += watts * interval }
+        }
+    }
+
+    /// Average whole-system draw since launch.
+    var averageWatts: Double? { seconds > 0 ? energy / seconds : nil }
+
+    private static func history() -> History<Double> {
+        History(capacity: AppModel.historyCapacity)
     }
 }
 
@@ -115,6 +188,7 @@ final class AppModel {
     private(set) var appGroups: [ProcessNode] = []
     private(set) var gpuHistory: [String: History<Double>] = [:]
     private(set) var powerHistory = History<Double>(capacity: historyCapacity)
+    private(set) var powerDetail = PowerHistory()
     private(set) var diskReadHistory: [String: History<Double>] = [:]
     private(set) var diskWriteHistory: [String: History<Double>] = [:]
     private(set) var networkInHistory: [String: History<Double>] = [:]
@@ -226,6 +300,7 @@ final class AppModel {
         memoryHistory.append(snapshot.memory.usedFraction)
         memoryDetail.append(snapshot.memory)
         powerHistory.append(snapshot.power.systemWatts ?? 0)
+        powerDetail.append(snapshot.power, interval: snapshot.interval)
         if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
             peakSystemWatts = watts
             UserDefaults.standard.set(watts, forKey: "peakSystemWatts")
