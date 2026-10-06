@@ -13,7 +13,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | End task, end process tree, force quit | ✅ | Apps quit politely first |
 | Column chooser, sorting, saved column layout | ✅ | Right-click the header |
 | Heat shading of busy values | ✅ | Meter bars, coloured per resource |
-| Performance: CPU, memory, disk, network, GPU graphs | ✅ | Plus power and battery |
+| Performance: CPU, memory, disk, network, GPU graphs | ✅ | Plus power and battery. Graphs scroll smoothly and auto-scale |
 | Per-core CPU graphs | ✅ | Grouped by core type |
 | Status bar summary | ✅ | |
 | Always-available shortcut (⌃⇧⎋) | ✅ | |
@@ -34,14 +34,18 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Inspector: arguments, environment, open files, sockets | ✅ | |
 | Sample Process (stack sampling) | ✅ | Uses `/usr/bin/sample` |
 | Menu bar meters and top processes | ✅ | |
-| `otm` CLI with JSON output | ✅ | `ps`, `top`, `system`, `ports`, `inspect`, `kill` |
+| `otm` CLI with JSON output | ✅ | `ps`, `top`, `system`, `power`, `ports`, `inspect`, `kill` |
 | Overview dashboard with live core map | ✅ | |
+| Power by part of the chip | ✅ | CPU, GPU, Neural Engine, DRAM and the rest, from IOReport and the SMC |
+| CPU cluster and GPU clock speeds | ✅ | From IOReport residencies and the device tree's clock tables |
+| Memory by app, paging and compressor rates | ✅ | Stacked over time |
+| GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
 | Privileged helper | ⬜ | Full details for root processes. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
 | Flight recorder | ⬜ | SQLite history with a timeline scrubber: "what was hogging the CPU at 3 a.m.?" |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
 | Per-process network throughput | ⬜ | Per-socket byte counters |
 | "Who is using…" | 🚧 | Port, file or volume to process. `otm ports` exists; the UI and "can't eject" helper are planned |
-| Sensors | ⬜ | Temperatures, fan speeds and SoC power rails |
+| Sensors | 🚧 | SoC power rails are done; temperatures and fan speeds are planned |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |
 | Widgets | ⬜ | WidgetKit gauges |

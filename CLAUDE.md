@@ -19,7 +19,8 @@ Manager OG or any other proprietary task manager.
 
 ## Layout
 
-- `Packages/OTMKit`: sampling library (System/, Model/, Monitor/, Format/),
+- `Packages/OTMKit`: sampling library (System/, Model/, Monitor/, Format/,
+  Graphing/ for axis and curve maths),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
@@ -38,6 +39,10 @@ Manager OG or any other proprietary task manager.
 - The process table updates rows in place: `OrderedDiff` moves, inserts and
   removes rows, and visible cells are restyled. Don't go back to calling
   `reloadData()` every tick.
+- Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
+  per sample and a Core Animation scroll slides them between samples. Changing
+  numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
+  Don't swap either for SwiftUI `Path` or `Text` animations.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s, not `ps %cpu`.
 

@@ -9,8 +9,9 @@ layout people already know, rebuilt for Apple silicon and taken further.
 
 **Overview**: one screen with a glowing gauge for CPU, memory, GPU and power,
 a live map of every core grouped by type (for example 6 Super + 12 Performance
-on an M5 Pro), disk, network and storage, and the apps using the most CPU,
-memory and energy right now.
+on an M5 Pro), disk, network, power by part of the chip, storage, and the apps
+using the most CPU, memory and energy right now. Numbers count smoothly to each
+new reading.
 
 **Processes**
 - Apps, background processes and system processes, with helpers folded under
@@ -25,24 +26,30 @@ memory and energy right now.
   Resume, any signal, priority (nice), Sample Process, Reveal in Finder.
   Actions on system processes ask for an administrator password only when
   they're needed.
-- An inspector with per-process CPU and memory graphs, command line,
-  environment, working directory, and open files and network ports.
+- An inspector with per-process CPU, memory, power and GPU graphs, command
+  line, environment, working directory, and open files and network ports.
 
-**Performance**: Task Manager-style graphs for CPU (overall, by core type or
-every core), memory composition and pressure, GPU, each disk, each network
-interface, and power and battery. The CPU, memory, GPU, disk and power pages
-list the processes responsible.
+**Performance**: Task Manager-style graphs that scroll smoothly between
+samples and scale their axes to round numbers.
+- CPU: overall, by core type or every core, the clock speed of each cluster,
+  and a stacked chart of CPU by app.
+- Memory: what's in memory over time (wired, app, compressed, cached), pressure,
+  swap, paging and compressor activity, and memory by app.
+- GPU: shading and geometry load, GPU time by app, clock speed and GPU memory.
+- Power: where the power goes (CPU, GPU, Neural Engine, DRAM and the rest of
+  the system), energy since launch, adapter and battery flow, and power by app.
+- Each disk and network interface.
 
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
-- The `otm` command-line tool: `ps`, `top`, `system`, `ports`, `inspect` and
-  `kill`, with JSON output.
+- The `otm` command-line tool: `ps`, `top`, `system`, `power`, `ports`,
+  `inspect` and `kill`, with JSON output.
 
-OpenTaskManager is light. Gauges and core tiles animate in Core Animation's
-render server, and the process table moves rows in place instead of rebuilding
-them, so the app itself uses only a few percent of one core.
+OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
+Animation's render server, and the process table moves rows in place instead
+of rebuilding them, so the app itself uses only a few percent of one core.
 
 ## Build
 
@@ -66,11 +73,16 @@ and notarized downloads need an Apple Developer account; they're on the
 
 ## How it reads the system
 
-Everything comes from public kernel and IOKit interfaces, and root isn't
-needed: `libproc` and `proc_pid_rusage` for processes and energy,
+Root isn't needed. Most figures come from public kernel and IOKit
+interfaces: `libproc` and `proc_pid_rusage` for processes and energy,
 `host_processor_info` for each core, `host_statistics64` for memory (using the
 same arithmetic as Activity Monitor), IOKit for the GPU, disks and battery
 telemetry, and routing sockets for network counters.
+
+Power by part of the chip and clock speeds come from IOReport, and
+whole-system power from read-only SMC keys. Both are undocumented, so
+OpenTaskManager loads them at run time and shows "—" for anything a Mac
+doesn't report.
 
 macOS hides most details of other users' processes from unprivileged apps. For
 those, OpenTaskManager falls back to `/bin/ps` for CPU and memory and marks the
