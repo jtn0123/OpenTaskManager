@@ -127,4 +127,42 @@ public enum GraphMath {
         }
         return ticks
     }
+
+    /// Round steps a time axis may be labelled at, from ten seconds to a week.
+    static let timeSteps: [TimeInterval] = [
+        10, 15, 30, 60, 2 * 60, 5 * 60, 10 * 60, 15 * 60, 30 * 60,
+        3_600, 2 * 3_600, 3 * 3_600, 4 * 3_600, 6 * 3_600, 12 * 3_600, 86_400, 2 * 86_400, 7 * 86_400,
+    ]
+
+    /// The shortest round step (10, 15 or 30 s; 1, 2, 5, 10, 15 or 30 min;
+    /// 1, 2, 3, 4, 6 or 12 h; 1, 2 or 7 days, then whole weeks) that labels
+    /// an axis `span` seconds long no more than `maximumTicks` times. For
+    /// spans that aren't one of the fixed ranges, such as a short recording
+    /// fitted to the width.
+    public static func timeTickStep(for span: TimeInterval, maximumTicks: Int = 6) -> TimeInterval {
+        guard span.isFinite, span > 0, maximumTicks > 0 else { return timeSteps[0] }
+        // A little slack, so an hour over six ticks gets 10 minutes, not 15.
+        let shortest = span / Double(maximumTicks) * (1 - 1e-9)
+        if let step = timeSteps.first(where: { $0 >= shortest }) { return step }
+        let week = 7 * 86_400.0
+        return (shortest / week).rounded(.up) * week
+    }
+
+    // MARK: - History ranges
+
+    /// Whether fitting a history graph to its recording would change it: the
+    /// recording, `recorded` seconds old, began well inside the `range`.
+    public static func canFit(range: TimeInterval, recorded: TimeInterval?) -> Bool {
+        guard let recorded, recorded.isFinite, recorded >= 0 else { return false }
+        return recorded < range * 0.95
+    }
+
+    /// Seconds a history graph spans: the whole `range`, or with `fit`, back
+    /// only as far as the recording goes (never under `minimum`). Fitting
+    /// changes the axis, not the data: ten minutes of recording are labelled
+    /// as ten minutes, and gaps in them stay gaps.
+    public static func historySpan(range: TimeInterval, recorded: TimeInterval?, fit: Bool, minimum: TimeInterval = 60) -> TimeInterval {
+        guard fit, canFit(range: range, recorded: recorded), let recorded else { return range }
+        return min(max(recorded, minimum), range)
+    }
 }

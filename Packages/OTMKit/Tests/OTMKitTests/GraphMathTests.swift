@@ -92,4 +92,54 @@ struct GraphMathTests {
         #expect(lateTicks.map { Int($0.timeIntervalSince1970) % 86_400 / 60 } == [6 * 60 + 30, 6 * 60 + 45, 7 * 60])
         #expect(GraphMath.timeTicks(in: start...start, step: 900).isEmpty)
     }
+
+    /// Spans and the step each gets, in seconds.
+    private static let tickSteps: [(Double, Double)] = [
+        (60, 10), (180, 30), (1_440, 300), (3_600, 600),
+        (9_000, 1_800), (21_600, 3_600), (86_400, 14_400), (259_200, 43_200),
+    ]
+
+    @Test(arguments: tickSteps)
+    func tickStepIsRoundForAnySpan(span: Double, expected: Double) {
+        #expect(GraphMath.timeTickStep(for: span) == expected)
+    }
+
+    @Test func tickStepNeverCrowdsTheAxis() {
+        var previous = 0.0
+        for span in stride(from: 30.0, through: 30 * 86_400, by: 97) {
+            let step = GraphMath.timeTickStep(for: span)
+            #expect(span / step <= 6 + 1e-6, "\(span) s got a step of \(step) s")
+            #expect(step >= previous, "a longer span shouldn't get a finer step")
+            previous = step
+        }
+        // A week fits seven daily labels when asked for seven.
+        #expect(GraphMath.timeTickStep(for: 7 * 86_400, maximumTicks: 7) == 86_400)
+        // Past the list it counts in whole weeks.
+        #expect(GraphMath.timeTickStep(for: 100 * 86_400) == 21 * 86_400)
+    }
+
+    @Test func tickStepForDegenerateSpans() {
+        #expect(GraphMath.timeTickStep(for: 0) == 10)
+        #expect(GraphMath.timeTickStep(for: -60) == 10)
+        #expect(GraphMath.timeTickStep(for: .nan) == 10)
+        #expect(GraphMath.timeTickStep(for: 5) == 10)
+        #expect(GraphMath.timeTickStep(for: 3_600, maximumTicks: 0) == 10)
+    }
+
+    @Test func fittingOnlyShortensARangeTheRecordingDoesNotFill() {
+        let hour = 3_600.0
+        // Ten minutes recorded: fitted, the axis spans ten minutes.
+        #expect(GraphMath.canFit(range: hour, recorded: 600))
+        #expect(GraphMath.historySpan(range: hour, recorded: 600, fit: true) == 600)
+        #expect(GraphMath.historySpan(range: hour, recorded: 600, fit: false) == hour)
+        // A recording that fills the range (or nearly) leaves it alone.
+        #expect(!GraphMath.canFit(range: hour, recorded: 5 * hour))
+        #expect(!GraphMath.canFit(range: hour, recorded: 0.97 * hour))
+        #expect(GraphMath.historySpan(range: hour, recorded: 5 * hour, fit: true) == hour)
+        // Nothing recorded yet: nothing to fit.
+        #expect(!GraphMath.canFit(range: hour, recorded: nil))
+        #expect(GraphMath.historySpan(range: hour, recorded: nil, fit: true) == hour)
+        // A recording seconds old still gets a readable minute.
+        #expect(GraphMath.historySpan(range: hour, recorded: 12, fit: true) == 60)
+    }
 }

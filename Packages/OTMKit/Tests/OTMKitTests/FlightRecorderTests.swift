@@ -80,6 +80,21 @@ struct HistoryAccumulatorTests {
         #expect(top.memory == [HistoryApp(name: "A", value: 9), HistoryApp(name: "B", value: 7)])
     }
 
+    @Test func findsTheNearestPoint() {
+        let points = [10.0, 20, 40, 100].map { HistoryPoint(time: Date(timeIntervalSince1970: $0), values: HistoryValues()) }
+        func nearest(_ seconds: Double) -> Double? {
+            HistoryPoint.nearest(to: Date(timeIntervalSince1970: seconds), in: points)?.time.timeIntervalSince1970
+        }
+        #expect(nearest(0) == 10)
+        #expect(nearest(10) == 10)
+        #expect(nearest(27) == 20)
+        #expect(nearest(33) == 40)
+        // Halfway between two points picks the earlier.
+        #expect(nearest(70) == 40)
+        #expect(nearest(500) == 100)
+        #expect(HistoryPoint.nearest(to: .now, in: []) == nil)
+    }
+
     @Test func numbersSegmentsBetweenGaps() {
         let base = Date(timeIntervalSince1970: 0)
         let points = [0.0, 10, 20, 100, 110, 400].map { HistoryPoint(time: base.addingTimeInterval($0), values: HistoryValues()) }
@@ -138,6 +153,31 @@ struct FlightRecorderTests {
         #expect(points[0].time == Date(timeIntervalSince1970: 1_200_020))
         #expect(points[0].values.gpu == nil)
         #expect(points.map(\.segment) == [0, 0, 1])
+    }
+
+    @Test func countsRecordedTimeOncePerStretch() async throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let recorder = try FlightRecorder(url: url)
+        // Three stretches, one written twice by two copies of the app a second apart, then a gap.
+        for seconds in [10.0, 20, 21, 30, 600] {
+            try await recorder.append(record(at: 1_300_000 + seconds, cpu: 0.1))
+        }
+        let start = Date(timeIntervalSince1970: 1_300_000)
+        #expect(try await recorder.recordedSeconds(from: start, to: start.addingTimeInterval(100)) == 30)
+        #expect(try await recorder.recordedSeconds(from: start, to: start.addingTimeInterval(1_000)) == 40)
+        #expect(try await recorder.recordedSeconds(from: start.addingTimeInterval(1_000), to: start.addingTimeInterval(2_000)) == 0)
+    }
+
+    @Test func bucketsHoldWholeRecords() {
+        // About 360 points across, each a whole number of ten-second records.
+        #expect(FlightRecorder.bucket(for: 3_600) == 10)
+        #expect(FlightRecorder.bucket(for: 21_600) == 60)
+        #expect(FlightRecorder.bucket(for: 604_800) == 1_680)
+        #expect(FlightRecorder.bucket(for: 11_820) == 40)
+        // A short fitted span never averages less than one record.
+        #expect(FlightRecorder.bucket(for: 600) == 10)
+        #expect(FlightRecorder.bucket(for: 0) == 10)
     }
 
     @Test func prunesOldRecordsAndKeepsTheRestAcrossReopening() async throws {
