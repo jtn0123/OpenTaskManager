@@ -5,7 +5,8 @@ import Testing
 struct AutoScaleTests {
     @Test(arguments: [
         (0.0, 0.1), (0.03, 0.1), (0.084, 0.1), (0.086, 0.2), (0.169, 0.2), (0.18, 0.25), (0.21, 0.25),
-        (0.22, 0.5), (0.42, 0.5), (0.43, 1.0), (0.97, 1.0), (1.4, 1.0), (-0.2, 0.1),
+        (0.22, 0.5), (0.42, 0.5), (0.43, 0.75), (0.48, 0.75), (0.63, 0.75), (0.64, 1.0), (0.97, 1.0), (1.4, 1.0),
+        (-0.2, 0.1),
     ])
     func boundIsTheSmallestRoundStepWithHeadroom(peak: Double, expected: Double) {
         #expect(AutoScale.bound(for: peak) == expected)
@@ -27,7 +28,8 @@ struct AutoScaleTests {
     @Test func growsAtOnceWhenTheDataNeedsRoom() {
         var scale = AutoScale(peak: 0.03)
         #expect(scale.update(peak: 0.09, at: 1) == 0.2)
-        #expect(scale.update(peak: 0.6, at: 2) == 1)
+        #expect(scale.update(peak: 0.6, at: 2) == 0.75)
+        #expect(scale.update(peak: 0.7, at: 3) == 1)
     }
 
     @Test func shrinksOnlyAfterTheDataStaysLowForAWhile() {

@@ -3,14 +3,14 @@ import Foundation
 /// The top of an auto-scaled share graph (CPU), so light load isn't
 /// crushed against the bottom of a 100% scale.
 ///
-/// The bound is one of a few round figures (10, 20, 25, 50 or 100%), with
+/// The bound is one of a few round figures (10, 20, 25, 50, 75 or 100%), with
 /// headroom over the data, and it holds steady: it grows as soon as the
 /// data needs more room, but shrinks only once the data has stayed well
 /// inside a smaller bound for a while. Between the two thresholds neither
 /// happens, so load hovering near a step never flicks between two scales.
 public struct AutoScale: Equatable, Sendable {
     /// The bounds a scale stops at, as fractions of the whole.
-    public static let steps: [Double] = [0.1, 0.2, 0.25, 0.5, 1]
+    public static let steps: [Double] = [0.1, 0.2, 0.25, 0.5, 0.75, 1]
     /// The share of a bound the data may reach before the scale grows.
     public static let headroom = 0.85
     /// The share of a smaller bound the data must stay under for the scale
