@@ -12,10 +12,13 @@ public struct SystemInfo: Sendable {
     public let network: [NetworkPortInfo]
     /// nil on Macs without a battery.
     public let battery: BatteryInfo?
+    /// Addresses with prefixes, routers, DNS, proxies, services and routes;
+    /// nil where it wasn't read.
+    public let networkConfiguration: NetworkConfiguration?
 
     public init(
         hardware: MacHardware, topology: CPUTopology, software: SoftwareInfo, gpus: [GPUInfo], disks: [DiskInfo],
-        volumes: [VolumeInfo], network: [NetworkPortInfo], battery: BatteryInfo?
+        volumes: [VolumeInfo], network: [NetworkPortInfo], battery: BatteryInfo?, networkConfiguration: NetworkConfiguration? = nil
     ) {
         self.hardware = hardware
         self.topology = topology
@@ -25,6 +28,7 @@ public struct SystemInfo: Sendable {
         self.volumes = volumes
         self.network = network
         self.battery = battery
+        self.networkConfiguration = networkConfiguration
     }
 }
 

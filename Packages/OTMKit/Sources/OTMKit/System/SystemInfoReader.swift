@@ -36,7 +36,8 @@ public enum SystemInfoReader {
             disks: disks,
             volumes: VolumeReader.read(),
             network: readNetwork(),
-            battery: battery
+            battery: battery,
+            networkConfiguration: NetworkConfigurationReader.read()
         )
     }
 
@@ -84,7 +85,8 @@ public enum SystemInfoReader {
 
     // MARK: - Network
 
-    private static func readNetwork() -> [NetworkPortInfo] {
+    /// The network ports alone, as the page lists them (for `otm netconfig`).
+    public static func readNetwork() -> [NetworkPortInfo] {
         let hardwareAddresses = readHardwareAddresses()
         return NetworkSampler().sample(interval: 0).map { link in
             NetworkPortInfo(

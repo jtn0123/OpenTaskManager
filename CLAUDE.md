@@ -60,7 +60,11 @@ Manager OG or any other proprietary task manager.
   per tick; the rows come from `SystemReport` in OTMKit, and attached devices from
   one `system_profiler -json` run, `PeripheralReader` in OTMKit's System/Peripherals,
   again on Refresh; Save Report… and `otm system report` write `SystemReportDocument`,
-  whose JSON schema is `SystemReportJSON`, with identifiers left out unless asked),
+  whose JSON schema is `SystemReportJSON`, with identifiers left out unless asked;
+  the network cards' addresses, routes, DNS and proxies come from
+  `NetworkConfigurationReader` (SCDynamicStore, `getifaddrs`, a route dump,
+  CoreWLAN without the SSID, which needs Location), also read on Refresh and
+  printed by `otm netconfig`),
   Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
   the main actor when the page opens and on Refresh, never per tick; parsing is
   in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),

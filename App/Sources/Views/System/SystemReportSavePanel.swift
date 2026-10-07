@@ -95,8 +95,8 @@ private final class SaveOptions: NSObject {
         formatMenu.target = self
         formatMenu.action = #selector(formatChanged)
         identifiers.state = .off
-        identifiers.toolTip = "The serial number, hardware UUID, device serial numbers, and MAC, Bluetooth and IP addresses. "
-            + "Leave it off for a report you'll share."
+        identifiers.toolTip = "The serial number, hardware UUID, device serial numbers, MAC, Bluetooth and IP addresses, "
+            + "routers, DNS servers, search domains and proxy hosts. Leave it off for a report you'll share."
         identifiers.setAccessibilityLabel("Include identifiers (serial numbers, UUIDs, addresses)")
         let note = NSTextField(labelWithString: "Serial numbers, UUIDs, addresses")
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)

@@ -91,8 +91,10 @@ struct SystemReportDocumentTests {
         #expect(json["includesIdentifiers"] as? Bool == false)
         #expect(Set(json.keys) == [
             "format", "schemaVersion", "generator", "collectedAt", "includesIdentifiers", "hardware", "processor", "graphics",
-            "displays", "storage", "network", "devices", "battery", "software", "security",
+            "displays", "storage", "network", "networkConfiguration", "devices", "battery", "software", "security",
         ])
+        // Not read for this report: there, but null.
+        #expect(json["networkConfiguration"] is NSNull)
         let software = try dictionary(json["software"])
         #expect(software["uptimeSeconds"] as? Int == 3_600)
         #expect(software["bootTime"] as? String == ISO8601DateFormatter().string(from: Self.boot))
@@ -215,7 +217,8 @@ struct SystemReportDocumentTests {
         let hidden = document().markdown(includeIdentifiers: false)
         #expect(hidden.hasPrefix("# MacBook Pro (16-inch, M5 Pro)\n\nMac17,8 · Apple M5 Pro · 48 GB memory · macOS 27.2 (26B5101f)\n"))
         #expect(hidden.contains("- Written by: otm test\n"))
-        #expect(hidden.contains("- Left out: serial numbers, the hardware UUID, and MAC, Bluetooth and IP addresses\n"))
+        #expect(hidden.contains("- Left out: serial numbers, the hardware UUID, MAC, Bluetooth and IP addresses, routers, DNS servers, "
+            + "search domains and proxy hosts\n"))
         for secret in ["SERIAL123", "UUID-456", "a4:83:e7", "192.168.1.9", "2001:db8", "S123", "K789", "AA:BB"] {
             #expect(!hidden.contains(secret), "\(secret) leaked")
         }

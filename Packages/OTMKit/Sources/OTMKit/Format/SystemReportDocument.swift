@@ -2,8 +2,9 @@ import Foundation
 
 /// Everything the System page shows, as of one moment: what its Save Report
 /// writes and `otm system report` prints, as Markdown or as versioned JSON.
-/// Serial numbers, the hardware UUID, and MAC, Bluetooth and IP addresses
-/// stay out unless `includeIdentifiers` is set, since a report gets shared.
+/// Serial numbers, the hardware UUID, MAC, Bluetooth and IP addresses,
+/// routers, DNS servers, search domains and proxy hosts stay out unless
+/// `includeIdentifiers` is set, since a report gets shared.
 public struct SystemReportDocument: Sendable {
     /// Marks the JSON as a system report, whatever the file's name.
     public static let format = "io.github.jtn0123.OpenTaskManager.system-report"
@@ -60,7 +61,8 @@ public struct SystemReportDocument: Sendable {
         if includeIdentifiers {
             lines += SystemReport.identifiers(hardware).map { "- \(Self.escaped($0.label)): " + Self.value($0) }
         } else {
-            lines.append("- Left out: serial numbers, the hardware UUID, and MAC, Bluetooth and IP addresses")
+            lines.append("- Left out: serial numbers, the hardware UUID, MAC, Bluetooth and IP addresses, routers, DNS servers, "
+                + "search domains and proxy hosts")
         }
         let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, now: collectedAt)
         for section in sections {

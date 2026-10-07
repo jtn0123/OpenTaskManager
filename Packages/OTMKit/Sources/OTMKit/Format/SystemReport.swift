@@ -14,8 +14,9 @@ public struct InfoRow: Sendable, Hashable {
     public var isSensitive = false
     /// An address or identifier someone may copy: shown monospaced, one item per line.
     public var isCode = false
-    /// An IP address: shown on the page and copied, but left out of a saved
-    /// report unless identifiers are included, since a report gets shared.
+    /// An IP address, router, DNS server, search domain or proxy host: shown
+    /// on the page and copied, but left out of a saved report unless
+    /// identifiers are included, since a report gets shared.
     public var isAddress = false
     /// One of an attached device's facts, under its heading: the page shows
     /// it once the device is opened. Copied and saved text always keep it.
@@ -26,9 +27,13 @@ public struct InfoRow: Sendable, Hashable {
     /// On a device's heading, how many hubs or devices it's plugged in behind.
     public var depth = 0
     public var status: Status?
+    /// On a network port's heading, its BSD name ("en0"), so the page can
+    /// link the port to its traffic.
+    public var interface: String?
 
     public init(_ label: String, _ value: String, isHeading: Bool = false, isSensitive: Bool = false, isCode: Bool = false,
-                isAddress: Bool = false, isDetail: Bool = false, state: String? = nil, depth: Int = 0, status: Status? = nil) {
+                isAddress: Bool = false, isDetail: Bool = false, state: String? = nil, depth: Int = 0, status: Status? = nil,
+                interface: String? = nil) {
         self.label = label
         self.value = value
         self.isHeading = isHeading
@@ -39,6 +44,7 @@ public struct InfoRow: Sendable, Hashable {
         self.state = state
         self.depth = depth
         self.status = status
+        self.interface = interface
     }
 
     /// A heading's note and state together: "5 Gb/s, built-in".
@@ -56,7 +62,8 @@ public enum InfoBlock: Sendable, Hashable {
 
 public struct InfoSection: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable {
-        case processor, memory, graphics, displays, storage, network, usb, thunderbolt, bluetooth, audio, battery, software, security
+        case processor, memory, graphics, displays, storage, network, networkConfiguration, usb, thunderbolt, bluetooth, audio, battery,
+             software, security
 
         /// USB, Thunderbolt, Bluetooth, and audio and video: the cards
         /// listing what's attached, which keep their own heights on the page.
@@ -65,6 +72,11 @@ public struct InfoSection: Sendable, Hashable, Identifiable {
             case .usb, .thunderbolt, .bluetooth, .audio: true
             default: false
             }
+        }
+
+        /// The ports and the configuration: a pair the page keeps together.
+        public var isNetwork: Bool {
+            self == .network || self == .networkConfiguration
         }
     }
 
@@ -108,8 +120,8 @@ public enum SystemReport {
             InfoSection(kind: .graphics, title: "Graphics", rows: graphics(info)),
             InfoSection(kind: .displays, title: "Displays", rows: self.displays(displays)),
             InfoSection(kind: .storage, title: "Storage", rows: storage(info)),
-            InfoSection(kind: .network, title: "Network", rows: network(info)),
         ]
+        sections += networkSections(info.network, info.networkConfiguration)
         sections += deviceSections(devices)
         if let battery = info.battery {
             sections.append(InfoSection(kind: .battery, title: "Battery", rows: self.battery(battery)))
@@ -145,6 +157,12 @@ public enum SystemReport {
     /// Just the attached devices, as `otm devices` prints them.
     public static func deviceText(_ devices: PeripheralInventory, includeIdentifiers: Bool) -> String {
         textLines(deviceSections(devices), includeIdentifiers: includeIdentifiers).dropFirst().joined(separator: "\n") + "\n"
+    }
+
+    /// Just the network cards, as `otm netconfig` prints them: addresses as
+    /// the page shows and copies them, MAC addresses only with `includeIdentifiers`.
+    public static func networkText(_ ports: [NetworkPortInfo], configuration: NetworkConfiguration?, includeIdentifiers: Bool) -> String {
+        textLines(networkSections(ports, configuration), includeIdentifiers: includeIdentifiers).dropFirst().joined(separator: "\n") + "\n"
     }
 
     /// Each section as a blank line, its title and indented rows.
@@ -271,29 +289,6 @@ public enum SystemReport {
             rows += others.map(volumeRow)
         }
         return rows.isEmpty ? [InfoRow("Storage", "None found")] : rows
-    }
-
-    private static func network(_ info: SystemInfo) -> [InfoRow] {
-        let ports = info.network.filter(\.isWorthListing)
-        guard !ports.isEmpty else { return [InfoRow("Network", "No active connections")] }
-        var rows: [InfoRow] = []
-        for port in ports {
-            // Ports without a friendly name ("bridge100") would otherwise repeat it.
-            rows.append(InfoRow(port.displayName, port.displayName == port.name ? "" : port.name, isHeading: true))
-            let connected = port.isUp && !port.addresses.isEmpty
-            rows.append(InfoRow("Status", connected ? "Connected" : "Not connected", status: connected ? .good : nil))
-            let ipv4 = port.addresses.filter { !$0.contains(":") }
-            let ipv6 = port.addresses.filter { $0.contains(":") && !$0.lowercased().hasPrefix("fe80") }
-            if !ipv4.isEmpty { rows.append(InfoRow("IPv4", ipv4.joined(separator: "\n"), isCode: true, isAddress: true)) }
-            if !ipv6.isEmpty { rows.append(InfoRow("IPv6", ipv6.joined(separator: "\n"), isCode: true, isAddress: true)) }
-            if let speed = port.linkSpeed, connected {
-                rows.append(InfoRow("Link speed", Format.bitsPerSecond(Double(speed) / 8)))
-            }
-            if let address = port.hardwareAddress {
-                rows.append(InfoRow("Hardware address", address, isSensitive: true, isCode: true))
-            }
-        }
-        return rows
     }
 
     private static func battery(_ battery: BatteryInfo) -> [InfoRow] {

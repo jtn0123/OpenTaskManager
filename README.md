@@ -117,11 +117,16 @@ devices with their battery levels, audio devices with their channels and
 defaults, and cameras), battery health, macOS and kernel versions, uptime, and
 whether SIP, FileVault and Gatekeeper are on. The serial number, hardware UUID,
 MAC addresses and device serials stay hidden until you ask, Refresh reads the
-devices again, and Copy Summary puts the page on the clipboard as plain text.
+page, network settings and devices again, and Copy Summary puts the page on the
+clipboard as plain text.
 Each attached device is one line (name, speed or connection, and a status such
 as battery level); click it for its maker, bus, power and IDs. Save Report…
 writes the page as Markdown or versioned JSON, with identifiers left out unless
 you tick the option; `otm system report [--json] [--all]` prints the same.
+Each network port lists its addresses with prefixes, router, Wi-Fi channel or
+Ethernet media, MTU and flags, with a link to its traffic; a Network
+Configuration card shows the primary service, default routes, VPN tunnels, DNS
+and proxies in use, and the service order (`otm netconfig` prints both).
 
 **Drivers**: the system extensions and kernel extensions loaded on the Mac.
 - Counts of system extensions by kind, third-party kexts, loaded kexts and
