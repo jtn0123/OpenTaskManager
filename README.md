@@ -94,7 +94,8 @@ Summary puts the page on the clipboard as plain text.
   processes.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
 - The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
-  `ports`, `inspect` and `kill`, with JSON output.
+  `ports`, `net` (the processes moving the most network traffic), `inspect`
+  and `kill`, with JSON output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
 Animation's render server, and the process table moves rows in place instead

@@ -15,6 +15,8 @@ USAGE:
                                  clocks, adapter and battery flow
   otm sensors [--json]           Chip, SSD and battery temperatures, fan speeds
   otm ports [--json]             Listening TCP/UDP ports of your processes
+  otm net [-n COUNT] [--interval SECONDS] [--json]
+                                 Processes moving the most network traffic
   otm inspect PID [--json]       Arguments, environment and open files
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
@@ -333,6 +335,24 @@ case "ports":
         }
         if sample.hiddenProcesses > 0 {
             print("\n\(sample.hiddenProcesses) processes of root and other users hidden (macOS restricts them; try sudo)")
+        }
+    }
+
+case "net":
+    guard let before = ProcessNetwork.read() else { fail("nettop couldn't run") }
+    let started = Date()
+    try await Task.sleep(for: .seconds(options.interval))
+    guard let after = ProcessNetwork.read() else { fail("nettop couldn't run") }
+    let rates = Array(ProcessNetwork.rates(from: before, to: after, interval: Date().timeIntervalSince(started)).prefix(options.count))
+    if options.json {
+        printJSON(rates)
+    } else if rates.isEmpty {
+        print("No process sent or received anything in \(Format.timeSpan(options.interval)).")
+    } else {
+        print(pad("PID", 7, right: true) + pad("RECEIVED", 13, right: true) + pad("SENT", 13, right: true) + "  PROCESS")
+        for rate in rates {
+            print(pad(String(rate.pid), 7, right: true) + pad(Format.bitsPerSecond(rate.bytesInPerSecond), 13, right: true)
+                + pad(Format.bitsPerSecond(rate.bytesOutPerSecond), 13, right: true) + "  " + rate.name)
         }
     }
 
