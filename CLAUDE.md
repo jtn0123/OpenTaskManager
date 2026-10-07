@@ -23,7 +23,9 @@ Manager OG or any other proprietary task manager.
   Graphing/ for axis and curve maths and the squarified `Treemap`;
   System/LaunchItems, LaunchTriggers and Launchctl read launchd plists and
   parse `launchctl` output; System/DiskUsageScanner walks a folder for the
-  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules),
+  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules;
+  System/InstalledApps, MachO and CodeSigning find and read app bundles for the
+  Apps page and `otm apps`),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
@@ -33,6 +35,10 @@ Manager OG or any other proprietary task manager.
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick),
+  Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
+  the main actor when the page opens and on Refresh, then streams bundle sizes in
+  from a few GCD threads, and follows launches and quits through NSWorkspace,
+  never per tick),
   Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
   Views/System (hardware and security facts, read once when the page opens, never
   per tick; the rows come from `SystemReport` in OTMKit),
@@ -85,12 +91,13 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance|History|Connections|Startup|Users|System|Drivers|Storage` sets the starting page, and
+`-openPage Overview|Processes|Performance|History|Connections|Startup|Apps|Users|System|Drivers|Storage` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
+`-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page,
 `-openDriver <text>` selects the first extension on the Drivers page whose name
 or bundle ID contains it (switching the Third party/Apple filter if it hides it),
 `-openUser <name>` opens that user's top processes on the Users page (and
@@ -113,4 +120,8 @@ locked or the window is on another Space.
   displayed through `CPUScale`, which defaults to share of the whole CPU.
 - Restricted processes (root and other users) only have CPU and memory, read
   via `/bin/ps`. Show "—" for other fields, never zero.
+- In a details pane beside a table, wrapping text outside the pane's scroll
+  view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
+  the window's split view it made the page take the pane's height and pushed
+  the status bar out of a 730-point window. Plain wrapping text is enough.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

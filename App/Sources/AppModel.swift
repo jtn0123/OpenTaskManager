@@ -256,6 +256,9 @@ final class AppModel {
     /// A process another page asked the Processes page to select, such as
     /// the owner of a socket on the Connections page. Cleared once shown.
     var requestedProcess: Int32?
+    /// A search the Apps page asked the Startup page to run ("Show in
+    /// Startup" for an app's launch items). Cleared once applied.
+    var requestedStartupSearch: String?
     /// Highest whole-system draw seen on this Mac, kept across launches.
     private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
 

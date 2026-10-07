@@ -1,0 +1,464 @@
+import OTMKit
+import SwiftUI
+
+/// Which apps the Apps table shows.
+enum AppsFilter: String, CaseIterable, Identifiable {
+    case all = "All"
+    case thirdParty = "Third party"
+    case appStore = "App Store"
+    case apple = "Apple"
+    case intel = "Intel only"
+    case running = "Running"
+
+    var id: String { rawValue }
+
+    func includes(_ row: AppRow) -> Bool {
+        switch self {
+        case .all: true
+        case .thirdParty: row.app.kind == .thirdParty
+        case .appStore: row.app.kind == .appStore
+        case .apple: row.app.kind == .apple
+        case .intel: row.app.architecture == .intel
+        case .running: row.isRunning
+        }
+    }
+}
+
+/// One table row: the app plus what the store learns about it later.
+struct AppRow: Identifiable {
+    let app: InstalledApp
+    /// Nil until it's measured, or when it can't be.
+    let size: UInt64?
+    let pids: [Int32]
+
+    var id: InstalledApp.ID { app.id }
+    var isRunning: Bool { !pids.isEmpty }
+
+    // Sort keys for the columns.
+    var name: String { app.name }
+    var version: String { app.version ?? app.build ?? "" }
+    var kind: AppKind { app.kind }
+    var architecture: AppArchitecture { app.architecture }
+    var sizeOrder: UInt64 { size ?? 0 }
+    var lastOpenedOrder: Date { app.lastOpened ?? .distantPast }
+}
+
+/// Every app on this Mac: where it came from, what it's built for, who
+/// signed it, how much space it takes and whether it starts by itself.
+///
+/// The folders are read off the main actor when the page opens and on
+/// Refresh, then sizes fill in. Nothing follows the sampling tick, and the
+/// page reads nothing from `AppModel` as it draws, so once the sizes are in
+/// it costs nothing while it sits open.
+struct AppsView: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage("page") private var page: Page = .overview
+    @AppStorage("appsFilter") private var filter: AppsFilter = .all
+    @AppStorage("showAppsInspector") private var showInspector = true
+    @State private var store = InstalledAppStore()
+    @State private var search = ""
+    @State private var selection: InstalledApp.ID?
+    @State private var sortOrder = [KeyPathComparator(\AppRow.name)]
+    /// Bumped by Refresh, which restarts the scan.
+    @State private var refreshes = 0
+    /// A row to bring into view once, for `-openApp`.
+    @State private var scrollTarget: InstalledApp.ID?
+    @State private var openedRequest = false
+    /// The window is too narrow for the table and the details side by side.
+    @State private var isNarrow = false
+    /// In a narrow window, the details cover the table.
+    @State private var showsFullDetail = false
+
+    var body: some View {
+        Group {
+            if let apps = store.apps {
+                page(apps)
+            } else {
+                ProgressView("Reading applications…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    refreshes += 1
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(store.isScanning)
+                .help("Look for apps again and measure their sizes again")
+            }
+            ToolbarItem {
+                Button(action: toggleDetails) {
+                    Label("Inspector", systemImage: "sidebar.trailing")
+                }
+                .help(isNarrow ? (showsFullDetail ? "Back to the list" : "Show the selected app's details")
+                    : "Show details for the selected app")
+            }
+        }
+        .searchable(text: $search, placement: .toolbar, prompt: "Name, bundle ID, path or team")
+        .task(id: refreshes) {
+            await store.scan(refresh: refreshes > 0)
+            guard !Task.isCancelled, let apps = store.apps else { return }
+            select(in: apps)
+            await store.measureSizes()
+        }
+        .task { await store.followRunningApps() }
+        .onChange(of: filter) {
+            // Drop a selection the filter hides, so its details go with it.
+            guard let selection, let app = store.apps?.first(where: { $0.id == selection }) else { return }
+            if !filter.includes(AppRow(app: app, size: nil, pids: store.running[selection] ?? [])) { self.selection = nil }
+        }
+    }
+
+    private func page(_ apps: [InstalledApp]) -> some View {
+        let all = apps.map { AppRow(app: $0, size: store.sizes[$0.id], pids: store.running[$0.id] ?? []) }
+        let rows = visibleRows(all)
+        return VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                AppsSummary(rows: all, sizesLeft: store.sizesLeft)
+                Picker("Show", selection: $filter) {
+                    ForEach(AppsFilter.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            InspectorSplit(
+                listMinimum: AppsTable.minimumWidth,
+                // Like the Processes inspector, the details take room only once
+                // something is selected.
+                wantsInspector: showInspector && selection != nil,
+                coversList: $showsFullDetail,
+                isNarrow: $isNarrow,
+                widthKey: "appsInspectorWidth",
+                backTitle: "Apps"
+            ) {
+                AppsTable(rows: rows, isMeasuring: store.sizesLeft > 0, selection: $selection, sortOrder: $sortOrder,
+                          scrollTarget: $scrollTarget, showInStartup: showInStartup, open: openDetails)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } detail: {
+                if let row = all.first(where: { $0.id == selection }) {
+                    AppDetail(app: row.app, size: row.size, isMeasuring: store.sizesLeft > 0, pids: row.pids) {
+                        showInStartup(row.app)
+                    }
+                } else {
+                    ContentUnavailableView("No app selected", systemImage: "info.circle",
+                                           description: Text("Select an app to see who signed it and what it starts."))
+                }
+            }
+            Divider()
+            AppsStatusBar(shown: rows.count, total: all.count, scannedAt: store.scannedAt, isScanning: store.isScanning,
+                          sizesLeft: store.sizesLeft)
+        }
+    }
+
+    private func visibleRows(_ rows: [AppRow]) -> [AppRow] {
+        rows.filter { filter.includes($0) && $0.app.matches(search) }.sorted(using: sortOrder)
+    }
+
+    /// Drops a selection a refresh no longer finds, and picks the app
+    /// `-openApp` names once (for screenshots).
+    private func select(in apps: [InstalledApp]) {
+        if let selection, !apps.contains(where: { $0.id == selection }) { self.selection = nil }
+        guard !openedRequest, let query = LaunchArgument.string("openApp") else { return }
+        openedRequest = true
+        guard let app = InstalledApps.find(query, in: apps) else { return }
+        let row = AppRow(app: app, size: nil, pids: store.running[app.id] ?? [])
+        if !filter.includes(row) { filter = .all }
+        if !app.matches(search) { search = "" }
+        selection = app.id
+        scrollTarget = app.id
+        openDetails()
+    }
+
+    /// Double-click: the pane in a wide window, the full-width details in a narrow one.
+    private func openDetails() {
+        showInspector = true
+        if isNarrow { showsFullDetail = true }
+    }
+
+    private func toggleDetails() {
+        if isNarrow {
+            if showsFullDetail { showsFullDetail = false } else { openDetails() }
+        } else {
+            showInspector.toggle()
+        }
+    }
+
+    /// Opens the Startup page searching for this app's launch items.
+    private func showInStartup(_ app: InstalledApp) {
+        guard let query = app.startupSearchText else { return }
+        model.requestedStartupSearch = query
+        page = .startup
+    }
+}
+
+// MARK: - Summary
+
+private struct AppsSummary: View {
+    var rows: [AppRow]
+    var sizesLeft: Int
+
+    var body: some View {
+        let sized = rows.filter { $0.size != nil }
+        let total = sized.reduce(0) { $0 + Double($1.size ?? 0) }
+        let largest = sized.max { $0.sizeOrder < $1.sizeOrder }
+        let intel = rows.filter { $0.app.architecture == .intel }.count
+        let running = rows.filter(\.isRunning).count
+        let selfStarting = rows.filter { $0.app.startsItself }.count
+        let thirdParty = rows.filter { $0.app.kind == .thirdParty }.count
+        let appStore = rows.filter { $0.app.kind == .appStore }.count
+
+        FillGrid(minimum: 140, spacing: 12) {
+            AppsCard(tint: Theme.cpu, detail: "\(thirdParty) third party, \(appStore) App Store",
+                     help: "Apps in the Applications folders, plus any others Spotlight knows about") {
+                Stat(label: "Apps", value: String(rows.count), color: Theme.cpu)
+            }
+            AppsCard(tint: Theme.memory,
+                     detail: sizesLeft > 0 ? "Measuring, \(sizesLeft) to go" : largest.map { "Largest: \($0.app.name)" } ?? "Nothing measured",
+                     help: "Space the bundles take on disk. Documents, caches and settings each app keeps in your Library aren't counted.") {
+                Stat(label: "Total size", number: total, color: Theme.memory, format: Format.bytes)
+            }
+            AppsCard(tint: Theme.network, detail: intel == 0 ? "Nothing needs Rosetta" : "Run under Rosetta",
+                     help: "Apps built only for Intel processors. On Apple silicon they run under Rosetta translation.") {
+                Stat(label: "Intel only", value: String(intel), color: Theme.network)
+            }
+            AppsCard(tint: Theme.disk, detail: selfStarting == 1 ? "1 app starts by itself" : "\(selfStarting) apps start by themselves",
+                     help: "Apps open right now. Below: apps with a launch agent or daemon that starts without being asked.") {
+                Stat(label: "Running now", value: String(running), color: Theme.disk)
+            }
+        }
+    }
+}
+
+private struct AppsCard<Content: View>: View {
+    var tint: Color
+    var detail: String
+    var help: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        Card(tint: tint) {
+            VStack(alignment: .leading, spacing: 4) {
+                content
+                // Two lines in the narrowest window; the grid keeps the cards level.
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .help(help)
+    }
+}
+
+// MARK: - Table
+
+private struct AppsTable: View {
+    var rows: [AppRow]
+    var isMeasuring: Bool
+    @Binding var selection: InstalledApp.ID?
+    @Binding var sortOrder: [KeyPathComparator<AppRow>]
+    @Binding var scrollTarget: InstalledApp.ID?
+    var showInStartup: (InstalledApp) -> Void
+    var open: () -> Void
+
+    /// The columns' minimum widths and the gaps between them, plus the
+    /// table's side insets and a vertical scroller for when scroll bars
+    /// always show. Without those the table scrolled sideways at 1100 points.
+    static let minimumWidth: CGFloat = 130 + 45 + 75 + 85 + 55 + 70 + 6 * 17 + 2 * 10 + 16
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            table
+                .onChange(of: scrollTarget, initial: true) { _, target in
+                    guard let target else { return }
+                    // Leading, not centre: centring would also scroll the columns sideways.
+                    proxy.scrollTo(target, anchor: .leading)
+                    scrollTarget = nil
+                }
+        }
+    }
+
+    private var table: some View {
+        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name) { row in
+                AppNameCell(row: row)
+            }
+            .width(min: 130, ideal: 190)
+            TableColumn("Version", value: \.version) { row in
+                Text(row.app.version ?? row.app.build ?? "—")
+                    .lineLimit(1)
+                    .help(row.app.versionText)
+            }
+            .width(min: 45, ideal: 55)
+            TableColumn("Kind", value: \.kind) { row in
+                Text(row.app.kind.title)
+                    .foregroundStyle(row.app.kind == .apple ? .secondary : .primary)
+            }
+            .width(min: 75, ideal: 80)
+            TableColumn("Architecture", value: \.architecture) { row in
+                ArchitectureLabel(app: row.app)
+            }
+            .width(min: 85, ideal: 95)
+            TableColumn("Size", value: \.sizeOrder) { row in
+                Text(row.size.map(Format.bytes) ?? (isMeasuring ? "…" : "—"))
+                    .monospacedDigit()
+                    .foregroundStyle(row.size == nil ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .width(min: 55, ideal: 65)
+            TableColumn("Last opened", value: \.lastOpenedOrder) { row in
+                Text(AppText.lastOpened(row.app.lastOpened))
+                    .foregroundStyle(row.app.lastOpened == nil ? .secondary : .primary)
+                    .help(row.app.lastOpened.map { $0.formatted(date: .complete, time: .shortened) } ?? "Spotlight has no record of it being opened")
+            }
+            .width(min: 70, ideal: 75)
+        }
+        .contextMenu(forSelectionType: InstalledApp.ID.self) { ids in
+            if let id = ids.first, let app = rows.first(where: { $0.id == id })?.app {
+                Button("Open") { AppActions.open(app) }
+                Button("Reveal in Finder") { AppActions.reveal(app) }
+                Button("Show in Startup") { showInStartup(app) }
+                    .disabled(app.launchItems.isEmpty)
+                Divider()
+                Button("Copy Bundle ID") { AppActions.copy(app.bundleIdentifier ?? "") }
+                    .disabled(app.bundleIdentifier == nil)
+                Button("Copy Path") { AppActions.copy(app.path) }
+            }
+        } primaryAction: { _ in
+            open()
+        }
+    }
+}
+
+/// The icon and name, a dot while it runs, and a sunrise when it starts by itself.
+private struct AppNameCell: View {
+    var row: AppRow
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(nsImage: IconCache.icon(forBundle: row.app.path))
+                .resizable()
+                .frame(width: 16, height: 16)
+            Text(row.app.name).lineLimit(1)
+            if row.isRunning {
+                Circle().fill(Theme.disk).frame(width: 6, height: 6)
+                    .help("Running")
+                    .accessibilityLabel("Running")
+            }
+            if row.app.startsItself {
+                Image(systemName: "sunrise.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(Theme.power)
+                    .help("Has a launch agent or daemon that starts by itself")
+                    .accessibilityLabel("Starts by itself")
+            }
+        }
+        .help(row.app.path)
+    }
+}
+
+/// The architecture, with Intel-only apps called out since they need Rosetta.
+struct ArchitectureLabel: View {
+    var app: InstalledApp
+
+    var body: some View {
+        switch app.architecture {
+        case .intel:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill").imageScale(.small)
+                Text(app.architecture.title)
+            }
+            .foregroundStyle(Theme.network)
+            .help("Built only for Intel processors: runs under Rosetta")
+        case .unsupported:
+            Text(app.architecture.title)
+                .foregroundStyle(.red)
+                .help("Built only for 32-bit or PowerPC processors, which current macOS can't run")
+        case .unknown:
+            Text(app.architecture.title)
+                .foregroundStyle(.secondary)
+                .help("Its executable is missing or isn't a Mach-O program (a script, say)")
+        case .appleSilicon, .universal:
+            Text(app.architecture.title)
+                .help(app.sliceNames ?? "")
+        }
+    }
+}
+
+// MARK: - Status bar
+
+private struct AppsStatusBar: View {
+    var shown: Int
+    var total: Int
+    var scannedAt: Date?
+    var isScanning: Bool
+    var sizesLeft: Int
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(shown == total ? "\(total) apps" : "\(shown) of \(total) apps")
+            if isScanning {
+                Text("Reading…")
+            } else if let scannedAt {
+                Text("Read at \(scannedAt.formatted(date: .omitted, time: .shortened))")
+            }
+            if sizesLeft > 0 {
+                Text("Measuring sizes, \(sizesLeft) to go")
+            }
+            Spacer()
+            Text("Last opened is what Spotlight recorded")
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(-1)
+                .help("Spotlight notes when an app is opened from Finder, the Dock or Launchpad. Apps opened other "
+                    + "ways, or on a volume Spotlight doesn't index, show a dash.")
+        }
+        .font(.subheadline)
+        .monospacedDigit()
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+    }
+}
+
+// MARK: - Shared
+
+/// Shared by the context menu and the detail pane.
+@MainActor
+enum AppActions {
+    static func open(_ app: InstalledApp) {
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: NSWorkspace.OpenConfiguration(),
+                                           completionHandler: nil)
+    }
+
+    static func reveal(_ app: InstalledApp) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: app.path)])
+    }
+
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+enum AppText {
+    /// "Today", "Yesterday" or the date ("Aug 18", "Mar 3, 2024"); a dash when Spotlight doesn't know.
+    static func lastOpened(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        // The year only when it isn't this one, so the column stays narrow.
+        if calendar.isDate(date, equalTo: .now, toGranularity: .year) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
+        }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
+}

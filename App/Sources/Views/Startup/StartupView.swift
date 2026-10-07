@@ -29,8 +29,9 @@ enum StartupFilter: String, CaseIterable, Identifiable {
 ///
 /// The scan runs off the main actor when the page opens and on Refresh. It
 /// never follows the sampling tick, and the page reads nothing from
-/// `AppModel`, so it costs nothing while it sits open.
+/// `AppModel` as it draws, so it costs nothing while it sits open.
 struct StartupView: View {
+    @Environment(AppModel.self) private var model
     @AppStorage("startupFilter") private var filter: StartupFilter = .all
     @AppStorage("showStartupInspector") private var showInspector = true
     @State private var items: [LaunchItem]?
@@ -77,6 +78,12 @@ struct StartupView: View {
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Label, program or path")
         .task {
+            // "Show in Startup" on the Apps page searches for that app's items.
+            if let query = model.requestedStartupSearch {
+                model.requestedStartupSearch = nil
+                search = query
+                filter = .all
+            }
             if items == nil { await scan() }
         }
         .confirmationDialog("Disable \(disabling?.name ?? "this item")?", isPresented: Binding(

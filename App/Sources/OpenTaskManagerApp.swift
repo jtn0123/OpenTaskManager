@@ -60,6 +60,7 @@ enum Page: String, CaseIterable, Identifiable {
     case history = "History"
     case connections = "Connections"
     case startup = "Startup"
+    case apps = "Apps"
     case users = "Users"
     case system = "System"
     case drivers = "Drivers"
@@ -75,6 +76,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .history: "clock.arrow.circlepath"
         case .connections: "point.3.connected.trianglepath.dotted"
         case .startup: "sunrise"
+        case .apps: "square.grid.3x3"
         case .users: "person.2"
         case .system: "info.circle"
         case .drivers: "puzzlepiece.extension"
@@ -102,6 +104,7 @@ struct ContentView: View {
             case .history: HistoryView()
             case .connections: ConnectionsView()
             case .startup: StartupView()
+            case .apps: AppsView()
             case .users: UsersView()
             case .system: SystemInfoView()
             case .drivers: DriversView()

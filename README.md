@@ -81,6 +81,19 @@ again, for your account only; daemons and Apple's own agents are left alone. mac
 only an administrator can read them, so the page links to their pane in System
 Settings instead.
 
+**Apps**: every app on the Mac, from the Applications folders (yours, the
+shared one and macOS's own) plus any others Spotlight knows about. Each shows
+its version and build, bundle ID, where it is, whether it came from Apple, the
+App Store or a third party, what it's built for (Apple silicon, Universal, or
+Intel only, which runs under Rosetta and is flagged as such), how much space it
+takes on disk, and when Spotlight last saw it opened. The details pane adds who
+signed it (Apple, the Mac App Store, a Developer ID with its team, ad hoc or
+nobody), the certificate chain, whether it's running and as which PIDs, and
+the launch agents and daemons that belong to it, with whether they start by
+themselves. Open an app, reveal it in Finder, copy its bundle ID, or jump to
+its items on the Startup page. Sizes fill in after the list appears; nothing
+is re-read until you press Refresh. Uninstalling isn't offered.
+
 **Users**: a card for each person using the Mac, with their processes added
 up (CPU, memory, power, GPU), a minute of CPU and memory history, who's signed
 in at the screen, their Terminal and remote logins, and their busiest
@@ -133,9 +146,9 @@ showing how far it has got as it goes (it can be stopped at any time).
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
 - The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
   `ports`, `net` (the processes moving the most network traffic), `drivers`
-  (system extensions and third-party kexts), `inspect`, `kill` and `du` (the
-  Storage page's scan, as a table of a folder's largest items), with JSON
-  output.
+  (system extensions and third-party kexts), `apps` (the installed apps, with
+  `--sizes` to measure them), `inspect`, `kill` and `du` (the Storage page's
+  scan, as a table of a folder's largest items), with JSON output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
 Animation's render server, and the process table moves rows in place instead
@@ -172,7 +185,10 @@ table (`proc_pidfdinfo`) for its sockets. Startup items come from
 the launchd property lists themselves, plus `launchctl list` and
 `launchctl print` for what's loaded, running or disabled. Drivers come from
 `systemextensionsctl list` and IOKit's `KextManagerCopyLoadedKextInfo`, with
-`kmutil showloaded` as a fallback. The Storage scan
+`kmutil showloaded` as a fallback. The Apps page reads each bundle's
+Info.plist, the Mach-O header of its executable, its code signature through
+the Security framework (without validating the whole bundle, so notarization
+isn't shown), and Spotlight's last-opened date. The Storage scan
 walks folders with `FileManager`'s enumerator, asking for each file's
 allocated size, link count and type in the same call, and keeps only each
 folder's 200 largest items, so memory stays bounded on a full disk.
