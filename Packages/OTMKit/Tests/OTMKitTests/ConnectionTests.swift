@@ -202,9 +202,21 @@ struct ConnectionTests {
         #expect(summary.openConnections == 4)
         #expect(summary.listeningPorts == 3, "TCP 5000, TCP 3000 and UDP 5353")
         #expect(summary.exposedPorts == 2, "TCP 5000 and UDP 5353; 3000 is loopback only")
+        #expect(summary.exposedOnAllInterfaces == 2)
         #expect(summary.remoteHosts == 2, "loopback peers don't count")
         #expect(summary.processesWithSockets == 4)
         #expect(ConnectionSummary([]) == ConnectionSummary())
+    }
+
+    @Test func separatesAllInterfaceBindsFromOneAddress() {
+        let summary = ConnectionSummary([
+            Self.make(local: ("0.0.0.0", 22), state: .listen),
+            Self.make(local: ("10.0.0.2", 8080), state: .listen), // one network address
+            Self.make(local: ("10.0.0.2", 22), state: .listen), // 22 again: still on every interface
+            Self.make(.udp, local: ("::", 5353)),
+        ])
+        #expect(summary.exposedPorts == 3)
+        #expect(summary.exposedOnAllInterfaces == 2, "TCP 22 and UDP 5353; 8080 is on one address")
     }
 }
 

@@ -301,6 +301,9 @@ public struct ConnectionSummary: Sendable, Equatable {
     public var listeningPorts = 0
     /// Distinct ports reachable from other machines.
     public var exposedPorts = 0
+    /// Those of `exposedPorts` bound to every interface (`0.0.0.0` or `::`),
+    /// rather than to one network address.
+    public var exposedOnAllInterfaces = 0
     /// Distinct peers other than this Mac.
     public var remoteHosts = 0
     public var processesWithSockets = 0
@@ -314,6 +317,7 @@ public struct ConnectionSummary: Sendable, Equatable {
         }
         var listening = Set<Port>()
         var exposed = Set<Port>()
+        var everywhere = Set<Port>()
         var hosts = Set<String>()
         var processes = Set<Int32>()
         for connection in connections {
@@ -324,11 +328,15 @@ public struct ConnectionSummary: Sendable, Equatable {
             }
             if connection.kind.acceptsInbound, let port = connection.local.port {
                 listening.insert(Port(transport: connection.transport, port: port))
-                if connection.isExposed { exposed.insert(Port(transport: connection.transport, port: port)) }
+                if connection.isExposed {
+                    exposed.insert(Port(transport: connection.transport, port: port))
+                    if connection.local.isWildcard { everywhere.insert(Port(transport: connection.transport, port: port)) }
+                }
             }
         }
         listeningPorts = listening.count
         exposedPorts = exposed.count
+        exposedOnAllInterfaces = everywhere.count
         remoteHosts = hosts.count
         processesWithSockets = processes.count
     }

@@ -135,9 +135,11 @@ final class StreamGraphView: NSView {
     /// Horizontal distance between the hatch's diagonals: wide and faint,
     /// so the unrecorded stretch reads as empty rather than as texture.
     private static let hatchSpacing: CGFloat = 10
-    private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+    /// The axis labels' size. 12 pt, the app's size for explanations, would
+    /// leave no room for the caption under the middle label in a 72-point graph.
+    private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
     private static let gapText = "Not recorded yet"
-    private static let gapFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+    private static let gapFont = NSFont.systemFont(ofSize: 11, weight: .medium)
     private static let gapTextWidth = ceil(NSAttributedString(string: gapText, attributes: [.font: gapFont]).size().width)
 
     private let plot = CALayer()
@@ -636,8 +638,9 @@ extension StreamGraphView {
         let width = captionWidth(text)
         if key != shownCaption {
             shownCaption = key
-            // Resolved now, for this appearance: the layer draws it later.
-            let color = NSColor(cgColor: NSColor.secondaryLabelColor.cgColor) ?? .secondaryLabelColor
+            // Resolved now, for this appearance: the layer draws it later. The
+            // app's secondary tone, as the system's falls under 4.5:1 here.
+            let color = NSColor(cgColor: NSColor.secondaryText.cgColor) ?? .secondaryText
             captionLabel.string = NSAttributedString(string: text, attributes: [.font: Self.captionFont, .foregroundColor: color])
             captionBadge.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.7 : 0.8).cgColor
         }
@@ -664,7 +667,8 @@ extension StreamGraphView {
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         if gapLabelIsDark != isDark {
             gapLabelIsDark = isDark
-            let color = NSColor(white: isDark ? 1 : 0, alpha: TextTone.opacity(.tertiary, dark: isDark))
+            // Secondary, not tertiary: it explains the stretch, so it has to read (4.5:1).
+            let color = NSColor(white: isDark ? 1 : 0, alpha: TextTone.opacity(.secondary, dark: isDark))
             gapLabel.string = NSAttributedString(string: Self.gapText, attributes: [.font: Self.gapFont, .foregroundColor: color])
         }
         let padding = verticalPadding

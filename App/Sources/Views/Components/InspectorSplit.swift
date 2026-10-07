@@ -12,6 +12,8 @@ import SwiftUI
 struct InspectorSplit<Content: View, Detail: View>: View {
     static var minimumWidth: CGFloat { 280 }
     static var maximumWidth: CGFloat { 480 }
+    /// How far a covered list moves out of the window: past any screen.
+    private static var coveredOffset: CGFloat { 100_000 }
 
     /// Narrowest the list can be without scrolling sideways.
     var listMinimum: CGFloat
@@ -53,10 +55,18 @@ struct InspectorSplit<Content: View, Detail: View>: View {
         let paneWidth = available.flatMap(paneWidth(in:))
         // Until the first measurement, assume there's room.
         let narrow = available != nil && paneWidth == nil
+        let covered = narrow && coversList
         HStack(spacing: 0) {
             ZStack {
                 content
-                if narrow, coversList {
+                    // Moved aside while covered, not removed, so it keeps its
+                    // selection and scroll position. AppKit shows a view's
+                    // tooltips wherever it is, covered or transparent, so left
+                    // in place its rows' tooltips would float over the details.
+                    .opacity(covered ? 0 : 1)
+                    .offset(x: covered ? -Self.coveredOffset : 0)
+                    .accessibilityHidden(covered)
+                if covered {
                     VStack(spacing: 0) {
                         backBar
                         Divider()

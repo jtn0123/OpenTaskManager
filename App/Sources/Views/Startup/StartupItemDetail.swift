@@ -79,7 +79,7 @@ struct StartupItemDetail: View {
     private var settings: some View {
         VStack(alignment: .leading, spacing: 14) {
             metadata
-            if let note { Text(note).font(.subheadline).foregroundStyle(.secondaryText) }
+            if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
             program
             launches
             labelled("Property list", item.plistPath)
@@ -93,11 +93,11 @@ struct StartupItemDetail: View {
             HStack(alignment: .firstTextBaseline) {
                 Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
                 Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
-                    .font(.subheadline)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
         } else if item.publisher == .thirdParty, let restriction {
-            Text(restriction).font(.subheadline).foregroundStyle(.secondaryText)
+            Text(restriction).font(.explanation).foregroundStyle(.secondaryText)
         }
         HStack {
             Button("Reveal in Finder") { StartupActions.reveal(item) }
@@ -242,7 +242,7 @@ struct StartupItemDetail: View {
 
     private func consequence(_ text: String) -> some View {
         Text(text)
-            .font(.subheadline)
+            .font(.explanation)
             .foregroundStyle(.secondaryText)
             .gridColumnAlignment(.leading)
     }

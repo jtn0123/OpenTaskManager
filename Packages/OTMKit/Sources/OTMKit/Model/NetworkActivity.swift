@@ -129,8 +129,9 @@ public struct NetworkActivityHistory<Key: Hashable & Comparable & Sendable>: Sen
     /// The keys to draw as bands of their own (at most `bands`, the busiest
     /// over the whole window) and the keys to list (at most `rows`: whatever
     /// is moving data now, busiest first, then bands that have gone quiet, so
-    /// each band keeps its row).
-    public func ranking(bands: Int, rows: Int) -> (bands: [Key], rows: [Key]) {
+    /// each band keeps its row, and keys that moved in the newest `holding`
+    /// readings, so a list shown while `hasMoved(inLast: holding)` is never empty).
+    public func ranking(bands: Int, rows: Int, holding readings: Int = 0) -> (bands: [Key], rows: [Key]) {
         var volumes: [Key: Double] = [:]
         for key in totals.keys { volumes[key] = volume(key) }
         func busier(_ lhs: Key, _ rhs: Key) -> Bool {
@@ -138,7 +139,8 @@ public struct NetworkActivityHistory<Key: Hashable & Comparable & Sendable>: Sen
             return left == right ? lhs < rhs : left > right
         }
         let banded = Array(volumes.keys.sorted(by: busier).prefix(max(bands, 0)))
-        let listed = Set(latest.keys).union(banded).sorted { lhs, rhs in
+        let held = totals.compactMap { key, values in values.suffix(max(readings, 0)).contains { $0 > 0 } ? key : nil }
+        let listed = Set(latest.keys).union(banded).union(held).sorted { lhs, rhs in
             let left = latest[lhs]?.total ?? 0, right = latest[rhs]?.total ?? 0
             return left == right ? busier(lhs, rhs) : left > right
         }

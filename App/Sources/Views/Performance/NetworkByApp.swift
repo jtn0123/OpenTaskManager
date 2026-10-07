@@ -134,10 +134,20 @@ struct NetworkAppsSection: View {
 struct TopNetworkCard: View {
     @Environment(AppModel.self) private var model
 
+    /// Quiet readings an app keeps its row for, so a pause in the traffic
+    /// doesn't empty the card or swap it for the Overview's one-line strip.
+    static let holdReadings = 10
+
+    /// Whether the card has rows: something moved within the hold. Without
+    /// any, the Overview shows a one-line strip in its place.
+    static func hasRanking(_ store: NetworkActivityStore) -> Bool {
+        store.hasMeasured && store.apps.hasMoved(inLast: holdReadings)
+    }
+
     var body: some View {
         let store = model.networkActivity
         let history = store.apps
-        let top = history.ranking(bands: 0, rows: 6).rows
+        let top = history.ranking(bands: 0, rows: 6, holding: Self.holdReadings).rows
         let peak = top.compactMap { history.latest[$0]?.total }.max() ?? 0
         Card {
             HStack(alignment: .firstTextBaseline) {

@@ -94,9 +94,10 @@ struct ConnectionsView: View {
         selection = store.rows.sorted(using: sortOrder).first { $0.matches(query) }?.id
     }
 
-    /// The filters, and beside them, right under the counts, that the counts
-    /// and the table only cover the user's own processes. In a window too
-    /// narrow for both, the note takes a line of its own under the filters.
+    /// The filters, and beside them, right under the counts, how many sockets
+    /// the counts and the table cover, and that other users' processes are
+    /// left out. In a window too narrow for both, the note takes a line of
+    /// its own under the filters.
     private var filterBar: some View {
         FilterBarLayout {
             Picker("Show", selection: $filter) {
@@ -107,9 +108,11 @@ struct ConnectionsView: View {
             .fixedSize()
             .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
             if store.hiddenProcesses > 0 {
+                let (visible, hidden) = (store.rows.count, store.hiddenProcesses)
                 ViewThatFits(in: .horizontal) {
-                    ScopeBadge(hidden: store.hiddenProcesses, isShort: false)
-                    ScopeBadge(hidden: store.hiddenProcesses, isShort: true)
+                    ScopeBadge(visible: visible, hidden: hidden, length: .long)
+                    ScopeBadge(visible: visible, hidden: hidden, length: .short)
+                    ScopeBadge(visible: visible, hidden: hidden, length: .shortest)
                 }
             }
         }
@@ -212,16 +215,30 @@ private struct FilterBarLayout: Layout {
     }
 }
 
-/// Says the counts and the table are the user's own processes' sockets, in
-/// a capsule so it reads with the counts above it rather than as a footnote.
+/// Says how many sockets the counts and the table cover, and how many
+/// processes they leave out, in a capsule so it reads with the counts above
+/// it rather than as a footnote. So a 0 above a socket in the table reads as
+/// a count of something else, not a missing row.
 private struct ScopeBadge: View {
+    var visible: Int
     var hidden: Int
-    var isShort: Bool
+    var length: Length
+
+    /// Longest first. The shortest keeps the badge beside the filters in a
+    /// narrow window; the footer under the table still counts the sockets.
+    enum Length {
+        case long, short, shortest
+    }
 
     var body: some View {
-        Label(isShort ? "Yours only · \(hidden.formatted()) hidden" : "Your processes only · \(hidden.formatted()) hidden",
-              systemImage: "eye.slash")
-            .font(.metadata.weight(.medium))
+        let sockets = visible == 1 ? "socket" : "sockets"
+        let text = switch length {
+        case .long: "\(visible.formatted()) visible \(sockets) · \(hidden.formatted()) processes hidden"
+        case .short: "\(visible.formatted()) \(sockets) · \(hidden.formatted()) hidden"
+        case .shortest: "\(hidden.formatted()) hidden"
+        }
+        Label(text, systemImage: "eye.slash")
+            .font(.explanation.weight(.medium))
             .foregroundStyle(.secondaryText)
             .lineLimit(1)
             .padding(.horizontal, 9)
@@ -230,9 +247,9 @@ private struct ScopeBadge: View {
             .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
             .fixedSize()
             .help("""
-            macOS only lets an app list the sockets of your own processes, so the counts above and the table leave out \
-            \(hidden.formatted()) processes. Sockets held by root and other users, such as system daemons, aren't shown. \
-            A privileged helper that lifts this is planned.
+            The counts above and the table cover the \(visible.formatted()) \(sockets) your own processes hold. macOS only \
+            lets an app list its own user's sockets, so \(hidden.formatted()) processes are left out: sockets held by root \
+            and other users, such as system daemons, aren't shown. A privileged helper that lifts this is planned.
             """)
     }
 }
@@ -242,15 +259,26 @@ private struct SummaryCards: View {
 
     var body: some View {
         FillGrid(minimum: 140, spacing: 12) {
-            SummaryCard(title: "Open connections", value: summary.openConnections, symbol: "arrow.left.arrow.right",
-                        tint: Theme.cpu, explanation: "Sockets with a peer: TCP connections and connected UDP.")
-            SummaryCard(title: "Listening ports", value: summary.listeningPorts, symbol: "antenna.radiowaves.left.and.right",
-                        tint: Theme.disk, explanation: "Distinct ports taking new traffic: TCP listeners and bound UDP sockets.")
+            // "Connected", not "Established": the count takes in connected UDP
+            // and TCP connections still opening or closing, which the
+            // Established filter leaves out.
+            SummaryCard(title: "Connected sockets", value: summary.openConnections, symbol: "arrow.left.arrow.right",
+                        tint: Theme.cpu, explanation: """
+                        Sockets talking to one peer: TCP connections, including ones opening or closing, and connected \
+                        UDP. A listening or bound socket waits for anyone, so it isn't counted here.
+                        """)
+            SummaryCard(title: "Listening / bound ports", value: summary.listeningPorts, symbol: "antenna.radiowaves.left.and.right",
+                        tint: Theme.disk, explanation: """
+                        Distinct ports waiting for traffic from anyone: TCP sockets listening for connections, and UDP \
+                        sockets bound to a port.
+                        """)
             SummaryCard(title: "Exposed to network", value: summary.exposedPorts, symbol: "exclamationmark.shield",
                         tint: Theme.network, glow: summary.exposedPorts > 0 ? 0.35 : 0,
+                        caption: Self.exposedCaption(summary),
                         explanation: """
-                        Ports bound to every interface (0.0.0.0 or ::) or to a network address, so other devices \
-                        can reach them unless the firewall blocks it.
+                        Listening or bound ports other devices can reach unless the firewall blocks them. Bound to all \
+                        interfaces (* in Local, the address 0.0.0.0 or ::) means every network this Mac is on: Wi-Fi, \
+                        Ethernet and any VPN. The rest are bound to one network address.
                         """)
             SummaryCard(title: "Remote hosts", value: summary.remoteHosts, symbol: "globe",
                         tint: Theme.memory, explanation: "Distinct addresses at the other end of a connection, not counting this Mac.")
@@ -259,6 +287,14 @@ private struct SummaryCards: View {
             // Reads the model every tick in a view of its own, so the counts and table aren't rebuilt.
             NetworkTrafficCard(title: "Network traffic", compact: true)
         }
+    }
+
+    /// Says outright where an exposed port is open, so "All interfaces" in
+    /// the table and the count here read as the same thing.
+    private static func exposedCaption(_ summary: ConnectionSummary) -> String? {
+        let everywhere = summary.exposedOnAllInterfaces
+        guard everywhere > 0 else { return nil }
+        return everywhere == summary.exposedPorts ? "on all interfaces" : "\(everywhere.formatted()) on all interfaces"
     }
 }
 
@@ -270,9 +306,13 @@ private struct SummaryCard: View {
     var symbol: String
     var tint: Color
     var glow = 0.0
+    /// A few words after the number, such as where it's open.
+    var caption: String?
     var explanation: String
 
     var body: some View {
+        // Its line box sits on the bottom edge, so the baseline is the descender up.
+        let descender = Self.valueFont.descender
         Card(tint: tint, glow: glow) {
             Label {
                 Text(title).lineLimit(2)
@@ -284,7 +324,16 @@ private struct SummaryCard: View {
             // A title that wraps to two lines makes its card the row's
             // height; the numbers stay on one line across the row.
             Spacer(minLength: 0)
-            AnimatedNumber(value: Double(value), format: { Format.fixed($0, 0) }, font: Self.valueFont)
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                AnimatedNumber(value: Double(value), format: { Format.fixed($0, 0) }, font: Self.valueFont)
+                    .alignmentGuide(.lastTextBaseline) { $0.height + descender }
+                if let caption {
+                    Text(caption)
+                        .font(.explanation)
+                        .foregroundStyle(.secondaryText)
+                        .lineLimit(2)
+                }
+            }
         }
         .help(explanation)
     }

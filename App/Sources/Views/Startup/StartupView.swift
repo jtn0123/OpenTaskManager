@@ -370,7 +370,7 @@ private struct StartupTable: View {
     private var publisherColumn: some Column {
         TableColumn("Publisher", value: \.publisher) { item in
             Text(item.publisher.title)
-                .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
+                .foregroundStyle(item.publisher == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
         .width(min: Minimum.publisher, ideal: 75, max: 100)
         .customizationID(Self.publisherID)
@@ -461,7 +461,7 @@ private struct LoginItemsNote: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Label("Login Items aren't listed: macOS keeps them private. System Settings shows and changes them.",
                   systemImage: "info.circle")
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .help("Apps that open at login, and background items apps register with macOS, are kept where only "
                     + "an administrator can read them.")
