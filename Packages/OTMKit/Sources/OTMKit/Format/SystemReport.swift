@@ -12,13 +12,17 @@ public struct InfoRow: Sendable, Hashable {
     public var isHeading = false
     /// Identifies this machine (serial number, hardware UUID, MAC address): hidden unless asked for.
     public var isSensitive = false
+    /// An address or identifier someone may copy: shown monospaced, one item per line.
+    public var isCode = false
     public var status: Status?
 
-    public init(_ label: String, _ value: String, isHeading: Bool = false, isSensitive: Bool = false, status: Status? = nil) {
+    public init(_ label: String, _ value: String, isHeading: Bool = false, isSensitive: Bool = false, isCode: Bool = false,
+                status: Status? = nil) {
         self.label = label
         self.value = value
         self.isHeading = isHeading
         self.isSensitive = isSensitive
+        self.isCode = isCode
         self.status = status
     }
 }
@@ -81,7 +85,9 @@ public enum SystemReport {
                     lines.append("  " + row.label + (row.value.isEmpty ? "" : " (\(row.value))"))
                     indent = "    "
                 } else {
-                    lines.append(indent + row.label + ": " + row.value)
+                    // Further lines of a list (several addresses) line up under the first.
+                    let continuation = "\n" + indent + String(repeating: " ", count: row.label.count + 2)
+                    lines.append(indent + row.label + ": " + row.value.replacingOccurrences(of: "\n", with: continuation))
                 }
             }
         }
@@ -178,7 +184,7 @@ public enum SystemReport {
             let medium = disk.isSolidState.map { $0 ? "SSD" : "hard disk" }
             rows.append(InfoRow(disk.model ?? disk.bsdName, [place, medium].compactMap { $0 }.joined(separator: " "), isHeading: true))
             if let size = disk.size { rows.append(InfoRow("Capacity", SystemFacts.decimalBytes(size))) }
-            rows.append(InfoRow("Device", disk.bsdName))
+            rows.append(InfoRow("Device", disk.bsdName, isCode: true))
             rows += volumes.filter { $0.physicalDisk == disk.bsdName }.map(volumeRow)
         }
         let known = Set(info.disks.map(\.bsdName))
@@ -201,13 +207,13 @@ public enum SystemReport {
             rows.append(InfoRow("Status", connected ? "Connected" : "Not connected", status: connected ? .good : nil))
             let ipv4 = port.addresses.filter { !$0.contains(":") }
             let ipv6 = port.addresses.filter { $0.contains(":") && !$0.lowercased().hasPrefix("fe80") }
-            if !ipv4.isEmpty { rows.append(InfoRow("IPv4", ipv4.joined(separator: ", "))) }
-            if !ipv6.isEmpty { rows.append(InfoRow("IPv6", ipv6.joined(separator: ", "))) }
+            if !ipv4.isEmpty { rows.append(InfoRow("IPv4", ipv4.joined(separator: "\n"), isCode: true)) }
+            if !ipv6.isEmpty { rows.append(InfoRow("IPv6", ipv6.joined(separator: "\n"), isCode: true)) }
             if let speed = port.linkSpeed, connected {
                 rows.append(InfoRow("Link speed", Format.bitsPerSecond(Double(speed) / 8)))
             }
             if let address = port.hardwareAddress {
-                rows.append(InfoRow("Hardware address", address, isSensitive: true))
+                rows.append(InfoRow("Hardware address", address, isSensitive: true, isCode: true))
             }
         }
         return rows
@@ -243,7 +249,7 @@ public enum SystemReport {
             rows.append(InfoRow("Kernel build", xnu + (kernel.configuration.map { " (\($0))" } ?? "")))
         }
         if let name = software.computerName { rows.append(InfoRow("Computer name", name)) }
-        if let host = software.localHostName { rows.append(InfoRow("Local host name", host)) }
+        if let host = software.localHostName { rows.append(InfoRow("Local host name", host, isCode: true)) }
         if let boot = software.bootTime {
             rows.append(InfoRow("Started up", boot.formatted(date: .abbreviated, time: .shortened)))
             rows.append(InfoRow("Up time", Format.duration(now.timeIntervalSince(boot))))

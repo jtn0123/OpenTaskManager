@@ -49,7 +49,6 @@ struct StartupView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Label, program or path")
         .toolbar {
             ToolbarItem {
                 Button {
@@ -69,17 +68,7 @@ struct StartupView: View {
                 .help("Show details for the selected item")
             }
         }
-        .inspector(isPresented: $showInspector) {
-            Group {
-                if let item = items?.first(where: { $0.id == selection }) {
-                    StartupItemDetail(item: item)
-                } else {
-                    ContentUnavailableView("No item selected", systemImage: "info.circle",
-                                           description: Text("Select an item to see what it runs and when."))
-                }
-            }
-            .inspectorColumnWidth(min: 280, ideal: 330, max: 480)
-        }
+        .searchable(text: $search, placement: .toolbar, prompt: "Label, program or path")
         .task {
             if items == nil { await scan() }
         }
@@ -101,7 +90,25 @@ struct StartupView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
 
-            StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder)
+            // A pane beside the table, like the Connections details, rather than
+            // an inspector column: with the toolbar's search field, an inspector
+            // pushed the window's content past both of its edges.
+            HStack(spacing: 0) {
+                StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder)
+                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                if showInspector {
+                    Divider()
+                    Group {
+                        if let item = items.first(where: { $0.id == selection }) {
+                            StartupItemDetail(item: item)
+                        } else {
+                            ContentUnavailableView("No item selected", systemImage: "info.circle",
+                                                   description: Text("Select an item to see what it runs and when."))
+                        }
+                    }
+                    .frame(width: 300)
+                }
+            }
             Divider()
             StartupStatusBar(shown: rows.count, total: items.count, scannedAt: scannedAt, isScanning: isScanning)
         }
@@ -137,7 +144,12 @@ struct StartupView: View {
         scannedAt = .now
         isScanning = false
         if selection == nil || !scanned.contains(where: { $0.id == selection }) {
-            selection = visibleRows(scanned).first?.id
+            // `--args -openStartupItem <text>` picks the first item whose label or name contains it, for screenshots.
+            let rows = visibleRows(scanned)
+            let requested = LaunchArgument.string("openStartupItem").flatMap { query in
+                rows.first { $0.label.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query) }
+            }
+            selection = (requested ?? rows.first)?.id
         }
     }
 }
@@ -174,24 +186,24 @@ private struct StartupTable: View {
                 }
                 .help(item.label)
             }
-            .width(min: 160, ideal: 240)
+            .width(min: 130, ideal: 200)
             TableColumn("Kind", value: \.scope) { item in
                 Text(item.scope.title)
             }
-            .width(min: 90, ideal: 100)
+            .width(min: 80, ideal: 100)
             TableColumn("Status", value: \.state) { item in
                 LaunchStateLabel(state: item.state)
             }
-            .width(min: 140, ideal: 155)
+            .width(min: 110, ideal: 155)
             TableColumn("Launches", value: \.timing) { item in
                 Text(item.launchSummary).lineLimit(1)
             }
-            .width(min: 90, ideal: 120)
+            .width(min: 80, ideal: 120)
             TableColumn("Publisher", value: \.publisher) { item in
                 Text(item.publisher.title)
                     .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
             }
-            .width(min: 85, ideal: 90)
+            .width(min: 70, ideal: 90)
         }
         .contextMenu(forSelectionType: LaunchItem.ID.self) { ids in
             if let id = ids.first, let item = rows.first(where: { $0.id == id }) {
@@ -252,6 +264,9 @@ private struct StartupStatusBar: View {
             }
             Spacer()
             Text("Login Items aren't listed: macOS keeps them private")
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(-1)
                 .help("Apps that open at login, and background items apps register with macOS, are kept where only "
                     + "an administrator can read them. System Settings shows and changes them.")
             Button("Open Login Items Settings") {

@@ -135,7 +135,7 @@ private struct HeroCard: View {
                 HStack(spacing: 5) {
                     Text(row.label).foregroundStyle(.secondary)
                     if showsIdentifiers {
-                        Text(row.value).textSelection(.enabled)
+                        CopyableText(value: row.value)
                     } else {
                         Text(Self.mask).foregroundStyle(.tertiary).accessibilityLabel("Hidden")
                     }
@@ -228,6 +228,8 @@ private struct InfoCard: View {
             if row.isSensitive && !showsIdentifiers {
                 Text(Self.mask).foregroundStyle(.tertiary).accessibilityLabel("Hidden")
                     .help("Hidden. Use Show at the top of the page to reveal it.")
+            } else if row.isCode {
+                CopyableText(value: row.value)
             } else {
                 Text(row.value)
                     .textSelection(.enabled)

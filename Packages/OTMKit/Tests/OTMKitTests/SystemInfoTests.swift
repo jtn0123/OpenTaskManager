@@ -187,7 +187,8 @@ struct SystemReportTests {
                            availableBytes: 1_000_000, isInternal: false, isRemovable: true, isRoot: false, physicalDisk: nil),
             ],
             network: [
-                NetworkPortInfo(name: "en0", displayName: "Wi-Fi", kind: .wifi, isUp: true, addresses: ["192.168.1.9", "fe80::1"],
+                NetworkPortInfo(name: "en0", displayName: "Wi-Fi", kind: .wifi, isUp: true,
+                                addresses: ["192.168.1.9", "fe80::1", "2001:db8::5", "2001:db8::6"],
                                 hardwareAddress: "a4:83:e7:0b:12:9c", linkSpeed: 1_200_000_000),
                 NetworkPortInfo(name: "utun0", displayName: "utun0", kind: .vpn, isUp: true, addresses: ["fe80::2"],
                                 hardwareAddress: nil, linkSpeed: nil),
@@ -209,6 +210,7 @@ struct SystemReportTests {
         #expect(!hidden.contains("UUID-456"))
         #expect(!hidden.contains("a4:83:e7"))
         #expect(hidden.contains("  Up time: 1d 1h"))
+        #expect(hidden.contains("    IPv6: 2001:db8::5\n          2001:db8::6\n"))
 
         let shown = SystemReport.text(info(), displays: [display], security: nil, includeIdentifiers: true, now: now)
         #expect(shown.contains("Serial number: SERIAL123"))
@@ -241,8 +243,9 @@ struct SystemReportTests {
         #expect(rows.filter(\.isHeading).map(\.label) == ["Wi-Fi", "bridge100"])
         // The BSD name follows a friendly name, but isn't repeated when it's all there is.
         #expect(rows.filter(\.isHeading).map(\.value) == ["en0", ""])
-        #expect(rows.contains(InfoRow("IPv4", "192.168.1.9")))
-        #expect(!rows.contains { $0.label == "IPv6" })
+        #expect(rows.contains(InfoRow("IPv4", "192.168.1.9", isCode: true)))
+        // Link-local addresses are left out, and each address gets its own line.
+        #expect(rows.first { $0.label == "IPv6" }?.value == "2001:db8::5\n2001:db8::6")
         #expect(rows.contains(InfoRow("Link speed", "1.2 Gbps")))
         #expect(rows.first { $0.label == "Hardware address" }?.isSensitive == true)
     }

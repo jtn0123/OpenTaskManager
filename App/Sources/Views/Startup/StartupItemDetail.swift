@@ -38,9 +38,10 @@ struct StartupItemDetail: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.headline).lineLimit(2)
                 Text(item.label)
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline.monospaced()).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
                     .textSelection(.enabled)
+                    .help(item.label)
             }
         }
     }
@@ -68,14 +69,14 @@ struct StartupItemDetail: View {
         if let path = item.program {
             labelled("Program", path)
         } else if !item.isUnreadable {
-            labelled("Program", "None: the property list names no program")
+            labelled("Program", "None: the property list names no program", isCode: false)
         }
         let arguments = item.arguments.first == item.program ? Array(item.arguments.dropFirst()) : item.arguments
         if !arguments.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Arguments").font(.subheadline).foregroundStyle(.secondary)
                 ForEach(Array(arguments.enumerated()), id: \.offset) { _, argument in
-                    Text(argument).font(.caption.monospaced()).textSelection(.enabled)
+                    CopyableText(value: argument).font(.subheadline)
                 }
             }
         }
@@ -124,10 +125,10 @@ struct StartupItemDetail: View {
         return nil
     }
 
-    private func labelled(_ label: String, _ value: String) -> some View {
+    private func labelled(_ label: String, _ value: String, isCode: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.subheadline).foregroundStyle(.secondary)
-            Text(value).font(.caption.monospaced()).textSelection(.enabled)
+            CopyableText(value: value, monospaced: isCode).font(.subheadline)
         }
     }
 }

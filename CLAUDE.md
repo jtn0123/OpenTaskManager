@@ -81,6 +81,7 @@ screencapture -x -o -l <windowID> out.png
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,
+`-openStartupItem <text>` selects the first startup item whose label or name contains it,
 and `-openUser <name>` opens that user's top processes on the Users page (and
 the system accounts, for root or a service account). Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
