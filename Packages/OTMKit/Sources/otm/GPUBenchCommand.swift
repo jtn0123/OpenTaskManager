@@ -52,9 +52,11 @@ func gpuBenchSummary(_ result: GPUBenchmarkResult) -> String {
     ]
     for workload in result.workloads {
         let measurement = workload.measurement
+        // A figure whose GPU time looked short says so on its own row, not only in the note below.
+        let flag = measurement.gpuTimeLooksShort ? "   " + BenchmarkFigureCaveat.timingUnverified.title.lowercased() : ""
         lines.append(pad(workload.workload.title, 16) + pad(workload.workload.format(measurement.median), 18)
             + pad("±" + spread(measurement.spread / 2), 10) + pad(milliseconds(measurement.medianGPUSeconds), 12)
-            + milliseconds(measurement.medianWallSeconds))
+            + milliseconds(measurement.medianWallSeconds) + flag)
     }
     lines += [
         "",

@@ -243,11 +243,22 @@ public enum DiskSpeedTest {
 
     /// How a result was measured, and what that means for reading it.
     public static func methodNote(_ result: DiskSpeedResult) -> String {
-        var note = "File-level results from a \(Format.wholeBytes(result.configuration.fileSize)) file, one request at a time, "
+        ([fileLevelNote(result)] + cautions(result)).joined(separator: " ")
+    }
+
+    /// What any result's figures are: true of every run, so it can sit in a methodology.
+    public static func fileLevelNote(_ result: DiskSpeedResult) -> String {
+        "File-level results from a \(Format.wholeBytes(result.configuration.fileSize)) file, one request at a time, "
             + "so APFS caching and compression play a part and they can differ from the drive's rated speed."
-        if !result.bypassedCache { note += " This volume ignored F_NOCACHE, so reads may have come from memory." }
-        if !result.fullFlush { note += " Writes were flushed with fsync only, so the disk's own cache may hold some." }
-        return note
+    }
+
+    /// What this result's volume did that flatters its figures, if anything,
+    /// to keep beside them.
+    public static func cautions(_ result: DiskSpeedResult) -> [String] {
+        var cautions: [String] = []
+        if !result.bypassedCache { cautions.append("This volume ignored F_NOCACHE, so reads may have come from memory.") }
+        if !result.fullFlush { cautions.append("Writes were flushed with fsync only, so the disk's own cache may hold some.") }
+        return cautions
     }
 
     /// Runs a test in `folder`, blocking the calling thread. The file is

@@ -60,8 +60,12 @@ struct SavedRuns: View, Equatable {
                     .fixedSize(horizontal: false, vertical: true)
             }
             RunsTable(kind: kind, runs: runs, picked: picked)
+            if let caveat = runs.lazy.flatMap(\.measurements).compactMap(\.caveat).first {
+                FigureCaveatFootnote(caveat: caveat)
+            }
             if picked.count == 2 {
                 ComparisonPanel(kind: kind, earlier: picked[0], later: picked[1])
+                    .modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.comparison(kind)))
             }
         }
     }
@@ -183,8 +187,18 @@ private struct RunRow: View {
             ForEach(groups) { group in
                 ForEach(group.ids, id: \.self) { id in
                     let measurement = run.measurement(id)
-                    Text(measurement.map { $0.unit.number($0.value, divisor: group.divisor) } ?? "—")
-                        .help(measurement?.plusMinus.map { "\($0) over \(measurement?.repeats ?? 0) repeats" } ?? "")
+                    let number = measurement.map { $0.unit.number($0.value, divisor: group.divisor) } ?? "—"
+                    let spread = measurement?.plusMinus.map { "\($0) over \(measurement?.repeats ?? 0) repeats" } ?? ""
+                    if let caveat = measurement?.caveat {
+                        // Marked at the figure, which drops to secondary text.
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            FigureCaveatMark(caveat: caveat)
+                            Text(number).foregroundStyle(.secondaryText).fontWeight(.regular)
+                        }
+                        .help("\(caveat.title): \(caveat.explanation)" + (spread.isEmpty ? "" : " (\(spread))"))
+                    } else {
+                        Text(number).help(spread)
+                    }
                 }
             }
         }
@@ -270,23 +284,42 @@ private struct ChangeTable: View {
             ForEach(changes) { change in
                 // Figures keep their width; in a narrow window the name and
                 // the verdict wrap instead.
+                // A figure in doubt in either run is marked at its figures,
+                // which drop to secondary text, and its verdict isn't coloured.
                 GridRow {
                     Text(change.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    Text(change.unit.format(change.baseline)).fixedSize()
-                    Text(change.unit.format(change.compared)).fixedSize()
-                    Text(change.change.map(BenchmarkChange.formatChange) ?? "—").fontWeight(.semibold).fixedSize()
+                    figure(change.unit.format(change.baseline), caveat: change.baselineCaveat)
+                    figure(change.unit.format(change.compared), caveat: change.comparedCaveat)
+                    Text(change.change.map(BenchmarkChange.formatChange) ?? "—")
+                        .fontWeight(change.caveat == nil ? .semibold : .regular)
+                        .foregroundStyle(change.caveat == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
+                        .fixedSize()
                     Text(change.spreadText).foregroundStyle(.secondaryText).fixedSize()
                     Label(change.verdict.title, systemImage: Self.symbol(change.verdict))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(Self.color(change.verdict))
-                        .help(change.verdict.explanation)
+                        .foregroundStyle(change.caveat == nil ? Self.color(change.verdict) : AnyShapeStyle(.secondaryText))
+                        .help(change.verdict.explanation + (change.caveatNote.map { " \($0)" } ?? ""))
                 }
             }
         }
         .font(.tableText)
         .monospacedDigit()
         .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private func figure(_ text: String, caveat: BenchmarkFigureCaveat?) -> some View {
+        if let caveat {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                FigureCaveatMark(caveat: caveat)
+                Text(text).foregroundStyle(.secondaryText)
+            }
+            .fixedSize()
+            .help("\(caveat.title): \(caveat.explanation)")
+        } else {
+            Text(text).fixedSize()
+        }
     }
 
     private static func symbol(_ verdict: BenchmarkChange.Verdict) -> String {

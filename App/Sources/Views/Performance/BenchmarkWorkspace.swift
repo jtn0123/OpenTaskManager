@@ -26,6 +26,16 @@ final class BenchmarkWorkspace {
         var id: BenchmarkKind { kind }
     }
 
+    /// A request to bring a test's comparison into view: when a second run is
+    /// ticked, only as far as it takes, and for `-openBenchmarkCompare`, to the
+    /// top. The serial tells two requests for the same test apart.
+    struct Reveal: Equatable {
+        let kind: BenchmarkKind
+        /// Scrolled to the top of the page, under the pinned strip.
+        let aligned: Bool
+        let serial: Int
+    }
+
     /// Where Run all's disk test writes and which interface its Internet test loads.
     struct SuiteTargets: Equatable {
         /// The disk holding the folder ("disk3"), as the disk store keys its runs.
@@ -45,6 +55,8 @@ final class BenchmarkWorkspace {
     private(set) var suiteRunning = false
     /// Each test's runs picked for comparison, by id, in the order picked: at most two.
     private(set) var picks: [BenchmarkKind: [String]]
+    /// The last request to show a comparison; the workspace scrolls when it changes.
+    private(set) var reveal: Reveal?
     /// Whether Run all adds the disk test, which writes a temporary file.
     var includesDisk: Bool {
         didSet { UserDefaults.standard.set(includesDisk, forKey: Self.includesDiskKey) }
@@ -92,6 +104,7 @@ final class BenchmarkWorkspace {
     }
 
     /// Picks a run, or drops it if picked; a third pick drops the oldest pick.
+    /// A pick that makes a pair asks for the comparison to be shown.
     func togglePick(_ run: BenchmarkRun) {
         var ids = picks[run.kind] ?? []
         if let index = ids.firstIndex(of: run.id) {
@@ -99,9 +112,14 @@ final class BenchmarkWorkspace {
         } else {
             ids.append(run.id)
             if ids.count > 2 { ids.removeFirst(ids.count - 2) }
+            if ids.count == 2 { requestReveal(run.kind, aligned: false) }
         }
         picks[run.kind] = ids
         savePicks()
+    }
+
+    private func requestReveal(_ kind: BenchmarkKind, aligned: Bool) {
+        reveal = Reveal(kind: kind, aligned: aligned, serial: (reveal?.serial ?? 0) + 1)
     }
 
     func clearPicks(_ kind: BenchmarkKind) {
@@ -205,7 +223,8 @@ final class BenchmarkWorkspace {
 
     /// For screenshots: `-openBenchmarkCompare gpu:1,2` picks a test's
     /// first and second saved runs, newest first, for this launch only, and
-    /// `-openResource benchmarks -openSpeedTest start` starts Run all.
+    /// scrolls to their comparison; `-openResource benchmarks -openSpeedTest
+    /// start` starts Run all.
     func handleLaunchArguments(runs: [BenchmarkKind: [BenchmarkRun]], targets: SuiteTargets) {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
@@ -214,6 +233,7 @@ final class BenchmarkWorkspace {
             if parts.count == 2, let kind = BenchmarkKind(rawValue: String(parts[0])), let saved = runs[kind] {
                 let ids = parts[1].split(separator: ",").compactMap { Int($0) }.compactMap { saved.indices.contains($0 - 1) ? saved[$0 - 1].id : nil }
                 picks[kind] = Array(ids.prefix(2))
+                if ids.count >= 2 { requestReveal(kind, aligned: true) }
             }
         }
         if LaunchArgument.startsTest(on: "benchmarks") { runAll(targets: targets) }
