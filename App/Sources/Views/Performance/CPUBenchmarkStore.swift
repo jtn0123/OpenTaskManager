@@ -61,6 +61,7 @@ final class CPUBenchmarkStore {
             do throws(CPUBenchmarkError) {
                 let result = try await CPUBenchmark.measure(workers: workers, appVersion: appVersion, progress: report)
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.cpuBenchmark.append(result) }.value
+                BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 history = (saved ?? [result] + history).filter { $0.historyKey == self.machineKey }
             } catch {
@@ -74,6 +75,11 @@ final class CPUBenchmarkStore {
     func cancel() {
         task?.cancel()
         finish(generation)
+    }
+
+    /// Returns once the run in progress, if any, has ended, for Run all.
+    func waitForRun() async {
+        await task?.value
     }
 
     private func finish(_ generation: Int) {
