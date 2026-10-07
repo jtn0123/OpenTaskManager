@@ -358,8 +358,10 @@ struct LaunchctlTests {
     @Test func statesSortRunningFirst() {
         let states: [LaunchItemState] = [.notLoaded, .disabled, .running(pid: 9), .loaded, .running(pid: 2)]
         #expect(states.sorted() == [.running(pid: 2), .running(pid: 9), .loaded, .disabled, .notLoaded])
+        #expect(states.filter(\.isRunning).count == 2)
         #expect(LaunchItemPublisher.thirdParty < .apple)
         #expect(LaunchItemScope.allCases.sorted() == [.userAgent, .systemAgent, .daemon])
+        #expect(LaunchItemScope.allCases.map(\.shortTitle) == ["Agent", "Agent", "Daemon"])
     }
 }
 

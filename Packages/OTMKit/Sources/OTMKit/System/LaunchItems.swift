@@ -19,6 +19,9 @@ public enum LaunchItemScope: String, Sendable, Codable, Hashable, CaseIterable, 
         }
     }
 
+    /// For a narrow column: "Agent" or "Daemon".
+    public var shortTitle: String { isAgent ? "Agent" : "Daemon" }
+
     private var rank: Int {
         switch self {
         case .userAgent: 0
@@ -60,6 +63,11 @@ public enum LaunchItemState: Sendable, Hashable, Comparable {
         case .disabled: "Disabled"
         case .notLoaded: "Not loaded"
         }
+    }
+
+    public var isRunning: Bool {
+        if case .running = self { return true }
+        return false
     }
 }
 
@@ -162,7 +170,13 @@ public enum LaunchItems {
     /// jobs are loaded, running or disabled. This reads hundreds of files and
     /// runs launchctl three times, so call it off the main actor.
     public static func scan(directories: [LaunchDirectory] = LaunchDirectory.standard(), uid: uid_t = getuid()) -> [LaunchItem] {
-        let items = directories.flatMap { read($0) }
+        withCurrentStatus(directories.flatMap { read($0) }, uid: uid)
+    }
+
+    /// The same items with launchd asked again which jobs are loaded, running
+    /// or disabled. It runs launchctl three times and reads no property list,
+    /// so the Startup page can follow restarts with it; call it off the main actor.
+    public static func withCurrentStatus(_ items: [LaunchItem], uid: uid_t = getuid()) -> [LaunchItem] {
         let system = Launchctl.systemDomain()
         return correlate(items, userJobs: Launchctl.userJobs(), systemJobs: system.jobs,
                          userOverrides: Launchctl.userOverrides(uid: uid), systemOverrides: system.overrides)

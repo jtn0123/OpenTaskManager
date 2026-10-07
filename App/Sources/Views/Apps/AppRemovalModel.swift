@@ -33,6 +33,9 @@ final class AppRemovalModel {
     private(set) var isQuitting = false
     private(set) var outcomes: [RemovalOutcome] = []
     private(set) var icons: [String: NSImage] = [:]
+    /// When each item was last modified, as Finder's Date Modified shows it,
+    /// to tell a leftover in use from one long forgotten. Read once, with the plan.
+    private(set) var modified: [String: Date] = [:]
 
     init(app: InstalledApp) {
         self.app = app
@@ -64,11 +67,20 @@ final class AppRemovalModel {
     /// Reads launchd's jobs and the Library folders, then starts the review.
     func load(otherApps: [InstalledApp]) async {
         let app = app
-        let plan = await Task.detached(priority: .userInitiated) {
-            AppRemoval.plan(for: app, otherApps: otherApps, launchItems: LaunchItems.scan())
+        let (plan, modified) = await Task.detached(priority: .userInitiated) {
+            let plan = AppRemoval.plan(for: app, otherApps: otherApps, launchItems: LaunchItems.scan())
+            var modified: [String: Date] = [:]
+            for path in plan.items.map(\.path) + plan.protected.map(\.path) {
+                // Not following a link, so a link to the app says when the link was made.
+                if let date = try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date {
+                    modified[path] = date
+                }
+            }
+            return (plan, modified)
         }.value
         guard !Task.isCancelled else { return }
         self.plan = plan
+        self.modified = modified
         selection = plan.preselected
         for path in plan.items.map(\.path) + plan.protected.map(\.path) {
             let icon = NSWorkspace.shared.icon(forFile: path)

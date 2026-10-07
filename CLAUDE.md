@@ -66,7 +66,12 @@ Manager OG or any other proprietary task manager.
   recorder, and `-openRecording <path> -openPlayback 1|10|60` opens and plays one),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
-  when the page opens and on Refresh, never per tick),
+  when the page opens and on Refresh, never per tick; while it's on screen
+  launchd's list alone, no plists, is read again every 10 s and noted in
+  `LaunchJobStore`, whose `LaunchJobWatch` in OTMKit counts restarts by label,
+  scope, PID and start time and names failed, crashed and restarting jobs for
+  the Problems filter; the CPU and Memory cells look launchd's PID up in the
+  latest sample themselves, so a tick redraws them, not the table),
   Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
   the main actor when the page opens and on Refresh, then streams bundle sizes in
   from a few GCD threads, and follows launches and quits through NSWorkspace,
@@ -197,6 +202,10 @@ build, `-sensorFixture <file>` loads a recording from
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
   Scope first, then PID, then Protocol; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
+  The Startup table does too, through the shared `FittingColumn`,
+  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting):
+  Launches first, then Publisher, Kind, Memory and CPU, so Name and Status
+  keep their room; Kind says Agent or Daemon when narrow.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its
@@ -214,10 +223,11 @@ build, `-sensorFixture <file>` loads a recording from
   the window's split view it made the page take the pane's height and pushed
   the status bar out of a 730-point window. Plain wrapping text is enough.
   The pane's minimum height also sets the page's, so a tall pinned part
-  (Startup's state and Start Now or Restart/Stop) goes in `ViewThatFits(in: .vertical)`
-  with a fallback that scrolls it, name and all, with the rest (see
-  `StartupItemDetail`; a fallback that kept the name pinned still pushed the
-  status bar out of a 560-point window).
+  (Startup's state and Start Now or Restart/Stop) is pinned only when the
+  measured heights leave room, and otherwise scrolls, name and all, with the
+  rest (see `StartupItemDetail` and `ConnectionDetail`; a fallback that kept
+  the name pinned still pushed the status bar out of a 560-point window, and
+  `ViewThatFits(in: .vertical)` measured both layouts again on every tick).
 - A details pane has one scroll view, edge to edge between a pinned header and
   a pinned footer of actions, with dividers at both ends. Long technical values
   fold away in a `DetailDisclosure` (Startup's arguments, an app's certificate

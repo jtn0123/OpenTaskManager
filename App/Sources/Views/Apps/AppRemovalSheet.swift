@@ -37,7 +37,9 @@ struct AppRemovalSheet: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
         }
-        .frame(minWidth: 560, idealWidth: 660, maxWidth: 820)
+        // Wide enough for a row's path and its evidence, Reveal in Finder
+        // beside it, to take a line each, and still inside the narrowest window.
+        .frame(minWidth: 620, idealWidth: 680, maxWidth: 800)
         .task {
             await model.load(otherApps: otherApps)
             await model.measureSizes()
@@ -252,7 +254,7 @@ private struct LeftoverRow: View {
                         .font(.tableText.weight(.medium))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if item.isUncertain { UncertainTag() }
+                    CertaintyTag(item: item)
                     Spacer(minLength: 8)
                     Text(size)
                         .font(.tableText)
@@ -262,15 +264,8 @@ private struct LeftoverRow: View {
                         .help(item.location.isMeasured ? "Space it takes on disk"
                             : "macOS asks before one app reads another app's container, so its size isn't measured")
                 }
-                Text(RemovalText.shortPath(item.path))
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(item.path)
-                Text(evidence)
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
+                RemovalPath(path: item.path)
+                RemovalEvidence(text: RemovalText.withModified(evidence, model.modified[item.path]), path: item.path)
                 if let caveat = item.caveat {
                     Label(caveat, systemImage: "exclamationmark.triangle.fill")
                         .font(.explanation)
@@ -280,6 +275,7 @@ private struct LeftoverRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .contextMenu { RemovalPathMenu(path: item.path) }
     }
 
     private var isSelected: Binding<Bool> {
@@ -322,20 +318,68 @@ private struct ProtectedRow: View {
                     .font(.tableText.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(RemovalText.shortPath(item.path))
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(item.path)
-                Text(item.reason + ". " + item.evidence.description(bundlePath: model.app.resolvedPath))
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
+                RemovalPath(path: item.path)
+                RemovalEvidence(text: RemovalText.withModified(item.reason + ". " + item.evidence.description(bundlePath: model.app.resolvedPath),
+                                                               model.modified[item.path]),
+                                path: item.path)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .contextMenu { RemovalPathMenu(path: item.path) }
+    }
+}
+
+/// The item's whole path, selectable and copyable, on a line of its own and
+/// cut in the middle only when it's longer than that.
+private struct RemovalPath: View {
+    var path: String
+
+    var body: some View {
+        CopyableText(value: path, truncatesMiddle: true)
+            .font(.callout)
+            .foregroundStyle(.secondaryText)
+    }
+}
+
+/// Why the item matched and when it last changed, and a button that shows
+/// it in Finder, so it can be looked at before it goes.
+private struct RemovalEvidence: View {
+    var text: String
+    var path: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(text)
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+            Spacer(minLength: 8)
+            Button("Reveal in Finder") { RemovalActions.reveal(path) }
+                .buttonStyle(.link)
+                .font(.explanation)
+                .fixedSize()
+                .help("Show it in a Finder window")
+        }
+    }
+}
+
+private struct RemovalPathMenu: View {
+    var path: String
+
+    var body: some View {
+        Button("Reveal in Finder") { RemovalActions.reveal(path) }
+        Button("Copy Path") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(path, forType: .string)
+        }
+    }
+}
+
+@MainActor
+private enum RemovalActions {
+    static func reveal(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
     }
 }
 
@@ -354,15 +398,35 @@ private struct RemovalIcon: View {
     }
 }
 
-private struct UncertainTag: View {
+/// How sure the match is, on each item: Uncertain for a guess, Exact for a
+/// bundle-ID match, and nothing for the app itself.
+private struct CertaintyTag: View {
+    var item: LeftoverItem
+
     var body: some View {
-        Text("Uncertain")
+        switch item.confidence {
+        case .uncertain:
+            tag("Uncertain", tint: Theme.network,
+                help: "Matched by name, team or a shared app group, which doesn't prove the app owns it. Left unselected.")
+        case .exact:
+            tag("Exact match", help: "Named exactly after the app's bundle ID, so it starts selected.")
+        case .required where item.evidence != .theApp:
+            tag("Goes with the app", help: "Runs from inside the app or points to it, so it can't stay behind once the app goes.")
+        case .required:
+            EmptyView()
+        }
+    }
+
+    /// Tinted for a warning, grey otherwise.
+    private func tag(_ title: String, tint: Color? = nil, help: String) -> some View {
+        Text(title)
             .font(.metadata.weight(.semibold))
-            .foregroundStyle(Theme.network)
+            .foregroundStyle(tint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.secondaryText))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Theme.network.opacity(0.14), in: Capsule())
-            .help("Matched by name, team or a shared app group, which doesn't prove the app owns it. Left unselected.")
+            .background((tint ?? .secondary).opacity(0.14), in: Capsule())
+            .fixedSize()
+            .help(help)
     }
 }
 
@@ -494,5 +558,13 @@ enum RemovalText {
     /// The path with your home folder shortened to "~".
     static func shortPath(_ path: String, home: String = NSHomeDirectory()) -> String {
         path == home || path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+    }
+
+    /// "Named after com.example.app · Modified 3 Oct 2026", or the text alone when the date isn't known.
+    static func withModified(_ text: String, _ modified: Date?) -> String {
+        guard let modified else { return text }
+        // Kept on one line when the text wraps, rather than split inside the date.
+        let date = "Modified \(modified.formatted(date: .abbreviated, time: .omitted))"
+        return "\(text) · " + date.replacingOccurrences(of: " ", with: "\u{00A0}")
     }
 }
