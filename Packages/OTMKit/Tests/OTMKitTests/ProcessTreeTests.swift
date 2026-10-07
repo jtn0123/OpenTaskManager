@@ -117,4 +117,52 @@ struct ProcessTreeTests {
         #expect(ProcessSample.measuresEnergy(sample, interval: 0) == nil, "the first sample has no rates yet")
         #expect(ProcessSample.measuresEnergy([], interval: 1) == nil)
     }
+
+    @Test func findsARowWithTheTotalsTheTableShows() {
+        let grouped = ProcessTreeBuilder.build(sample, mode: .grouped, appPIDs: [100, 200], currentUID: Self.me)
+        let safari = ProcessTreeBuilder.node(for: 100, in: grouped)
+        #expect(safari?.totals.memory == 450, "the app's row counts its helpers")
+        #expect(safari?.totals.processCount == 3)
+        #expect(ProcessTreeBuilder.node(for: 101, in: grouped)?.totals.processCount == 1, "a helper is found under its app")
+        #expect(ProcessTreeBuilder.node(for: 999, in: grouped) == nil)
+
+        let tree = ProcessTreeBuilder.build(sample, mode: .tree, appPIDs: [], currentUID: Self.me)
+        #expect(ProcessTreeBuilder.node(for: 300, in: tree)?.children.map(\.id) == [301], "found two levels down")
+        let filtered = ProcessTreeBuilder.build(sample, mode: .grouped, appPIDs: [100, 200], currentUID: Self.me, filter: "web content")
+        #expect(ProcessTreeBuilder.node(for: 100, in: filtered)?.totals.memory == 400, "only the helpers the search kept")
+    }
+
+    @Test func gpuIsReportedOnceAnyProcessHasGPUTime() {
+        var reporting = ProcessGPUReporting()
+        #expect(reporting.isReported == nil)
+        reporting.record(anyGPUTime: true)
+        #expect(reporting.isReported == true)
+        // Once seen, quiet samples don't take it back this session.
+        for _ in 0..<10 { reporting.record(anyGPUTime: false) }
+        #expect(reporting.isReported == true)
+    }
+
+    @Test func gpuIsUnreportedOnlyAfterSeveralSamplesWithNone() {
+        var reporting = ProcessGPUReporting()
+        for _ in 1..<ProcessGPUReporting.samplesToRuleOut { reporting.record(anyGPUTime: false) }
+        #expect(reporting.isReported == nil, "too soon to tell")
+        reporting.record(anyGPUTime: false)
+        #expect(reporting.isReported == false)
+        // A process that draws later still brings it back.
+        reporting.record(anyGPUTime: true)
+        #expect(reporting.isReported == true)
+    }
+
+    @Test func gpuVerdictFromAnEarlierLaunchHoldsUntilSamplesSayOtherwise() {
+        var hidden = ProcessGPUReporting(isReported: false)
+        #expect(hidden.isReported == false, "a VM without GPU time hides the column from the first frame")
+        hidden.record(anyGPUTime: true)
+        #expect(hidden.isReported == true)
+
+        var shown = ProcessGPUReporting(isReported: true)
+        shown.record(anyGPUTime: false)
+        #expect(shown.isReported == true)
+        for _ in 1..<ProcessGPUReporting.samplesToRuleOut { shown.record(anyGPUTime: false) }
+        #expect(shown.isReported == false)
+    }
 }

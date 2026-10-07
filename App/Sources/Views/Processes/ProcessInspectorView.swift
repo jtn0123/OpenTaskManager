@@ -1,14 +1,61 @@
 import OTMKit
 import SwiftUI
 
+/// What the table's row for the inspected process counts besides it: in
+/// Grouped, its app's helpers; in Tree, the processes under it. A collapsed
+/// row shows the sum, so its figures differ from the inspector's.
+struct ProcessRowGroup {
+    var totals: ProcessTotals
+    var mode: ProcessViewMode
+    /// Expanded, the row shows the process's own figures, the others under it.
+    var isExpanded: Bool
+    /// Expands the row in the table.
+    var show: () -> Void
+
+    private var others: Int { max(totals.processCount - 1, 0) }
+
+    /// "its 2 helpers", "the 3 processes under it".
+    private var othersPhrase: String {
+        switch mode {
+        case .tree: others == 1 ? "the process under it" : "the \(others) processes under it"
+        case .grouped, .flat: others == 1 ? "its helper" : "its \(others) helpers"
+        }
+    }
+
+    /// The row as the table names it: Grouped's count badge is the group's
+    /// size, while Tree's counts only the processes directly under it.
+    private func row(_ name: String) -> String {
+        mode == .tree ? name : "\(name) (\(totals.processCount))"
+    }
+
+    /// Where the table's figures for `name`'s row come from, with `cpu`
+    /// formatted on the page's CPU scale.
+    func summary(name: String, cpu: String) -> String {
+        let figures = "\(Format.bytes(totals.memory)), \(cpu) CPU"
+        return isExpanded
+            ? "Together with \(othersPhrase), listed under it in the table: \(figures)."
+            : "The table's \(row(name)) row includes \(othersPhrase): \(figures) in all."
+    }
+
+    var showTitle: String {
+        switch mode {
+        case .tree: "Expand Row"
+        case .grouped, .flat: others == 1 ? "Show Helper" : "Show Helpers"
+        }
+    }
+}
+
 struct ProcessInspectorView: View {
     @Environment(AppModel.self) private var model
     let pid: Int32
+    /// Set when the selected row has processes nested under it.
+    var group: ProcessRowGroup?
 
     @State private var details = Details()
     @State private var tab: Tab = .overview
     @State private var socketsOnly = false
     @State private var confirmingForceQuit = false
+    @State private var showsMemoryHelp = false
 
     struct Details {
         var arguments: ProcessArguments?
@@ -27,6 +74,11 @@ struct ProcessInspectorView: View {
         if let process = model.process(pid) {
             VStack(alignment: .leading, spacing: 12) {
                 header(process)
+                if let group {
+                    RowGroupNote(text: group.summary(name: model.displayName(for: process),
+                                                     cpu: model.cpuScale.format(group.totals.cpuPercent)),
+                                 showTitle: group.isExpanded ? nil : group.showTitle, show: group.show)
+                }
                 Picker("", selection: $tab) {
                     ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
@@ -74,8 +126,9 @@ struct ProcessInspectorView: View {
                 axis: { Format.fixed($0, $0 < 10 ? 1 : 0) + "%" },
                 capacity: AppModel.processHistoryCapacity - 2
             )
+            // Named for what it plots, the table's Memory figure for this process.
             GraphPanel(
-                title: process.isRestricted ? "Memory (resident)" : "Memory",
+                title: process.isRestricted ? "Resident memory" : "Memory footprint",
                 trailing: Format.bytes(process.memory),
                 series: [GraphSeries(values: history.map { Double($0.memory) }, color: Theme.memory)],
                 height: 80,
@@ -84,6 +137,7 @@ struct ProcessInspectorView: View {
                 axisUnits: .binaryBytes,
                 capacity: AppModel.processHistoryCapacity - 2
             )
+            .help(process.isRestricted ? MemoryMeasure.restricted : MemoryMeasure.footprint)
             if !process.isRestricted {
                 if measuresPower {
                     HStack(spacing: 12) {
@@ -132,7 +186,7 @@ struct ProcessInspectorView: View {
                 FactRow(label: "CPU time", value: Format.cpuTime(process.cpuTime))
                 FactRow(label: "Threads", value: process.threadCount > 0 ? String(process.threadCount) : "—")
                 if !process.isRestricted {
-                    FactRow(label: "Real memory", value: Format.bytes(process.residentMemory))
+                    memoryRows(process)
                     if measuresPower {
                         FactRow(label: "Power", value: process.powerWatts.map(Format.watts) ?? "—")
                     }
@@ -172,6 +226,41 @@ struct ProcessInspectorView: View {
                     .font(.subheadline).foregroundStyle(.secondaryText)
             }
         }
+    }
+
+    /// The two memory figures side by side, each with its definition on
+    /// hover, and both in a popover from the info button.
+    @ViewBuilder private func memoryRows(_ process: ProcessSample) -> some View {
+        GridRow {
+            Text("Memory footprint").foregroundStyle(.secondaryText).help(MemoryMeasure.footprint)
+            Text(Format.bytes(process.memory)).textSelection(.enabled).help(MemoryMeasure.footprint)
+        }
+        .font(.callout)
+        GridRow {
+            Text("Real memory").foregroundStyle(.secondaryText).help(MemoryMeasure.resident)
+            HStack(spacing: 4) {
+                Text(Format.bytes(process.residentMemory)).textSelection(.enabled)
+                Button {
+                    showsMemoryHelp.toggle()
+                } label: {
+                    Image(systemName: "info.circle").foregroundStyle(.secondaryText)
+                }
+                .buttonStyle(.borderless)
+                .help("Why real memory differs from the footprint")
+                .accessibilityLabel("About the memory figures")
+                .popover(isPresented: $showsMemoryHelp, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(MemoryMeasure.footprint)
+                        Text(MemoryMeasure.resident)
+                    }
+                    .font(.explanation)
+                    .frame(width: 300, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                }
+            }
+        }
+        .font(.callout)
     }
 
     private var environment: some View {
@@ -305,5 +394,39 @@ struct ProcessInspectorView: View {
         case .pipe: "arrow.left.arrow.right"
         case .file, .other: "doc"
         }
+    }
+}
+
+/// Under the inspector's header when the selected row has processes nested
+/// under it: the figures below are this process's alone, what the table's
+/// row adds, and a button that expands the row to show them one by one.
+private struct RowGroupNote: View {
+    /// `ProcessRowGroup.summary`.
+    var text: String
+    /// The button's title; nil once the row is expanded.
+    var showTitle: String?
+    var show: () -> Void
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "square.stack.3d.up").foregroundStyle(.secondaryText)
+                Text("This process only").fontWeight(.medium)
+                Spacer(minLength: 4)
+                if let showTitle {
+                    Button(showTitle, action: show)
+                        .controlSize(.small)
+                        .help("Expand its row in the table, so each process shows its own figures")
+                }
+            }
+            Text(text).font(.explanation).foregroundStyle(.secondaryText)
+        }
+        .font(.metadata)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.04), in: shape)
+        .overlay(shape.strokeBorder(Color.primary.opacity(0.12)))
+        .accessibilityElement(children: .contain)
     }
 }

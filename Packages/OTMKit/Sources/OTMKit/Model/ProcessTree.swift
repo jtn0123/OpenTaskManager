@@ -104,6 +104,17 @@ public enum ProcessTreeBuilder {
         return query.isEmpty ? nodes : self.filter(nodes, query: query)
     }
 
+    /// The row for `pid` among `nodes` and everything nested under them, as
+    /// the table shows it: in grouped and tree modes, its totals include the
+    /// processes nested under it. Stops at the first match.
+    public static func node(for pid: Int32, in nodes: [ProcessNode]) -> ProcessNode? {
+        for node in nodes {
+            if node.process?.pid == pid { return node }
+            if let found = self.node(for: pid, in: node.children) { return found }
+        }
+        return nil
+    }
+
     // MARK: Grouped
 
     static func grouped(_ processes: [ProcessSample], appPIDs: Set<Int32>, currentUID: UInt32) -> [ProcessNode] {
