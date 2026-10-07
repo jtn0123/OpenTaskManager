@@ -36,6 +36,9 @@ Manager OG or any other proprietary task manager.
   Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
   Views/System (hardware and security facts, read once when the page opens, never
   per tick; the rows come from `SystemReport` in OTMKit),
+  Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
+  the main actor when the page opens and on Refresh, never per tick; parsing is
+  in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),
   Views/Storage (disk space: `StorageStore` keeps the session's last scan and
   scans only on Scan or a scope pick, never on launch or per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
@@ -82,12 +85,14 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance|History|Connections|Startup|Users|System|Storage` sets the starting page, and
+`-openPage Overview|Processes|Performance|History|Connections|Startup|Users|System|Drivers|Storage` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
+`-openDriver <text>` selects the first extension on the Drivers page whose name
+or bundle ID contains it (switching the Third party/Apple filter if it hides it),
 `-openUser <name>` opens that user's top processes on the Users page (and
 the system accounts, for root or a service account), and
 `-openStorageScope <path>` scans that folder or volume when the Storage page

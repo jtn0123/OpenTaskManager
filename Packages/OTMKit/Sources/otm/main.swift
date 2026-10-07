@@ -17,6 +17,8 @@ USAGE:
   otm ports [--json]             Listening TCP/UDP ports of your processes
   otm net [-n COUNT] [--interval SECONDS] [--json]
                                  Processes moving the most network traffic
+  otm drivers [--all] [--json]   System extensions and third-party kernel
+                                 extensions; --all adds Apple's kexts
   otm inspect PID [--json]       Arguments, environment and open files
   otm du [PATH] [--depth N] [-n COUNT] [--json]
                                  What's using the space under PATH (default: the
@@ -32,6 +34,7 @@ struct Options {
     var count = 20
     var sort = "cpu"
     var json = false
+    var all = false
     var interval = 1.0
     var signal = "term"
     var depth = 1
@@ -52,6 +55,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--signal": options.signal = iterator.next() ?? options.signal
         case "-d", "--depth": options.depth = iterator.next().flatMap(Int.init) ?? options.depth
         case "--json": options.json = true
+        case "-a", "--all": options.all = true
         case "-h", "--help": options.command = "help"
         case "-v", "--version": options.command = "version"
         default: options.positional.append(argument)
@@ -251,6 +255,17 @@ func listeningPorts(_ connections: [Connection]) -> [ListeningPort] {
                              address: connection.local.address, port: port)
     }
     .sorted { ($0.port, $0.pid, $0.proto) < ($1.port, $1.pid, $1.proto) }
+}
+
+/// System extensions, then kexts, with what needs approval called out.
+func extensionTable(_ items: [ExtensionItem]) -> String {
+    var lines = [" " + pad("STATUS", 21) + pad("KIND", 21) + pad("PUBLISHER", 13) + pad("VERSION", 14) + "NAME (BUNDLE ID)"]
+    for item in items {
+        let marker = item.status.needsAttention ? "!" : " "
+        lines.append(marker + pad(item.status.title, 21) + pad(item.kind, 21) + pad(item.publisher.title, 13)
+            + pad(item.version.isEmpty ? "-" : item.version, 14) + "\(item.name) (\(item.bundleID))")
+    }
+    return lines.joined(separator: "\n")
 }
 
 struct Inspection: Encodable {
@@ -461,6 +476,29 @@ case "net":
             print(pad(String(rate.pid), 7, right: true) + pad(Format.bitsPerSecond(rate.bytesInPerSecond), 13, right: true)
                 + pad(Format.bitsPerSecond(rate.bytesOutPerSecond), 13, right: true) + "  " + rate.name)
         }
+    }
+
+case "drivers":
+    let scan = Extensions.scan()
+    let shown = options.all ? scan.items : scan.items.filter { $0.category.isSystemExtension || $0.publisher == .thirdParty }
+    if options.json {
+        printJSON(shown)
+    } else {
+        if shown.isEmpty {
+            print("No system extensions or third-party kernel extensions are loaded.")
+        } else {
+            print(extensionTable(shown))
+        }
+        var notes: [String] = []
+        if !scan.readSystemExtensions { notes.append("System extensions couldn't be read: systemextensionsctl failed.") }
+        if !scan.readKernelExtensions { notes.append("Kernel extensions couldn't be read.") }
+        let waiting = scan.summary.needsAttention
+        if waiting > 0 {
+            notes.append("! \(waiting) waiting for approval in System Settings > General > Login Items & Extensions.")
+        }
+        let apple = scan.items.filter { $0.category == .kernel && $0.publisher == .apple }.count
+        if !options.all && apple > 0 { notes.append("\(apple) Apple kernel extensions are loaded too (--all lists them).") }
+        if !notes.isEmpty { print("\n" + notes.joined(separator: "\n")) }
     }
 
 case "inspect":

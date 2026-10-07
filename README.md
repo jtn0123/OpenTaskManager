@@ -89,6 +89,20 @@ versions, uptime, and whether SIP, FileVault and Gatekeeper are on. The serial
 number, hardware UUID and MAC addresses stay hidden until you ask, and Copy
 Summary puts the page on the clipboard as plain text.
 
+**Drivers**: the system extensions and kernel extensions loaded on the Mac.
+- Counts of system extensions by kind, third-party kexts, loaded kexts and
+  their wired memory, and anything waiting for your approval.
+- A sortable table of name, kind (network extension, DriverKit driver,
+  endpoint security or kernel extension), status, publisher and version.
+  Third-party extensions come first; Apple's own are one click away.
+- An extension waiting for approval is flagged, and a button opens Login Items
+  & Extensions in System Settings, where macOS lets you allow or turn off a
+  system extension.
+- Details for each: bundle and team IDs and the app that installed a system
+  extension, or a kext's UUID, path, load address, memory, and the kexts it
+  links against and is used by.
+- It's read when the page opens and on Refresh, never while it sits open.
+
 **Storage**: what's using your disk space. Pick Home, the startup disk, another
 local volume or any folder, and a scan on its own thread adds everything up,
 showing how far it has got as it goes (it can be stopped at any time).
@@ -115,9 +129,10 @@ showing how far it has got as it goes (it can be stopped at any time).
   processes.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
 - The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
-  `ports`, `net` (the processes moving the most network traffic), `inspect`,
-  `kill` and `du` (the Storage page's scan, as a table of a folder's largest
-  items), with JSON output.
+  `ports`, `net` (the processes moving the most network traffic), `drivers`
+  (system extensions and third-party kexts), `inspect`, `kill` and `du` (the
+  Storage page's scan, as a table of a folder's largest items), with JSON
+  output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
 Animation's render server, and the process table moves rows in place instead
@@ -152,7 +167,9 @@ same arithmetic as Activity Monitor), IOKit for the GPU, disks and battery
 telemetry, routing sockets for network counters, and each process's descriptor
 table (`proc_pidfdinfo`) for its sockets. Startup items come from
 the launchd property lists themselves, plus `launchctl list` and
-`launchctl print` for what's loaded, running or disabled. The Storage scan
+`launchctl print` for what's loaded, running or disabled. Drivers come from
+`systemextensionsctl list` and IOKit's `KextManagerCopyLoadedKextInfo`, with
+`kmutil showloaded` as a fallback. The Storage scan
 walks folders with `FileManager`'s enumerator, asking for each file's
 allocated size, link count and type in the same call, and keeps only each
 folder's 200 largest items, so memory stays bounded on a full disk.

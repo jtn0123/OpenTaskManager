@@ -62,6 +62,7 @@ enum Page: String, CaseIterable, Identifiable {
     case startup = "Startup"
     case users = "Users"
     case system = "System"
+    case drivers = "Drivers"
     case storage = "Storage"
 
     var id: String { rawValue }
@@ -76,6 +77,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .startup: "sunrise"
         case .users: "person.2"
         case .system: "info.circle"
+        case .drivers: "puzzlepiece.extension"
         case .storage: "internaldrive"
         }
     }
@@ -102,6 +104,7 @@ struct ContentView: View {
             case .startup: StartupView()
             case .users: UsersView()
             case .system: SystemInfoView()
+            case .drivers: DriversView()
             case .storage: StorageView()
             }
         }
