@@ -128,28 +128,35 @@ public enum ProcessTreeBuilder {
     // MARK: Grouped
 
     static func grouped(_ processes: [ProcessSample], appPIDs: Set<Int32>, currentUID: UInt32) -> [ProcessNode] {
-        let byPID = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        // Positions rather than samples, so following a chain copies nothing.
+        var indexByPID: [Int32: Int] = [:]
+        indexByPID.reserveCapacity(processes.count)
+        for index in processes.indices where indexByPID[processes[index].pid] == nil {
+            indexByPID[processes[index].pid] = index
+        }
 
         // Follow responsibility up to the process that owns the group. Chains
         // are short in practice; the hop limit guards against cycles.
-        func groupRoot(of process: ProcessSample) -> Int32 {
-            var current = process
+        var roots: [Int32] = []
+        roots.reserveCapacity(processes.count)
+        for index in processes.indices {
+            var current = index
             for _ in 0..<4 {
-                let owner = current.responsiblePID
-                guard owner != current.pid, let next = byPID[owner] else { break }
+                let owner = processes[current].responsiblePID
+                guard owner != processes[current].pid, let next = indexByPID[owner] else { break }
                 current = next
             }
-            return current.pid
+            roots.append(processes[current].pid)
         }
 
         var members: [Int32: [ProcessSample]] = [:]
-        for process in processes {
-            let root = groupRoot(of: process)
-            if root != process.pid { members[root, default: []].append(process) }
+        for index in processes.indices where roots[index] != processes[index].pid {
+            members[roots[index], default: []].append(processes[index])
         }
 
         var sections: [ProcessSection: [ProcessNode]] = [:]
-        for process in processes where groupRoot(of: process) == process.pid {
+        for index in processes.indices where roots[index] == processes[index].pid {
+            let process = processes[index]
             let children = (members[process.pid] ?? []).map { ProcessNode.process($0) }
             let section: ProcessSection = if appPIDs.contains(process.pid) {
                 .apps
