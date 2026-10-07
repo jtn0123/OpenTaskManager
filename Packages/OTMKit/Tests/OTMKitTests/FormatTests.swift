@@ -102,6 +102,24 @@ struct HistoryTests {
         #expect(history.append(9) == nil)
     }
 
+    @Test func addsValuesAlignedOnTheNewest() {
+        var wrapped = History<Int>(capacity: 3)
+        for value in 1...5 { wrapped.append(value) }
+        var short = History<Int>(capacity: 4)
+        short.append(10)
+        var sums = [Double](repeating: 0, count: 4)
+        // Each history's newest lands in the last slot, whatever its length.
+        wrapped.addValues(to: &sums) { Double($0) }
+        short.addValues(to: &sums) { Double($0) * 2 }
+        #expect(sums == [0, 3, 4, 25])
+        // A history longer than the sums gives only its newest values.
+        var two = [Double](repeating: 0, count: 2)
+        wrapped.addValues(to: &two) { Double($0) }
+        #expect(two == [4, 5])
+        History<Int>(capacity: 2).addValues(to: &two) { Double($0) }
+        #expect(two == [4, 5])
+    }
+
     @Test func runningSumFollowsTheWindow() {
         var sum = RunningSum()
         #expect(sum.value == 0)

@@ -127,10 +127,11 @@ final class StreamGraphView: NSView {
         }
     }
 
-    /// Screen-space shape of one series, ready to turn into paths.
+    /// Screen-space shape of one series, ready to turn into paths. In
+    /// `Double`, as `GraphMath` works, so nothing is converted per point.
     private struct Trace {
-        var ys: [CGFloat]
-        var tangents: [CGFloat]
+        var ys: [Double]
+        var tangents: [Double]
     }
 
     /// The axis labels' size. 12 pt, the app's size for explanations, would
@@ -231,10 +232,11 @@ final class StreamGraphView: NSView {
 
     func update(_ configuration: Configuration, interval: TimeInterval, streams: Bool) {
         let values = configuration.lines.map(\.values)
-        let isNewSample = hasDrawn && values != lastValues
+        let changed = values != lastValues
+        let isNewSample = hasDrawn && changed
             && configuration.lines.count == self.configuration?.lines.count
             && configuration.capacity == self.configuration?.capacity
-        if values != lastValues { sampleIndex += 1 }
+        if changed { sampleIndex += 1 }
         self.configuration = configuration
         self.interval = interval
         self.streams = streams
@@ -288,10 +290,10 @@ final class StreamGraphView: NSView {
 
         let raw = configuration.lines.map(\.values)
         let shown = configuration.stacked ? GraphMath.stack(raw) : raw
-        let peak = shown.joined().max() ?? 0
         let previousCeiling = ceiling
+        // The peak is scanned for only when there's no fixed top.
         ceiling = configuration.maxValue
-            ?? min(GraphMath.ceiling(peak: peak, floor: configuration.minimumCeiling, units: configuration.axisUnits),
+            ?? min(GraphMath.ceiling(peak: shown.joined().max() ?? 0, floor: configuration.minimumCeiling, units: configuration.axisUnits),
                    configuration.maximumCeiling)
         let rescales = hasDrawn && newSample && previousCeiling != ceiling && !reduceMotion
 
@@ -370,14 +372,18 @@ final class StreamGraphView: NSView {
 
     /// Screen y for each value, plus the curve's tangents.
     private func makeTrace(_ values: [Double], ceiling: Double, height: CGFloat) -> Trace {
-        let padding = verticalPadding
-        let usable = max(height - 2 * padding, 1)
-        let ys = values.map { value -> CGFloat in
-            let fraction = value.isFinite ? min(max(value / max(ceiling, .leastNonzeroMagnitude), 0), 1) : 0
-            return padding + usable * CGFloat(fraction)
+        let padding = Double(verticalPadding)
+        let usable = Double(max(height - 2 * verticalPadding, 1))
+        let top = max(ceiling, .leastNonzeroMagnitude)
+        // A plain loop, as this runs for every point of every graph each
+        // sample: closures and generic min/max cost a call per point in a
+        // debug build. Unreadable values sit on the baseline.
+        var ys = [Double](repeating: padding, count: values.count)
+        for index in values.indices where values[index].isFinite {
+            let fraction = values[index] / top
+            ys[index] = padding + usable * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)
         }
-        let tangents = GraphMath.monotoneTangents(ys.map(Double.init)).map { CGFloat($0) }
-        return Trace(ys: ys, tangents: tangents)
+        return Trace(ys: ys, tangents: GraphMath.monotoneTangents(ys))
     }
 
     /// The line along `trace`, and the area under it (down to the baseline,
@@ -386,13 +392,13 @@ final class StreamGraphView: NSView {
         let line = CGMutablePath()
         guard !trace.ys.isEmpty else { return (line, line) }
         let lastX = firstX + CGFloat(trace.ys.count - 1) * step
-        line.move(to: CGPoint(x: firstX, y: trace.ys[0]))
+        line.move(to: CGPoint(x: firstX, y: CGFloat(trace.ys[0])))
         appendCurve(trace, to: line, firstX: firstX, step: step, reversed: false)
 
         let area = CGMutablePath()
         area.addPath(line)
         if let below, below.ys.count == trace.ys.count {
-            area.addLine(to: CGPoint(x: lastX, y: below.ys[below.ys.count - 1]))
+            area.addLine(to: CGPoint(x: lastX, y: CGFloat(below.ys[below.ys.count - 1])))
             appendCurve(below, to: area, firstX: firstX, step: step, reversed: true)
         } else {
             area.addLine(to: CGPoint(x: lastX, y: 0))
@@ -408,16 +414,17 @@ final class StreamGraphView: NSView {
         let tangents = trace.tangents
         guard ys.count > 1 else { return }
         let third = step / 3
-        let indices = reversed ? Array((1..<ys.count).reversed()) : Array(0..<ys.count - 1)
-        for index in indices {
+        let direction: Double = reversed ? -1 : 1
+        // Counted off a range rather than an array of indices made per path.
+        for offset in 0..<ys.count - 1 {
+            let index = reversed ? ys.count - 1 - offset : offset
             let next = reversed ? index - 1 : index + 1
-            let direction: CGFloat = reversed ? -1 : 1
             let x = firstX + CGFloat(index) * step
             let nextX = firstX + CGFloat(next) * step
             path.addCurve(
-                to: CGPoint(x: nextX, y: ys[next]),
-                control1: CGPoint(x: x + direction * third, y: ys[index] + direction * tangents[index] / 3),
-                control2: CGPoint(x: nextX - direction * third, y: ys[next] - direction * tangents[next] / 3)
+                to: CGPoint(x: nextX, y: CGFloat(ys[next])),
+                control1: CGPoint(x: x + CGFloat(direction) * third, y: CGFloat(ys[index] + direction * tangents[index] / 3)),
+                control2: CGPoint(x: nextX - CGFloat(direction) * third, y: CGFloat(ys[next] - direction * tangents[next] / 3))
             )
         }
     }
@@ -458,15 +465,15 @@ final class StreamGraphView: NSView {
         layers.halo.backgroundColor = bright.withAlphaComponent(0.16).cgColor
         layers.dot.backgroundColor = line.color.cgColor
         layers.dot.shadowColor = bright.cgColor
-        layers.head.position = CGPoint(x: edge, y: last)
+        layers.head.position = CGPoint(x: edge, y: CGFloat(last))
         layers.head.removeAnimation(forKey: "glide")
 
         let count = trace.ys.count
         guard animated, count > 1 else { return }
         let keyframes = (0...12).map { frame -> NSValue in
             let y = GraphMath.hermite(
-                from: Double(trace.ys[count - 2]), to: Double(last),
-                startTangent: Double(trace.tangents[count - 2]), endTangent: Double(trace.tangents[count - 1]), at: Double(frame) / 12
+                from: trace.ys[count - 2], to: last,
+                startTangent: trace.tangents[count - 2], endTangent: trace.tangents[count - 1], at: Double(frame) / 12
             )
             return NSValue(point: CGPoint(x: edge, y: y))
         }

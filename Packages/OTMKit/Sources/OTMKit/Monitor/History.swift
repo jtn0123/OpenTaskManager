@@ -39,6 +39,20 @@ public struct History<Element: Sendable>: Sendable {
         return storage[(head + storage.count - 1) % storage.count]
     }
 
+    /// Adds each value, through `figure`, to `sums`, aligned on the newest,
+    /// which goes into the last element; values older than `sums` has room
+    /// for are left out. Sums many histories without building each one's
+    /// `values` first.
+    public func addValues(to sums: inout [Double], _ figure: (Element) -> Double) {
+        let count = min(storage.count, sums.count)
+        guard count > 0 else { return }
+        var index = (head + storage.count - count) % storage.count
+        for slot in sums.count - count..<sums.count {
+            sums[slot] += figure(storage[index])
+            index = index + 1 == storage.count ? 0 : index + 1
+        }
+    }
+
     public mutating func removeAll() {
         storage.removeAll(keepingCapacity: true)
         head = 0

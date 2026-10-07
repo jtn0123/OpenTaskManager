@@ -55,24 +55,37 @@ enum MenuBarIcon {
     private static let barWidth: CGFloat = 2
     private static let gap: CGFloat = 1
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    /// The last image and what it shows. An idle Mac's bars and figure
+    /// often look the same from one sample to the next, and handing back
+    /// the same image spares the menu bar a redraw.
+    private static var last: Drawn?
+
+    private struct Drawn {
+        let heights: [CGFloat]
+        let text: String
+        let image: NSImage
+    }
 
     static func image(history: [Double], usage: Double) -> NSImage {
         let height: CGFloat = 16
+        // Bar heights to the half point, a pixel on a Retina menu bar.
+        let heights = history.suffix(bars).map { max(1, (CGFloat(min(max($0, 0), 1)) * (height - 2) * 2).rounded() / 2) }
+        let label = Format.percent(usage)
+        if let last, last.heights == heights, last.text == label { return last.image }
+
         let graphWidth = CGFloat(bars) * (barWidth + gap) - gap
-        let text = Format.percent(usage) as NSString
+        let text = label as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         // Reserve room for "99%" so the item doesn't jiggle as the number changes.
         let textWidth = ceil(max(text.size(withAttributes: attributes).width, ("99%" as NSString).size(withAttributes: attributes).width))
         let size = NSSize(width: graphWidth + 4 + textWidth, height: height)
-        let values = Array(history.suffix(bars))
 
         let image = NSImage(size: size, flipped: false) { _ in
             NSColor.black.withAlphaComponent(0.3).setFill()
             NSRect(x: 0, y: 1, width: graphWidth, height: 1).fill()
             NSColor.black.setFill()
-            for (index, value) in values.enumerated() {
-                let x = CGFloat(bars - values.count + index) * (barWidth + gap)
-                let barHeight = max(1, CGFloat(min(max(value, 0), 1)) * (height - 2))
+            for (index, barHeight) in heights.enumerated() {
+                let x = CGFloat(bars - heights.count + index) * (barWidth + gap)
                 NSBezierPath(roundedRect: NSRect(x: x, y: 1, width: barWidth, height: barHeight), xRadius: 0.5, yRadius: 0.5).fill()
             }
             let textSize = text.size(withAttributes: attributes)
@@ -80,6 +93,7 @@ enum MenuBarIcon {
             return true
         }
         image.isTemplate = true
+        last = Drawn(heights: heights, text: label, image: image)
         return image
     }
 }

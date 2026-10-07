@@ -216,6 +216,8 @@ public enum ProcessTreeBuilder {
     /// rows is most of what a tick costs the table.
     public static func sort(_ nodes: [ProcessNode], by key: ProcessSortKey, ascending: Bool, cpuStep: Double = 0) -> [ProcessNode] {
         let sortedChildren = nodes.map { node -> ProcessNode in
+            // Most rows have nothing under them to sort.
+            guard !node.children.isEmpty else { return node }
             var node = node
             node.children = sort(node.children, by: key, ascending: ascending, cpuStep: cpuStep)
             return node

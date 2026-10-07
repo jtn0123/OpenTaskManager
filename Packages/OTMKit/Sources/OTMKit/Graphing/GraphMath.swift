@@ -55,7 +55,9 @@ public enum GraphMath {
     public static func monotoneTangents(_ values: [Double]) -> [Double] {
         let count = values.count
         guard count > 1 else { return Array(repeating: 0, count: count) }
-        let deltas = (0..<count - 1).map { values[$0 + 1] - values[$0] }
+        // Loops, not `map`: every graph runs this for each point each sample.
+        var deltas = [Double](repeating: 0, count: count - 1)
+        for index in 0..<count - 1 { deltas[index] = values[index + 1] - values[index] }
         var tangents = [Double](repeating: 0, count: count)
         tangents[0] = deltas[0]
         tangents[count - 1] = deltas[count - 2]

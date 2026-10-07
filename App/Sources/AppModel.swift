@@ -707,7 +707,13 @@ final class AppModel {
         }
         return ranked.sorted { $0.score > $1.score }.prefix(count).compactMap { entry in
             guard let process = entry.group.process else { return nil }
-            let values = Self.tailSum(members(entry.group).compactMap { processHistory[$0]?.values.map { $0[figure] * scale } })
+            // Added straight from each ring, aligned on the newest: no copy
+            // of each member's window first, since apps can have dozens.
+            let histories = members(entry.group).compactMap { processHistory[$0] }
+            var values = [Double](repeating: 0, count: histories.map(\.count).max() ?? 0)
+            for history in histories {
+                history.addValues(to: &values) { $0[figure] * scale }
+            }
             return AppSeries(id: entry.group.id, name: displayName(for: process),
                              icon: IconCache.icon(for: process, app: regularApps[process.pid]), values: values)
         }
@@ -719,7 +725,7 @@ final class AppModel {
         var result = [Double](repeating: 0, count: length)
         for values in series {
             let offset = length - values.count
-            for (index, value) in values.enumerated() { result[offset + index] += value }
+            for index in values.indices { result[offset + index] += values[index] }
         }
         return result
     }
