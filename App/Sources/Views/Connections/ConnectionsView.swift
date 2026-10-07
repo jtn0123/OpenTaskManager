@@ -94,8 +94,11 @@ struct ConnectionsView: View {
         selection = store.rows.sorted(using: sortOrder).first { $0.matches(query) }?.id
     }
 
+    /// The filters, and beside them, right under the counts, that the counts
+    /// and the table only cover the user's own processes. In a window too
+    /// narrow for both, the note takes a line of its own under the filters.
     private var filterBar: some View {
-        HStack(spacing: 12) {
+        FilterBarLayout {
             Picker("Show", selection: $filter) {
                 ForEach(ConnectionFilter.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -103,22 +106,26 @@ struct ConnectionsView: View {
             .labelsHidden()
             .fixedSize()
             .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
-            Spacer()
+            if store.hiddenProcesses > 0 {
+                ViewThatFits(in: .horizontal) {
+                    ScopeBadge(hidden: store.hiddenProcesses, isShort: false)
+                    ScopeBadge(hidden: store.hiddenProcesses, isShort: true)
+                }
+            }
         }
     }
 
-    /// Right under the last row: how many sockets show, and that only the
-    /// user's own processes' sockets can be listed. Detail drops out as the
-    /// table narrows, so it stays one line.
+    /// Right under the last row: how many sockets show, and how often they're
+    /// read. Detail drops out as the table narrows, so it stays one line.
     private func tableFooter(shown: Int) -> some View {
         let total = store.rows.count
         let sockets = Self.count(total, "socket", "sockets")
         let count = shown == total ? sockets : shown == 0 ? "None of \(sockets) match" : "\(shown.formatted()) of \(sockets)"
         let processes = Self.count(store.summary.processesWithSockets, "process", "processes") + " with sockets"
         return ViewThatFits(in: .horizontal) {
-            footerLine(count: count, processes: processes, longNote: true, showsCadence: true)
-            footerLine(count: count, processes: processes, longNote: false, showsCadence: true)
-            footerLine(count: count, processes: nil, longNote: false, showsCadence: false)
+            footerLine(count: count, processes: processes, showsCadence: true)
+            footerLine(count: count, processes: nil, showsCadence: true)
+            footerLine(count: count, processes: nil, showsCadence: false)
         }
         .font(.metadata)
         .foregroundStyle(.secondaryText)
@@ -127,20 +134,10 @@ struct ConnectionsView: View {
         .padding(.vertical, 6)
     }
 
-    private func footerLine(count: String, processes: String?, longNote: Bool, showsCadence: Bool) -> some View {
+    private func footerLine(count: String, processes: String?, showsCadence: Bool) -> some View {
         HStack(spacing: 14) {
             Text(count).foregroundStyle(Color.primary)
             if let processes { Text(processes) }
-            if store.hiddenProcesses > 0 {
-                let hidden = store.hiddenProcesses.formatted()
-                Label(longNote ? "Only your own processes' sockets are listed · \(hidden) processes hidden"
-                                : "Your processes only · \(hidden) hidden",
-                      systemImage: "eye.slash")
-                    .help("""
-                    macOS only lets an app list the sockets of your own processes. Sockets held by root and \
-                    other users, such as system daemons, aren't shown. A privileged helper that lifts this is planned.
-                    """)
-            }
             if showsCadence {
                 Spacer(minLength: 12)
                 Text("Updates every \(Int(ConnectionStore.refreshInterval.components.seconds)) s")
@@ -165,6 +162,80 @@ struct ConnectionsView: View {
 }
 
 // MARK: - Summary
+
+/// The filters at the leading edge and the scope badge at the trailing one,
+/// or under the filters when the row has no room for even its short form.
+/// A layout rather than a `ViewThatFits` of whole rows: that measured the
+/// segmented control once per row on every layout pass, which here come
+/// every tick, and cost about 1.5% of a core.
+private struct FilterBarLayout: Layout {
+    var spacing: CGFloat = 12
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let filters = subviews.first?.sizeThatFits(.unspecified) else { return .zero }
+        let ideal = filters.width + (subviews.count > 1 ? spacing + subviews[1].sizeThatFits(.unspecified).width : 0)
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? ideal
+        guard subviews.count > 1 else { return CGSize(width: width, height: filters.height) }
+        let badge = subviews[1]
+        if let room = room(beside: filters, in: width, badge: badge) {
+            let size = badge.sizeThatFits(ProposedViewSize(width: room, height: nil))
+            return CGSize(width: width, height: max(filters.height, size.height))
+        }
+        let size = badge.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        return CGSize(width: width, height: filters.height + lineSpacing + size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let picker = subviews.first else { return }
+        let filters = picker.sizeThatFits(.unspecified)
+        guard subviews.count > 1 else {
+            picker.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: .unspecified)
+            return
+        }
+        let badge = subviews[1]
+        if let room = room(beside: filters, in: bounds.width, badge: badge) {
+            picker.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: .unspecified)
+            badge.place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                        proposal: ProposedViewSize(width: room, height: nil))
+        } else {
+            picker.place(at: bounds.origin, anchor: .topLeading, proposal: .unspecified)
+            badge.place(at: CGPoint(x: bounds.minX, y: bounds.minY + filters.height + lineSpacing), anchor: .topLeading,
+                        proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
+    }
+
+    /// The width beside the filters, when the badge's narrowest form fits there.
+    private func room(beside filters: CGSize, in width: CGFloat, badge: LayoutSubview) -> CGFloat? {
+        let room = width - filters.width - spacing
+        return badge.sizeThatFits(ProposedViewSize(width: 0, height: nil)).width <= room ? room : nil
+    }
+}
+
+/// Says the counts and the table are the user's own processes' sockets, in
+/// a capsule so it reads with the counts above it rather than as a footnote.
+private struct ScopeBadge: View {
+    var hidden: Int
+    var isShort: Bool
+
+    var body: some View {
+        Label(isShort ? "Yours only · \(hidden.formatted()) hidden" : "Your processes only · \(hidden.formatted()) hidden",
+              systemImage: "eye.slash")
+            .font(.metadata.weight(.medium))
+            .foregroundStyle(.secondaryText)
+            .lineLimit(1)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(Color.primary.opacity(0.06), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+            .fixedSize()
+            .help("""
+            macOS only lets an app list the sockets of your own processes, so the counts above and the table leave out \
+            \(hidden.formatted()) processes. Sockets held by root and other users, such as system daemons, aren't shown. \
+            A privileged helper that lifts this is planned.
+            """)
+    }
+}
 
 private struct SummaryCards: View {
     var summary: ConnectionSummary

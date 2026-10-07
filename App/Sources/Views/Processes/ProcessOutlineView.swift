@@ -8,6 +8,8 @@ struct ProcessTableConfiguration {
     /// Whole-system figures shown in the column headers, Windows-style.
     var headerTotals: [ProcessColumn: String]
     var hiddenColumns: HiddenProcessColumns
+    /// Columns this Mac has no figures for, hidden unless switched on anyway.
+    var unreportedColumns: Set<ProcessColumn>
     var cpuScale: CPUScale
     var heatmap: Bool
     var fastTierName: String
@@ -207,9 +209,10 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
 
         private func updateColumns(_ outline: ProcessOutline, configuration: ProcessTableConfiguration) {
-            // Shows and hides columns only when the choice changed, or a
-            // column was resized while the pointer was down.
-            outline.userHidden = configuration.hiddenColumns.columns
+            // Shows and hides columns only when the choice or what this Mac
+            // reports changed, or a column was resized while the pointer was down.
+            outline.unreported = configuration.unreportedColumns
+            outline.userHidden = configuration.hiddenColumns.hidden(unreported: configuration.unreportedColumns)
             if outline.needsColumnFit { outline.fitColumns() }
             for (index, tableColumn) in outline.tableColumns.enumerated() {
                 guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue) else { continue }
@@ -650,12 +653,14 @@ extension ProcessOutlineView.Coordinator {
     }
 
     /// The same choices as the toolbar's Columns menu: ticked means on, even
-    /// while the column is hidden to fit.
+    /// while the column is hidden to fit. A column this Mac doesn't report
+    /// says so, unticked until switched on anyway.
     private func buildColumnMenu(_ menu: NSMenu, outline: ProcessOutline) {
         let toggle = parent.onToggleColumn
         for tableColumn in outline.tableColumns {
             guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue), column != .name else { continue }
-            let item = ActionItem(column.menuTitle(hiddenToFit: outline.hiddenToFit.contains(column))) { toggle(column) }
+            let title = column.menuTitle(hiddenToFit: outline.hiddenToFit.contains(column), unreported: outline.unreported.contains(column))
+            let item = ActionItem(title) { toggle(column) }
             item.state = outline.userHidden.contains(column) ? .off : .on
             menu.addItem(item)
         }

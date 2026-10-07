@@ -82,6 +82,21 @@ struct NetworkActivityTests {
         #expect(history.isEmpty)
     }
 
+    @Test func hasMovedLooksOnlyAtTheNewestReadings() {
+        var history = NetworkActivityHistory<Int32>(capacity: 10)
+        #expect(!history.hasMoved(inLast: 3))
+        history.append([1: usage(10)])
+        #expect(history.hasMoved(inLast: 1))
+        history.append([:])
+        history.append([:])
+        // Moved two readings ago: inside a window of three, outside one of two.
+        #expect(history.hasMoved(inLast: 3))
+        #expect(!history.hasMoved(inLast: 2))
+        #expect(!history.hasMoved(inLast: 0))
+        history.append([2: usage(1)])
+        #expect(history.hasMoved(inLast: 1))
+    }
+
     @Test func rankingBandsTheBusiestAndListsWhatsMovingNow() {
         var history = NetworkActivityHistory<Int32>(capacity: 10)
         history.append([1: usage(1_000), 2: usage(100), 3: usage(50)])

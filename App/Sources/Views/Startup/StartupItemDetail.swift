@@ -17,36 +17,35 @@ struct StartupItemDetail: View {
     /// rescan, never per tick. Nil while reading, or when it isn't loaded.
     @State private var service: LaunchServiceInfo?
 
+    /// What launchd is doing with the job and what can be done about it sit
+    /// at the top, the plist's settings scroll below, and the lasting
+    /// changes (Disable) and the file itself stay in a footer.
+    ///
+    /// The pinned top is tall, and a pane's minimum height becomes the
+    /// window's: laid out alone it pushed the status bar out of a 760-point
+    /// window. So in a pane too short for it plus a few lines of settings,
+    /// the top scrolls with the settings, and only the footer stays put.
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    facts
-                    if let note { Text(note).font(.subheadline).foregroundStyle(.secondaryText) }
-                    program
-                    launches
-                    labelled("Property list", item.plistPath)
+        let restriction = LaunchControl.restriction(for: item)
+        ViewThatFits(in: .vertical) {
+            VStack(alignment: .leading, spacing: 12) {
+                top(restriction: restriction)
+                Divider()
+                ScrollView { settings }
+                    .frame(minHeight: Self.settingsMinimum, idealHeight: Self.settingsMinimum, maxHeight: .infinity)
+                Divider()
+                footer(restriction: restriction)
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        top(restriction: restriction)
+                        Divider()
+                        settings
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if LaunchControl.restriction(for: item) == nil, let service {
-                serviceControls(service)
-            }
-            if LaunchControl.restriction(for: item) == nil {
-                HStack(alignment: .firstTextBaseline) {
-                    Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
-                    Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondaryText)
-                }
-            } else if item.publisher == .thirdParty, let reason = LaunchControl.restriction(for: item) {
-                Text(reason).font(.subheadline).foregroundStyle(.secondaryText)
-            }
-            HStack {
-                Button("Reveal in Finder") { StartupActions.reveal(item) }
-                Button("Show plist") { StartupActions.openPlist(item) }
-                Spacer()
+                Divider()
+                footer(restriction: restriction)
             }
         }
         .padding(12)
@@ -62,7 +61,50 @@ struct StartupItemDetail: View {
         var refreshID: Date?
     }
 
+    /// Room the settings keep under the pinned top before it scrolls too.
+    private static let settingsMinimum: CGFloat = 96
+
     // MARK: Sections
+
+    /// Who the item is, launchd's view of it, and the controls that change that.
+    @ViewBuilder private func top(restriction: String?) -> some View {
+        header
+        status
+        if restriction == nil, let service {
+            serviceControls(service)
+        }
+    }
+
+    /// The property list's settings.
+    private var settings: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            metadata
+            if let note { Text(note).font(.subheadline).foregroundStyle(.secondaryText) }
+            program
+            launches
+            labelled("Property list", item.plistPath)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The lasting change, Disable or Enable, with what it does, and the file itself.
+    @ViewBuilder private func footer(restriction: String?) -> some View {
+        if restriction == nil {
+            HStack(alignment: .firstTextBaseline) {
+                Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
+                Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondaryText)
+            }
+        } else if item.publisher == .thirdParty, let restriction {
+            Text(restriction).font(.subheadline).foregroundStyle(.secondaryText)
+        }
+        HStack {
+            Button("Reveal in Finder") { StartupActions.reveal(item) }
+            Button("Show plist") { StartupActions.openPlist(item) }
+            Spacer()
+        }
+    }
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -80,7 +122,8 @@ struct StartupItemDetail: View {
         }
     }
 
-    private var facts: some View {
+    /// launchd's view of the job now, right above the controls that change it.
+    private var status: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             GridRow {
                 Text("Status").foregroundStyle(.secondaryText)
@@ -91,9 +134,15 @@ struct StartupItemDetail: View {
                 FactRow(label: "Disabled by", value: disabledBy)
             }
             if let service { serviceRows(service) }
+            FactRow(label: "Last exit", value: lastExit)
+        }
+    }
+
+    /// What the property list says about the item, which doesn't change as it runs.
+    private var metadata: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             FactRow(label: "Kind", value: item.scope.title)
             FactRow(label: "Publisher", value: item.publisher.title)
-            FactRow(label: "Last exit", value: lastExit)
             if let modified = item.modified {
                 FactRow(label: "Modified", value: modified.formatted(date: .abbreviated, time: .shortened))
             }
@@ -166,22 +215,36 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// Start, restart and stop, for a loaded job this app may control.
+    /// Start, restart and stop, for a loaded job this app may control, each
+    /// with what it does beside it.
     private func serviceControls(_ service: LaunchServiceInfo) -> some View {
-        HStack(alignment: .firstTextBaseline) {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
             if service.isRunning {
-                Button("Restart") { control(.restart) }
-                    .help("Stop the job and start it again")
-                Button("Stop") { control(.stop) }
-                    .help(stopHelp)
+                GridRow {
+                    Button("Restart") { control(.restart) }
+                        .help("Stop the job and start it again")
+                    consequence("Quits it and starts it again straight away.")
+                }
+                GridRow {
+                    Button("Stop") { control(.stop) }
+                        .help(stopHelp)
+                    consequence(afterStop)
+                }
             } else {
-                Button("Start Now") { control(.start) }
-                    .help("Run the job now, whatever usually launches it")
+                GridRow {
+                    Button("Start Now") { control(.start) }
+                        .help("Run the job now, whatever usually launches it")
+                    consequence("Runs it once, now.")
+                }
             }
-            Text(service.isRunning ? afterStop : "Runs it once, now.")
-                .font(.subheadline)
-                .foregroundStyle(.secondaryText)
         }
+    }
+
+    private func consequence(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondaryText)
+            .gridColumnAlignment(.leading)
     }
 
     // MARK: Text
