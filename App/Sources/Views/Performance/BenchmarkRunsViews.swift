@@ -37,8 +37,8 @@ struct BenchmarkFigureGroup: Identifiable {
 
 /// A test's saved runs, newest first, each with a box to pick it for
 /// comparison, and the comparison of the two picked. Debug builds' runs are
-/// marked; with one run picked, those it can't be compared with are dimmed,
-/// the reason in their tooltip. It changes only with the runs or the picks.
+/// marked; with one run picked, those it can't be compared with drop to
+/// secondary text, the reason in their tooltip. It changes only with the runs or the picks.
 struct SavedRuns: View, Equatable {
     let kind: BenchmarkKind
     let runs: [BenchmarkRun]
@@ -53,7 +53,7 @@ struct SavedRuns: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Saved runs").font(.callout.weight(.semibold))
+                Text("Saved runs").font(.body.weight(.semibold))
                 Text(hint(picked))
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
@@ -80,21 +80,31 @@ struct SavedRuns: View, Equatable {
     }
 }
 
-private struct RunsTable: View {
+/// A test's runs, newest first: when, the build and the volume or interface
+/// where they differ, then each figure in its column's unit. The headings are
+/// secondary text; the runs' figures are body text in the primary colour (a
+/// debug run is marked in its Build cell, not dimmed), so they read at a glance.
+struct RunsTable: View {
     let kind: BenchmarkKind
     let runs: [BenchmarkRun]
-    let picked: [BenchmarkRun]
+    var picked: [BenchmarkRun] = []
+    /// A box on each row to tick it for comparison: the workspace's table has
+    /// them, a resource card's doesn't.
+    var picking = true
+    /// The volume or interface column; nil shows it for the tests that have one.
+    /// A card's runs are all on its own volume or interface.
+    var showsTarget: Bool?
 
     var body: some View {
         let ids = Self.ids(runs)
         let groups = BenchmarkFigureGroup.groups(ids, in: runs)
         let variants = groups.contains { $0.ids.count > 1 }
         let showsBuild = runs.contains { $0.build != nil }
-        let showsTarget = !kind.measuresThisMac || kind == .disk
-        Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
+        let showsTarget = showsTarget ?? (!kind.measuresThisMac || kind == .disk)
+        Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 4) {
             // A heading wraps over its unit, to three lines ("Random / 4K read / IOPS"), rather than truncate where the card is narrow.
             GridRow(alignment: .bottom) {
-                Text("").gridColumnAlignment(.leading)
+                if picking { Text("").gridColumnAlignment(.leading) }
                 Text(variants ? "" : "When").gridColumnAlignment(.leading)
                 if showsBuild { Text(variants ? "" : "Build").gridColumnAlignment(.leading) }
                 if showsTarget { Text(variants ? "" : "On").gridColumnAlignment(.leading) }
@@ -107,9 +117,11 @@ private struct RunsTable: View {
                         .gridCellAnchor(group.ids.count > 1 ? .center : .trailing)
                 }
             }
+            .font(.tableText)
+            .foregroundStyle(.secondaryText)
             if variants {
                 GridRow {
-                    Text("")
+                    if picking { Text("") }
                     Text("When")
                     if showsBuild { Text("Build") }
                     if showsTarget { Text("On") }
@@ -119,15 +131,15 @@ private struct RunsTable: View {
                         }
                     }
                 }
+                .font(.tableText)
+                .foregroundStyle(.secondaryText)
                 .help("One worker, then one per logical CPU")
             }
             ForEach(runs) { run in
-                RunRow(run: run, groups: groups, showsBuild: showsBuild, showsTarget: showsTarget,
-                       picked: picked.contains { $0.id == run.id }, refusal: refusal(run))
+                RunRow(run: run, groups: groups, showsBuild: showsBuild, showsTarget: showsTarget, picking: picking,
+                       picked: picked.contains { $0.id == run.id }, refusal: picking ? refusal(run) : nil)
             }
         }
-        .font(.tableText)
-        .foregroundStyle(.secondaryText)
         .monospacedDigit()
         .lineLimit(1)
     }
@@ -158,22 +170,26 @@ private struct RunsTable: View {
     }
 }
 
+/// A run's row. With one run ticked, a run that can't be compared with it
+/// drops to secondary text (still readable, never faded), the reason in its tooltip.
 private struct RunRow: View {
     let run: BenchmarkRun
     let groups: [BenchmarkFigureGroup]
     let showsBuild: Bool
     let showsTarget: Bool
+    let picking: Bool
     let picked: Bool
     let refusal: BenchmarkRefusal?
 
     var body: some View {
         let debug = run.build?.optimized == false
-        let dimmed = refusal != nil || debug
         GridRow {
-            Toggle("Compare", isOn: Binding(get: { picked }, set: { _ in BenchmarkWorkspace.shared.togglePick(run) }))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
-                .accessibilityLabel("Compare the run of \(BenchmarkLook.when(run.date))")
+            if picking {
+                Toggle("Compare", isOn: Binding(get: { picked }, set: { _ in BenchmarkWorkspace.shared.togglePick(run) }))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .accessibilityLabel("Compare the run of \(BenchmarkLook.when(run.date))")
+            }
             Text(BenchmarkLook.when(run.date)).fixedSize()
             if showsBuild {
                 Text(run.build?.title ?? "—")
@@ -202,9 +218,9 @@ private struct RunRow: View {
                 }
             }
         }
+        .font(.body)
         .fontWeight(picked ? .semibold : nil)
-        .foregroundStyle(dimmed ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
-        .opacity(refusal != nil ? 0.7 : 1)
+        .foregroundStyle(refusal != nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         .help(refusal.map { "Can't be compared with the run picked: \($0.reason)" } ?? Self.details(run))
     }
 
@@ -295,10 +311,10 @@ private struct ChangeTable: View {
                         .foregroundStyle(change.caveat == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
                         .fixedSize()
                     Text(change.spreadText).foregroundStyle(.secondaryText).fixedSize()
-                    Label(change.verdict.title, systemImage: Self.symbol(change.verdict))
+                    Label(change.verdict.title, systemImage: BenchmarkLook.symbol(change.verdict))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(change.caveat == nil ? Self.color(change.verdict) : AnyShapeStyle(.secondaryText))
+                        .foregroundStyle(change.caveat == nil ? BenchmarkLook.color(change.verdict) : AnyShapeStyle(.secondaryText))
                         .help(change.verdict.explanation + (change.caveatNote.map { " \($0)" } ?? ""))
                 }
             }
@@ -319,25 +335,6 @@ private struct ChangeTable: View {
             .help("\(caveat.title): \(caveat.explanation)")
         } else {
             Text(text).fixedSize()
-        }
-    }
-
-    private static func symbol(_ verdict: BenchmarkChange.Verdict) -> String {
-        switch verdict {
-        case .better: "checkmark.circle.fill"
-        case .worse: "exclamationmark.circle.fill"
-        case .withinSpread: "equal.circle"
-        case .negligible: "equal.circle"
-        case .measuredOnce: "questionmark.circle"
-        case .unchanged: "equal.circle"
-        }
-    }
-
-    private static func color(_ verdict: BenchmarkChange.Verdict) -> AnyShapeStyle {
-        switch verdict {
-        case .better: AnyShapeStyle(BenchmarkLook.better)
-        case .worse: AnyShapeStyle(BenchmarkLook.worse)
-        case .withinSpread, .negligible, .measuredOnce, .unchanged: AnyShapeStyle(.secondaryText)
         }
     }
 }
