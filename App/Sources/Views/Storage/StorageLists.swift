@@ -2,30 +2,41 @@ import AppKit
 import OTMKit
 import SwiftUI
 
-/// Beside the treemap: the open folder's contents ranked by size, or the
-/// largest files anywhere in the scan.
+/// Beside the treemap: the open folder's contents ranked by size, the
+/// largest files anywhere in the scan, or what changed since an earlier scan.
 struct StorageListCard: View {
     let store: StorageStore
     let usage: DiskUsage
     let folder: DiskItem
     let hover: StorageHover
     var open: (Int) -> Void
-    var show: (DiskFile) -> Void
+    /// Opens the folder holding a path and outlines its tile, if it's still there.
+    var show: (_ path: String, _ exists: Bool) -> Void
 
     var body: some View {
         Card(tint: nil) {
-            Picker("List", selection: Binding(get: { store.list }, set: { store.list = $0 })) {
-                ForEach(StorageList.allCases) { Text($0.rawValue).tag($0) }
+            // The short titles when the list is narrow.
+            ViewThatFits(in: .horizontal) {
+                picker(\.rawValue)
+                picker(\.shortTitle)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
             switch store.list {
             case .contents:
                 FolderContentsList(store: store, usage: usage, folder: folder, hover: hover, open: open)
             case .largest:
-                LargestFilesList(store: store, usage: usage, hover: hover, show: show)
+                LargestFilesList(store: store, usage: usage, hover: hover) { show($0.path, true) }
+            case .changes:
+                ChangesList(store: store, usage: usage, folder: folder, show: show)
             }
         }
+    }
+
+    private func picker(_ title: KeyPath<StorageList, String>) -> some View {
+        Picker("List", selection: Binding(get: { store.list }, set: { store.list = $0 })) {
+            ForEach(StorageList.allCases) { Text($0[keyPath: title]).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
     }
 }
 

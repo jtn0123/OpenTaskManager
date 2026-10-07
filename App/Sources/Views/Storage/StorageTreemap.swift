@@ -15,31 +15,94 @@ final class StorageHover {
 
     /// The item under the pointer, in the treemap or the list.
     private(set) var item: Int?
+    /// Inside a folder's tile: the item drawn in it under the pointer.
+    private(set) var inner: Int?
     /// Which view `item` came from: the list follows the treemap, not itself.
     private(set) var source = Source.list
-    /// An item picked in the Largest Files list, outlined while its folder shows.
+    /// An item picked in the Largest Files or Changes list, outlined while its folder shows.
     var marked: (folder: Int, item: Int)?
     /// The file picked in the Largest Files list.
     var markedFile: String?
 
-    func enter(_ id: Int?, from source: Source = .list) {
+    func enter(_ id: Int?, inner: Int? = nil, from source: Source = .list) {
         if self.source != source { self.source = source }
         if item != id { item = id }
+        if self.inner != inner { self.inner = inner }
     }
 
     /// Clears the hover, unless the pointer has already moved on to another item.
     func leave(_ id: Int) {
-        if item == id { item = nil }
+        guard item == id else { return }
+        item = nil
+        inner = nil
+    }
+}
+
+/// The comparison the treemap colours its tiles by in Changes mode.
+struct TreemapChanges {
+    let comparison: DiskScanComparison
+
+    var since: Date { comparison.earlier.scannedAt }
+
+    /// How `item` changed, from its size in this scan; nil for a "smaller
+    /// items" row, which stands for many things.
+    func change(of item: DiskItem, in usage: DiskUsage) -> DiskSizeChange? {
+        guard item.kind != .smallerItems, let path = comparison.later.scope.relativePath(usage.path(of: item.id)) else { return nil }
+        switch item.kind {
+        case .file:
+            return comparison.change(ofFile: path, now: item.allocatedSize)
+        case .package:
+            return comparison.change(ofFolder: path, isPackage: true, now: .exact(item.allocatedSize))
+        case .folder, .smallerItems:
+            // A folder this scan couldn't open could hold anything.
+            let now = item.isUnreadable
+                ? DiskSizeEstimate(low: item.allocatedSize, high: .max, unreadableCount: item.unreadableCount)
+                : .exact(item.allocatedSize, unreadableCount: item.unreadableCount)
+            return comparison.change(ofFolder: path, now: now)
+        }
+    }
+}
+
+/// A tile's colour and second line: its category and size, or in Changes
+/// mode which way it went and by how much.
+struct TileLook {
+    /// The grey tile for everything past a folder's first `innerLimit` items.
+    static let rest = TileLook(color: Theme.smallerItems, caption: "", change: nil, direction: nil)
+
+    let color: Color
+    let caption: String
+    let change: DiskSizeChange?
+    let direction: DiskSizeChange.Direction?
+
+    var isHatched: Bool { direction == .unclear }
+
+    private init(color: Color, caption: String, change: DiskSizeChange?, direction: DiskSizeChange.Direction?) {
+        self.color = color
+        self.caption = caption
+        self.change = change
+        self.direction = direction
+    }
+
+    init(_ item: DiskItem, changes: TreemapChanges?, in usage: DiskUsage, threshold: UInt64) {
+        guard let changes, let change = changes.change(of: item, in: usage) else {
+            self.init(color: StorageStyle.color(item), caption: Format.bytes(item.allocatedSize), change: nil, direction: nil)
+            return
+        }
+        let direction = change.direction(ignoringUnder: threshold)
+        self.init(color: StorageChangeStyle.fill(direction), caption: StorageChangeStyle.caption(change, direction), change: change,
+                  direction: direction)
     }
 }
 
 /// The squarified tiles for one folder's children, worked out once per
-/// scan, folder and size, never per frame or per hover.
+/// scan, folder, size and comparison, never per frame or per hover.
 struct TreemapLayout: Equatable {
     struct Key: Equatable {
         let scan: Date
         let folder: Int
         let size: CGSize
+        /// The earlier scan the tiles show changes since, in Changes mode.
+        let since: Date?
     }
 
     struct Tile: Identifiable {
@@ -49,16 +112,25 @@ struct TreemapLayout: Equatable {
         /// sits in, above tiles for its own children.
         let header: CGRect?
         let inner: [Inner]
-        /// Which of the name and size fit, measured once with the layout.
+        /// Which of the name and caption fit, measured once with the layout.
         let label: TreemapLabel.Fit
+        /// The name as drawn: whole, or a file's without its extension when
+        /// only that fits.
+        let title: String
+        let look: TileLook
 
         var id: Int { item.id }
     }
 
-    /// A grandchild drawn inside its folder's tile.
+    /// A grandchild drawn inside its folder's tile, labelled when its name
+    /// and caption fit.
     struct Inner {
-        let color: Color
+        /// Nil for the grey tile standing for everything past `innerLimit`.
+        let item: DiskItem?
         let rect: CGRect
+        let look: TileLook
+        let label: TreemapLabel.Fit
+        let title: String
     }
 
     static let headerHeight: CGFloat = 20
@@ -68,38 +140,53 @@ struct TreemapLayout: Equatable {
     /// The labels' fonts, which `TileLabel` draws them in too.
     @MainActor static let nameFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
     @MainActor static let sizeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    /// A point smaller inside a folder's tile, so grandchildren read as inside it.
+    @MainActor static let innerNameFont = NSFont.systemFont(ofSize: 10, weight: .semibold)
+    @MainActor static let innerSizeFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
     /// Space between a label and its tile's edges.
     static let labelInset = CGSize(width: 6, height: 4)
+    static let innerInset = CGSize(width: 4, height: 2)
     static let headerSpacing: CGFloat = 5
+
+    @MainActor static let lineHeight = lineHeight(of: nameFont)
+    @MainActor static let innerLineHeight = lineHeight(of: innerNameFont)
 
     let key: Key
     let tiles: [Tile]
 
+    var since: Date? { key.since }
+
     @MainActor
-    init(usage: DiskUsage, folder: DiskItem, size: CGSize) {
-        key = Key(scan: usage.finishedAt, folder: folder.id, size: size)
+    init(usage: DiskUsage, folder: DiskItem, size: CGSize, changes: TreemapChanges? = nil) {
+        key = Key(scan: usage.finishedAt, folder: folder.id, size: size, since: changes?.since)
+        // One yardstick for the whole map, so a colour means the same in every tile.
+        let threshold = StorageChangeStyle.threshold(for: folder.allocatedSize)
         let children = usage.children(of: folder).filter { $0.allocatedSize > 0 }
         let rects = Treemap.squarify(children.map { Double($0.allocatedSize) }, in: CGRect(origin: .zero, size: size))
         tiles = zip(children, rects).compactMap { item, rect in
             guard rect.width >= 1, rect.height >= 1 else { return nil }
             // A hairline gap between neighbours, unless the tile is a sliver.
             let tile = rect.width > 4 && rect.height > 4 ? rect.insetBy(dx: 1, dy: 1) : rect
-            let name = Self.width(StorageStyle.name(item), Self.nameFont)
-            let bytes = Self.width(Format.bytes(item.allocatedSize), Self.sizeFont)
+            let look = TileLook(item, changes: changes, in: usage, threshold: threshold)
+            let name = StorageStyle.name(item)
             guard item.isFolder, !item.children.isEmpty, tile.width >= 80, tile.height >= 56 else {
                 let room = CGSize(width: tile.width - 2 * Self.labelInset.width, height: tile.height - 2 * Self.labelInset.height)
-                let label = TreemapLabel.tile(name: name, size: bytes, lineHeight: Self.lineHeight, room: room)
-                return Tile(item: item, rect: tile, header: nil, inner: [], label: label)
+                let (label, title) = Self.label(item, name: name, caption: look.caption, room: room, inner: false)
+                return Tile(item: item, rect: tile, header: nil, inner: [], label: label, title: title, look: look)
             }
             let header = CGRect(x: tile.minX, y: tile.minY, width: tile.width, height: Self.headerHeight)
             let room = CGRect(x: tile.minX + 3, y: tile.minY + Self.headerHeight, width: tile.width - 6, height: tile.height - Self.headerHeight - 3)
-            let label = TreemapLabel.header(name: name, size: bytes, spacing: Double(Self.headerSpacing),
-                                            room: Double(header.width - 2 * Self.labelInset.width))
-            return Tile(item: item, rect: tile, header: header, inner: Self.inner(of: item, in: usage, room: room), label: label)
+            let label = TreemapLabel.header(name: Self.width(name, Self.nameFont), size: Self.width(look.caption, Self.sizeFont),
+                                            spacing: Double(Self.headerSpacing), room: Double(header.width - 2 * Self.labelInset.width))
+            let inner = Self.inner(of: item, in: usage, room: room, changes: changes, threshold: threshold)
+            return Tile(item: item, rect: tile, header: header, inner: inner, label: label, title: name, look: look)
         }
     }
 
-    @MainActor private static let lineHeight = Double(ceil(nameFont.ascender - nameFont.descender + nameFont.leading))
+    @MainActor
+    private static func lineHeight(of font: NSFont) -> Double {
+        Double(ceil(font.ascender - font.descender + font.leading))
+    }
 
     /// How wide `text` draws, with a point to spare for SwiftUI's rounding.
     @MainActor
@@ -107,19 +194,41 @@ struct TreemapLayout: Equatable {
         Double(ceil((text as NSString).size(withAttributes: [.font: font]).width)) + 1
     }
 
-    private static func inner(of folder: DiskItem, in usage: DiskUsage, room: CGRect) -> [Inner] {
+    /// What of a plain tile's name and caption fit in `room`, and the name
+    /// to draw. A file or package may drop its extension to fit; a folder's
+    /// name stays whole, since a dot in it starts no extension.
+    @MainActor
+    private static func label(_ item: DiskItem, name: String, caption: String, room: CGSize, inner: Bool) -> (TreemapLabel.Fit, String) {
+        let fonts = inner ? (name: innerNameFont, size: innerSizeFont) : (name: nameFont, size: sizeFont)
+        let line = inner ? innerLineHeight : lineHeight
+        // Too small for any name: skip the measuring.
+        guard room.width >= 14, Double(room.height) >= line else { return (.none, name) }
+        let short = item.kind == .file || item.kind == .package ? TreemapLabel.shortName(name) : nil
+        let fit = TreemapLabel.tile(name: width(name, fonts.name), shortName: short.map { width($0, fonts.name) },
+                                    size: width(caption, fonts.size), lineHeight: line, room: room)
+        return (fit.fit, fit.short ? short ?? name : name)
+    }
+
+    @MainActor
+    private static func inner(of folder: DiskItem, in usage: DiskUsage, room: CGRect, changes: TreemapChanges?,
+                              threshold: UInt64) -> [Inner] {
         let children = usage.children(of: folder).filter { $0.allocatedSize > 0 }
-        let shown = Array(children.prefix(innerLimit))
+        var shown: [DiskItem?] = Array(children.prefix(innerLimit))
         let rest = children.dropFirst(innerLimit).reduce(0) { $0 + Double($1.allocatedSize) }
-        var colors = shown.map(StorageStyle.color)
-        var values = shown.map { Double($0.allocatedSize) }
+        var values = shown.map { Double($0?.allocatedSize ?? 0) }
         if rest > 0 {
-            colors.append(Theme.smallerItems)
+            shown.append(nil)
             values.append(rest)
         }
-        return zip(colors, Treemap.squarify(values, in: room)).compactMap { color, rect in
+        return zip(shown, Treemap.squarify(values, in: room)).compactMap { item, rect in
             guard rect.width >= 2, rect.height >= 2 else { return nil }
-            return Inner(color: color, rect: rect.width > 3 && rect.height > 3 ? rect.insetBy(dx: 0.5, dy: 0.5) : rect)
+            let rect = rect.width > 3 && rect.height > 3 ? rect.insetBy(dx: 0.5, dy: 0.5) : rect
+            guard let item else { return Inner(item: nil, rect: rect, look: .rest, label: .none, title: "") }
+            let look = TileLook(item, changes: changes, in: usage, threshold: threshold)
+            let name = StorageStyle.name(item)
+            let labelRoom = CGSize(width: rect.width - 2 * innerInset.width, height: rect.height - 2 * innerInset.height)
+            let (label, title) = Self.label(item, name: name, caption: look.caption, room: labelRoom, inner: true)
+            return Inner(item: item, rect: rect, look: look, label: label, title: title)
         }
     }
 
@@ -137,16 +246,28 @@ struct TreemapLayout: Equatable {
     }
 }
 
-/// Keeps the last layout, so the tiles are worked out once per scan, folder
-/// and size however often the views around them redraw.
+extension TreemapLayout.Tile {
+    /// The item drawn inside this folder's tile at `point`.
+    func inner(at point: CGPoint) -> TreemapLayout.Inner? {
+        inner.first { $0.rect.contains(point) }
+    }
+
+    func inner(id: Int?) -> TreemapLayout.Inner? {
+        guard let id else { return nil }
+        return inner.first { $0.item?.id == id }
+    }
+}
+
+/// Keeps the last layout, so the tiles are worked out once per scan,
+/// folder, size and comparison however often the views around them redraw.
 @MainActor
 private final class TreemapCache {
     private var last: TreemapLayout?
 
-    func layout(usage: DiskUsage, folder: DiskItem, size: CGSize) -> TreemapLayout {
-        let key = TreemapLayout.Key(scan: usage.finishedAt, folder: folder.id, size: size)
+    func layout(usage: DiskUsage, folder: DiskItem, size: CGSize, changes: TreemapChanges?) -> TreemapLayout {
+        let key = TreemapLayout.Key(scan: usage.finishedAt, folder: folder.id, size: size, since: changes?.since)
         if let last, last.key == key { return last }
-        let layout = TreemapLayout(usage: usage, folder: folder, size: size)
+        let layout = TreemapLayout(usage: usage, folder: folder, size: size, changes: changes)
         last = layout
         return layout
     }
@@ -164,12 +285,14 @@ enum StorageStyle {
 }
 
 /// A drill-down treemap of one folder: a tile per child sized by its space
-/// on disk and coloured by category, with each large folder showing its own
-/// contents inside. Click a folder to open it.
+/// on disk and coloured by category (or, in Changes mode, by how it changed
+/// since an earlier scan), with each large folder showing its own contents
+/// inside. Click a folder to open it.
 struct StorageTreemap: View {
     let usage: DiskUsage
     let folder: DiskItem
     let hover: StorageHover
+    var changes: TreemapChanges?
     var open: (DiskItem) -> Void
     var menu: (DiskItem) -> StorageItemMenu
 
@@ -177,7 +300,7 @@ struct StorageTreemap: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = cache.layout(usage: usage, folder: folder, size: proxy.size)
+            let layout = cache.layout(usage: usage, folder: folder, size: proxy.size, changes: changes)
             ZStack(alignment: .topLeading) {
                 TreemapTiles(layout: layout).equatable()
                 TreemapPointer(layout: layout, folder: folder, hover: hover, open: open, menu: menu)
@@ -205,11 +328,11 @@ private struct TreemapTiles: View, Equatable {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Treemap")
+        .accessibilityLabel(layout.since == nil ? "Treemap" : "Treemap of changes")
     }
 
     private func draw(_ tile: TreemapLayout.Tile, in context: inout GraphicsContext) {
-        let color = StorageStyle.color(tile.item)
+        let color = tile.look.color
         let radius = min(4, tile.rect.width / 4, tile.rect.height / 4)
         let shape = RoundedRectangle(cornerRadius: radius).path(in: tile.rect)
         if tile.header != nil {
@@ -218,14 +341,11 @@ private struct TreemapTiles: View, Equatable {
             context.fill(shape, with: .linearGradient(Gradient(colors: [color.opacity(0.38), color.opacity(0.20)]),
                                                       startPoint: tile.rect.origin, endPoint: CGPoint(x: tile.rect.minX, y: tile.rect.maxY)))
             context.stroke(shape, with: .color(color.opacity(0.75)), lineWidth: 1)
-            for inner in tile.inner {
-                let path = RoundedRectangle(cornerRadius: min(2, inner.rect.width / 4, inner.rect.height / 4)).path(in: inner.rect)
-                context.fill(path, with: .linearGradient(Gradient(colors: [inner.color.opacity(0.95), inner.color.opacity(0.72)]),
-                                                         startPoint: inner.rect.origin, endPoint: CGPoint(x: inner.rect.minX, y: inner.rect.maxY)))
-            }
+            for inner in tile.inner { draw(inner, in: &context) }
         } else {
             context.fill(shape, with: .linearGradient(Gradient(colors: [color, color.opacity(0.74)]),
                                                       startPoint: tile.rect.origin, endPoint: CGPoint(x: tile.rect.minX, y: tile.rect.maxY)))
+            if tile.look.isHatched { hatch(tile.rect, in: context) }
             context.stroke(shape, with: .color(.white.opacity(0.14)), lineWidth: 1)
         }
         // A bright edge along the top, like the cards' sheen.
@@ -236,10 +356,43 @@ private struct TreemapTiles: View, Equatable {
             context.stroke(sheen, with: .color(.white.opacity(0.30)), lineWidth: 1)
         }
     }
+
+    private func draw(_ inner: TreemapLayout.Inner, in context: inout GraphicsContext) {
+        let color = inner.look.color
+        let path = RoundedRectangle(cornerRadius: min(2, inner.rect.width / 4, inner.rect.height / 4)).path(in: inner.rect)
+        context.fill(path, with: .linearGradient(Gradient(colors: [color.opacity(0.95), color.opacity(0.72)]),
+                                                 startPoint: inner.rect.origin, endPoint: CGPoint(x: inner.rect.minX, y: inner.rect.maxY)))
+        if inner.look.isHatched { hatch(inner.rect, in: context) }
+        guard inner.label != .none else { return }
+        // Drawn here rather than as views: a folder tile can hold dozens.
+        var lines = [Text(inner.title).font(Font(TreemapLayout.innerNameFont))]
+        if inner.label == .nameAndSize { lines.append(Text(inner.look.caption).font(Font(TreemapLayout.innerSizeFont))) }
+        for (index, line) in lines.enumerated() {
+            let point = CGPoint(x: inner.rect.minX + TreemapLayout.innerInset.width,
+                                y: inner.rect.minY + TreemapLayout.innerInset.height + CGFloat(index) * TreemapLayout.innerLineHeight)
+            context.draw(line.foregroundStyle(Color.black.opacity(0.45)), at: CGPoint(x: point.x, y: point.y + 0.5), anchor: .topLeading)
+            context.draw(line.foregroundStyle(Color.white.opacity(index == 0 ? 1 : 0.9)), at: point, anchor: .topLeading)
+        }
+    }
+
+    /// Light diagonal stripes over a tile whose change can't be told.
+    private func hatch(_ rect: CGRect, in context: GraphicsContext) {
+        var context = context
+        context.clip(to: Path(rect))
+        var stripes = Path()
+        var x = rect.minX - rect.height
+        while x < rect.maxX {
+            stripes.move(to: CGPoint(x: x, y: rect.maxY))
+            stripes.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+            x += 6
+        }
+        context.stroke(stripes, with: .color(.white.opacity(0.28)), lineWidth: 1.5)
+    }
 }
 
-/// Name and size on tiles with room for them. The layout measured what
-/// fits, so a label shows whole or not at all; hovering names the rest.
+/// Name and size (or change) on tiles with room for them. The layout
+/// measured what fits, so a label shows whole or not at all; hovering names
+/// the rest.
 private struct TileLabel: View {
     let tile: TreemapLayout.Tile
 
@@ -249,7 +402,7 @@ private struct TileLabel: View {
             if let header = tile.header {
                 HStack(spacing: TreemapLayout.headerSpacing) {
                     name
-                    if tile.label == .nameAndSize { size.foregroundStyle(.secondaryText) }
+                    if tile.label == .nameAndSize { caption.foregroundStyle(.secondaryText) }
                 }
                 .padding(.horizontal, inset.width)
                 .frame(width: header.width, height: header.height, alignment: .leading)
@@ -259,7 +412,7 @@ private struct TileLabel: View {
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     name
-                    if tile.label == .nameAndSize { size.opacity(0.88) }
+                    if tile.label == .nameAndSize { caption.opacity(0.88) }
                 }
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.45), radius: 0, x: 0, y: 0.5)
@@ -274,17 +427,18 @@ private struct TileLabel: View {
     }
 
     private var name: some View {
-        Text(StorageStyle.name(tile.item)).font(Font(TreemapLayout.nameFont)).fixedSize()
+        Text(tile.title).font(Font(TreemapLayout.nameFont)).fixedSize()
     }
 
-    private var size: some View {
-        Text(Format.bytes(tile.item.allocatedSize)).font(Font(TreemapLayout.sizeFont)).fixedSize()
+    private var caption: some View {
+        Text(tile.look.caption).font(Font(TreemapLayout.sizeFont)).fixedSize()
     }
 }
 
-/// Reads the pointer: highlights the tile under it and names it in a tag,
-/// opens folders on click, and offers the item's actions on right-click.
-/// It alone redraws as the pointer moves, and only when the tile changes.
+/// Reads the pointer: highlights the tile under it (and the item inside a
+/// folder's tile) and names it in a tag, opens folders on click, and offers
+/// the item's actions on right-click. It alone redraws as the pointer
+/// moves, and only when the item under it changes.
 private struct TreemapPointer: View {
     let layout: TreemapLayout
     let folder: DiskItem
@@ -294,35 +448,44 @@ private struct TreemapPointer: View {
 
     var body: some View {
         let hovered = layout.tile(id: hover.item)
+        let inner = hovered?.inner(id: hover.inner)
         let marked = hover.marked.flatMap { $0.folder == folder.id ? layout.tile(id: $0.item) : nil }
         Color.clear
             .contentShape(Rectangle())
             .overlay(alignment: .topLeading) {
                 ZStack(alignment: .topLeading) {
-                    if let marked, marked.id != hovered?.id { Highlight(tile: marked, strength: 0.7) }
-                    if let hovered { Highlight(tile: hovered, strength: 1) }
+                    if let marked, marked.id != hovered?.id { Highlight(rect: marked.rect, color: marked.look.color, strength: 0.7) }
+                    if let hovered { Highlight(rect: hovered.rect, color: hovered.look.color, strength: 1) }
+                    if let inner { InnerHighlight(rect: inner.rect) }
                 }
             }
             .overlay {
                 // Only for hovers here: the list beside it shows its own row.
                 if let hovered, hover.source == .treemap {
-                    TagPlacement(tile: hovered.rect) {
-                        HoverTag(item: hovered.item, total: folder.allocatedSize)
+                    TagPlacement(tile: inner?.rect ?? hovered.rect) {
+                        if let inner, let item = inner.item {
+                            HoverTag(item: item, look: inner.look, total: hovered.item.allocatedSize, within: hovered.item.name, since: layout.since)
+                        } else {
+                            HoverTag(item: hovered.item, look: hovered.look, total: folder.allocatedSize, within: nil, since: layout.since)
+                        }
                     }
                     .allowsHitTesting(false)
                 }
             }
             .onContinuousHover { phase in
                 switch phase {
-                case let .active(point): hover.enter(layout.tile(at: point)?.item.id, from: .treemap)
-                case .ended: hover.enter(nil, from: .treemap)
+                case let .active(point):
+                    let tile = layout.tile(at: point)
+                    hover.enter(tile?.item.id, inner: tile?.inner(at: point)?.item?.id, from: .treemap)
+                case .ended:
+                    hover.enter(nil, from: .treemap)
                 }
             }
             .onTapGesture { point in
                 if let tile = layout.tile(at: point), tile.item.isFolder { open(tile.item) }
             }
             .contextMenu {
-                if let hovered { menu(hovered.item) }
+                if let item = inner?.item ?? hovered?.item, item.kind != .smallerItems { menu(item) }
             }
     }
 }
@@ -330,35 +493,54 @@ private struct TreemapPointer: View {
 /// A bright outline with a soft halo, faked with a wide translucent stroke
 /// rather than a blur.
 private struct Highlight: View {
-    let tile: TreemapLayout.Tile
+    let rect: CGRect
+    let color: Color
     let strength: Double
 
     var body: some View {
-        let color = StorageStyle.color(tile.item)
         ZStack {
             RoundedRectangle(cornerRadius: 6).stroke(color.opacity(0.55 * strength), lineWidth: 7)
             RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.16 * strength))
             RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0.95 * strength), lineWidth: 2)
         }
-        .frame(width: tile.rect.width, height: tile.rect.height)
-        .offset(x: tile.rect.minX, y: tile.rect.minY)
+        .frame(width: rect.width, height: rect.height)
+        .offset(x: rect.minX, y: rect.minY)
         .allowsHitTesting(false)
     }
 }
 
-/// The hovered tile's full name, size and share of the folder, whether or
-/// not its label fits on the tile.
+/// A thin outline round the item under the pointer inside a folder's tile.
+private struct InnerHighlight: View {
+    let rect: CGRect
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .strokeBorder(Color.white.opacity(0.95), lineWidth: 1.5)
+            .background(RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.14)))
+            .frame(width: rect.width, height: rect.height)
+            .offset(x: rect.minX, y: rect.minY)
+            .allowsHitTesting(false)
+    }
+}
+
+/// The hovered tile's full name, size and share of its folder, whether or
+/// not its label fits on the tile, and in Changes mode how it changed.
 private struct HoverTag: View {
     let item: DiskItem
+    let look: TileLook
     let total: UInt64
+    /// For an item inside a folder's tile: that folder.
+    let within: String?
+    let since: Date?
 
     var body: some View {
         let share = Double(item.allocatedSize) / Double(max(total, 1))
         var detail = "\(Format.bytes(item.allocatedSize)) · \(Format.percent(share, digits: share < 0.1 ? 1 : 0))"
+        if let within { detail += " of \(within)" }
         if item.kind != .file, item.kind != .smallerItems { detail += " · \(item.itemCount.formatted()) items" }
         let shape = RoundedRectangle(cornerRadius: 7)
         return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Circle().fill(StorageStyle.color(item)).frame(width: 8, height: 8)
+            Circle().fill(look.color).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(StorageStyle.name(item))
                     .font(.callout.weight(.semibold))
@@ -369,6 +551,14 @@ private struct HoverTag: View {
                     .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .lineLimit(1)
+                if let since, let change = look.change, let direction = look.direction {
+                    Text(StorageChangeStyle.summary(change, direction, since: since))
+                        .font(.metadata)
+                        .foregroundStyle(StorageChangeStyle.textStyle(direction))
+                        .monospacedDigit()
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(.horizontal, 9)
@@ -399,29 +589,72 @@ private struct TagPlacement: Layout {
     }
 }
 
-/// What's under the pointer, beside the breadcrumb.
+/// What's under the pointer, beside the breadcrumb; in Changes mode, the
+/// colours' key while nothing is.
 struct TreemapCaption: View {
     let usage: DiskUsage
     let folder: DiskItem
     let hover: StorageHover
+    var changes: TreemapChanges?
 
     var body: some View {
         let items = usage.children(of: folder)
         if let id = hover.item, let item = items.first(where: { $0.id == id }) {
             let share = Double(item.allocatedSize) / Double(max(folder.allocatedSize, 1))
+            let look = TileLook(item, changes: changes, in: usage, threshold: StorageChangeStyle.threshold(for: folder.allocatedSize))
             HStack(spacing: 6) {
-                Circle().fill(StorageStyle.color(item)).frame(width: 8, height: 8)
+                Circle().fill(look.color).frame(width: 8, height: 8)
                 Text(StorageStyle.name(item)).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
-                Text("\(Format.bytes(item.allocatedSize)) · \(Format.percent(share, digits: share < 0.1 ? 1 : 0))")
-                    .foregroundStyle(.secondaryText)
-                    .monospacedDigit()
-                    .fixedSize()
+                Group {
+                    if let direction = look.direction {
+                        Text(look.caption).foregroundStyle(StorageChangeStyle.textStyle(direction))
+                    } else {
+                        Text("\(Format.bytes(item.allocatedSize)) · \(Format.percent(share, digits: share < 0.1 ? 1 : 0))")
+                            .foregroundStyle(.secondaryText)
+                    }
+                }
+                .monospacedDigit()
+                .fixedSize()
             }
             .font(.metadata)
+        } else if changes != nil {
+            ChangeLegend()
         } else {
             Text(items.contains(where: \.isFolder) ? "Click a folder to open it" : "")
                 .font(.metadata)
                 .foregroundStyle(.secondaryText)
+        }
+    }
+}
+
+/// What the Changes colours mean.
+private struct ChangeLegend: View {
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            entries([.grew, .shrank, .same, .unclear])
+            entries([.grew, .shrank, .same])
+            entries([.grew, .shrank])
+        }
+        .font(.metadata)
+        .foregroundStyle(.secondaryText)
+    }
+
+    private func entries(_ directions: [DiskSizeChange.Direction]) -> some View {
+        HStack(spacing: 10) {
+            ForEach(directions, id: \.self) { direction in
+                HStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(StorageChangeStyle.fill(direction))
+                        .overlay {
+                            if direction == .unclear {
+                                Image(systemName: "line.diagonal").font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.8))
+                            }
+                        }
+                        .frame(width: 10, height: 10)
+                    Text(StorageChangeStyle.title(direction))
+                }
+                .fixedSize()
+            }
         }
     }
 }

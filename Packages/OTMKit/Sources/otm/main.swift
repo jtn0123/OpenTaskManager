@@ -23,10 +23,12 @@ USAGE:
   otm apps [--sizes] [--json]    Installed apps: version, kind, architecture,
                                  signer, last opened; --sizes adds disk space
   otm inspect PID [--json]       Arguments, environment and open files
-  otm du [PATH] [--depth N] [-n COUNT] [--json]
+  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--json]
                                  What's using the space under PATH (default: the
                                  current folder): biggest folders and files,
-                                 space by category
+                                 space by category; --changes saves the scan
+                                 (as the Storage page does) and shows what grew
+                                 and shrank since the last saved one
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -42,6 +44,7 @@ struct Options {
     var signal = "term"
     var depth = 1
     var sizes = false
+    var changes = false
 }
 
 func parseOptions(_ arguments: [String]) -> Options {
@@ -61,6 +64,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--json": options.json = true
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
+        case "--changes": options.changes = true
         case "-h", "--help": options.command = "help"
         case "-v", "--version": options.command = "version"
         default: options.positional.append(argument)
@@ -341,8 +345,11 @@ struct DiskUsageReport: Encodable {
     let children: [Entry]
     let largestFiles: [DiskFile]
     let categories: [CategoryEntry]
+    /// With `--changes`, when an earlier scan was saved.
+    let changes: DiskChangesReport?
 
-    init(_ usage: DiskUsage, depth: Int, count: Int) {
+    init(_ usage: DiskUsage, depth: Int, count: Int, changes: DiskChangesReport? = nil) {
+        self.changes = changes
         func entries(_ item: DiskItem, depth: Int) -> [Entry] {
             usage.children(of: item).prefix(count).map { child in
                 Entry(name: child.kind == .smallerItems ? "\(child.itemCount) smaller items" : child.name, kind: child.kind.rawValue,
@@ -407,6 +414,98 @@ func diskUsageSummary(_ usage: DiskUsage, depth: Int, count: Int) -> String {
         lines += ["", "\(usage.unreadableFolders.formatted()) folders couldn't be read, so their contents aren't counted."
             + " Give your terminal Full Disk Access to include them."]
     }
+    return lines.joined(separator: "\n")
+}
+
+/// `otm du --changes --json`: what changed since the last saved scan.
+/// Sizes a saved scan only bounds have a `low` and a `high` (none when
+/// unknown); growth and shrinkage are only what both scans prove.
+struct DiskChangesReport: Encodable {
+    struct Size: Encodable {
+        let low: UInt64
+        let high: UInt64?
+
+        init(_ estimate: DiskSizeEstimate) {
+            low = estimate.low
+            high = estimate.isBounded ? estimate.high : nil
+        }
+    }
+
+    struct Change: Encodable {
+        let path: String
+        let kind: String
+        let before: Size
+        let after: Size
+        let growth: UInt64
+        let shrinkage: UInt64
+        let exact: Bool
+
+        init(_ change: DiskSizeChange) {
+            path = change.path
+            kind = String(describing: change.kind)
+            before = Size(change.before)
+            after = Size(change.after)
+            growth = change.growth
+            shrinkage = change.shrinkage
+            exact = change.isExact
+        }
+    }
+
+    let since: Date
+    let ignoredUnder: UInt64
+    let total: Change
+    let grew: [Change]
+    let shrank: [Change]
+    let filesAdded: [Change]
+    let filesRemoved: [Change]
+    let becameUnreadable: [Change]
+    let becameReadable: [Change]
+
+    init(_ comparison: DiskScanComparison, count: Int) {
+        let threshold = DiskScanComparison.noiseFloor(for: comparison.later.allocatedSize)
+        let report = comparison.report(limit: count, ignoringUnder: threshold)
+        since = comparison.earlier.scannedAt
+        ignoredUnder = threshold
+        total = Change(report.total)
+        grew = report.grew.map(Change.init)
+        shrank = report.shrank.map(Change.init)
+        filesAdded = report.filesAdded.map(Change.init)
+        filesRemoved = report.filesRemoved.map(Change.init)
+        becameUnreadable = report.becameUnreadable.map(Change.init)
+        becameReadable = report.becameReadable.map(Change.init)
+    }
+}
+
+func diskChangesSummary(_ comparison: DiskScanComparison, count: Int) -> String {
+    let threshold = DiskScanComparison.noiseFloor(for: comparison.later.allocatedSize)
+    let report = comparison.report(limit: count, ignoringUnder: threshold)
+    let total = report.total
+    let direction = total.direction(ignoringUnder: threshold)
+    let amount = switch direction {
+    case .grew: Format.byteChange(total.growth, grew: true, exact: total.isExact)
+    case .shrank: Format.byteChange(total.shrinkage, grew: false, exact: total.isExact)
+    case .same: "no change"
+    case .unclear: "can't tell"
+    }
+    var lines = ["", "Changes since \(comparison.earlier.scannedAt.formatted(date: .abbreviated, time: .shortened)): \(amount)"
+        + " (\(Format.bytes(total.before)) → \(Format.bytes(total.after)))"]
+    func section(_ title: String, _ changes: [DiskSizeChange], grew: Bool?) {
+        guard !changes.isEmpty else { return }
+        lines += ["", title]
+        for change in changes {
+            let figure = grew.map { Format.byteChange($0 ? change.growth : change.shrinkage, grew: $0, exact: change.isExact) } ?? ""
+            let suffix = change.kind == .file ? "" : "/"
+            let note = change.isNew && change.before.isExact ? "  (new)" : change.isGone && change.after.isExact ? "  (removed)" : ""
+            lines.append(pad(figure, 18, right: true) + "  " + change.path + suffix + note)
+        }
+    }
+    section("Grew", report.grew, grew: true)
+    section("Shrank", report.shrank, grew: false)
+    section("Large files added", report.filesAdded, grew: true)
+    section("Large files removed", report.filesRemoved, grew: false)
+    section("Couldn't be read this time (not counted as space freed)", report.becameUnreadable, grew: nil)
+    section("Could be read this time (not counted as growth)", report.becameReadable, grew: nil)
+    if report.isEmpty { lines.append("Nothing changed by more than \(Format.bytes(threshold)).") }
     return lines.joined(separator: "\n")
 }
 
@@ -602,10 +701,29 @@ case "du":
         FileHandle.standardError.write(Data("\u{1B}[2K\r\(line)".utf8))
     }) else { fail("scan cancelled") }
     if showsProgress { FileHandle.standardError.write(Data("\u{1B}[2K\r".utf8)) }
+    var comparison: DiskScanComparison?
+    if options.changes {
+        // The same history the Storage page keeps, so either can follow the other.
+        let summary = DiskScanSummary(usage, scope: DiskScanScope(usage, request: request))
+        let history = DiskScanHistory()
+        let earlier = history.summaries(of: summary.scope).first { $0.scannedAt < summary.scannedAt }
+        do {
+            try history.save(summary)
+        } catch {
+            FileHandle.standardError.write(Data("otm: couldn't save this scan: \(error.localizedDescription)\n".utf8))
+        }
+        comparison = earlier.map { DiskScanComparison(earlier: $0, later: summary) }
+    }
     if options.json {
-        printJSON(DiskUsageReport(usage, depth: options.depth, count: options.count))
+        printJSON(DiskUsageReport(usage, depth: options.depth, count: options.count,
+                                  changes: comparison.map { DiskChangesReport($0, count: options.count) }))
     } else {
         print(diskUsageSummary(usage, depth: options.depth, count: options.count))
+        if let comparison {
+            print(diskChangesSummary(comparison, count: options.count))
+        } else if options.changes {
+            print("\nNo earlier scan of this folder was saved. This one is, so the next `otm du --changes` can compare with it.")
+        }
     }
 
 case "kill":

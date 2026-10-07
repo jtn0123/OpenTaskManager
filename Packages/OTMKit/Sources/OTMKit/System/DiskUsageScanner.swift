@@ -94,6 +94,9 @@ struct LargestKept<Element> {
 
     var count: Int { entries.count }
 
+    /// The smallest key kept.
+    var smallestKey: UInt64? { entries.first?.key }
+
     /// Whether an element this big would be kept.
     func accepts(_ key: UInt64) -> Bool {
         entries.count < limit || (limit > 0 && key > entries[0].key)
@@ -188,6 +191,8 @@ private final class DiskScan {
         var foldedAllocated: UInt64 = 0
         var foldedLogical: UInt64 = 0
         var isUnreadable = false
+        /// Unreadable folders in here, this one included.
+        var unreadableCount = 0
 
         /// Files in here are part of a package and aren't listed on their own.
         var insidePackage: Bool { isPackage || withinPackage }
@@ -215,6 +220,7 @@ private final class DiskScan {
         var children: [Int32] = []
         var omitted = false
         var unreadable = false
+        var unreadableCount = 0
 
         static let free = Node(name: "", kind: .file, allocated: 0, logical: 0, items: 0, category: .other, modified: nil)
     }
@@ -232,6 +238,8 @@ private final class DiskScan {
     private var liveNodes = 0
     private var threshold: UInt64 = 0
     private var largest: LargestKept<DiskFile>
+    /// Set once a file or package didn't make the list of the largest.
+    private var largestTurnedAway = false
     private var hardLinks = Set<UInt64>()
     private var typeCategories: [String: DiskCategory] = [:]
     private var allowedVolumes: [any NSObjectProtocol] = []
@@ -243,7 +251,7 @@ private final class DiskScan {
     private var folderCount = 0
     private var allocatedSoFar: UInt64 = 0
     private var unreadableFolders = 0
-    private var unreadableExamples: [String] = []
+    private var unreadablePaths: [String] = []
     private var hardLinkDuplicates = 0
     private var skippedVolumes: [String] = []
 
@@ -376,10 +384,19 @@ private final class DiskScan {
         guard !stack[top].insidePackage else { return }
         let modified = values.contentModificationDate
         offer(.file(FileChild(url: url, allocated: allocated, logical: logical, category: category, modified: modified)), size: allocated, to: top)
-        if largest.accepts(allocated) {
-            _ = largest.insert(DiskFile(path: url.path, isPackage: false, allocatedSize: allocated, logicalSize: logical,
-                                        category: category, modified: modified), key: allocated)
+        offerLargest(allocated) {
+            DiskFile(path: url.path, isPackage: false, allocatedSize: allocated, logicalSize: logical, category: category, modified: modified)
         }
+    }
+
+    /// Offers a file or package to the list of the largest, noting when one
+    /// doesn't make it. `file` is only made when it does.
+    private func offerLargest(_ allocated: UInt64, _ file: () -> DiskFile) {
+        guard largest.accepts(allocated) else {
+            largestTurnedAway = true
+            return
+        }
+        if largest.insert(file(), key: allocated) != nil { largestTurnedAway = true }
     }
 
     /// Closes the innermost open folder: turns it into a node (unless it's
@@ -393,6 +410,7 @@ private final class DiskScan {
             stack[top].allocated += frame.allocated
             stack[top].logical += frame.logical
             stack[top].items += frame.items + 1
+            stack[top].unreadableCount += frame.unreadableCount
             for index in frame.categoryBytes.indices { stack[top].categoryBytes[index] += frame.categoryBytes[index] }
             if frame.withinPackage { return -1 }
         }
@@ -421,14 +439,17 @@ private final class DiskScan {
         }
         let index = allocate(Node(name: frame.name, kind: frame.isPackage ? .package : .folder, allocated: frame.allocated,
                                   logical: frame.logical, items: frame.items, category: frame.dominantCategory, modified: frame.modified,
-                                  children: children, omitted: omitted, unreadable: frame.isUnreadable))
+                                  children: children, omitted: omitted, unreadable: frame.isUnreadable,
+                                  unreadableCount: frame.unreadableCount))
         guard !isRoot else { return index }
 
         let top = stack.count - 1
         offer(.node(index), size: frame.allocated, to: top)
-        if frame.isPackage, largest.accepts(frame.allocated) {
-            _ = largest.insert(DiskFile(path: frame.url.path, isPackage: true, allocatedSize: frame.allocated, logicalSize: frame.logical,
-                                        category: frame.dominantCategory, modified: frame.modified), key: frame.allocated)
+        if frame.isPackage {
+            offerLargest(frame.allocated) {
+                DiskFile(path: frame.url.path, isPackage: true, allocatedSize: frame.allocated, logicalSize: frame.logical,
+                         category: frame.dominantCategory, modified: frame.modified)
+            }
         }
         if liveNodes > request.nodeBudget { tighten() }
         return index
@@ -460,10 +481,11 @@ private final class DiskScan {
             // Not `standardizedFileURL`, which turns the enumerator's real
             // `/private/var` paths back into `/var`.
             let path = url.path
-            if unreadableExamples.count < 5 { unreadableExamples.append(path) }
-            if let index = stack.lastIndex(where: { $0.url.path == path }) {
-                stack[index].isUnreadable = true
-            }
+            if unreadablePaths.count < DiskUsage.unreadablePathLimit { unreadablePaths.append(path) }
+            // The folder itself if it's open, else whichever folder holds it.
+            let index = stack.lastIndex { $0.url.path == path }
+            if let index { stack[index].isUnreadable = true }
+            stack[index ?? stack.count - 1].unreadableCount += 1
         }
         errors.pending.removeAll()
     }
@@ -546,15 +568,17 @@ private final class DiskScan {
             let isRoot = offset == 0
             return DiskItem(id: offset, parent: parents[offset], name: isRoot ? rootFrame.name : node.name, kind: isRoot ? .folder : node.kind,
                             allocatedSize: node.allocated, logicalSize: node.logical, itemCount: node.items, category: node.category,
-                            modified: node.modified, children: ranges[offset], contentsOmitted: node.omitted, isUnreadable: node.unreadable)
+                            modified: node.modified, children: ranges[offset], contentsOmitted: node.omitted, isUnreadable: node.unreadable,
+                            unreadableCount: node.unreadableCount)
         }
         let categories = DiskCategory.allCases
             .map { DiskCategoryTotal(category: $0, allocatedSize: rootFrame.categoryBytes[$0.rawValue]) }
             .sorted { $0.allocatedSize != $1.allocatedSize ? $0.allocatedSize > $1.allocatedSize : $0.category < $1.category }
         return DiskUsage(
-            rootPath: rootPath, items: items, largestFiles: largest.sortedDescending(), categories: categories,
+            rootPath: rootPath, items: items, largestFiles: largest.sortedDescending(),
+            largestFilesCutoff: largestTurnedAway ? largest.smallestKey ?? .max : 0, categories: categories,
             fileCount: fileCount, folderCount: folderCount, unreadableFolders: unreadableFolders,
-            unreadableExamples: unreadableExamples, hardLinkDuplicates: hardLinkDuplicates, skippedVolumes: skippedVolumes,
+            unreadablePaths: unreadablePaths, hardLinkDuplicates: hardLinkDuplicates, skippedVolumes: skippedVolumes,
             detailThreshold: threshold, duration: duration, finishedAt: Date()
         )
     }

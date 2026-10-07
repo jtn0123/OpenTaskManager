@@ -129,6 +129,30 @@ struct TreemapLabelTests {
         #expect(TreemapLabel.tile(name: 50, size: 40, lineHeight: line, room: CGSize(width: 80, height: 12)) == .none)
     }
 
+    @Test func shortNamesDropOnlyTheExtension() {
+        #expect(TreemapLabel.shortName("Holiday-2026.mov") == "Holiday-2026")
+        #expect(TreemapLabel.shortName("Sketchpad.app") == "Sketchpad")
+        #expect(TreemapLabel.shortName("archive.tar.gz") == "archive.tar")
+        #expect(TreemapLabel.shortName("Movies") == nil)
+        #expect(TreemapLabel.shortName(".gitignore") == nil)
+    }
+
+    @Test func tileFallsBackToTheShortNameOnlyWhenItShowsMore() {
+        let line = 13.0
+        let room = CGSize(width: 80, height: 30)
+        // The whole name fits with its size: keep it.
+        #expect(TreemapLabel.tile(name: 70, shortName: 40, size: 40, lineHeight: line, room: room) == (.nameAndSize, false))
+        // Too wide whole; the short one fits with the size.
+        #expect(TreemapLabel.tile(name: 95, shortName: 60, size: 40, lineHeight: line, room: room) == (.nameAndSize, true))
+        // Only one line of room: the whole name if it fits, the short one if only that does.
+        let low = CGSize(width: 80, height: 20)
+        #expect(TreemapLabel.tile(name: 70, shortName: 40, size: 40, lineHeight: line, room: low) == (.name, false))
+        #expect(TreemapLabel.tile(name: 95, shortName: 60, size: 40, lineHeight: line, room: low) == (.name, true))
+        // Neither fits, or there's no short form: nothing, never a cut name.
+        #expect(TreemapLabel.tile(name: 95, shortName: 85, size: 40, lineHeight: line, room: room) == (.none, false))
+        #expect(TreemapLabel.tile(name: 95, shortName: nil, size: 40, lineHeight: line, room: room) == (.none, false))
+    }
+
     static let bounds = CGSize(width: 400, height: 300)
     static let tag = CGSize(width: 120, height: 40)
 

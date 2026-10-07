@@ -279,9 +279,12 @@ private struct StorageResultsView: View {
     var body: some View {
         let usage = result.usage
         let folder = usage.items.indices.contains(store.folder) ? usage.items[store.folder] : usage.root
+        // This scan's comparison, once saved; the treemap shows it in Changes mode.
+        let comparison = store.comparison.flatMap { $0.later.scannedAt == usage.finishedAt ? $0 : nil }
+        let changes = store.list == .changes ? comparison.map(TreemapChanges.init) : nil
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                SummaryCard(result: result)
+                SummaryCard(store: store, result: result, comparison: comparison)
                     .frame(minWidth: 240, idealWidth: 320, maxWidth: 340)
                 CategoriesCard(usage: usage)
                     .frame(maxWidth: .infinity)
@@ -289,7 +292,7 @@ private struct StorageResultsView: View {
             .fixedSize(horizontal: false, vertical: true)
             GeometryReader { proxy in
                 HStack(spacing: 12) {
-                    TreemapCard(store: store, result: result, folder: folder, hover: hover, open: open)
+                    TreemapCard(store: store, result: result, folder: folder, hover: hover, changes: changes, open: open)
                     StorageListCard(store: store, usage: usage, folder: folder, hover: hover, open: open, show: show)
                         .frame(width: min(max(proxy.size.width * 0.36, 250), 340))
                 }
@@ -307,24 +310,29 @@ private struct StorageResultsView: View {
         store.folder = id
     }
 
-    /// Opens the folder holding a large file and outlines the tile it's in.
-    private func show(_ file: DiskFile) {
+    /// Opens the folder holding `path` and, if it's in this scan, outlines
+    /// the tile it's in: its own, or the one for the folder or smaller items
+    /// holding it.
+    private func show(_ path: String, exists: Bool) {
         let usage = result.usage
-        let folder = usage.closestFolder(to: file.path)
+        let folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent)
         let base = usage.path(of: folder.id)
-        let next = file.path.dropFirst(base.count).split(separator: "/").first.map(String.init)
+        let next = path.dropFirst(base.count).split(separator: "/").first.map(String.init)
         let children = usage.children(of: folder)
-        let target = children.first { $0.name == next } ?? children.first { $0.kind == .smallerItems }
+        let target = exists ? children.first { $0.name == next } ?? children.first { $0.kind == .smallerItems } : nil
         hover.enter(nil)
         store.folder = folder.id
         hover.marked = target.map { (folder: folder.id, item: $0.id) }
-        hover.markedFile = file.path
+        hover.markedFile = path
     }
 }
 
-/// The scan's total, with the counts behind it.
+/// The scan's total, with the counts behind it and what changed since the
+/// last scan of the same place.
 private struct SummaryCard: View {
+    let store: StorageStore
     let result: StorageResult
+    let comparison: DiskScanComparison?
 
     var body: some View {
         let usage = result.usage
@@ -343,12 +351,32 @@ private struct SummaryCard: View {
                     .help("The files' own lengths, as Finder's Size column shows them")
                 Text("\(usage.fileCount.formatted()) files in \(usage.folderCount.formatted()) folders")
                 Text("Scanned at \(usage.finishedAt.formatted(date: .omitted, time: .shortened)), took \(Self.duration(usage.duration))")
+                if let comparison { change(comparison) }
             }
             .font(.metadata)
             .foregroundStyle(.secondaryText)
             .monospacedDigit()
         }
     }
+
+    /// "+200 MB since 9:59 AM", which opens the Changes list.
+    private func change(_ comparison: DiskScanComparison) -> some View {
+        let total = comparison.total
+        let direction = total.direction(ignoringUnder: StorageChangeStyle.threshold(for: usage.root.allocatedSize))
+        return Button {
+            store.list = .changes
+        } label: {
+            HStack(spacing: 4) {
+                Text(StorageChangeStyle.caption(total, direction)).foregroundStyle(StorageChangeStyle.textStyle(direction)).fontWeight(.medium)
+                Text("since \(StorageChangeStyle.when(comparison.earlier.scannedAt))")
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold))
+            }
+        }
+        .buttonStyle(.plain)
+        .help("Show what changed since the scan at \(comparison.earlier.scannedAt.formatted(date: .abbreviated, time: .shortened))")
+    }
+
+    private var usage: DiskUsage { result.usage }
 
     private static func duration(_ seconds: TimeInterval) -> String {
         if seconds < 0.1 { return "under 0.1 s" }
@@ -403,6 +431,7 @@ private struct TreemapCard: View {
     let result: StorageResult
     let folder: DiskItem
     let hover: StorageHover
+    let changes: TreemapChanges?
     var open: (Int) -> Void
     @State private var copied = false
 
@@ -437,7 +466,7 @@ private struct TreemapCard: View {
             }
             Group {
                 if usage.children(of: folder).contains(where: { $0.allocatedSize > 0 }) {
-                    StorageTreemap(usage: usage, folder: folder, hover: hover) { item in
+                    StorageTreemap(usage: usage, folder: folder, hover: hover, changes: changes) { item in
                         open(item.id)
                     } menu: { item in
                         StorageItemMenu(path: usage.path(of: item.id), isFolder: item.isFolder, store: store)
@@ -448,15 +477,21 @@ private struct TreemapCard: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 8) {
-                TreemapCaption(usage: usage, folder: folder, hover: hover)
+                TreemapCaption(usage: usage, folder: folder, hover: hover, changes: changes)
                 Spacer(minLength: 8)
-                Text("\(Format.bytes(folder.allocatedSize)) · \(folder.itemCount.formatted()) items")
+                Text(caption)
                     .font(.metadata)
                     .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .fixedSize()
             }
         }
+    }
+
+    /// The open folder's size, or in Changes mode which scan the colours compare with.
+    private var caption: String {
+        if let changes { return "Since \(StorageChangeStyle.when(changes.since))" }
+        return "\(Format.bytes(folder.allocatedSize)) · \(folder.itemCount.formatted()) items"
     }
 }
 
@@ -513,7 +548,7 @@ private struct StorageFooter: View {
                         .buttonStyle(.link)
                 }
                 .lineLimit(1)
-                .help(usage.unreadableExamples.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
+                .help(usage.unreadablePaths.prefix(5).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
             }
             Text(Self.explanation)
                 .foregroundStyle(.secondaryText)
