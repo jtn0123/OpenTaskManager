@@ -19,6 +19,9 @@ final class HistoryRecordingStore {
     private(set) var opened: OpenedRecording?
     /// The sessions saved in the live recording, oldest first.
     private(set) var sessions: [RecordingSession] = []
+    /// How the recording file's replay is going while the History page shows
+    /// it, for the toolbar; nil on the live history and on every other page.
+    private(set) var replay: HistoryReplayStatus?
 
     @ObservationIgnored private var launchSpeed: Double?
     @ObservationIgnored private var handledLaunchArguments = false
@@ -26,6 +29,11 @@ final class HistoryRecordingStore {
     /// The sessions as the page last read them; only a change redraws what shows them.
     func update(_ sessions: [RecordingSession]) {
         if sessions != self.sessions { self.sessions = sessions }
+    }
+
+    /// The replay's state as the page last saw it; only a change redraws the toolbar.
+    func report(_ replay: HistoryReplayStatus?) {
+        if replay != self.replay { self.replay = replay }
     }
 
     // MARK: - Recording files
@@ -278,5 +286,60 @@ struct HistoryRecordingsMenu: View {
             Label("Recordings", systemImage: "record.circle")
         }
         .help("Open a recording file, or save a session as one")
+    }
+}
+
+/// How a recording file's replay is going: playing at which speed, or paused.
+struct HistoryReplayStatus: Equatable {
+    let isPlaying: Bool
+    /// How many times the recording's own pace.
+    let speed: Double
+
+    /// "Recording · Replay 10×", or "Recording · Replay paused".
+    var label: String {
+        "Recording · Replay " + (isPlaying ? "\(Int(speed))×" : "paused")
+    }
+}
+
+/// Tells the toolbar how replay is going while the History page shows a
+/// recording file, and that it's over once the file closes or the page goes.
+/// It alone reads the player's state, so play and pause redraw nothing else.
+struct HistoryReplayReporter: View {
+    let player: HistoryPlayer
+    let store: HistoryRecordingStore
+    /// Showing a recording file rather than the live history.
+    let showsFile: Bool
+
+    var body: some View {
+        let status = showsFile ? HistoryReplayStatus(isPlaying: player.isPlaying, speed: player.speed) : nil
+        Color.clear
+            .onChange(of: status, initial: true) { store.report(status) }
+            .onDisappear { store.report(nil) }
+    }
+}
+
+/// The toolbar's word on a recording file's replay, after the live badge
+/// while the History page shows one, in the replay's tint: so replay never
+/// reads as this Mac's live figures.
+struct HistoryReplayBadge: View {
+    let status: HistoryReplayStatus
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: status.isPlaying ? "play.fill" : "pause.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(HistorySessionStyle.tint)
+            Text(status.label)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+        }
+        .font(.subheadline)
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(HistorySessionStyle.tint.opacity(0.15), in: Capsule())
+        .fixedSize()
+        .help(status.isPlaying ? "The recording file on the History page is playing back at \(Int(status.speed))× its own pace"
+            : "The recording file on the History page is open, its replay paused. Play it from the timeline.")
     }
 }

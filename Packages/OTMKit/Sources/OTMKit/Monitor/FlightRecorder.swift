@@ -128,7 +128,7 @@ public actor FlightRecorder {
             let time = Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
             points.append(HistoryPoint(time: time, values: Self.values(statement, from: 1)))
         }
-        return HistoryPoint.segmented(points, gap: bucket * 2.5)
+        return HistoryPoint.segmented(points, gap: bucket * HistoryGap.spacing)
     }
 
     /// Every record between two dates, oldest first.

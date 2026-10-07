@@ -1,11 +1,12 @@
 import OTMKit
 import SwiftUI
 
-/// The figures at the moment picked on the graphs (previewed under the
-/// pointer, pinned by a click, or else the latest), and the apps that were
+/// The figures at the moment shown (previewed under the pointer, pinned by a
+/// click, where playback is, or else the latest), and the apps that were
 /// busiest then, read from the recording for that stretch.
 struct HistoryMomentPanel: View {
     let scrubber: HistoryScrubber
+    let player: HistoryPlayer
     let points: [HistoryPoint]
     /// Seconds each point averages.
     let bucket: TimeInterval
@@ -27,16 +28,15 @@ struct HistoryMomentPanel: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Whether the panel follows the pointer, a pinned moment or the latest,
-    /// and the moment's time, large.
+    /// Whether the panel follows the pointer, a pinned moment, playback or
+    /// the latest, and the moment's time, large; then where playback is,
+    /// while the panel shows another moment.
     private func heading(_ point: HistoryPoint) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center) {
                 HistoryMomentBadge(scrubber: scrubber)
                 Spacer()
-                if scrubber.pinned != nil {
-                    HistoryReturnButton(scrubber: scrubber, title: "Return to \(scrubber.endName.lowercased())")
-                }
+                HistoryMomentAction(scrubber: scrubber, player: player)
             }
             Text(HistoryMoment.label(point.time, bucket: bucket))
                 .font(.title2.weight(.semibold))
@@ -45,6 +45,9 @@ struct HistoryMomentPanel: View {
                  : "Average of the \(Format.timeSpan(bucket)) up to this time")
                 .font(.subheadline)
                 .foregroundStyle(.secondaryText)
+            if let playback = scrubber.playback(bucket: bucket) {
+                playback.font(.subheadline)
+            }
             if let hint = scrubber.hint {
                 Text(hint).font(.subheadline).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
             }
@@ -58,6 +61,7 @@ struct HistoryMomentPanel: View {
 /// moment to the next, so the charts under the pointer never shift.
 struct HistoryMomentSummary: View {
     let scrubber: HistoryScrubber
+    let player: HistoryPlayer
     let points: [HistoryPoint]
     /// Seconds each point averages.
     let bucket: TimeInterval
@@ -85,14 +89,19 @@ struct HistoryMomentSummary: View {
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
                     .fixedSize()
-                Text(bucket <= FlightRecorder.span ? "\(Int(FlightRecorder.span)) s average" : "\(Format.timeSpan(bucket)) average")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if scrubber.pinned != nil {
-                    HistoryReturnButton(scrubber: scrubber, title: scrubber.endName)
+                // Where playback is takes the average's place while another moment shows.
+                Group {
+                    if let playback = scrubber.playback(bucket: bucket) {
+                        playback
+                    } else {
+                        Text(bucket <= FlightRecorder.span ? "\(Int(FlightRecorder.span)) s average" : "\(Format.timeSpan(bucket)) average")
+                            .foregroundStyle(.secondaryText)
+                    }
                 }
+                .font(.subheadline)
+                .lineLimit(1)
+                Spacer(minLength: 0)
+                HistoryMomentAction(scrubber: scrubber, player: player)
                 Button {
                     showsDetails.toggle()
                 } label: {
@@ -249,15 +258,19 @@ struct HistoryMomentDetails: View {
     }
 }
 
-/// "Latest" (or a file's "End"), "Pinned", "Replay" or "Preview": whether
-/// the moment shown follows the recording, a click, playback, or the pointer.
+/// "Preview", "Pinned", "Playing" or "Paused", else "Latest" (a file's
+/// "End"): whether the moment shown follows the pointer, a click, playback
+/// or the recording, each in its marker's colour on the charts and the rail.
 private struct HistoryMomentBadge: View {
     let scrubber: HistoryScrubber
 
     var body: some View {
-        let (state, color): (String, Color) = scrubber.hovered != nil ? ("Preview", .secondary)
-            : scrubber.isPlaying ? ("Replay", HistorySessionStyle.tint)
-            : scrubber.pinned != nil ? ("Pinned", .accentColor) : (scrubber.endName, .green)
+        let (state, color): (String, Color) = switch scrubber.focus {
+        case .preview: ("Preview", .secondary)
+        case .pinned: ("Pinned", .accentColor)
+        case .playback(_, let playing): (playing ? "Playing" : "Paused", HistorySessionStyle.tint)
+        case .end: (scrubber.endName, .green)
+        }
         Text(state.uppercased())
             .font(.caption.weight(.bold))
             .foregroundStyle(color)
@@ -268,30 +281,62 @@ private struct HistoryMomentBadge: View {
     }
 }
 
-/// Unpins the moment, so the panel follows the latest again. Esc does the same.
-private struct HistoryReturnButton: View {
+/// The way back, which Esc takes too: from a moment pinned apart from
+/// playback, to where playback is ("Go to playing moment"); from a pinned
+/// moment alone, or from playback, to the latest (a file's end). None while
+/// the panel already follows the latest.
+private struct HistoryMomentAction: View {
     let scrubber: HistoryScrubber
-    let title: String
+    let player: HistoryPlayer
 
     var body: some View {
-        Button {
-            scrubber.pinned = nil
-        } label: {
-            Label(title, systemImage: "arrow.uturn.forward")
+        if scrubber.pinned != nil || scrubber.playhead != nil {
+            let toPlayback = scrubber.pinned != nil && scrubber.playhead != nil
+            Button {
+                if scrubber.pinned != nil {
+                    scrubber.pin(nil)
+                } else {
+                    player.stop(scrubber)
+                }
+            } label: {
+                Label(title(toPlayback), systemImage: toPlayback ? "play.circle" : "arrow.uturn.forward")
+            }
+            .controlSize(.small)
+            .fixedSize()
+            .keyboardShortcut(.cancelAction)
+            .help(help(toPlayback))
         }
-        .controlSize(.small)
-        .fixedSize()
-        .keyboardShortcut(.cancelAction)
-        .help(scrubber.showsFile ? "Unpin the moment and go back to the recording's end (Esc)"
-            : "Unpin the moment and follow the latest again (Esc)")
+    }
+
+    private func title(_ toPlayback: Bool) -> String {
+        guard toPlayback else { return "Return to \(scrubber.endName.lowercased())" }
+        return scrubber.isPlaying ? "Go to playing moment" : "Go to paused moment"
+    }
+
+    private func help(_ toPlayback: Bool) -> String {
+        if toPlayback { return "Unpin this moment and show where playback is again (Esc)" }
+        let back = scrubber.showsFile ? "go back to the recording's end" : "follow the latest again"
+        return scrubber.pinned != nil ? "Unpin the moment and \(back) (Esc)" : "Stop playback and \(back) (Esc)"
     }
 }
 
 private extension HistoryScrubber {
-    /// How to pick a moment, while none is pinned.
+    /// How to pick a moment, while the panel shows a preview or the latest.
     var hint: String? {
-        guard pinned == nil else { return nil }
-        return hovered == nil ? "Click or drag on a graph or the timeline to pin a moment." : "Click to pin this moment."
+        switch focus {
+        case .preview: "Click to pin this moment."
+        case .end: "Click or drag on a graph or the timeline to pin a moment."
+        case .pinned, .playback: nil
+        }
+    }
+
+    /// Where playback is, while the panel shows another moment: "Playing
+    /// at 10:14:30 AM" after a play or pause glyph in the replay's tint.
+    func playback(bucket: TimeInterval) -> Text? {
+        guard let playhead, focus.time != playhead else { return nil }
+        let glyph = Text(Image(systemName: isPlaying ? "play.fill" : "pause.fill")).foregroundStyle(HistorySessionStyle.tint)
+        return glyph + Text(" \(isPlaying ? "Playing" : "Paused") at \(HistoryMoment.label(playhead, bucket: bucket))")
+            .foregroundStyle(.secondaryText)
     }
 }
 
