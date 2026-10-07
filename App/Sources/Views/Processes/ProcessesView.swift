@@ -8,20 +8,42 @@ struct ProcessesView: View {
     @AppStorage("processSortAscending") private var ascending = false
     @AppStorage("heatmap") private var heatmap = true
     @AppStorage("showInspector") private var showInspector = true
+    @AppStorage("hiddenProcessColumns") private var hiddenColumns = HiddenProcessColumns.defaults
     @State private var search = ""
     @State private var selection: Set<Int32> = []
+    /// Width the table needs for its visible columns, as it last measured.
+    @State private var tableMinimum = ProcessColumn.defaultTableMinimum
+    /// The window is too narrow for the table and the inspector side by side.
+    @State private var isNarrow = false
+    /// In a narrow window, the inspector covers the table.
+    @State private var showsFullDetail = false
 
     var body: some View {
         VStack(spacing: 0) {
             if let snapshot = model.snapshot {
-                ProcessOutlineView(
-                    configuration: configuration(for: snapshot),
-                    selection: $selection,
-                    sortKey: $sortKey,
-                    ascending: $ascending,
-                    model: model,
-                    onShowInspector: { showInspector = true }
-                )
+                // The table gets the full width until there's something to inspect.
+                InspectorSplit(
+                    listMinimum: tableMinimum,
+                    wantsInspector: showInspector && !selection.isEmpty,
+                    coversList: $showsFullDetail,
+                    isNarrow: $isNarrow,
+                    widthKey: "processInspectorWidth",
+                    backTitle: "Processes"
+                ) {
+                    ProcessOutlineView(
+                        // Covered by the inspector, the table is hidden and not updated.
+                        configuration: isNarrow && showsFullDetail ? nil : configuration(for: snapshot),
+                        selection: $selection,
+                        sortKey: $sortKey,
+                        ascending: $ascending,
+                        model: model,
+                        onShowInspector: openDetails,
+                        onToggleColumn: { hiddenColumns.toggle($0) },
+                        onMinimumWidthChange: { tableMinimum = $0 }
+                    )
+                } detail: {
+                    inspector
+                }
                 Divider()
                 StatusBar(snapshot: snapshot)
                     .onAppear(perform: selectRequestedProcess)
@@ -42,6 +64,9 @@ struct ProcessesView: View {
                 .help("Group helpers under their app, show the parent/child tree, or list every process")
             }
             ToolbarItem {
+                columnsMenu
+            }
+            ToolbarItem {
                 Button {
                     model.endTask(Array(selection))
                 } label: {
@@ -51,28 +76,70 @@ struct ProcessesView: View {
                 .help("Quit the selected processes (Delete)")
             }
             ToolbarItem {
-                Button {
-                    showInspector.toggle()
-                } label: {
+                Button(action: toggleDetails) {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
-                .help(showInspector ? "Hide the details pane" : "Show details when a process is selected")
+                .disabled(isNarrow && !showsFullDetail && selection.isEmpty)
+                .help(detailsHelp)
             }
         }
-        // The table gets the full width until there's something to inspect.
-        .inspector(isPresented: Binding(get: { showInspector && !selection.isEmpty }, set: { showInspector = $0 })) {
-            Group {
-                if let pid = selection.first, selection.count == 1, model.process(pid) != nil {
-                    ProcessInspectorView(pid: pid)
-                } else {
-                    ContentUnavailableView(
-                        selection.count > 1 ? "\(selection.count) processes selected" : "No process selected",
-                        systemImage: "info.circle",
-                        description: Text("Select a single process to see its details.")
-                    )
-                }
+    }
+
+    @ViewBuilder private var inspector: some View {
+        if let pid = selection.first, selection.count == 1, model.process(pid) != nil {
+            ProcessInspectorView(pid: pid)
+        } else if let pid = selection.first, selection.count == 1 {
+            ContentUnavailableView(
+                "Process ended",
+                systemImage: "info.circle",
+                description: Text("PID \(String(pid)) is no longer running.")
+            )
+        } else {
+            ContentUnavailableView(
+                selection.count > 1 ? "\(selection.count) processes selected" : "No process selected",
+                systemImage: "info.circle",
+                description: Text("Select a single process to see its details.")
+            )
+        }
+    }
+
+    /// Optional columns, also in the header's context menu. Hiding one makes
+    /// room rather than squeezing the others' headings.
+    private var columnsMenu: some View {
+        Menu {
+            ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
+                Toggle(column.title, isOn: Binding(
+                    get: { !hiddenColumns.contains(column) },
+                    set: { if $0 == hiddenColumns.contains(column) { hiddenColumns.toggle(column) } }
+                ))
             }
-            .inspectorColumnWidth(min: 280, ideal: 320, max: 480)
+            Divider()
+            Button("Default Columns") { hiddenColumns = .defaults }
+        } label: {
+            Label("Columns", systemImage: "tablecells")
+        }
+        .help("Choose the table's columns")
+    }
+
+    private var detailsHelp: String {
+        if isNarrow {
+            return showsFullDetail ? "Back to the process list" : "Show the selected process's details"
+        }
+        return showInspector ? "Hide the details pane" : "Show details when a process is selected"
+    }
+
+    /// Double-click, Get Info and requests from other pages: the pane in a
+    /// wide window, the full-width details in a narrow one.
+    private func openDetails() {
+        showInspector = true
+        if isNarrow { showsFullDetail = true }
+    }
+
+    private func toggleDetails() {
+        if isNarrow {
+            if showsFullDetail { showsFullDetail = false } else { openDetails() }
+        } else {
+            showInspector.toggle()
         }
     }
 
@@ -85,13 +152,13 @@ struct ProcessesView: View {
             guard model.process(pid) != nil else { return }
             search = ""
             selection = [pid]
-            showInspector = true
+            openDetails()
             return
         }
         guard selection.isEmpty, let pid = LaunchArgument.string("openProcess").flatMap(Int32.init),
               model.process(pid) != nil else { return }
         selection = [pid]
-        showInspector = true
+        openDetails()
     }
 
     private func configuration(for snapshot: SystemSnapshot) -> ProcessTableConfiguration {
@@ -104,6 +171,7 @@ struct ProcessesView: View {
         return ProcessTableConfiguration(
             nodes: ProcessTreeBuilder.sort(nodes, by: sortKey, ascending: ascending),
             headerTotals: headerTotals(snapshot),
+            hiddenColumns: hiddenColumns,
             cpuScale: model.cpuScale,
             heatmap: heatmap,
             fastTierName: model.topology.tiers.first?.name ?? "P-core"
@@ -140,8 +208,12 @@ private struct StatusBar: View {
             }
             Spacer()
             if snapshot.processes.contains(where: \.isRestricted) {
+                // Gives way first in a narrow window, on one line; the tooltip has it all.
                 Text("System processes show CPU and memory only")
-                    .help("macOS only reveals footprint, power, GPU and disk use for your own processes. A privileged helper will lift this.")
+                    .lineLimit(1)
+                    .layoutPriority(-1)
+                    .help("System processes show CPU and memory only: macOS only reveals footprint, power, GPU and disk use "
+                        + "for your own processes. A privileged helper will lift this.")
             }
             Text("Up \(Format.duration(snapshot.uptime))")
         }
