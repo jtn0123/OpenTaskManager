@@ -49,7 +49,8 @@ extension HistoryMoment {
 /// the lanes show; saved sessions, the events (in a thin lane of their own)
 /// and the stretches compared (as labelled brackets on the track) ride
 /// above the track, and the controls to mark, compare, export and play
-/// back sit under it.
+/// back sit under it. Scrolled down among the charts, it folds to a strip
+/// (`HistoryRailStrip`); opened from there, its Fold button folds it again.
 ///
 /// The track spans the same width as the charts' plots, so the handle sits
 /// over their markers. Only its handle, the lanes above it and the
@@ -69,6 +70,61 @@ struct HistoryRail: View {
     let domain: ClosedRange<Date>
     /// Seconds each point averages.
     let bucket: TimeInterval
+    /// Folds the card, opened from the strip, back to it; nil shows no control for that.
+    var onFold: (() -> Void)?
+
+    var body: some View {
+        let hasEvents = events.contains { domain.contains($0.time) }
+        let hasSessions = recorder != nil && store.sessions.contains { $0.end >= domain.lowerBound && $0.start <= domain.upperBound }
+        // Tinted while comparing, so the mode reads at a glance.
+        Card(tint: scrubber.comparing ? HistoryCompareDraft.tintA : nil) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    HistoryRailKey(hasEvents: hasEvents, hasSessions: hasSessions)
+                    if let onFold {
+                        Button(action: onFold) {
+                            Label("Fold", systemImage: "chevron.up")
+                        }
+                        .controlSize(.small)
+                        .fixedSize()
+                        .help("Fold the timeline to a strip while the page is scrolled down among the charts")
+                    }
+                }
+                .padding(.bottom, 3)
+                if recorder != nil {
+                    HistorySessionLane(scrubber: scrubber, store: store, domain: domain)
+                }
+                if hasEvents {
+                    HistoryEventLane(scrubber: scrubber, player: player, events: events, points: points, domain: domain, bucket: bucket)
+                }
+                // The brackets sit right on the track, their sides running on through it.
+                VStack(alignment: .leading, spacing: 0) {
+                    HistoryCompareLaneSlot(scrubber: scrubber, domain: domain)
+                    HistoryRailTrack(scrubber: scrubber, recorder: recorder, points: points, gaps: gaps, domain: domain, bucket: bucket)
+                }
+                HistoryRailLabels(domain: domain)
+            }
+            HistoryTimelineControls(scrubber: scrubber, player: player, store: store, recorder: recorder, bucket: bucket)
+        }
+    }
+}
+
+/// The rail's track, the whole card's and the strip's: recorded time and
+/// gaps (`HistoryCoverage`), A and B while comparing, and the moments shown.
+/// Hovering previews a moment or names a gap; a click or drag moves
+/// playback or pins a moment, a Shift-drag marks a session, and while
+/// comparing a drag picks A or B. `compact` marks the moments with slim
+/// ticks rather than pills, for the strip, whose caption names them.
+struct HistoryRailTrack: View {
+    let scrubber: HistoryScrubber
+    /// The live recording, where a Shift-drag marks a session; nil for a file.
+    let recorder: FlightRecorder?
+    let points: [HistoryPoint]
+    let gaps: [HistoryGap]
+    let domain: ClosedRange<Date>
+    let bucket: TimeInterval
+    var height: CGFloat = 22
+    var compact = false
 
     /// What a drag along the track does, decided as it starts.
     private enum Drag {
@@ -84,38 +140,17 @@ struct HistoryRail: View {
     @State private var drag: Drag?
 
     var body: some View {
-        let hasEvents = events.contains { domain.contains($0.time) }
-        let hasSessions = recorder != nil && store.sessions.contains { $0.end >= domain.lowerBound && $0.start <= domain.upperBound }
-        // Tinted while comparing, so the mode reads at a glance.
-        Card(tint: scrubber.comparing ? HistoryCompareDraft.tintA : nil) {
-            VStack(alignment: .leading, spacing: 3) {
-                HistoryRailKey(hasEvents: hasEvents, hasSessions: hasSessions)
-                    .padding(.bottom, 3)
-                if recorder != nil {
-                    HistorySessionLane(scrubber: scrubber, store: store, domain: domain)
-                }
-                if hasEvents {
-                    HistoryEventLane(scrubber: scrubber, player: player, events: events, points: points, domain: domain, bucket: bucket)
-                }
-                // The brackets sit right on the track, their sides running on through it.
-                VStack(alignment: .leading, spacing: 0) {
-                    HistoryCompareLaneSlot(scrubber: scrubber, domain: domain)
-                    track
-                }
-                HistoryRailLabels(domain: domain)
-            }
-            HistoryTimelineControls(scrubber: scrubber, player: player, store: store, recorder: recorder, bucket: bucket)
-        }
-    }
-
-    private var track: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
             ZStack(alignment: .leading) {
                 HistoryCompareTrackBands(scrubber: scrubber, domain: domain, width: width)
                 HistoryCoverage(points: points, gaps: gaps, domain: domain, bucket: bucket, width: width)
                 HistoryRailGapOutline(scrubber: scrubber, domain: domain, width: width)
-                HistoryRailHandle(scrubber: scrubber, domain: domain, bucket: bucket, width: width)
+                if compact {
+                    HistoryRailTicks(scrubber: scrubber, domain: domain, width: width, height: height)
+                } else {
+                    HistoryRailHandle(scrubber: scrubber, domain: domain, bucket: bucket, width: width)
+                }
             }
             .frame(width: width, height: geometry.size.height)
             .contentShape(Rectangle())
@@ -129,7 +164,7 @@ struct HistoryRail: View {
                 .onChanged { value in dragged(from: value.startLocation.x, to: value.location.x, width: width) }
                 .onEnded { _ in ended() })
         }
-        .frame(height: 22)
+        .frame(height: height)
         .help("Click or drag along the timeline to move playback, or to pin a moment when there's none. "
             + (recorder == nil ? "" : "Shift-drag along the timeline to mark a session. ")
             + "While comparing, drag along it to pick A or B. Hover a hatched gap to see when nothing was recorded.")
@@ -387,7 +422,7 @@ private struct HistorySessionLane: View {
 /// wasn't running, the Mac slept) hatched between dashed edges, at least a
 /// couple of points wide, so even a short one shows and can be hovered. One
 /// canvas, drawn again only on a load or a resize.
-private struct HistoryCoverage: View {
+struct HistoryCoverage: View {
     let points: [HistoryPoint]
     let gaps: [HistoryGap]
     let domain: ClosedRange<Date>
@@ -556,5 +591,53 @@ private struct HistoryRailHandle: View {
             .overlay(Capsule().strokeBorder(border, style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 2] : [])))
             .fixedSize()
             .alignmentGuide(.leading) { size in -min(max(x - size.width / 2, 0), width - size.width) }
+    }
+}
+
+/// The strip's moments on its slim track: a tick where playback is, in the
+/// replay's tint, one at a pinned moment in the accent colour, a dashed one
+/// at a moment the pointer previews, and one at the right end while nothing
+/// is pinned or played. The strip's caption says what each is.
+private struct HistoryRailTicks: View {
+    let scrubber: HistoryScrubber
+    let domain: ClosedRange<Date>
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        let pinned = scrubber.pinned.flatMap { domain.contains($0) ? $0 : nil }
+        let playhead = scrubber.playhead.flatMap { domain.contains($0) ? $0 : nil }
+        if pinned == nil, playhead == nil {
+            tick(at: width, tint: Color.accentColor)
+        }
+        if let playhead {
+            tick(at: x(of: playhead), tint: HistorySessionStyle.tint)
+        }
+        if let pinned {
+            tick(at: x(of: pinned), tint: Color.accentColor)
+        }
+        if let hovered = scrubber.hovered, hovered != pinned, hovered != playhead, domain.contains(hovered) {
+            let place = min(max(x(of: hovered) - 0.75, 0), width - 1.5)
+            Rectangle()
+                .stroke(Color.primary.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [2, 2]))
+                .frame(width: 1.5, height: height + 2)
+                .alignmentGuide(.leading) { _ in -place }
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func x(of time: Date) -> CGFloat {
+        HistoryMoment.x(of: time, width: width, domain: domain)
+    }
+
+    /// A tick centred on `x`, kept within the track, with a light edge so it
+    /// reads over the recorded bar.
+    private func tick(at x: CGFloat, tint: Color) -> some View {
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(tint)
+            .overlay(RoundedRectangle(cornerRadius: 1.5).strokeBorder(Color(nsColor: .controlBackgroundColor), lineWidth: 0.5))
+            .frame(width: 4, height: height + 2)
+            .alignmentGuide(.leading) { _ in -min(max(x - 2, 0), width - 4) }
+            .allowsHitTesting(false)
     }
 }

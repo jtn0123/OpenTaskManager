@@ -12,14 +12,44 @@ struct HistoryCompareDraft: Equatable {
         case b
     }
 
+    /// A and B as picked: B nil while it's the same length before A.
+    struct Stretches: Equatable {
+        var a: ClosedRange<Date>?
+        var b: ClosedRange<Date>?
+    }
+
     var a: ClosedRange<Date>?
     /// Nil compares A with the same length just before it.
     var b: ClosedRange<Date>?
     /// Which one a drag along the rail picks.
     var picking = Side.a
+    /// A and B before Compare Recorded Overlap narrowed them, for the way back.
+    private var beforeOverlap: Stretches?
+    /// What it narrowed them to, so the way back shows only while they're unchanged.
+    private var overlap: Stretches?
 
     /// What A is compared with.
     var resolvedB: ClosedRange<Date>? { b ?? a.map(HistoryComparison.before) }
+
+    /// Whether A and B are still the recorded overlap they were narrowed to.
+    var showsOverlap: Bool { beforeOverlap != nil && overlap == Stretches(a: a, b: b) }
+
+    /// Narrows A and B to `overlap`, keeping them as they were for the way back.
+    mutating func narrow(to overlap: HistoryComparison.Overlap) {
+        beforeOverlap = Stretches(a: a, b: b)
+        a = overlap.a
+        b = overlap.b
+        self.overlap = Stretches(a: a, b: b)
+    }
+
+    /// A and B as they were before they were narrowed to their overlap.
+    mutating func widen() {
+        guard showsOverlap, let beforeOverlap else { return }
+        a = beforeOverlap.a
+        b = beforeOverlap.b
+        self.beforeOverlap = nil
+        overlap = nil
+    }
 
     /// Starts with `selection` (a picked session, say) as A, then picks B; else picks A.
     init(selection: ClosedRange<Date>? = nil) {
@@ -42,6 +72,12 @@ struct HistoryCompareDraft: Equatable {
     static func letter(_ side: Side) -> String { side == .a ? "A" : "B" }
 }
 
+extension HistoryCompareDraft.Side {
+    init(_ side: HistoryComparison.Side) {
+        self = side == .a ? .a : .b
+    }
+}
+
 /// The comparison's summary under the rail, while two stretches are
 /// compared. It alone reads the comparison, so picking stretches never
 /// redraws the charts.
@@ -52,21 +88,31 @@ struct HistoryComparisonSlot: View {
     let bucket: TimeInterval
     /// The latest point, so a live comparison reads again as records arrive.
     let revision: Date?
+    /// Where the card is noted as a section of the page, for the folded rail.
+    let pageScroll: HistoryPageScroll
 
     var body: some View {
         if let draft = scrubber.compare {
-            HistoryComparisonCard(draft: draft, recorder: recorder, bucket: bucket, revision: revision)
+            HistoryComparisonCard(scrubber: scrubber, draft: draft, recorder: recorder, bucket: bucket, revision: revision)
+                .historySection("Compare", scroll: pageScroll)
         }
     }
 }
 
 /// A against B at a glance: each stretch's times, how much of it was
 /// sampled and the gaps left out, then the average and peak of CPU,
-/// memory, disk and network in both, with how A differs. Every figure
-/// (totals, power and GPU), the apps busier in A and the events in each
-/// are a click away. Gaps are left out of every figure, and it says so.
+/// memory, disk and network in both, under headings that say how much of
+/// each was recorded, with how A differs. When too little of either was
+/// recorded, or much less of one than the other (`HistoryComparison.limitation`),
+/// a notice over the figures says so, the thinner side's figures recede, and
+/// where both hold records at the same offsets for long enough, they can be
+/// narrowed to that overlap. Every figure (totals, power and GPU), the apps
+/// busier in A and the events in each are a click away. Gaps are left out
+/// of every figure, and it says so.
 private struct HistoryComparisonCard: View {
     @Environment(AppModel.self) private var model
+    /// Where the overlap's narrowing and the way back go; the body reads it not.
+    let scrubber: HistoryScrubber
     let draft: HistoryCompareDraft
     let recorder: FlightRecorder?
     let bucket: TimeInterval
@@ -96,11 +142,17 @@ private struct HistoryComparisonCard: View {
                     Spacer(minLength: 0)
                     detailsButton
                 }
+                if draft.showsOverlap {
+                    overlapNote
+                } else if let comparison, let limitation = comparison.limitation {
+                    notice(limitation, overlap: comparison.recordedOverlap())
+                }
                 if let comparison {
-                    // B's own figures while there's room, else A's and the change.
+                    // Peaks beside the averages while there's room, else the
+                    // averages alone, so both A and B keep their columns.
                     ViewThatFits(in: .horizontal) {
-                        headlines(comparison, showsB: true)
-                        headlines(comparison, showsB: false)
+                        headlines(comparison, statistics: [.average, .peak])
+                        headlines(comparison, statistics: [.average])
                     }
                     Text("Disk and network add both directions. Gaps are left out of every figure.")
                         .font(.explanation)
@@ -165,24 +217,41 @@ private struct HistoryComparisonCard: View {
         }
     }
 
-    /// CPU, memory, disk and network: each one's average and peak in A,
-    /// in B when `showsB`, and how A differs.
-    private func headlines(_ comparison: HistoryComparison, showsB: Bool) -> some View {
-        Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
-            GridRow {
-                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-                Text("Average").gridCellColumns(showsB ? 3 : 2).gridCellAnchor(.leading)
-                Text("Peak").gridCellColumns(showsB ? 3 : 2).gridCellAnchor(.leading).padding(.leading, 10)
-            }
-            .font(.explanation.weight(.semibold))
-            .foregroundStyle(.secondaryText)
-            GridRow {
-                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
-                ForEach(0..<2, id: \.self) { group in
-                    HistoryCompareBadge(side: .a).padding(.leading, group == 1 ? 10 : 0)
-                    if showsB { HistoryCompareBadge(side: .b) }
-                    Text("Change").font(.explanation.weight(.semibold)).foregroundStyle(.secondaryText)
+    /// CPU, memory, disk and network: each `statistics` (average, and peak
+    /// where there's room) in A, then in B, then how A differs, under A's
+    /// and B's headings with how much of each was recorded. With the
+    /// average alone, the corner names it.
+    private func headlines(_ comparison: HistoryComparison, statistics: [HistoryStatistic]) -> some View {
+        let thin = Set(comparison.limitation?.sides ?? [])
+        let span = statistics.count
+        return Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
+            GridRow(alignment: .center) {
+                if span == 1 {
+                    Text("Average").font(.explanation.weight(.semibold)).foregroundStyle(.secondaryText).gridCellAnchor(.leading)
+                } else {
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
                 }
+                ForEach(HistoryComparison.Side.allCases, id: \.self) { side in
+                    coverageHeading(side, comparison, thin: thin.contains(side))
+                        .gridCellColumns(span)
+                        .gridCellAnchor(.leading)
+                        .padding(.leading, side == .a ? 0 : 10)
+                }
+                Text("Change").font(.explanation.weight(.semibold)).foregroundStyle(.secondaryText)
+                    .gridCellColumns(span).gridCellAnchor(.leading).padding(.leading, 10)
+            }
+            if span > 1 {
+                GridRow {
+                    Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                    ForEach(0..<3, id: \.self) { group in
+                        ForEach(statistics, id: \.self) { statistic in
+                            Text(statistic == .peak ? "Peak" : "Average")
+                                .padding(.leading, group > 0 && statistic == statistics.first ? 10 : 0)
+                        }
+                    }
+                }
+                .font(.explanation.weight(.semibold))
+                .foregroundStyle(.secondaryText)
             }
             ForEach(comparison.headlines) { row in
                 GridRow(alignment: .firstTextBaseline) {
@@ -190,8 +259,18 @@ private struct HistoryComparisonCard: View {
                         .foregroundStyle(.secondaryText)
                         .gridColumnAlignment(.leading)
                         .help(row.headline.parts.map { "\(row.headline.name): \($0) together" } ?? row.headline.name)
-                    figures(row, .average, showsB: showsB)
-                    figures(row, .peak, showsB: showsB, lead: 10)
+                    ForEach(statistics, id: \.self) { statistic in
+                        figure(row.text(row.a, statistic), side: .a, thin: thin.contains(.a))
+                    }
+                    ForEach(statistics, id: \.self) { statistic in
+                        figure(row.text(row.b, statistic), side: .b, thin: thin.contains(.b))
+                            .padding(.leading, statistic == statistics.first ? 10 : 0)
+                    }
+                    ForEach(statistics, id: \.self) { statistic in
+                        Text(row.changeText(statistic))
+                            .foregroundStyle(.secondaryText)
+                            .padding(.leading, statistic == statistics.first ? 10 : 0)
+                    }
                 }
                 .monospacedDigit()
             }
@@ -200,21 +279,89 @@ private struct HistoryComparisonCard: View {
         .fixedSize()
     }
 
-    /// One statistic's cells in a headline row: A, B when `showsB`, the
-    /// change; `lead` sets the group off from the one before.
-    @ViewBuilder private func figures(_ row: HistoryComparison.Headline, _ statistic: HistoryStatistic, showsB: Bool,
-                                      lead: CGFloat = 0) -> some View {
-        Text(row.text(row.a, statistic)).fontWeight(.medium).padding(.leading, lead)
-        if showsB { Text(row.text(row.b, statistic)) }
-        Text(row.changeText(statistic)).foregroundStyle(.secondaryText)
+    /// A figure of A's (medium) or B's: the side a comparison is thin on
+    /// recedes, so the better-recorded one carries the weight.
+    private func figure(_ text: String, side: HistoryComparison.Side, thin: Bool) -> some View {
+        Text(text)
+            .fontWeight(side == .a && !thin ? .medium : .regular)
+            .foregroundStyle(thin ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
+    }
+
+    /// A column's heading: its letter and how much of it was recorded, "73%
+    /// recorded", spelled out in the tooltip.
+    private func coverageHeading(_ side: HistoryComparison.Side, _ comparison: HistoryComparison, thin: Bool) -> some View {
+        let stats = comparison.stats(side)
+        let recorded = HistoryInterval.recorded(stats.coverage)
+        let share = HistoryInterval.share(sampled: stats.sampledSeconds, span: stats.duration)
+        return HStack(spacing: 5) {
+            HistoryCompareBadge(side: HistoryCompareDraft.Side(side))
+            Text(recorded)
+                .font(.explanation.weight(.semibold))
+                .foregroundStyle(thin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
+                .monospacedDigit()
+        }
+        .fixedSize()
+        .help("\(side.rawValue) holds \(share). Its figures cover that recorded time alone; gaps are left out."
+            + (thin ? " Too little to read them at face value." : ""))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(side.rawValue), \(recorded)")
+    }
+
+    /// Why the figures can't be taken at face value, over them, as calm as
+    /// the gaps it's about (their hatch, in a dashed box); and, where both
+    /// hold records at the same offsets for long enough, a way to narrow
+    /// both to that stretch.
+    private func notice(_ limitation: HistoryComparison.Limitation, overlap: HistoryComparison.Overlap?) -> some View {
+        HistoryCompareNote {
+            (Text(limitation.title + ": ").fontWeight(.semibold) + Text(limitation.message))
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Each side's figures cover its recorded time alone, so a change may come from what wasn't recorded.")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            if let overlap {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Button("Compare Recorded Overlap") { scrubber.compare?.narrow(to: overlap) }
+                        .controlSize(.small)
+                        .fixedSize()
+                        .help("Narrow A and B to the \(Format.roughDuration(overlap.duration)) where both hold records at the same "
+                            + "point in their stretch: \(HistorySessionStyle.span(overlap.a.lowerBound, overlap.a.upperBound)) "
+                            + "against \(HistorySessionStyle.span(overlap.b.lowerBound, overlap.b.upperBound))")
+                    Text("\(Format.roughDuration(overlap.duration)) both recorded at the same offsets")
+                        .font(.explanation)
+                        .foregroundStyle(.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    /// While A and B are narrowed to their recorded overlap: what that
+    /// means, and the way back to the stretches as picked.
+    private var overlapNote: some View {
+        HistoryCompareNote {
+            (Text("Recorded overlap: ").fontWeight(.semibold)
+                + Text("A and B are narrowed to the stretch both recorded at the same offsets from their starts."))
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Back to Full Stretches") { scrubber.compare?.widen() }
+                .controlSize(.small)
+                .fixedSize()
+                .help("Compare A and B as they were picked again")
+                .padding(.top, 2)
+        }
     }
 
     private func table(_ comparison: HistoryComparison) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
+        let thin = Set(comparison.limitation?.sides ?? [])
+        return Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
             GridRow {
                 Text("")
-                Text("A").gridColumnAlignment(.trailing)
-                Text("B").gridColumnAlignment(.trailing)
+                ForEach(HistoryComparison.Side.allCases, id: \.self) { side in
+                    coverageHeading(side, comparison, thin: thin.contains(side)).gridColumnAlignment(.trailing)
+                }
                 Text("Change").gridColumnAlignment(.trailing)
             }
             .font(.explanation.weight(.semibold))
@@ -222,8 +369,8 @@ private struct HistoryComparisonCard: View {
             ForEach(comparison.rows) { row in
                 GridRow(alignment: .firstTextBaseline) {
                     Text(row.metric.title(row.statistic)).foregroundStyle(.secondaryText).lineLimit(1)
-                    Text(row.a.map { row.metric.format($0, row.statistic) } ?? "—").fontWeight(.medium)
-                    Text(row.b.map { row.metric.format($0, row.statistic) } ?? "—")
+                    figure(row.a.map { row.metric.format($0, row.statistic) } ?? "—", side: .a, thin: thin.contains(.a))
+                    figure(row.b.map { row.metric.format($0, row.statistic) } ?? "—", side: .b, thin: thin.contains(.b))
                     Text(row.change?.label(isFraction: row.metric.isFraction) ?? "—").foregroundStyle(.secondaryText)
                 }
                 .monospacedDigit()
@@ -273,6 +420,36 @@ private struct HistoryComparisonCard: View {
         comparison = HistoryComparison(a: first, b: second)
         busier = HistoryComparison.busier(a: appsA, b: appsB, count: 3)
         events = (eventsA, eventsB)
+    }
+}
+
+/// A note over the comparison's figures about what wasn't recorded: led by
+/// the gaps' hatch, as the rail's key draws "Not recorded", in a dashed box
+/// that marks something missing rather than a reading.
+private struct HistoryCompareNote<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8)
+        HStack(alignment: .top, spacing: 10) {
+            Canvas { context, size in
+                HistoryCoverage.drawGaps([CGRect(x: 0.5, y: 0.5, width: size.width - 1, height: size.height - 1)], in: context,
+                                         dark: colorScheme == .dark)
+            }
+            .frame(width: 18, height: 12)
+            .padding(.top, 2)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                content
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.primary.opacity(0.04), in: shape)
+        .overlay(shape.strokeBorder(Color.primary.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .accessibilityElement(children: .contain)
     }
 }
 

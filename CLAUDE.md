@@ -79,9 +79,21 @@ Manager OG or any other proprietary task manager.
   separately versioned `hardware` block, charted under History's folded Hardware
   section; Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
-  and B brackets over the rail; `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
+  and B brackets over the rail; each interval's column heading gives how much
+  of it was recorded, and `HistoryComparison.limitation` (a side under
+  `lowCoverage`, or under `unevenCoverage` of the other's share) puts a notice
+  over the figures, with Compare Recorded Overlap when `recordedOverlap()`
+  finds a minute or more both recorded at the same offsets (one-step holes
+  bridged), which narrows A and B to it until Back to Full Stretches;
+  `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
   opens Compare with them picked, counted back from the range's end, with B the
-  same length before A when left out),
+  same length before A when left out; the pinned rail folds to a strip (the
+  section at the top, the span, the moment, Play and speed, a slim track) once
+  the charts' top has scrolled under it, and comes back whole at the top or
+  from the strip's button: `RailFold` in OTMKit's Layout/ holds the rule, and
+  `HistoryPageScroll` follows the clip view's bounds, so it moves only on
+  scroll, never per tick, and only `HistoryPinnedRail` reads it, so the charts
+  never reload),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick; while it's on screen
