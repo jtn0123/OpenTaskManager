@@ -4,11 +4,13 @@ import SwiftUI
 @main
 struct OpenTaskManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
+    @State private var model: AppModel
     @AppStorage("streamGraphs") private var streamGraphs = true
 
     init() {
+        let model = AppModel()
+        _model = State(initialValue: model)
+        StatusItemController.shared.model = model
         // `--args -openPage Processes` picks the starting page. It's copied into the
         // saved value once, because passing `-page` itself would pin that setting
         // for the whole run and the sidebar would stop switching pages.
@@ -47,17 +49,6 @@ struct OpenTaskManagerApp: App {
             SettingsView()
                 .environment(model)
         }
-
-        MenuBarExtra(isInserted: $showMenuBarExtra) {
-            MenuBarView()
-                .environment(model)
-                .environment(\.sampleInterval, model.updateSpeed.rawValue)
-                .environment(\.streamsGraphs, streamGraphs)
-        } label: {
-            MenuBarLabel()
-                .environment(model)
-        }
-        .menuBarExtraStyle(.window)
     }
 }
 
@@ -376,22 +367,9 @@ private struct UpdateSpeedPicker: View {
 
 // MARK: - Menu bar
 
-struct MenuBarLabel: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Image(nsImage: MenuBarIcon.image(history: model.cpuHistory.values, usage: model.snapshot?.cpu.usage ?? 0))
-            .accessibilityLabel("CPU \(Format.percent(model.snapshot?.cpu.usage ?? 0))")
-            .onAppear {
-                WindowOpener.openMainWindow = { openWindow(id: "main") }
-            }
-    }
-}
-
+/// The summary under the menu bar item (`StatusItemController`).
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -426,8 +404,8 @@ struct MenuBarView: View {
             Divider()
             HStack {
                 Button("Open OpenTaskManager") {
-                    openWindow(id: "main")
-                    NSApp.activate(ignoringOtherApps: true)
+                    StatusItemController.shared.close()
+                    WindowOpener.showMainWindow()
                 }
                 Spacer()
                 Button("Quit") { NSApp.terminate(nil) }
