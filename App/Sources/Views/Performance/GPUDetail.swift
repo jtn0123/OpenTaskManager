@@ -14,16 +14,9 @@ struct GPUDetail: View {
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "GPU", subtitle: subtitle)
             stats()
-            if let busy = gpu.deviceUtilization {
-                utilization(busy)
-            } else {
-                // A paravirtual GPU only reports memory: say so rather than graph a flat 0%.
-                ChartCard(title: "Utilization", trailing: Unavailable.gpuUtilization, tint: Theme.gpu, span: nil) {
-                    UnavailableNote(text: Unavailable.gpuUtilizationDetail)
-                        .frame(maxWidth: .infinity)
-                        .chartFrame(height: 90, tint: Theme.gpu)
-                }
-            }
+            // A paravirtual GPU only reports memory. The strip says so, and the
+            // graphs it can draw move up rather than sit under a flat 0%.
+            if let busy = gpu.deviceUtilization { utilization(busy) }
             byApp()
             FillGrid(minimum: 280) {
                 if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }
@@ -35,8 +28,7 @@ struct GPUDetail: View {
     }
 
     private var subtitle: String {
-        let name = gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name
-        return gpu.deviceUtilization == nil ? "\(name) · utilization not reported" : name
+        gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name
     }
 
     private func utilization(_ busy: Double) -> some View {
@@ -106,8 +98,6 @@ struct GPUDetail: View {
         MetricStrip(tint: Theme.gpu) {
             if let busy = gpu.deviceUtilization {
                 Stat(label: "Utilization", number: busy, color: Theme.gpu) { Format.percent($0) }
-            } else {
-                Stat(label: "Utilization", value: "—", color: Theme.gpu).help(Unavailable.gpuUtilizationDetail)
             }
             if let renderer = gpu.rendererUtilization {
                 Stat(label: "Renderer", number: renderer, color: Self.renderer) { Format.percent($0) }
@@ -123,6 +113,10 @@ struct GPUDetail: View {
             }
             if let watts = snapshot.power.components?.watts(.gpu) {
                 Stat(label: "Power", number: watts, format: Format.watts)
+            }
+            if gpu.deviceUtilization == nil {
+                CapabilityNote(label: "Utilization", text: Unavailable.gpuUtilizationShort,
+                               detail: Unavailable.gpuUtilizationDetail + " GPU time by app and memory in use are measured.")
             }
         }
     }

@@ -209,7 +209,9 @@ struct HistoryChartCard: View {
         .chartXAxis {
             AxisMarks(values: ticks) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
-                AxisValueLabel(format: timeLabels).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                // Centred under its line, as `GraphMath.timeTicks` spaces them: a
+                // label hanging right of its tick ran past the plot's end and was cut.
+                AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }
         }
         .chartPlotStyle { plot in

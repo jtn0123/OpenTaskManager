@@ -148,21 +148,44 @@ public enum GraphMath {
         return (shortest / week).rounded(.up) * week
     }
 
-    // MARK: - History ranges
-
-    /// Whether fitting a history graph to its recording would change it: the
-    /// recording, `recorded` seconds old, began well inside the `range`.
-    public static func canFit(range: TimeInterval, recorded: TimeInterval?) -> Bool {
-        guard let recorded, recorded.isFinite, recorded >= 0 else { return false }
-        return recorded < range * 0.95
+    /// Times to label on a time axis `width` points wide, whose labels are
+    /// about `labelWidth` points wide: every `step` seconds, or a longer
+    /// round step when that many labels wouldn't fit side by side with
+    /// `spacing` between them, and none so near an end that its centred
+    /// label would run past it. Fewer labels, never cut-off ones. Until the
+    /// width is known it keeps 8% of the range clear at each end.
+    public static func timeTicks(in range: ClosedRange<Date>, step: TimeInterval, width: Double, labelWidth: Double,
+                                 spacing: Double = 14, calendar: Calendar = .current) -> [Date] {
+        let span = range.upperBound.timeIntervalSince(range.lowerBound)
+        guard width > 0, labelWidth > 0, span > 0 else { return timeTicks(in: range, step: step, margin: 0.08, calendar: calendar) }
+        let fitting = max(Int((width + spacing) / (labelWidth + spacing)), 1)
+        let step = max(step, timeTickStep(for: span, maximumTicks: fitting))
+        let margin = min(max((labelWidth / 2 + 2) / width, 0.05), 0.5)
+        return timeTicks(in: range, step: step, margin: margin, calendar: calendar)
     }
 
-    /// Seconds a history graph spans: the whole `range`, or with `fit`, back
-    /// only as far as the recording goes (never under `minimum`). Fitting
-    /// changes the axis, not the data: ten minutes of recording are labelled
-    /// as ten minutes, and gaps in them stay gaps.
-    public static func historySpan(range: TimeInterval, recorded: TimeInterval?, fit: Bool, minimum: TimeInterval = 60) -> TimeInterval {
-        guard fit, canFit(range: range, recorded: recorded), let recorded else { return range }
-        return min(max(recorded, minimum), range)
+    // MARK: - History ranges
+
+    /// The stretch a history graph spans, ending `end`: the whole `range`,
+    /// or with `fit`, from the start of the first record in it to the last
+    /// (`recorded`, each record covering `record` seconds), so a recording
+    /// that began or had gaps inside the range fills the width. Never under
+    /// `minimum` seconds or past the range. Fitting changes the axis, not
+    /// the data: ten minutes of recording are labelled as ten minutes, and
+    /// gaps in them stay gaps.
+    public static func historyDomain(range: TimeInterval, end: Date, recorded: ClosedRange<Date>?, fit: Bool,
+                                     record: TimeInterval = 10, minimum: TimeInterval = 60) -> ClosedRange<Date> {
+        let start = end.addingTimeInterval(-range)
+        guard fit, let recorded else { return start...end }
+        let last = min(max(recorded.upperBound, start), end)
+        let first = min(recorded.lowerBound.addingTimeInterval(-record), last.addingTimeInterval(-minimum))
+        return max(first, start)...last
+    }
+
+    /// Whether the records in a history range (`recorded`) begin well inside
+    /// it, more than 5% of the `range` after its start, so it opens on a
+    /// stretch with nothing recorded.
+    public static func recordingStartsLate(range: TimeInterval, end: Date, recorded: ClosedRange<Date>) -> Bool {
+        recorded.lowerBound.timeIntervalSince(end.addingTimeInterval(-range)) > range * 0.05
     }
 }

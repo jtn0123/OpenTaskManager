@@ -12,30 +12,40 @@ struct PerformanceView: View {
     @Environment(AppModel.self) private var model
     @State private var selected: Resource = .cpu
     @State private var opened = false
+    /// The page's width, which sets the resource list's.
+    @State private var width: CGFloat = 0
 
     var body: some View {
         if let snapshot = model.snapshot {
-            HSplitView {
+            // An HStack, not an `HSplitView`: the split view's minimum widths
+            // pushed the page past both edges of the narrowest window.
+            HStack(spacing: 0) {
                 List(selection: $selected) {
                     ForEach(resources(snapshot), id: \.self) { resource in
-                        ResourceRow(resource: resource, snapshot: snapshot).tag(resource)
+                        ResourceRow(resource: resource, snapshot: snapshot, compact: listWidth < 220).tag(resource)
                     }
                 }
                 .listStyle(.sidebar)
-                .frame(minWidth: 200, idealWidth: 230, maxWidth: 270)
-
+                .frame(width: listWidth)
+                Divider()
                 ScrollView {
                     detail(for: selected, snapshot: snapshot)
                         .padding(20)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
-                .frame(minWidth: 480)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onAppear { openRequestedResource(snapshot) }
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// A quarter of the page, within 184 to 250 points: in the narrowest
+    /// window the detail keeps over 440 points, every detail page's floor.
+    private var listWidth: CGFloat {
+        width > 0 ? min(max((width / 4).rounded(), 184), 250) : 230
     }
 
     /// `--args -openResource memory` (cpu, memory, gpu, disk, network, power, sensors)
@@ -92,14 +102,16 @@ private struct ResourceRow: View {
     @Environment(AppModel.self) private var model
     var resource: Resource
     var snapshot: SystemSnapshot
+    /// In a narrow list the sparkline gives the text more room.
+    var compact = false
 
     var body: some View {
         HStack(spacing: 10) {
             sparkline
-                .frame(width: 64, height: 40)
+                .frame(width: compact ? 48 : 64, height: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline)
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(2)
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(3)
             }
         }
         .padding(.vertical, 4)
@@ -139,7 +151,8 @@ private struct ResourceRow: View {
             return Format.percent(snapshot.cpu.usage)
         case .memory:
             let memory = snapshot.memory
-            return "\(Format.bytes(memory.used)) / \(Format.bytes(memory.physical)) (\(Format.percent(memory.usedFraction)))"
+            return "\(Self.unbroken(Format.bytes(memory.used))) / \(Self.unbroken(Format.bytes(memory.physical))) "
+                + "(\(Format.percent(memory.usedFraction)))"
         case .power:
             let watts = snapshot.power.systemWatts.map(Format.watts) ?? "—"
             let battery = snapshot.power.battery.map { " · \($0.percent)%" } ?? ""
@@ -156,8 +169,14 @@ private struct ResourceRow: View {
             return "\(disk.model ?? (disk.isSolidState == true ? "SSD" : "Disk"))\n\(Format.percent(disk.activeFraction)) active"
         case let .network(id):
             guard let link = snapshot.network.first(where: { $0.id == id }) else { return "" }
-            return "↓ \(Format.bitsPerSecond(link.receivedBytesPerSecond))  ↑ \(Format.bitsPerSecond(link.sentBytesPerSecond))"
+            return Self.unbroken("↓ \(Format.bitsPerSecond(link.receivedBytesPerSecond))") + "  "
+                + Self.unbroken("↑ \(Format.bitsPerSecond(link.sentBytesPerSecond))")
         }
+    }
+
+    /// Keeps a figure with its unit or arrow when a narrow row wraps.
+    private static func unbroken(_ text: String) -> String {
+        text.replacingOccurrences(of: " ", with: "\u{00A0}")
     }
 
     private func zipSum(_ a: [Double]?, _ b: [Double]?) -> [Double] {

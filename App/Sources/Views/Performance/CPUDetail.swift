@@ -44,21 +44,22 @@ struct CPUDetail: View {
 
     /// The utilization graph in the chosen form, with the choice on its caption row.
     private func graph(_ topology: CPUTopology) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(mode == "cores" ? "% Utilization of each core" : mode == "tiers" ? "% Utilization by core type"
-                     : "% Utilization over \(AppModel.graphSpan)s")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Picker("Graph", selection: $mode) {
-                    Text("Overall").tag("overall")
-                    Text("By core type").tag("tiers")
-                    Text("Every core").tag("cores")
+        let caption = Text(mode == "cores" ? "% Utilization of each core" : mode == "tiers" ? "% Utilization by core type"
+                           : "% Utilization over \(AppModel.graphSpan)s")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        return VStack(alignment: .leading, spacing: 6) {
+            // The caption moves above the picker when the pane is too narrow for both.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    caption.fixedSize()
+                    Spacer()
+                    graphPicker
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 320)
+                VStack(alignment: .leading, spacing: 6) {
+                    caption
+                    graphPicker
+                }
             }
             switch mode {
             case "cores": coreGrid(topology)
@@ -69,6 +70,17 @@ struct CPUDetail: View {
                            height: DetailGraph.primary, axis: { Format.percent($0) })
             }
         }
+    }
+
+    private var graphPicker: some View {
+        Picker("Graph", selection: $mode) {
+            Text("Overall").tag("overall")
+            Text("By core type").tag("tiers")
+            Text("Every core").tag("cores")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 
     private func facts(_ topology: CPUTopology) -> some View {

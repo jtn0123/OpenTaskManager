@@ -128,4 +128,9 @@ locked or the window is on another Space.
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
   the status bar out of a 730-point window. Plain wrapping text is enough.
+- Performance and History fit the narrowest window (820 points with the
+  sidebar shown) without clipping or scrolling sideways. Performance's resource
+  list is an `HStack` column sized from the page width, not an `HSplitView`,
+  whose minimum widths pushed the page past both window edges. Below 760 points
+  History moves its moment panel into a summary over the charts.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

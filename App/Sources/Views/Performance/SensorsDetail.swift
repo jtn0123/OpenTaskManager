@@ -5,7 +5,12 @@ import SwiftUI
 /// battery over time, each fan's speed within its range, and every sensor's
 /// lowest and highest reading since launch.
 struct SensorsDetail: View {
+    /// The sensor table's narrowest width with range bars: a label, three
+    /// temperatures and a bar of `RangeBar`'s minimum, with the spacing between.
+    private static let barsWidth: CGFloat = 490
+
     @Environment(AppModel.self) private var model
+    @State private var tableWidth: CGFloat = 0
     var sensors: SensorSample
     var snapshot: SystemSnapshot
 
@@ -79,14 +84,16 @@ struct SensorsDetail: View {
     }
 
     /// Every sensor with its reading now and its range since launch, drawn as
-    /// a bar from lowest to highest with a tick at the current reading.
+    /// a bar from lowest to highest with a tick at the current reading. In a
+    /// narrow pane the figures stay and the bars go, so no row runs past the card.
     private func sensorTable() -> some View {
         let ranges = model.sensorHistory.ranges
+        let bars = tableWidth == 0 || tableWidth >= Self.barsWidth
         return Card(tint: Theme.thermal) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Sensors").font(.headline)
                 Spacer()
-                Text("lowest and highest since launch").font(.callout).foregroundStyle(.secondary)
+                Text("lowest and highest since launch").font(.callout).foregroundStyle(.secondary).lineLimit(1)
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                 GridRow {
@@ -94,7 +101,9 @@ struct SensorsDetail: View {
                     Text("Now").gridColumnAlignment(.trailing)
                     Text("Lowest").gridColumnAlignment(.trailing)
                     Text("Highest").gridColumnAlignment(.trailing)
-                    Text("20 °C – 110 °C").frame(maxWidth: .infinity, alignment: .leading)
+                    if bars {
+                        Text("20 °C – 110 °C").frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -108,15 +117,18 @@ struct SensorsDetail: View {
                         Text(Format.celsius(reading.celsius)).fontWeight(.medium)
                         Text(Format.celsius(range.lowerBound)).foregroundStyle(.secondary)
                         Text(Format.celsius(range.upperBound)).foregroundStyle(.secondary)
-                        RangeBar(range: range, value: reading.celsius, color: Theme.sensor(reading.kind))
-                            .frame(minWidth: 160, maxWidth: .infinity)
-                            .frame(height: 8)
+                        if bars {
+                            RangeBar(range: range, value: reading.celsius, color: Theme.sensor(reading.kind))
+                                .frame(minWidth: 120, maxWidth: .infinity)
+                                .frame(height: 8)
+                        }
                     }
                     .font(.callout)
                     .monospacedDigit()
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tableWidth = $0 }
     }
 }
 

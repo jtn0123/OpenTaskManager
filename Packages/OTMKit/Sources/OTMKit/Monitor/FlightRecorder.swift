@@ -175,6 +175,17 @@ public actor FlightRecorder {
         return max(records, 1) * Self.span
     }
 
+    /// The times of the first and last records between two dates, or nil
+    /// when there are none: what the History page fits its graphs to.
+    public func recordedSpan(from start: Date, to end: Date) throws(FlightRecorderError) -> ClosedRange<Date>? {
+        let statement = try prepare("SELECT MIN(time), MAX(time) FROM records WHERE time > ? AND time <= ?")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
+        guard sqlite3_step(statement) == SQLITE_ROW, sqlite3_column_type(statement, 0) != SQLITE_NULL else { return nil }
+        return Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))...Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
+    }
+
     /// The oldest record kept, if any.
     public func earliest() throws(FlightRecorderError) -> Date? {
         let statement = try prepare("SELECT MIN(time) FROM records")
