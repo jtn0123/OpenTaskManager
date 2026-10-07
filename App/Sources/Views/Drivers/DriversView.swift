@@ -324,14 +324,15 @@ private struct DriverTable: View {
     @Binding var sortOrder: [KeyPathComparator<ExtensionItem>]
     var open: () -> Void
 
-    /// Narrowest each column gets: room for its usual values, so Name is
-    /// the one that gives way. All five fit the narrowest window.
+    /// Narrowest each column gets: room for its usual values (a version
+    /// like "2811.160.7"), so Name is the one that gives way. All five fit
+    /// the narrowest window.
     private enum Minimum {
-        static let name: CGFloat = 150
+        static let name: CGFloat = 121
         static let kind: CGFloat = 115
         static let status: CGFloat = 115
         static let publisher: CGFloat = 70
-        static let version: CGFloat = 55
+        static let version: CGFloat = 84
     }
 
     /// The columns at their narrowest, the gaps between them, and the
@@ -429,7 +430,7 @@ private struct DriverTable: View {
                 .lineLimit(1)
                 .help(item.version)
         }
-        .width(min: Minimum.version, ideal: 60, max: 90)
+        .width(min: Minimum.version, ideal: 90, max: 120)
     }
 }
 
