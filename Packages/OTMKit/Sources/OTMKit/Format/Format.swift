@@ -72,6 +72,16 @@ public enum Format {
         return "\(secs)s"
     }
 
+    /// "62 °C".
+    public static func celsius(_ value: Double) -> String {
+        value.isFinite ? "\(fixed(value, 0)) °C" : "—"
+    }
+
+    /// "1,357 rpm".
+    public static func rpm(_ value: Double) -> String {
+        value.isFinite ? "\(Int(value.rounded()).formatted()) rpm" : "—"
+    }
+
     /// A graph's time span for its axis: "30 s", "5 min", "2 min 30 s", "1 h".
     public static func timeSpan(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }

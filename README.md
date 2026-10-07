@@ -39,13 +39,16 @@ samples and scale their axes to round numbers.
 - Power: where the power goes (CPU, GPU, Neural Engine, DRAM and the rest of
   the system), energy since launch, adapter and battery flow, and power by app.
 - Each disk and network interface.
+- Thermals: chip, SSD and battery temperatures over time, each fan's speed
+  within its range, and every die sensor's lowest and highest reading since
+  launch.
 
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
-- The `otm` command-line tool: `ps`, `top`, `system`, `power`, `ports`,
-  `inspect` and `kill`, with JSON output.
+- The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
+  `ports`, `inspect` and `kill`, with JSON output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
 Animation's render server, and the process table moves rows in place instead
@@ -79,8 +82,9 @@ interfaces: `libproc` and `proc_pid_rusage` for processes and energy,
 same arithmetic as Activity Monitor), IOKit for the GPU, disks and battery
 telemetry, and routing sockets for network counters.
 
-Power by part of the chip and clock speeds come from IOReport, and
-whole-system power from read-only SMC keys. Both are undocumented, so
+Power by part of the chip and clock speeds come from IOReport,
+whole-system power and fan speeds from read-only SMC keys, and temperatures
+from the HID event system's sensors. All three are undocumented, so
 OpenTaskManager loads them at run time and shows "—" for anything a Mac
 doesn't report.
 

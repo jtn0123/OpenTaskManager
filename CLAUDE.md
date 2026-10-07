@@ -60,7 +60,7 @@ screencapture -x -o -l <windowID> out.png
 ```
 
 `-openPage Overview|Processes|Performance` sets the starting page, and
-`-openResource cpu|memory|gpu|disk|network|power` the Performance detail
+`-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), and `-openProcess <pid>`
 selects a process so its inspector shows. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the

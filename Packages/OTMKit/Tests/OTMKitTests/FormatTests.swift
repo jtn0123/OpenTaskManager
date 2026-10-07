@@ -94,4 +94,11 @@ struct HistoryTests {
         #expect(Format.timeSpan(5400) == "1 h 30 min")
         #expect(Format.timeSpan(-1) == "—")
     }
+
+    @Test func sensorReadings() {
+        #expect(Format.celsius(61.6) == "62 °C")
+        #expect(Format.celsius(.nan) == "—")
+        #expect(Format.rpm(1357.4).hasSuffix(" rpm"))
+        #expect(Format.rpm(0) == "0 rpm")
+    }
 }

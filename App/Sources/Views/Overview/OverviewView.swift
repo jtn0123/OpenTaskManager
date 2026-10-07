@@ -86,7 +86,7 @@ struct OverviewView: View {
         return GaugeCard(
             title: "Power", value: watts, format: { Format.fixed($0, $0 < 10 ? 1 : 0) }, unit: "W",
             fraction: watts / ceiling, color: Theme.power,
-            details: [source, "Thermal \(power.thermalState.rawValue)"],
+            details: [source, "Thermal \(power.thermalState.rawValue)" + (model.sensors?.hottest(.chip).map { " · \(Format.celsius($0))" } ?? "")],
             history: history, historyMax: nil
         )
     }

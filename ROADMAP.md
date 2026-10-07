@@ -45,7 +45,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
 | Per-process network throughput | ⬜ | Per-socket byte counters |
 | "Who is using…" | 🚧 | Port, file or volume to process. `otm ports` exists; the UI and "can't eject" helper are planned |
-| Sensors | 🚧 | SoC power rails are done; temperatures and fan speeds are planned |
+| Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, and fan speeds with their range |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |
 | Widgets | ⬜ | WidgetKit gauges |
@@ -57,4 +57,4 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 - **0.1**: what's above marked ✅, plus README screenshots. The repository goes
   public, CI runs on every push, and releases are ad-hoc signed.
 - **0.2**: startup items, services, the flight recorder and alerts.
-- **0.3**: privileged helper, sensors and the exporter.
+- **0.3**: privileged helper and the exporter.

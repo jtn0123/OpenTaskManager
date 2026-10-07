@@ -165,6 +165,31 @@ struct CPUScale: Equatable {
     }
 }
 
+/// Temperatures and fan speeds over time, plus each sensor's range since launch.
+struct SensorHistory {
+    private(set) var hottest: [SensorKind: History<Double>] = [:]
+    private(set) var chipAverage = History<Double>(capacity: AppModel.historyCapacity)
+    private(set) var fans: [Int: History<Double>] = [:]
+    /// Lowest and highest reading of each sensor, by sensor name.
+    private(set) var ranges: [String: ClosedRange<Double>] = [:]
+
+    mutating func append(_ sample: SensorSample) {
+        for kind in SensorKind.allCases {
+            if let celsius = sample.hottest(kind) {
+                hottest[kind, default: History(capacity: AppModel.historyCapacity)].append(celsius)
+            }
+        }
+        if let average = sample.average(.chip) { chipAverage.append(average) }
+        for fan in sample.fans {
+            fans[fan.id, default: History(capacity: AppModel.historyCapacity)].append(fan.rpm)
+        }
+        for reading in sample.temperatures {
+            let range = ranges[reading.name] ?? reading.celsius...reading.celsius
+            ranges[reading.name] = min(range.lowerBound, reading.celsius)...max(range.upperBound, reading.celsius)
+        }
+    }
+}
+
 /// Live state shared by every window: the latest snapshot plus graph history.
 @Observable
 @MainActor
@@ -176,9 +201,13 @@ final class AppModel {
     nonisolated static let processHistoryCapacity = 122
 
     let monitor = SystemMonitor()
+    let sensorMonitor = SensorMonitor()
     let topology: CPUTopology
 
     private(set) var snapshot: SystemSnapshot?
+    /// Temperatures and fans, read alongside each snapshot. Empty in a VM.
+    private(set) var sensors: SensorSample?
+    private(set) var sensorHistory = SensorHistory()
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
     private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
@@ -248,15 +277,19 @@ final class AppModel {
     func start() {
         guard samplingTask == nil, !isPaused else { return }
         let interval = updateSpeed.rawValue
-        samplingTask = Task { [weak self, monitor] in
+        samplingTask = Task { [weak self, monitor, sensorMonitor] in
             // Keep a steady cadence (sleep until the next deadline rather than
             // for a fixed time) so the graphs scroll at an even speed.
             let clock = ContinuousClock()
             var deadline = clock.now
             while !Task.isCancelled {
+                // The temperature sensors are slow to answer, so read them
+                // alongside the snapshot rather than after it.
+                async let readings = sensorMonitor.sample()
                 let snapshot = await monitor.sample()
+                let sensors = await readings
                 guard let self else { return }
-                self.ingest(snapshot)
+                self.ingest(snapshot, sensors: sensors)
                 deadline = max(deadline.advanced(by: .seconds(interval)), clock.now)
                 try? await Task.sleep(until: deadline, clock: clock)
             }
@@ -270,7 +303,7 @@ final class AppModel {
 
     func refreshNow() {
         Task {
-            ingest(await monitor.sample())
+            ingest(await monitor.sample(), sensors: nil)
         }
     }
 
@@ -285,10 +318,14 @@ final class AppModel {
         Task { [monitor] in await monitor.setOptions(options) }
     }
 
-    private func ingest(_ snapshot: SystemSnapshot) {
+    private func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
         // The first sample has no baseline, so its rates are all zero; keep it
         // for the process list but leave it out of the graphs.
         defer { self.snapshot = snapshot }
+        if let sensors, !sensors.isEmpty {
+            self.sensors = sensors
+            if snapshot.interval > 0 { sensorHistory.append(sensors) }
+        }
         regularApps = Dictionary(
             NSWorkspace.shared.runningApplications
                 .filter { $0.activationPolicy == .regular }

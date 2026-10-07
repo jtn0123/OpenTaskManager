@@ -10,6 +10,8 @@ enum Theme {
     static let networkSecondary = Color(red: 0.98, green: 0.80, blue: 0.30)
     static let gpu = Color(red: 0.10, green: 0.74, blue: 0.80)
     static let power = Color(red: 0.95, green: 0.72, blue: 0.12)
+    static let thermal = Color(red: 1.00, green: 0.42, blue: 0.30)
+    static let fan = Color(red: 0.38, green: 0.78, blue: 0.98)
 
     // Memory composition.
     static let wired = Color(red: 0.93, green: 0.36, blue: 0.62)
@@ -42,6 +44,15 @@ enum Theme {
     /// Colour for a core tier: the fastest tier (level 0) gets the CPU blue.
     static func tier(_ level: Int) -> Color {
         level == 0 ? cpu : Color(red: 0.22, green: 0.82, blue: 0.86)
+    }
+
+    /// Colour for each kind of temperature sensor.
+    static func sensor(_ kind: SensorKind) -> Color {
+        switch kind {
+        case .chip: thermal
+        case .storage: Color(red: 0.30, green: 0.80, blue: 0.62)
+        case .battery: Color(red: 0.98, green: 0.78, blue: 0.26)
+        }
     }
 
     static func pressure(_ fraction: Double) -> Color {

@@ -13,6 +13,7 @@ USAGE:
   otm system [--json]
   otm power [--json]             System, CPU/GPU/ANE/DRAM and cluster power,
                                  clocks, adapter and battery flow
+  otm sensors [--json]           Chip, SSD and battery temperatures, fan speeds
   otm ports [--json]             Listening TCP/UDP ports of your processes
   otm inspect PID [--json]       Arguments, environment and open files
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
@@ -299,6 +300,27 @@ case "power":
         printJSON(PowerReport(interval: snapshot.interval, power: snapshot.power, gpus: snapshot.gpus))
     } else {
         print(powerSummary(snapshot))
+    }
+
+case "sensors":
+    let sensors = await SensorMonitor().sample()
+    if options.json {
+        printJSON(sensors)
+    } else if sensors.isEmpty {
+        print("No temperature sensors or fans found.")
+    } else {
+        for kind in SensorKind.allCases {
+            let readings = sensors.temperatures.filter { $0.kind == kind }
+            guard let hottest = sensors.hottest(kind) else { continue }
+            print("\(pad(kind.title, 9))\(Format.celsius(hottest)) hottest of \(readings.count)")
+            for reading in readings where readings.count > 1 {
+                print("  \(pad(reading.label, 16))\(Format.celsius(reading.celsius))")
+            }
+        }
+        for fan in sensors.fans {
+            let range = [fan.minimumRPM, fan.maximumRPM].compactMap { $0 }.map(Format.rpm).joined(separator: " – ")
+            print("Fan \(fan.id)    \(fan.isStopped ? "stopped" : Format.rpm(fan.rpm))" + (range.isEmpty ? "" : "  (range \(range))"))
+        }
     }
 
 case "ports":

@@ -2,7 +2,7 @@ import OTMKit
 import SwiftUI
 
 enum Resource: Hashable {
-    case cpu, memory, power
+    case cpu, memory, power, sensors
     case gpu(String)
     case disk(String)
     case network(String)
@@ -38,7 +38,7 @@ struct PerformanceView: View {
         }
     }
 
-    /// `--args -openResource memory` (cpu, memory, gpu, disk, network, power)
+    /// `--args -openResource memory` (cpu, memory, gpu, disk, network, power, sensors)
     /// picks the first matching resource once, for screenshots. With
     /// `-openScroll bottom` the detail starts scrolled to the end.
     private func openRequestedResource(_ snapshot: SystemSnapshot) {
@@ -49,6 +49,7 @@ struct PerformanceView: View {
             case .cpu: name == "cpu"
             case .memory: name == "memory"
             case .power: name == "power"
+            case .sensors: name == "sensors"
             case .gpu: name == "gpu"
             case .disk: name == "disk"
             case .network: name == "network"
@@ -63,6 +64,7 @@ struct PerformanceView: View {
         list += snapshot.disks.map { .disk($0.id) }
         list += snapshot.network.filter(\.isPrimary).map { .network($0.id) }
         if snapshot.power.systemWatts != nil || snapshot.power.battery != nil { list.append(.power) }
+        if model.sensors != nil { list.append(.sensors) }
         return list
     }
 
@@ -72,6 +74,8 @@ struct PerformanceView: View {
         case .cpu: CPUDetail(snapshot: snapshot)
         case .memory: MemoryDetail(snapshot: snapshot)
         case .power: PowerDetail(snapshot: snapshot)
+        case .sensors:
+            if let sensors = model.sensors { SensorsDetail(sensors: sensors, snapshot: snapshot) }
         case let .gpu(id):
             if let gpu = snapshot.gpus.first(where: { $0.id == id }) { GPUDetail(gpu: gpu, snapshot: snapshot) }
         case let .disk(id):
@@ -106,6 +110,7 @@ private struct ResourceRow: View {
         case .cpu: Sparkline(values: model.cpuHistory.values, color: Theme.cpu, maxValue: 1)
         case .memory: Sparkline(values: model.memoryHistory.values, color: Theme.memory, maxValue: 1)
         case .power: Sparkline(values: model.powerHistory.values, color: Theme.power)
+        case .sensors: Sparkline(values: model.sensorHistory.hottest[.chip]?.values ?? [], color: Theme.thermal)
         case let .gpu(id): Sparkline(values: model.gpuHistory[id]?.values ?? [], color: Theme.gpu, maxValue: 1)
         case let .disk(id):
             Sparkline(values: zipSum(model.diskReadHistory[id]?.values, model.diskWriteHistory[id]?.values), color: Theme.disk)
@@ -119,6 +124,7 @@ private struct ResourceRow: View {
         case .cpu: "CPU"
         case .memory: "Memory"
         case .power: "Power"
+        case .sensors: "Thermals"
         case .gpu: "GPU"
         case let .disk(id):
             "Disk \(id.replacingOccurrences(of: "disk", with: ""))"
@@ -138,6 +144,10 @@ private struct ResourceRow: View {
             let watts = snapshot.power.systemWatts.map(Format.watts) ?? "—"
             let battery = snapshot.power.battery.map { " · \($0.percent)%" } ?? ""
             return watts + battery
+        case .sensors:
+            let chip = model.sensors?.hottest(.chip).map(Format.celsius)
+            let fans = model.sensors?.fans.map { $0.isStopped ? "off" : Format.rpm($0.rpm) } ?? []
+            return [chip, fans.isEmpty ? nil : "Fans " + fans.joined(separator: ", ")].compactMap { $0 }.joined(separator: "\n")
         case let .gpu(id):
             guard let gpu = snapshot.gpus.first(where: { $0.id == id }) else { return "" }
             return "\(gpu.name)\n\(Format.percent(gpu.deviceUtilization))"
