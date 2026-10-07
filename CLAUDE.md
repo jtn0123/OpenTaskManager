@@ -38,6 +38,11 @@ Manager OG or any other proprietary task manager.
   runs per tick; `-openSpeedTest start` starts one for screenshots) and `otm
   netquality` / `otm diskspeed`, with the last few results per interface or volume
   in Application Support/OpenTaskManager/SpeedTests (System/SpeedTestHistory);
+  System/CPUBenchmark (versioned workloads in CPUBenchmarkKernels, every unit
+  checked, on threads of its own, cancellable) backs the CPU detail's Benchmark
+  card (`CPUBenchmarkStore`) and `otm cpubench`, the last 10 per Mac kept beside
+  the speed tests; System/ChipLayoutReader (hw.perflevelN, device-tree clusters,
+  I/O Registry core counts) backs its Chip layout card and `otm cpubench layout`;
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.

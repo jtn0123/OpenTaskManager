@@ -108,7 +108,7 @@ struct PerformanceView: View {
     @ViewBuilder
     private func detail(for resource: Resource, snapshot: SystemSnapshot) -> some View {
         switch resource {
-        case .cpu: CPUDetail(snapshot: snapshot)
+        case .cpu: CPUDetail(snapshot: snapshot, select: { selected = $0 })
         case .memory: MemoryDetail(snapshot: snapshot)
         case .power: PowerDetail(snapshot: snapshot)
         case .sensors: SensorsDetail(sensors: model.sensors, snapshot: snapshot)

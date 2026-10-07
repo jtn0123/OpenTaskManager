@@ -139,7 +139,7 @@ enum CPUTopologyReader {
         return Dictionary(uniqueKeysWithValues: orderedTypes.enumerated().map { ($1, $0) })
     }
 
-    private static func logicalID(_ value: Any?) -> Int? {
+    static func logicalID(_ value: Any?) -> Int? {
         if let number = value as? NSNumber { return number.intValue }
         if let data = value as? Data, data.count >= 4 {
             return Int(data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) })
