@@ -12,13 +12,13 @@ struct SensorsDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "Thermals", subtitle: "Thermal state \(snapshot.power.thermalState.rawValue)")
+            stats()
             temperatures()
             if !sensors.fans.isEmpty {
                 FillGrid(minimum: 280) {
                     ForEach(sensors.fans) { fan in fanCard(fan) }
                 }
             }
-            stats()
             sensorTable()
         }
     }
@@ -42,7 +42,7 @@ struct SensorsDetail: View {
         return ChartCard(title: "Temperatures", trailing: sensors.hottest(.chip).map { "chip \(Format.celsius($0))" } ?? "",
                          tint: Theme.thermal, legend: legend) {
             GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8)
-                .chartFrame(height: 200, tint: Theme.thermal)
+                .chartFrame(height: DetailGraph.primary, tint: Theme.thermal)
         }
     }
 
@@ -56,12 +56,12 @@ struct SensorsDetail: View {
                          ]) {
             GraphView(series: [GraphSeries(values: model.sensorHistory.fans[fan.id]?.values ?? [], color: Theme.fan)],
                       maxValue: fan.maximumRPM, glows: true, minimumCeiling: 2000, axis: Format.rpm, cornerRadius: 8)
-                .chartFrame(height: 110, tint: Theme.fan)
+                .chartFrame(height: DetailGraph.compact, tint: Theme.fan)
         }
     }
 
     private func stats() -> some View {
-        HStack(spacing: 24) {
+        MetricStrip(tint: Theme.thermal) {
             if let chip = sensors.hottest(.chip) {
                 Stat(label: "Hottest die", number: chip, color: Theme.thermal, format: Format.celsius)
             }

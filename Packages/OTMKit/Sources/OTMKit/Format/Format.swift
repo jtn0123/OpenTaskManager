@@ -96,6 +96,22 @@ public enum Format {
         return minutes == 0 ? "\(total / 3600) h" : "\(total / 3600) h \(minutes) min"
     }
 
+    /// A length of time rounded for reading at a glance: "45 s", "17 min",
+    /// "5 h 40 min", "2 days 3 h".
+    public static func roughDuration(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "—" }
+        let whole = Int(seconds.rounded())
+        if whole < 60 { return "\(whole) s" }
+        let minutes = Int((seconds / 60).rounded())
+        if minutes < 60 { return "\(minutes) min" }
+        if minutes < 24 * 60 {
+            return minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
+        }
+        let hours = Int((seconds / 3600).rounded())
+        let days = hours / 24 == 1 ? "1 day" : "\(hours / 24) days"
+        return hours % 24 == 0 ? days : "\(days) \(hours % 24) h"
+    }
+
     /// CPU time as `h:mm:ss.cc`, the way `ps` and Activity Monitor show it.
     public static func cpuTime(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }

@@ -12,16 +12,16 @@ struct PowerDetail: View {
         let power = snapshot.power
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "Power", subtitle: subtitle(power))
+            stats(power)
             if let components = power.components {
                 breakdown(power, components)
             } else if let watts = power.systemWatts {
                 ChartCard(title: "Whole-system power draw", trailing: Format.watts(watts), tint: Theme.power) {
                     GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)], glows: true,
                               minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
-                        .chartFrame(height: 220, tint: Theme.power)
+                        .chartFrame(height: DetailGraph.primary, tint: Theme.power)
                 }
             }
-            stats(power)
             if model.powerDetail.energy > 0 { energy() }
             if let clusters = power.components?.clusters, clusters.contains(where: { $0.watts != nil }) {
                 clusterPower(clusters)
@@ -73,7 +73,7 @@ struct PowerDetail: View {
         return ChartCard(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "",
                          tint: Theme.power, legend: legend) {
             GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
-                .chartFrame(height: 240, tint: Theme.power)
+                .chartFrame(height: DetailGraph.primary, tint: Theme.power)
             Text("Rest of system covers the display, storage, radios, fans and power conversion.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -144,7 +144,7 @@ struct PowerDetail: View {
                 },
                 glows: true, minimumCeiling: 2, axis: Format.watts, cornerRadius: 8
             )
-            .chartFrame(height: 150, tint: Theme.cpu)
+            .chartFrame(height: DetailGraph.secondary, tint: Theme.cpu)
         }
     }
 
@@ -171,7 +171,7 @@ struct PowerDetail: View {
                 ],
                 glows: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8
             )
-            .chartFrame(height: 150, tint: Self.charging)
+            .chartFrame(height: DetailGraph.secondary, tint: Self.charging)
             if let battery = power.battery { batteryStats(battery) }
         }
     }
@@ -194,7 +194,7 @@ struct PowerDetail: View {
     // MARK: - Stats and apps
 
     private func stats(_ power: PowerSample) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 18, alignment: .leading)], alignment: .leading, spacing: 14) {
+        MetricStrip(tint: Theme.power) {
             if let watts = power.systemWatts {
                 Stat(label: "System power", number: watts, color: Theme.power, format: Format.watts)
             }
@@ -223,7 +223,7 @@ struct PowerDetail: View {
                          span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 1, axis: Format.watts, cornerRadius: 8)
-                .chartFrame(height: 180, tint: Theme.power)
+                .chartFrame(height: DetailGraph.secondary, tint: Theme.power)
         }
     }
 }

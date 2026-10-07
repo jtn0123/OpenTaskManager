@@ -95,6 +95,21 @@ struct HistoryTests {
         #expect(Format.timeSpan(-1) == "—")
     }
 
+    @Test func roughDurationsRoundForAGlance() {
+        #expect(Format.roughDuration(0) == "0 s")
+        #expect(Format.roughDuration(45) == "45 s")
+        // Just short of a minute rounds up to it rather than reading "60 s".
+        #expect(Format.roughDuration(59.6) == "1 min")
+        #expect(Format.roughDuration(17 * 60 + 20) == "17 min")
+        #expect(Format.roughDuration(3_599) == "1 h")
+        #expect(Format.roughDuration(5 * 3_600 + 40 * 60) == "5 h 40 min")
+        #expect(Format.roughDuration(24 * 3_600 - 10) == "1 day")
+        #expect(Format.roughDuration(27 * 3_600) == "1 day 3 h")
+        #expect(Format.roughDuration(6 * 86_400) == "6 days")
+        #expect(Format.roughDuration(-1) == "—")
+        #expect(Format.roughDuration(.nan) == "—")
+    }
+
     @Test func sensorReadings() {
         #expect(Format.celsius(61.6) == "62 °C")
         #expect(Format.celsius(.nan) == "—")

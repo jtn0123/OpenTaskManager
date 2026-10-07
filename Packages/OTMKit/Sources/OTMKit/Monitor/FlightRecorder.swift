@@ -153,6 +153,28 @@ public actor FlightRecorder {
         return records
     }
 
+    /// Seconds recorded between two dates. Each record covers `span`
+    /// seconds; copies of the app running side by side write records for the
+    /// same stretch, so each stretch counts once.
+    public func recordedSeconds(from start: Date, to end: Date) throws(FlightRecorderError) -> TimeInterval {
+        let statement = try prepare("SELECT COUNT(DISTINCT CAST(time / ? AS INTEGER)) FROM records WHERE time > ? AND time <= ?")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, Self.span)
+        sqlite3_bind_double(statement, 2, start.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 3, end.timeIntervalSince1970)
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
+        return Double(sqlite3_column_int64(statement, 0)) * Self.span
+    }
+
+    /// Seconds per graph point for a graph `span` seconds wide: about
+    /// `points` across, in whole records, so every point averages the same
+    /// number of them.
+    public static func bucket(for span: TimeInterval, points: Int = 360) -> TimeInterval {
+        guard span.isFinite, span > 0, points > 0 else { return Self.span }
+        let records = (span / Double(points) / Self.span - 1e-9).rounded(.up)
+        return max(records, 1) * Self.span
+    }
+
     /// The oldest record kept, if any.
     public func earliest() throws(FlightRecorderError) -> Date? {
         let statement = try prepare("SELECT MIN(time) FROM records")

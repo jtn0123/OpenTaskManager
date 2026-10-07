@@ -223,6 +223,23 @@ public struct HistoryPoint: Sendable, Identifiable, Equatable {
             return point
         }
     }
+
+    /// The point closest to `time` among `points`, which run oldest first.
+    /// A tie goes to the earlier point.
+    public static func nearest(to time: Date, in points: [HistoryPoint]) -> HistoryPoint? {
+        guard !points.isEmpty else { return nil }
+        var low = 0
+        var high = points.count - 1
+        while low < high {
+            let middle = (low + high) / 2
+            if points[middle].time < time { low = middle + 1 } else { high = middle }
+        }
+        // `low` is now the first point at or after `time`, or the last point.
+        if low > 0, time.timeIntervalSince(points[low - 1].time) <= points[low].time.timeIntervalSince(time) {
+            return points[low - 1]
+        }
+        return points[low]
+    }
 }
 
 // MARK: - Export

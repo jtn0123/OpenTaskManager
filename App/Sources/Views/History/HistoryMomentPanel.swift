@@ -1,8 +1,9 @@
 import OTMKit
 import SwiftUI
 
-/// The figures at the moment the pointer rests on (or the latest), and the
-/// apps that were busiest then, read from the recording for that stretch.
+/// The figures at the moment picked on the graphs (previewed under the
+/// pointer, pinned by a click, or else the latest), and the apps that were
+/// busiest then, read from the recording for that stretch.
 struct HistoryMomentPanel: View {
     @Environment(AppModel.self) private var model
     let scrubber: HistoryScrubber
@@ -13,7 +14,7 @@ struct HistoryMomentPanel: View {
     @State private var topMemory: [HistoryApp] = []
 
     var body: some View {
-        let point = nearest(to: scrubber.time)
+        let point = scrubber.time.flatMap { HistoryPoint.nearest(to: $0, in: points) } ?? points.last
         Card(tint: Theme.cpu) {
             if let point {
                 heading(point)
@@ -23,7 +24,7 @@ struct HistoryMomentPanel: View {
                 apps
             } else {
                 Text("Nothing recorded yet").font(.headline)
-                Text("Hover over a graph to see that moment here.").font(.callout).foregroundStyle(.secondary)
+                Text("Click or drag on a graph to pick a moment and see it here.").font(.callout).foregroundStyle(.secondary)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -36,21 +37,48 @@ struct HistoryMomentPanel: View {
         }
     }
 
+    /// Whether the panel follows the pointer, a pinned moment or the latest,
+    /// and the moment's time, large.
     private func heading(_ point: HistoryPoint) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(scrubber.time == nil ? "Latest" : moment(point.time)).font(.headline)
+        let (state, color): (String, Color) = scrubber.hovered != nil ? ("Preview", .secondary)
+            : scrubber.pinned != nil ? ("Pinned", .accentColor) : ("Latest", .green)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center) {
+                Text(state.uppercased())
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(color.opacity(0.14), in: Capsule())
                 Spacer()
-                if scrubber.time != nil {
-                    Button("Latest") { scrubber.time = nil }
-                        .controlSize(.small)
+                if scrubber.pinned != nil {
+                    Button {
+                        scrubber.pinned = nil
+                    } label: {
+                        Label("Return to latest", systemImage: "arrow.uturn.forward")
+                    }
+                    .controlSize(.small)
+                    .keyboardShortcut(.cancelAction)
+                    .help("Unpin the moment and follow the latest again (Esc)")
                 }
             }
+            Text(HistoryMoment.label(point.time, bucket: bucket))
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
             Text(bucket <= FlightRecorder.span ? "Average of \(Int(FlightRecorder.span)) seconds"
-                 : "Average of \(Format.timeSpan(bucket)) up to \(point.time.formatted(date: .omitted, time: .shortened))")
+                 : "Average of the \(Format.timeSpan(bucket)) up to this time")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+            if let hint {
+                Text(hint).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+
+    /// How to pick a moment, while none is pinned.
+    private var hint: String? {
+        guard scrubber.pinned == nil else { return nil }
+        return scrubber.hovered == nil ? "Click or drag on a graph or the timeline to pin a moment." : "Click to pin this moment."
     }
 
     private func figures(_ values: HistoryValues) -> some View {
@@ -103,17 +131,6 @@ struct HistoryMomentPanel: View {
         }
     }
 
-    private func moment(_ time: Date) -> String {
-        let style: Date.FormatStyle = Calendar.current.isDateInToday(time)
-            ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute()
-        return time.formatted(style)
-    }
-
-    /// The point closest to `time`, or the latest when there's no time.
-    private func nearest(to time: Date?) -> HistoryPoint? {
-        guard let time else { return points.last }
-        return points.min { abs($0.time.timeIntervalSince(time)) < abs($1.time.timeIntervalSince(time)) }
-    }
 }
 
 /// A short ranked list of apps, each with a bar scaled to the busiest.
