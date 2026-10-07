@@ -14,28 +14,85 @@ public struct InfoRow: Sendable, Hashable {
     public var isSensitive = false
     /// An address or identifier someone may copy: shown monospaced, one item per line.
     public var isCode = false
+    /// An IP address: shown on the page and copied, but left out of a saved
+    /// report unless identifiers are included, since a report gets shared.
+    public var isAddress = false
+    /// One of an attached device's facts, under its heading: the page shows
+    /// it once the device is opened. Copied and saved text always keep it.
+    public var isDetail = false
+    /// On a device's heading, the status worth seeing without opening it
+    /// ("built-in", "battery 80%", "default for output").
+    public var state: String?
+    /// On a device's heading, how many hubs or devices it's plugged in behind.
+    public var depth = 0
     public var status: Status?
 
     public init(_ label: String, _ value: String, isHeading: Bool = false, isSensitive: Bool = false, isCode: Bool = false,
-                status: Status? = nil) {
+                isAddress: Bool = false, isDetail: Bool = false, state: String? = nil, depth: Int = 0, status: Status? = nil) {
         self.label = label
         self.value = value
         self.isHeading = isHeading
         self.isSensitive = isSensitive
         self.isCode = isCode
+        self.isAddress = isAddress
+        self.isDetail = isDetail
+        self.state = state
+        self.depth = depth
         self.status = status
     }
+
+    /// A heading's note and state together: "5 Gb/s, built-in".
+    public var headingNote: String {
+        [value, state ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+}
+
+/// A section's rows as an attached-device card shows them: runs of plain
+/// rows, and each device with the facts it keeps behind a disclosure.
+public enum InfoBlock: Sendable, Hashable {
+    case rows([InfoRow])
+    case device(InfoRow, details: [InfoRow])
 }
 
 public struct InfoSection: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable {
         case processor, memory, graphics, displays, storage, network, usb, thunderbolt, bluetooth, audio, battery, software, security
+
+        /// USB, Thunderbolt, Bluetooth, and audio and video: the cards
+        /// listing what's attached, which keep their own heights on the page.
+        public var isAttachedDevice: Bool {
+            switch self {
+            case .usb, .thunderbolt, .bluetooth, .audio: true
+            default: false
+            }
+        }
     }
 
     public var id: Kind { kind }
     public let kind: Kind
     public let title: String
     public let rows: [InfoRow]
+
+    /// Whether some rows wait behind a device's disclosure.
+    public var hasDetails: Bool { rows.contains(where: \.isDetail) }
+
+    /// The rows grouped for an attached-device card: a heading takes the
+    /// detail rows after it, and the other rows run together.
+    public var blocks: [InfoBlock] {
+        var blocks: [InfoBlock] = []
+        for row in rows {
+            if row.isHeading {
+                blocks.append(.device(row, details: []))
+            } else if row.isDetail, case let .device(heading, details) = blocks.last {
+                blocks[blocks.count - 1] = .device(heading, details: details + [row])
+            } else if case let .rows(run) = blocks.last {
+                blocks[blocks.count - 1] = .rows(run + [row])
+            } else {
+                blocks.append(.rows([row]))
+            }
+        }
+        return blocks
+    }
 }
 
 /// Turns a `SystemInfo` into titled label/value sections, shared by the
@@ -69,17 +126,20 @@ public enum SystemReport {
         now: Date = Date()
     ) -> String {
         let hardware = info.hardware
-        var lines = [
-            hardware.displayName,
-            "\(hardware.modelIdentifier) · \(hardware.chip) · \(SystemFacts.memorySize(hardware.physicalMemory)) memory"
-                + " · \(info.software.macOSDescription)",
-        ]
+        var lines = [hardware.displayName, summaryLine(info)]
         if includeIdentifiers {
             lines += identifiers(hardware).map { "\($0.label): \($0.value)" }
         }
         lines += textLines(sections(info, displays: displays, devices: devices, security: security, now: now),
                            includeIdentifiers: includeIdentifiers)
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// "Mac17,8 · Apple M5 Pro · 48 GB memory · macOS 27.2 (26B5101f)".
+    static func summaryLine(_ info: SystemInfo) -> String {
+        let hardware = info.hardware
+        return "\(hardware.modelIdentifier) · \(hardware.chip) · \(SystemFacts.memorySize(hardware.physicalMemory)) memory"
+            + " · \(info.software.macOSDescription)"
     }
 
     /// Just the attached devices, as `otm devices` prints them.
@@ -98,7 +158,8 @@ public enum SystemReport {
             var indent = "  "
             for row in rows {
                 if row.isHeading {
-                    lines.append("  " + row.label + (row.value.isEmpty ? "" : " (\(row.value))"))
+                    let note = row.headingNote
+                    lines.append("  " + row.label + (note.isEmpty ? "" : " (\(note))"))
                     indent = "    "
                 } else {
                     // Further lines of a list (several addresses) line up under the first.
@@ -223,8 +284,8 @@ public enum SystemReport {
             rows.append(InfoRow("Status", connected ? "Connected" : "Not connected", status: connected ? .good : nil))
             let ipv4 = port.addresses.filter { !$0.contains(":") }
             let ipv6 = port.addresses.filter { $0.contains(":") && !$0.lowercased().hasPrefix("fe80") }
-            if !ipv4.isEmpty { rows.append(InfoRow("IPv4", ipv4.joined(separator: "\n"), isCode: true)) }
-            if !ipv6.isEmpty { rows.append(InfoRow("IPv6", ipv6.joined(separator: "\n"), isCode: true)) }
+            if !ipv4.isEmpty { rows.append(InfoRow("IPv4", ipv4.joined(separator: "\n"), isCode: true, isAddress: true)) }
+            if !ipv6.isEmpty { rows.append(InfoRow("IPv6", ipv6.joined(separator: "\n"), isCode: true, isAddress: true)) }
             if let speed = port.linkSpeed, connected {
                 rows.append(InfoRow("Link speed", Format.bitsPerSecond(Double(speed) / 8)))
             }

@@ -1,5 +1,4 @@
 import AppKit
-import CoreGraphics
 import OTMKit
 import SwiftUI
 
@@ -12,11 +11,14 @@ struct SystemInfoView: View {
     @State private var info: SystemInfo?
     @State private var displays: [DisplayInfo] = []
     @State private var devices: PeripheralInventory?
+    /// When `system_profiler` last ran, for a saved report.
+    @State private var devicesReadAt: Date?
     @State private var readingDevices = false
     @State private var security: SecurityStatus?
     /// Serial number, hardware UUID and MAC addresses stay masked until asked for.
     @State private var showsIdentifiers = false
     @State private var copied = false
+    @State private var saving = false
 
     var body: some View {
         Group {
@@ -46,6 +48,14 @@ struct SystemInfoView: View {
                     ? "Copy this page as plain text, including the serial number, hardware UUID and MAC addresses"
                     : "Copy this page as plain text. The serial number, hardware UUID and MAC addresses stay out while hidden.")
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: saveReport) {
+                    Label("Save Report…", systemImage: "square.and.arrow.down")
+                }
+                .labelStyle(.titleAndIcon)
+                .disabled(info == nil || saving)
+                .help("Save this page as a Markdown or JSON file. Identifiers stay out unless you include them.")
+            }
         }
         .task { await load() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
@@ -59,18 +69,29 @@ struct SystemInfoView: View {
                 HeroCard(info: info, showsIdentifiers: $showsIdentifiers)
                 // Only the uptime moves, so a minute is often enough.
                 TimelineView(.everyMinute) { context in
-                    FillGrid(minimum: 300) {
-                        let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security,
-                                                             now: context.date)
-                        ForEach(sections) { section in
-                            InfoCard(section: section, showsIdentifiers: showsIdentifiers)
+                    let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, now: context.date)
+                    let before = sections.prefix { !$0.kind.isAttachedDevice }
+                    let attached = sections.filter(\.kind.isAttachedDevice)
+                    VStack(spacing: 16) {
+                        cards(before)
+                        // Their own rows, each card as long as its list: an empty
+                        // Bluetooth card doesn't stretch to match a full USB one.
+                        FillGrid(minimum: 300, evensHeights: false) {
+                            ForEach(attached) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers) }
                         }
+                        cards(sections.dropFirst(before.count + attached.count))
                     }
                 }
             }
             .padding(20)
         }
         .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
+    }
+
+    private func cards(_ sections: ArraySlice<InfoSection>) -> some View {
+        FillGrid(minimum: 300) {
+            ForEach(sections) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers) }
+        }
     }
 
     private func load() async {
@@ -97,7 +118,31 @@ struct SystemInfoView: View {
                 continuation.resume(returning: PeripheralReader.read())
             }
         }
+        devicesReadAt = Date()
         readingDevices = false
+    }
+
+    /// Asks where, then saves the page. The hardware is read again so free
+    /// space, addresses and up time are as of now; devices and security are
+    /// the page's last reads, and the report says when the devices were read.
+    private func saveReport() {
+        guard let info else { return }
+        saving = true
+        Task {
+            defer { saving = false }
+            let day = Date.now.formatted(.iso8601.year().month().day())
+            let name = "\(info.hardware.displayName) System Report \(day)".replacingOccurrences(of: "/", with: "-")
+            guard let choice = await SystemReportSavePanel.choose(name: name) else { return }
+            let topology = model.topology
+            let fresh = await Task.detached(priority: .userInitiated) { SystemInfoReader.read(topology: topology) }.value
+            self.info = fresh
+            displays = DisplayReader.read()
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+            let generator = "OpenTaskManager \(version)".trimmingCharacters(in: .whitespaces)
+            let report = SystemReportDocument(info: fresh, displays: displays, devices: devices, devicesCollectedAt: devicesReadAt,
+                                              security: security, generator: generator)
+            await SystemReportSavePanel.write(report, as: choice)
+        }
     }
 
     private func copySummary() {
@@ -221,12 +266,13 @@ private struct Chip: View {
 // MARK: - Cards
 
 /// One section as label/value rows. Headings (a display, a drive, a network
-/// port) start a group and indent the rows under them.
+/// port) start a group and indent the rows under them. On an attached-device
+/// card each device is one compact row instead, opening onto its details.
 private struct InfoCard: View {
-    private static let mask = String(repeating: "•", count: 12)
-
     var section: InfoSection
     var showsIdentifiers: Bool
+    /// Devices opened to show their details, by position and name.
+    @State private var opened: Set<String> = []
 
     var body: some View {
         let style = SystemStyle(section.kind)
@@ -234,22 +280,27 @@ private struct InfoCard: View {
             Label(section.title, systemImage: style.symbol)
                 .font(.headline)
                 .foregroundStyle(style.tint)
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
-                ForEach(Array(section.rows.enumerated()), id: \.offset) { index, row in
-                    if row.isHeading {
-                        heading(row, isFirst: index == 0)
-                    } else {
-                        GridRow {
-                            Text(row.label)
-                                .foregroundStyle(.secondaryText)
-                                .fixedSize()
-                                .padding(.leading, section.rows[..<index].contains(where: \.isHeading) ? 10 : 0)
-                            value(row)
-                        }
-                    }
+            Group {
+                if section.hasDetails {
+                    deviceList
+                } else {
+                    rowGrid
                 }
             }
             .font(.callout)
+        }
+    }
+
+    private var rowGrid: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+            ForEach(Array(section.rows.enumerated()), id: \.offset) { index, row in
+                if row.isHeading {
+                    heading(row, isFirst: index == 0)
+                } else {
+                    InfoGridRow(row: row, showsIdentifiers: showsIdentifiers,
+                                indent: section.rows[..<index].contains(where: \.isHeading) ? 10 : 0)
+                }
+            }
         }
     }
 
@@ -264,8 +315,66 @@ private struct InfoCard: View {
         .padding(.top, isFirst ? 0 : 6)
     }
 
-    @ViewBuilder
-    private func value(_ row: InfoRow) -> some View {
+    private var deviceList: some View {
+        let blocks = Array(section.blocks.enumerated())
+        let keys = blocks.compactMap { index, block in
+            if case let .device(heading, details) = block, !details.isEmpty { Self.key(index, heading) } else { nil }
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(blocks, id: \.offset) { index, block in
+                switch block {
+                case let .rows(rows):
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                            InfoGridRow(row: row, showsIdentifiers: showsIdentifiers)
+                        }
+                    }
+                case let .device(heading, details):
+                    let key = Self.key(index, heading)
+                    DeviceRow(heading: heading, details: details, showsIdentifiers: showsIdentifiers, isOpen: opened.contains(key)) { all in
+                        let opening = !opened.contains(key)
+                        if all {
+                            opened = opening ? Set(keys) : []
+                        } else if opening {
+                            opened.insert(key)
+                        } else {
+                            opened.remove(key)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func key(_ index: Int, _ heading: InfoRow) -> String {
+        "\(index) \(heading.label)"
+    }
+}
+
+/// A label and its value, as a row of the card's grid.
+private struct InfoGridRow: View {
+    var row: InfoRow
+    var showsIdentifiers: Bool
+    var indent: CGFloat = 0
+
+    var body: some View {
+        GridRow {
+            Text(row.label)
+                .foregroundStyle(.secondaryText)
+                .fixedSize()
+                .padding(.leading, indent)
+            InfoValue(row: row, showsIdentifiers: showsIdentifiers)
+        }
+    }
+}
+
+private struct InfoValue: View {
+    private static let mask = String(repeating: "•", count: 12)
+
+    var row: InfoRow
+    var showsIdentifiers: Bool
+
+    var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             if let status = row.status {
                 StatusIcon(status: status)
@@ -283,6 +392,82 @@ private struct InfoCard: View {
         }
         // Lets the value column take the rest of the card, so values only wrap when they must.
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// An attached device as one line: its name, how it's connected, and the
+/// status worth seeing at a glance. Clicking it opens the rest of its facts
+/// (maker, bus, power, identifiers); Option-click opens or closes them all.
+/// Devices plugged into a hub sit indented under it.
+private struct DeviceRow: View {
+    var heading: InfoRow
+    var details: [InfoRow]
+    var showsIdentifiers: Bool
+    var isOpen: Bool
+    /// Called with true when Option is held.
+    var toggle: (_ all: Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if details.isEmpty {
+                summary
+            } else {
+                Button {
+                    toggle(NSEvent.modifierFlags.contains(.option))
+                } label: {
+                    summary.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isOpen ? "Hide the details" : "Show the details. Option-click shows every device's.")
+                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
+                if isOpen {
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+                        ForEach(Array(details.enumerated()), id: \.offset) { _, row in
+                            InfoGridRow(row: row, showsIdentifiers: showsIdentifiers)
+                        }
+                    }
+                    .padding(.leading, 15)
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+        .padding(.leading, CGFloat(heading.depth) * 14)
+    }
+
+    /// On one line while it fits, otherwise the status under the name.
+    private var summary: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondaryText)
+                .rotationEffect(.degrees(isOpen ? 90 : 0))
+                .frame(width: 10)
+                .opacity(details.isEmpty ? 0 : 1)
+                .accessibilityHidden(true)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    name.lineLimit(1)
+                    Spacer(minLength: 0)
+                    state
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    name
+                    state
+                }
+            }
+        }
+    }
+
+    private var name: Text {
+        let note = heading.value.isEmpty ? Text("") : Text("  " + heading.value).foregroundStyle(.secondaryText)
+        return Text(heading.label).fontWeight(.medium) + note
+    }
+
+    @ViewBuilder
+    private var state: some View {
+        if let state = heading.state {
+            Text(state).foregroundStyle(.secondaryText).lineLimit(1)
+        }
     }
 }
 
@@ -353,36 +538,5 @@ private struct SystemStyle {
         case .desktop: "desktopcomputer"
         }
         return NSImage(systemSymbolName: preferred, accessibilityDescription: nil) == nil ? "desktopcomputer" : preferred
-    }
-}
-
-// MARK: - Displays
-
-/// Connected displays from AppKit and Core Graphics, the main one first.
-@MainActor
-enum DisplayReader {
-    static func read() -> [DisplayInfo] {
-        let displays = NSScreen.screens.compactMap { screen -> DisplayInfo? in
-            guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-            let id = CGDirectDisplayID(number.uint32Value)
-            let mode = CGDisplayCopyDisplayMode(id)
-            let scale = screen.backingScaleFactor
-            let points = screen.frame.size
-            let modeRate = mode?.refreshRate ?? 0
-            let rate = modeRate > 0 ? modeRate : screen.maximumFramesPerSecond > 0 ? Double(screen.maximumFramesPerSecond) : nil
-            return DisplayInfo(
-                id: id,
-                name: screen.localizedName,
-                pixelWidth: mode?.pixelWidth ?? Int(points.width * scale),
-                pixelHeight: mode?.pixelHeight ?? Int(points.height * scale),
-                pointWidth: mode?.width ?? Int(points.width),
-                pointHeight: mode?.height ?? Int(points.height),
-                scale: Double(scale),
-                refreshRate: rate,
-                isBuiltIn: CGDisplayIsBuiltin(id) != 0,
-                isMain: CGDisplayIsMain(id) != 0
-            )
-        }
-        return displays.filter(\.isMain) + displays.filter { !$0.isMain }
     }
 }

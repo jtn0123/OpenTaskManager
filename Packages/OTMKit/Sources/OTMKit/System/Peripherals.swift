@@ -93,12 +93,15 @@ public struct ThunderboltReport: Sendable, Hashable, Encodable {
         public var speed: String?
         /// The device it's chained from; nil when it's plugged into the Mac.
         public var upstream: String?
+        /// Devices between it and the Mac.
+        public var depth = 0
 
-        public init(name: String, vendor: String?, speed: String?, upstream: String?) {
+        public init(name: String, vendor: String?, speed: String?, upstream: String?, depth: Int = 0) {
             self.name = name
             self.vendor = vendor
             self.speed = speed
             self.upstream = upstream
+            self.depth = depth
         }
     }
 
@@ -324,12 +327,12 @@ public struct PeripheralInventory: Sendable, Hashable, Encodable {
     static func parseThunderbolt(_ buses: [[String: Any]]) -> ThunderboltReport {
         var ports: [ThunderboltReport.Port] = []
         var devices: [ThunderboltReport.Device] = []
-        func walk(_ items: [[String: Any]], upstream: String?) {
+        func walk(_ items: [[String: Any]], upstream: String?, depth: Int) {
             for item in items {
                 let name = cleaned(item.string("device_name_key")) ?? cleaned(item.string("_name")) ?? "Thunderbolt device"
                 devices.append(.init(name: name, vendor: cleaned(item.string("vendor_name_key")), speed: linkSpeed(item),
-                                     upstream: upstream))
-                walk(item["_items"] as? [[String: Any]] ?? [], upstream: name)
+                                     upstream: upstream, depth: depth))
+                walk(item["_items"] as? [[String: Any]] ?? [], upstream: name, depth: depth + 1)
             }
         }
         // Each bus is the Mac's own controller; its receptacles are the ports.
@@ -340,7 +343,7 @@ public struct PeripheralInventory: Sendable, Hashable, Encodable {
                 ports.append(.init(speed: cleaned(receptacle.string("current_speed_key")),
                                    isInUse: status.map { $0 != "receptacle_no_devices_connected" } ?? false))
             }
-            walk(bus["_items"] as? [[String: Any]] ?? [], upstream: nil)
+            walk(bus["_items"] as? [[String: Any]] ?? [], upstream: nil, depth: 0)
         }
         return ThunderboltReport(ports: ports, devices: devices)
     }

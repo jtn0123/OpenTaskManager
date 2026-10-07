@@ -53,7 +53,8 @@ Manager OG or any other proprietary task manager.
   Views/System (hardware and security facts, read once when the page opens, never
   per tick; the rows come from `SystemReport` in OTMKit, and attached devices from
   one `system_profiler -json` run, `PeripheralReader` in OTMKit's System/Peripherals,
-  again on Refresh),
+  again on Refresh; Save Report… and `otm system report` write `SystemReportDocument`,
+  whose JSON schema is `SystemReportJSON`, with identifiers left out unless asked),
   Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
   the main actor when the page opens and on Refresh, never per tick; parsing is
   in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),
@@ -92,6 +93,8 @@ Manager OG or any other proprietary task manager.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.
+  `evensHeights: false` keeps each card's own height (the System page's
+  attached-device cards, whose length depends on what's plugged in).
 - The Connections page's socket walk (`ConnectionSampler`, every process's
   descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
   runs it off the main actor every 3 s, only while the page is on screen.

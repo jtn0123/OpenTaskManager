@@ -12,7 +12,11 @@ USAGE:
   otm ps [-n COUNT] [--sort cpu|mem|power|gpu|disk|pid|name] [--json]
   otm top [-n COUNT] [--sort KEY] [--interval SECONDS]
   otm system [--json]
-  otm power [--json]             System, CPU/GPU/ANE/DRAM and cluster power,
+  otm system report [--all] [--json]
+                                 The app's System page as Markdown, or as the
+                                 versioned JSON its Save Report writes; --all
+                                 adds serial numbers, UUIDs and addresses
+  otm power [--json]           System, CPU/GPU/ANE/DRAM and cluster power,
                                  clocks, adapter and battery flow
   otm sensors [--json]           Chip, SSD and battery temperatures, fan speeds
   otm ports [--json]             Listening TCP/UDP ports of your processes
@@ -538,6 +542,20 @@ case "top":
         try await Task.sleep(for: .seconds(options.interval))
         let snapshot = await monitor.sample()
         print("\u{1B}[H\u{1B}[2J" + systemSummary(snapshot, topology: monitor.topology) + "\n\n" + processTable(snapshot, options: options))
+    }
+
+case "system" where options.positional.first == "report":
+    // What the System page reads, the same way; the tool name stands in for the app's.
+    async let security = SecurityReader.read()
+    let devices = PeripheralReader.read()
+    let report = SystemReportDocument(info: SystemInfoReader.read(topology: monitor.topology), displays: DisplayReader.read(),
+                                      devices: devices, devicesCollectedAt: Date(), security: await security,
+                                      generator: "otm \(version)")
+    if options.json {
+        guard let data = try? report.json(includeIdentifiers: options.all) else { fail("could not encode JSON") }
+        FileHandle.standardOutput.write(data + Data("\n".utf8))
+    } else {
+        print(report.markdown(includeIdentifiers: options.all), terminator: "")
     }
 
 case "system":

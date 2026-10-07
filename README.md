@@ -114,6 +114,10 @@ defaults, and cameras), battery health, macOS and kernel versions, uptime, and
 whether SIP, FileVault and Gatekeeper are on. The serial number, hardware UUID,
 MAC addresses and device serials stay hidden until you ask, Refresh reads the
 devices again, and Copy Summary puts the page on the clipboard as plain text.
+Each attached device is one line (name, speed or connection, and a status such
+as battery level); click it for its maker, bus, power and IDs. Save Report…
+writes the page as Markdown or versioned JSON, with identifiers left out unless
+you tick the option; `otm system report [--json] [--all]` prints the same.
 
 **Drivers**: the system extensions and kernel extensions loaded on the Mac.
 - Counts of system extensions by kind, third-party kexts, loaded kexts and
