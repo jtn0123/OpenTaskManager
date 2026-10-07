@@ -32,6 +32,12 @@ public struct ProcessTotals: Sendable, Hashable {
     /// `powerWatts` is 0 for want of data, not a measured 0 W.
     public var isPowerMeasured = false
     public var gpuFraction: Double = 0
+    /// Neural Engine memory now, summed over the processes that report it.
+    public var neuralMemory: UInt64 = 0
+    /// Whether any process counted here has held Neural Engine memory. When
+    /// none has, `neuralMemory` is 0 because nothing uses it, and a table
+    /// shows "—" rather than 0 bytes.
+    public var hasHeldNeuralMemory = false
     public var diskRate: Double = 0
     public var threads: Int = 0
     public var processCount: Int = 0
@@ -44,6 +50,8 @@ public struct ProcessTotals: Sendable, Hashable {
         powerWatts = process.powerWatts ?? 0
         isPowerMeasured = process.powerWatts != nil
         gpuFraction = process.gpuFraction ?? 0
+        neuralMemory = process.neuralMemory ?? 0
+        hasHeldNeuralMemory = process.hasHeldNeuralMemory
         diskRate = process.diskReadRate + process.diskWriteRate
         threads = process.threadCount
         processCount = 1
@@ -55,6 +63,8 @@ public struct ProcessTotals: Sendable, Hashable {
         powerWatts += other.powerWatts
         isPowerMeasured = isPowerMeasured || other.isPowerMeasured
         gpuFraction += other.gpuFraction
+        neuralMemory += other.neuralMemory
+        hasHeldNeuralMemory = hasHeldNeuralMemory || other.hasHeldNeuralMemory
         diskRate += other.diskRate
         threads += other.threads
         processCount += other.processCount
@@ -84,7 +94,7 @@ public struct ProcessNode: Sendable, Identifiable {
 }
 
 public enum ProcessSortKey: String, Sendable, CaseIterable {
-    case name, pid, cpu, memory, power, gpu, disk, threads, user, topTier, wakeups
+    case name, pid, cpu, memory, power, gpu, neuralMemory, disk, threads, user, topTier, wakeups
 }
 
 public enum ProcessTreeBuilder {
@@ -224,6 +234,11 @@ public enum ProcessTreeBuilder {
         case .memory: return order(lhs.totals.memory, rhs.totals.memory)
         case .power: return order(lhs.totals.powerWatts, rhs.totals.powerWatts)
         case .gpu: return order(lhs.totals.gpuFraction, rhs.totals.gpuFraction)
+        case .neuralMemory:
+            // Among rows holding the same now (usually none), ones that have held some rank higher.
+            let now = order(lhs.totals.neuralMemory, rhs.totals.neuralMemory)
+            guard now == .orderedSame else { return now }
+            return order(lhs.totals.hasHeldNeuralMemory ? 1 : 0, rhs.totals.hasHeldNeuralMemory ? 1 : 0)
         case .disk: return order(lhs.totals.diskRate, rhs.totals.diskRate)
         case .threads: return order(lhs.totals.threads, rhs.totals.threads)
         case .user: return (a?.userName ?? "").localizedCaseInsensitiveCompare(b?.userName ?? "")

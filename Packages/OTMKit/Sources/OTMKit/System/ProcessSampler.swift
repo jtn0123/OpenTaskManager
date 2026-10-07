@@ -4,9 +4,10 @@ import Foundation
 /// Samples every process on the system.
 ///
 /// Processes owned by the current user are read natively through libproc,
-/// which gives footprint, energy, disk I/O and per-tier CPU time. macOS only
-/// lets root read those for other users' processes, so for those we fall back
-/// to the setuid `ps` binary for CPU time, resident size and thread counts.
+/// which gives footprint, energy, disk I/O, per-tier CPU time and Neural
+/// Engine memory. macOS only lets root read those for other users'
+/// processes, so for those we fall back to the setuid `ps` binary for CPU
+/// time, resident size and thread counts.
 final class ProcessSampler {
     var includeRestricted = true
 
@@ -67,6 +68,8 @@ final class ProcessSampler {
             sample.threadCount = native.threads
             sample.diskReadTotal = native.diskRead
             sample.diskWriteTotal = native.diskWrite
+            sample.neuralMemory = native.neuralMemory
+            sample.neuralMemoryPeak = native.neuralMemoryPeak
             if native.running, sample.state == .sleeping { sample.state = .running }
             apply(counters, before: before, interval: interval, to: &sample)
             samples.append(sample)
@@ -201,6 +204,8 @@ final class ProcessSampler {
         let diskWrite: UInt64
         let energyNanojoules: UInt64?
         let wakeups: UInt64?
+        var neuralMemory: UInt64?
+        var neuralMemoryPeak: UInt64?
     }
 
     private func readNative(_ pid: Int32) -> Native? {
@@ -211,6 +216,9 @@ final class ProcessSampler {
         if supportsV6 {
             var usage = rusage_info_v6()
             guard Self.rusage(pid, &usage, flavor: RUSAGE_INFO_V6) else { return nil }
+            // The Neural Engine figures come with the same call; before
+            // macOS 15 their fields are reserved and read 0, which isn't a figure.
+            let neural = ProcessSample.systemReportsNeuralMemory
             return Native(
                 cpuSeconds: MachTime.seconds(fromTicks: usage.ri_user_time + usage.ri_system_time),
                 topTierSeconds: MachTime.seconds(fromTicks: usage.ri_user_ptime + usage.ri_system_ptime),
@@ -221,7 +229,9 @@ final class ProcessSampler {
                 diskRead: usage.ri_diskio_bytesread,
                 diskWrite: usage.ri_diskio_byteswritten,
                 energyNanojoules: usage.ri_energy_nj > 0 ? usage.ri_energy_nj : nil,
-                wakeups: usage.ri_pkg_idle_wkups + usage.ri_interrupt_wkups
+                wakeups: usage.ri_pkg_idle_wkups + usage.ri_interrupt_wkups,
+                neuralMemory: neural ? usage.ri_neural_footprint : nil,
+                neuralMemoryPeak: neural ? usage.ri_lifetime_max_neural_footprint : nil
             )
         }
 

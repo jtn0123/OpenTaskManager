@@ -306,6 +306,8 @@ struct SoCPowerTests {
             let interval: Double
             let usable: Bool
             let batchedAfter: Bool
+            /// Set aside as not live, which one interval can already tell.
+            var stalled: Bool { !usable && interval >= EnergyModelMonitor.minimumInterval }
         }
         let readings = [
             Reading(joules: 2, interval: 1, usable: true, batchedAfter: false),
@@ -320,17 +322,21 @@ struct SoCPowerTests {
             let usable = monitor.accept(cpuJoules: reading.joules, interval: reading.interval, limitWatts: 100)
             #expect(usable == reading.usable, "step \(step)")
             #expect(monitor.isBatched == reading.batchedAfter, "step \(step)")
+            #expect(monitor.isStalled == reading.stalled, "step \(step)")
         }
     }
 
     @Test func rejectsABurstWithoutGivingUp() {
         var monitor = EnergyModelMonitor()
         let burst = monitor.accept(cpuJoules: 135, interval: 1, limitWatts: 60)
+        #expect(monitor.isStalled, "a burst isn't a live reading either")
         let missing = monitor.accept(cpuJoules: nil, interval: 1, limitWatts: 60)
+        #expect(!monitor.isStalled, "no CPU channel at all says nothing about the counters")
         let live = monitor.accept(cpuJoules: 5, interval: 1, limitWatts: 60)
         #expect(!burst)
         #expect(!missing)
         #expect(live)
+        #expect(!monitor.isStalled)
         #expect(!monitor.isBatched)
         #expect(SoCPowerAnalyzer.limitWatts(systemWatts: 10) == 60)
         #expect(SoCPowerAnalyzer.limitWatts(systemWatts: nil) == PowerSourceSelection.maximumPlausibleWatts)
@@ -353,6 +359,7 @@ struct SoCPowerTests {
         #expect(abs((components.dram ?? 0) - 0.4) < 1e-9)
         #expect(abs(components.total - 5.5) < 1e-9)
         #expect(components.sources == [.cpu: .energyModel, .gpu: .energyModel, .ane: .energyModel, .dram: .energyModel])
+        #expect(!components.energyCountersStalled)
 
         #expect(components.clusters.map(\.name) == ["Super 0", "Performance 0", "Performance 1"])
         #expect(components.clusters.map(\.tierLevel) == [0, 1, 1])
@@ -392,6 +399,7 @@ struct SoCPowerTests {
             #expect(components.clusters.allSatisfy { $0.watts == nil })
             #expect(components.clusters.first?.frequencyMHz == 4608)
             #expect(components.clusters.first?.activeFraction == 0.1)
+            #expect(components.energyCountersStalled, "one interval reading zero already tells")
         }
         #expect(analyzer.energyModel.isBatched)
 
@@ -403,6 +411,7 @@ struct SoCPowerTests {
         #expect(components.cpu == 7)
         #expect(components.sources[.cpu] == .smc)
         #expect(components.sources[.ane] == nil)
+        #expect(components.energyCountersStalled, "says why the Neural Engine and DRAM go unmeasured")
     }
 
     @Test func leavesTheCPUUnmeasuredWithoutAnySource() throws {

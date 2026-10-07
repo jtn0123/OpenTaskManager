@@ -77,10 +77,24 @@ struct PowerDetail: View {
                          tint: Theme.power, legend: legend) {
             GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.primary, tint: Theme.power)
-            Text("Rest of system covers the display, storage, radios, fans and power conversion.")
-                .font(.subheadline)
+            Text(Self.restNote(components))
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
         }
+    }
+
+    /// What "Rest of system" holds. A part that isn't measured lands in it
+    /// too, so the note names it, and says why when the energy counters
+    /// aren't live (on an M5 Pro they update in bursts minutes apart).
+    private static func restNote(_ components: PowerComponents) -> String {
+        let base = "Rest of system covers the display, storage, radios, fans and power conversion."
+        let names: [PowerComponent: String] = [.cpu: "the CPU", .gpu: "the GPU", .ane: "the Neural Engine", .dram: "memory"]
+        let unmeasured = PowerComponent.allCases.filter { !components.isMeasured($0) }.compactMap { names[$0] }
+        guard !unmeasured.isEmpty else { return base }
+        let parts = ListFormatter.localizedString(byJoining: unmeasured)
+        return components.energyCountersStalled
+            ? "\(base) Here it also includes \(parts), as this Mac's energy counters for them aren't updating live."
+            : "\(base) Here it also includes \(parts), which this Mac doesn't measure separately."
     }
 
     // MARK: - Energy since launch

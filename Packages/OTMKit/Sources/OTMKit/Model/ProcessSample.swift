@@ -47,6 +47,27 @@ public struct ProcessSample: Sendable, Codable, Identifiable, Hashable {
     public var gpuFraction: Double?
     /// Cumulative GPU time in seconds.
     public var gpuTime: Double?
+    /// Memory the process holds for the Neural Engine, in bytes: the models
+    /// and buffers macOS keeps for it apart from the footprint (`memory`
+    /// doesn't include them). It says how much the process has loaded for the
+    /// Neural Engine, not how busy the Neural Engine is. nil where macOS
+    /// doesn't say: before macOS 15 (`systemReportsNeuralMemory`), and for
+    /// restricted processes.
+    public var neuralMemory: UInt64?
+    /// The most `neuralMemory` has been since the process started.
+    public var neuralMemoryPeak: UInt64?
+
+    /// Whether macOS reports each process's Neural Engine memory: from macOS
+    /// 15, which filled in fields `rusage_info_v6` had left reserved.
+    public static let systemReportsNeuralMemory = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+        OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0)
+    )
+
+    /// Whether the process has held any Neural Engine memory since it
+    /// started. One that never has shows "—" rather than 0 bytes.
+    public var hasHeldNeuralMemory: Bool {
+        (neuralMemory ?? 0) > 0 || (neuralMemoryPeak ?? 0) > 0
+    }
 
     /// The enclosing `.app` bundle, derived from the executable path.
     public var bundlePath: String? {

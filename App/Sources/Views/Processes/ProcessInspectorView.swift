@@ -109,7 +109,7 @@ struct ProcessInspectorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName(for: process)).font(.headline).lineLimit(1)
                 Text("PID \(process.pid) · \(process.userName) · \(process.state.rawValue)")
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.callout).foregroundStyle(.secondaryText)
             }
         }
     }
@@ -187,6 +187,7 @@ struct ProcessInspectorView: View {
                 FactRow(label: "Threads", value: process.threadCount > 0 ? String(process.threadCount) : "—")
                 if !process.isRestricted {
                     memoryRows(process)
+                    if process.hasHeldNeuralMemory { neuralMemoryRow(process) }
                     if measuresPower {
                         FactRow(label: "Power", value: process.powerWatts.map(Format.watts) ?? "—")
                     }
@@ -223,7 +224,7 @@ struct ProcessInspectorView: View {
                 labelled("Command line", command)
             } else if details.loaded {
                 Text("Command line and environment are only visible for your own processes.")
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.explanation).foregroundStyle(.secondaryText)
             }
         }
     }
@@ -263,13 +264,25 @@ struct ProcessInspectorView: View {
         .font(.callout)
     }
 
+    /// Memory held for the Neural Engine now and at most, apart from the
+    /// footprint above. Named as memory: it isn't how busy the Neural Engine is.
+    private func neuralMemoryRow(_ process: ProcessSample) -> some View {
+        GridRow {
+            Text("Neural Engine memory").foregroundStyle(.secondaryText)
+            Text("\(Format.bytes(process.neuralMemory ?? 0)) · \(Format.bytes(process.neuralMemoryPeak ?? 0)) at most")
+                .textSelection(.enabled)
+        }
+        .font(.callout)
+        .help(MemoryMeasure.neural)
+    }
+
     private var environment: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let variables = details.arguments?.environment, !variables.isEmpty {
                 ForEach(variables) { variable in
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(variable.name).font(.caption.weight(.semibold))
-                        Text(variable.value).font(.caption.monospaced()).textSelection(.enabled).lineLimit(4)
+                        Text(variable.name).font(.callout.weight(.semibold))
+                        Text(variable.value).font(.callout.monospaced()).textSelection(.enabled).lineLimit(4)
                     }
                     .padding(.vertical, 2)
                 }
@@ -282,7 +295,7 @@ struct ProcessInspectorView: View {
 
     private var files: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Sockets only", isOn: $socketsOnly).toggleStyle(.checkbox).font(.subheadline)
+            Toggle("Sockets only", isOn: $socketsOnly).toggleStyle(.checkbox).font(.callout)
             if let files = details.openFiles {
                 let shown = socketsOnly ? files.filter { $0.socket != nil } : files
                 ForEach(shown) { file in
@@ -290,11 +303,11 @@ struct ProcessInspectorView: View {
                         Image(systemName: symbol(for: file))
                             .foregroundStyle(file.socket?.isListening == true ? .green : .secondary)
                             .frame(width: 14)
-                        Text(file.detail).font(.caption.monospaced()).textSelection(.enabled).lineLimit(2)
+                        Text(file.detail).font(.callout.monospaced()).textSelection(.enabled).lineLimit(2)
                     }
                 }
                 if shown.isEmpty {
-                    Text("Nothing open.").font(.subheadline).foregroundStyle(.secondaryText)
+                    Text("Nothing open.").font(.explanation).foregroundStyle(.secondaryText)
                 }
             } else {
                 unavailable("Open files unavailable", "macOS only lists open files for your own processes.")
@@ -366,15 +379,15 @@ struct ProcessInspectorView: View {
 
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
-            Text(value).font(.caption.monospaced()).textSelection(.enabled)
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            Text(value).font(.callout.monospaced()).textSelection(.enabled)
         }
     }
 
     private func unavailable(_ title: String, _ detail: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.callout)
-            Text(detail).font(.subheadline).foregroundStyle(.secondaryText)
+            Text(detail).font(.explanation).foregroundStyle(.secondaryText)
         }
     }
 
@@ -422,7 +435,7 @@ private struct RowGroupNote: View {
             }
             Text(text).font(.explanation).foregroundStyle(.secondaryText)
         }
-        .font(.metadata)
+        .font(.callout)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.primary.opacity(0.04), in: shape)

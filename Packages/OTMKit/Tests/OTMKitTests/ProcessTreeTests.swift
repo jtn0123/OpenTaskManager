@@ -108,6 +108,34 @@ struct ProcessTreeTests {
         #expect(ProcessTotals(measured[2]).isPowerMeasured, "a measured 0 W is still a measurement")
     }
 
+    @Test func groupTotalsAddNeuralEngineMemoryAndKnowWhetherAnyWasHeld() {
+        var held = sample
+        // Safari held some earlier and holds none now; its web content holds some.
+        (held[1].neuralMemory, held[1].neuralMemoryPeak) = (0, 4096)
+        (held[2].neuralMemory, held[2].neuralMemoryPeak) = (2048, 8192)
+        // Mail can be read and has never held any.
+        (held[4].neuralMemory, held[4].neuralMemoryPeak) = (0, 0)
+        let nodes = ProcessTreeBuilder.build(held, mode: .grouped, appPIDs: [100, 200], currentUID: Self.me)
+        let apps = nodes[0].children
+        #expect(apps[0].totals.neuralMemory == 2048, "the app's row adds up what its processes hold now")
+        #expect(apps[0].totals.hasHeldNeuralMemory)
+        #expect(!apps[1].totals.hasHeldNeuralMemory, "Mail's 0 bytes means nothing held: a dash, not 0")
+        #expect(nodes[0].totals.hasHeldNeuralMemory)
+        #expect(ProcessTotals(held[1]).hasHeldNeuralMemory, "holding none now but some earlier still counts")
+        #expect(!ProcessTotals(sample[1]).hasHeldNeuralMemory, "no figure at all: macOS 14, or a restricted process")
+    }
+
+    @Test func sortsByNeuralEngineMemoryThenByWhetherAnyWasHeld() {
+        var held = sample
+        (held[4].neuralMemory, held[4].neuralMemoryPeak) = (1024, 1024)
+        (held[5].neuralMemory, held[5].neuralMemoryPeak) = (0, 512)
+        (held[6].neuralMemory, held[6].neuralMemoryPeak) = (0, 0)
+        let nodes = ProcessTreeBuilder.build(held, mode: .flat, appPIDs: [])
+        let sorted = ProcessTreeBuilder.sort(nodes, by: .neuralMemory, ascending: false)
+        #expect(sorted.prefix(2).map(\.id) == [200, 300], "Mail holds some now; the agent held some earlier")
+        #expect(ProcessSortKey(rawValue: "neuralMemory") == .neuralMemory, "the table's column identifier")
+    }
+
     @Test func tellsWhetherThisMacCountsEnergyPerProcess() {
         var measured = sample
         measured[1].powerWatts = 0.2
@@ -133,36 +161,36 @@ struct ProcessTreeTests {
     }
 
     @Test func gpuIsReportedOnceAnyProcessHasGPUTime() {
-        var reporting = ProcessGPUReporting()
+        var reporting = ProcessFigureReporting()
         #expect(reporting.isReported == nil)
-        reporting.record(anyGPUTime: true)
+        reporting.record(anyProcess: true)
         #expect(reporting.isReported == true)
         // Once seen, quiet samples don't take it back this session.
-        for _ in 0..<10 { reporting.record(anyGPUTime: false) }
+        for _ in 0..<10 { reporting.record(anyProcess: false) }
         #expect(reporting.isReported == true)
     }
 
     @Test func gpuIsUnreportedOnlyAfterSeveralSamplesWithNone() {
-        var reporting = ProcessGPUReporting()
-        for _ in 1..<ProcessGPUReporting.samplesToRuleOut { reporting.record(anyGPUTime: false) }
+        var reporting = ProcessFigureReporting()
+        for _ in 1..<ProcessFigureReporting.samplesToRuleOut { reporting.record(anyProcess: false) }
         #expect(reporting.isReported == nil, "too soon to tell")
-        reporting.record(anyGPUTime: false)
+        reporting.record(anyProcess: false)
         #expect(reporting.isReported == false)
         // A process that draws later still brings it back.
-        reporting.record(anyGPUTime: true)
+        reporting.record(anyProcess: true)
         #expect(reporting.isReported == true)
     }
 
     @Test func gpuVerdictFromAnEarlierLaunchHoldsUntilSamplesSayOtherwise() {
-        var hidden = ProcessGPUReporting(isReported: false)
+        var hidden = ProcessFigureReporting(isReported: false)
         #expect(hidden.isReported == false, "a VM without GPU time hides the column from the first frame")
-        hidden.record(anyGPUTime: true)
+        hidden.record(anyProcess: true)
         #expect(hidden.isReported == true)
 
-        var shown = ProcessGPUReporting(isReported: true)
-        shown.record(anyGPUTime: false)
+        var shown = ProcessFigureReporting(isReported: true)
+        shown.record(anyProcess: false)
         #expect(shown.isReported == true)
-        for _ in 1..<ProcessGPUReporting.samplesToRuleOut { shown.record(anyGPUTime: false) }
+        for _ in 1..<ProcessFigureReporting.samplesToRuleOut { shown.record(anyProcess: false) }
         #expect(shown.isReported == false)
     }
 }

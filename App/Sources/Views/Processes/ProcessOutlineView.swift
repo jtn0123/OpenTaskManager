@@ -558,6 +558,10 @@ struct ProcessOutlineView: NSViewRepresentable {
             case .gpu:
                 guard process.gpuFraction != nil || (grouped && totals.gpuFraction > 0) else { return ("—", 0) }
                 return (Format.percent(totals.gpuFraction, digits: 1), min(totals.gpuFraction, 1))
+            case .neuralMemory:
+                // Memory, not load, so no meter. A row that never held any is "—", not 0 bytes.
+                guard totals.hasHeldNeuralMemory else { return ("—", 0) }
+                return (Format.bytes(totals.neuralMemory), 0)
             case .disk:
                 guard !process.isRestricted || grouped else { return ("—", 0) }
                 return (Format.bytesPerSecond(totals.diskRate), totals.diskRate / max(peaks.disk, 10_000_000))
@@ -756,7 +760,7 @@ final class SectionCell: NSTableCellView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)

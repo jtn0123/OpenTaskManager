@@ -230,20 +230,34 @@ struct EnergyModelMonitor {
     static let zeroReadingsBeforeGivingUp = 2
 
     private(set) var isBatched = false
+    /// Whether the last interval's figures were set aside because the
+    /// counters aren't live: they read zero over a long enough interval, or
+    /// a burst, or were found batched already. A single interval (`otm
+    /// power`) can tell this before `isBatched` can.
+    private(set) var isStalled = false
     private var zeroReadings = 0
 
     /// Whether this interval's power-manager figures can be used.
     mutating func accept(cpuJoules: Double?, interval: Double, limitWatts: Double) -> Bool {
-        guard !isBatched, let cpuJoules, interval > 0 else { return false }
+        guard let cpuJoules, interval > 0 else {
+            isStalled = isBatched
+            return false
+        }
+        guard !isBatched else {
+            isStalled = true
+            return false
+        }
         guard cpuJoules > 0 else {
-            if interval >= Self.minimumInterval {
+            isStalled = interval >= Self.minimumInterval
+            if isStalled {
                 zeroReadings += 1
                 isBatched = zeroReadings >= Self.zeroReadingsBeforeGivingUp
             }
             return false
         }
         zeroReadings = 0
-        return cpuJoules / interval <= limitWatts
+        isStalled = cpuJoules / interval > limitWatts
+        return !isStalled
     }
 }
 
@@ -393,7 +407,8 @@ struct SoCPowerAnalyzer {
 
         let components = sources.isEmpty && clusters.isEmpty
             ? nil
-            : PowerComponents(cpu: cpu, gpu: gpu, ane: ane, dram: dram, clusters: clusters, sources: sources)
+            : PowerComponents(cpu: cpu, gpu: gpu, ane: ane, dram: dram, clusters: clusters, sources: sources,
+                              energyCountersStalled: energyModel.isStalled)
         return SoCPowerResult(components: components, gpus: gpus)
     }
 

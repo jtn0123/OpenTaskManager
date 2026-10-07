@@ -319,6 +319,12 @@ public struct PowerComponents: Sendable, Codable {
     /// wasn't measured this interval: its figure above is 0 (or nil for
     /// `dram`), and a UI should show it as unknown rather than as 0 W.
     public let sources: [PowerComponent: ComponentPowerSource]
+    /// Whether the power manager's energy counters gave no live figure this
+    /// interval: they stood still, or jumped by a burst. An M5 Pro on macOS 27
+    /// holds them for minutes, then adds the whole gap at once. The Neural
+    /// Engine and DRAM, which only they measure, then go unmeasured, and the
+    /// CPU's figure comes from the SMC.
+    public var energyCountersStalled = false
 
     public var total: Double { cpu + gpu + ane + (dram ?? 0) }
 

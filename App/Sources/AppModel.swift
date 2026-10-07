@@ -279,12 +279,17 @@ final class AppModel {
     /// so a Mac without power sensors (a VM) hides its power figures from the
     /// first frame rather than a second later. nil until a sample has told.
     private(set) var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
-    /// Whether this Mac attributes GPU time to processes (`ProcessGPUReporting`),
+    /// Whether this Mac attributes GPU time to processes (`ProcessFigureReporting`),
     /// kept across launches and written only when it changes, like
     /// `measuresProcessEnergy`. nil until the samples have told.
     private(set) var reportsProcessGPU = UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
-    @ObservationIgnored private var gpuReporting = ProcessGPUReporting(
+    @ObservationIgnored private var gpuReporting = ProcessFigureReporting(
         isReported: UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+    )
+    /// Whether any process has held Neural Engine memory, kept like `reportsProcessGPU`.
+    private(set) var reportsProcessNeuralMemory = UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
+    @ObservationIgnored private var neuralMemoryReporting = ProcessFigureReporting(
+        isReported: UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
     )
 
     var isPaused = false {
@@ -445,6 +450,7 @@ final class AppModel {
         var totalMemory = 0.0
         var anyPower = false
         var anyGPU = false
+        var anyNeural = false
         for process in snapshot.processes {
             var history = processHistory[process.pid] ?? History(capacity: Self.processHistoryCapacity)
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
@@ -456,8 +462,9 @@ final class AppModel {
             totalMemory += Double(point.memory)
             if process.powerWatts != nil { anyPower = true }
             if process.gpuTime != nil { anyGPU = true }
+            if process.hasHeldNeuralMemory { anyNeural = true }
         }
-        noteWhatProcessesReport(snapshot, anyPower: anyPower, anyGPU: anyGPU)
+        noteWhatProcessesReport(snapshot, anyPower: anyPower, anyGPU: anyGPU, anyNeural: anyNeural)
         processHistory = processes
         processGPUHistory.append(totalGPU)
         processPowerHistory.append(totalPower)
@@ -467,19 +474,25 @@ final class AppModel {
         record(snapshot)
     }
 
-    /// Whether this Mac measures energy and GPU time per process, from the
-    /// tick's walk over the processes (any reading at all), saved when it changes.
-    private func noteWhatProcessesReport(_ snapshot: SystemSnapshot, anyPower: Bool, anyGPU: Bool) {
+    /// Whether this Mac measures energy, GPU time and Neural Engine memory per
+    /// process, from the tick's walk over the processes (any reading at all),
+    /// saved when it changes.
+    private func noteWhatProcessesReport(_ snapshot: SystemSnapshot, anyPower: Bool, anyGPU: Bool, anyNeural: Bool) {
         guard !snapshot.processes.isEmpty else { return }
         // The rule in `ProcessSample.measuresEnergy`, without a second walk.
         if snapshot.interval > 0, anyPower != measuresProcessEnergy {
             measuresProcessEnergy = anyPower
             UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
         }
-        gpuReporting.record(anyGPUTime: anyGPU)
+        gpuReporting.record(anyProcess: anyGPU)
         if let reported = gpuReporting.isReported, reported != reportsProcessGPU {
             reportsProcessGPU = reported
             UserDefaults.standard.set(reported, forKey: "reportsProcessGPU")
+        }
+        neuralMemoryReporting.record(anyProcess: anyNeural)
+        if let reported = neuralMemoryReporting.isReported, reported != reportsProcessNeuralMemory {
+            reportsProcessNeuralMemory = reported
+            UserDefaults.standard.set(reported, forKey: "reportsProcessNeuralMemory")
         }
     }
 
