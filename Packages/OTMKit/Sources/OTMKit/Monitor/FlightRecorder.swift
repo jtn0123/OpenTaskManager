@@ -24,16 +24,19 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// the same tables.
 ///
 /// The database's `user_version` is its schema: 0, records and sessions;
-/// 1 added the events table. An older database is brought up to date when
-/// it opens, and an older build still opens a newer one: it never reads
-/// the tables it doesn't know.
+/// 1 added the events table; 2 the hardware series (`HistoryHardwareSeries`:
+/// core loads, clocks, fans, temperatures, power rails), named once each in
+/// `hardware_series` and kept per record in a compact `hardware` column. An
+/// older database is brought up to date when it opens, and an older build
+/// still opens a newer one: it never reads the tables and columns it doesn't
+/// know, and its records simply have no hardware figures.
 public actor FlightRecorder {
     /// Seconds each record covers.
     public static let span: TimeInterval = 10
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
     /// The schema this build writes (`user_version`).
-    static let schemaVersion: Int32 = 1
+    static let schemaVersion: Int32 = 2
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -56,8 +59,10 @@ public actor FlightRecorder {
     /// The database file, or for a replayed recording the file it came from.
     public nonisolated let url: URL
     private let connection: Connection
-    private var database: OpaquePointer { connection.handle }
+    var database: OpaquePointer { connection.handle }
     private var lastPrune = Date.distantPast
+    /// The hardware series this recorder has written, by ID.
+    private let catalogue = HardwareCatalogue()
 
     /// Opens the recording at `url`, creating it and its folder if needed.
     public init(url: URL) throws(FlightRecorderError) {
@@ -82,7 +87,7 @@ public actor FlightRecorder {
         let connection = try Self.open(":memory:")
         try Self.createTables(on: connection.handle)
         try Self.execute("BEGIN", on: connection.handle)
-        try Self.insert(file.records, into: connection.handle)
+        try Self.insert(file.records, into: connection.handle, catalogue: HardwareCatalogue())
         try Self.insert(file.session, into: connection.handle)
         try Self.insert(file.events, into: connection.handle)
         try Self.execute("COMMIT", on: connection.handle)
@@ -100,7 +105,7 @@ public actor FlightRecorder {
     // MARK: - Writing
 
     public func append(_ record: HistoryRecord) throws(FlightRecorderError) {
-        try Self.insert([record], into: database)
+        try Self.insert([record], into: database, catalogue: catalogue)
         if record.time.timeIntervalSince(lastPrune) > 60 * 60 {
             try prune(before: record.time.addingTimeInterval(-Self.retention))
             lastPrune = record.time
@@ -147,10 +152,11 @@ public actor FlightRecorder {
         return HistoryPoint.segmented(points, gap: bucket * HistoryGap.spacing)
     }
 
-    /// Every record between two dates, oldest first.
+    /// Every record between two dates, oldest first, with its hardware series.
     public func records(from start: Date, to end: Date) throws(FlightRecorderError) -> [HistoryRecord] {
+        let series = try HardwareCatalogue.load(on: database)
         let statement = try prepare("""
-            SELECT time, \(Self.columns.joined(separator: ", ")), top_cpu, top_memory
+            SELECT time, \(Self.columns.joined(separator: ", ")), top_cpu, top_memory, hardware
             FROM records WHERE time > ? AND time <= ? ORDER BY time
             """)
         defer { sqlite3_finalize(statement) }
@@ -159,11 +165,14 @@ public actor FlightRecorder {
         var records: [HistoryRecord] = []
         let apps = Int32(Self.columns.count + 1)
         while sqlite3_step(statement) == SQLITE_ROW {
+            var values = Self.values(statement, from: 1)
+            let hardware = HardwareBlob.read(statement, apps + 2, series: series, into: &values)
             records.append(HistoryRecord(
                 time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
-                values: Self.values(statement, from: 1),
+                values: values,
                 topCPU: Self.decode(statement, apps),
-                topMemory: Self.decode(statement, apps + 1)
+                topMemory: Self.decode(statement, apps + 1),
+                hardwareSeries: hardware
             ))
         }
         return records
@@ -206,18 +215,45 @@ public actor FlightRecorder {
     /// (`HistoryIntervalStats`). Reads the figures alone, not the top
     /// apps, so a week's records cost little.
     public func stats(from start: Date, to end: Date) throws(FlightRecorderError) -> HistoryIntervalStats {
+        let series = try HardwareCatalogue.load(on: database)
         let statement = try prepare("""
-            SELECT time, \(Self.columns.joined(separator: ", ")) FROM records WHERE time > ? AND time <= ? ORDER BY time
+            SELECT time, \(Self.columns.joined(separator: ", ")), hardware FROM records WHERE time > ? AND time <= ? ORDER BY time
             """)
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, min(start, end).timeIntervalSince1970)
         sqlite3_bind_double(statement, 2, max(start, end).timeIntervalSince1970)
         var records: [HistoryRecord] = []
+        var seen: Set<HistoryHardwareSeries> = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            records.append(HistoryRecord(time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
-                                         values: Self.values(statement, from: 1)))
+            var values = Self.values(statement, from: 1)
+            seen.formUnion(HardwareBlob.read(statement, Int32(Self.columns.count + 1), series: series, into: &values))
+            records.append(HistoryRecord(time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)), values: values))
         }
-        return HistoryIntervalStats(records: records, from: start, to: end)
+        return HistoryIntervalStats(records: records, from: start, to: end, hardware: seen.sorted())
+    }
+
+    /// The hardware series between two dates as graph points' figures, each
+    /// series and core averaged per bucket of `bucket` seconds over the
+    /// records that have it, bucketed as `points` groups (`HistoryHardwareTrack`).
+    /// Read only while the History page shows them.
+    public func hardware(from start: Date, to end: Date, bucket: TimeInterval) throws(FlightRecorderError) -> HistoryHardwareTrack {
+        let series = try HardwareCatalogue.load(on: database)
+        let statement = try prepare(
+            "SELECT time, hardware FROM records WHERE time > ? AND time <= ? AND hardware IS NOT NULL ORDER BY time"
+        )
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
+        var records: [HistoryRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            var values = HistoryValues()
+            HardwareBlob.read(statement, 1, series: series, into: &values)
+            records.append(HistoryRecord(time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)), values: values))
+        }
+        let first = try prepare("SELECT time FROM records WHERE hardware IS NOT NULL ORDER BY time LIMIT 1")
+        defer { sqlite3_finalize(first) }
+        let earliest = sqlite3_step(first) == SQLITE_ROW ? Date(timeIntervalSince1970: sqlite3_column_double(first, 0)) : nil
+        return HistoryHardwareTrack(records: records, series: Array(series.values), bucket: bucket, earliest: earliest)
     }
 
     /// The apps that used the most CPU between two dates, averaged over the
@@ -373,7 +409,7 @@ public actor FlightRecorder {
         return (try? JSONEncoder().encode(rounded)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     }
 
-    private static func text(_ statement: OpaquePointer, _ column: Int32) -> String? {
+    static func text(_ statement: OpaquePointer, _ column: Int32) -> String? {
         sqlite3_column_text(statement, column).map { String(cString: $0) }
     }
 
@@ -423,6 +459,16 @@ public actor FlightRecorder {
                     CREATE INDEX IF NOT EXISTS events_time ON events (time);
                     """, on: handle)
             }
+            if version < 2 {
+                // Each series named once; a record holds a number per series in `hardware` (`HardwareBlob`).
+                try execute("""
+                    CREATE TABLE IF NOT EXISTS hardware_series (id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+                        unit TEXT NOT NULL, label TEXT NOT NULL, source TEXT NOT NULL, rank INTEGER NOT NULL DEFAULT 0);
+                    """, on: handle)
+                if try !hasColumn("hardware", in: "records", handle) {
+                    try execute("ALTER TABLE records ADD COLUMN hardware BLOB", on: handle)
+                }
+            }
             if version < schemaVersion { try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
             try execute("COMMIT", on: handle)
         } catch {
@@ -444,6 +490,14 @@ public actor FlightRecorder {
         try Self.userVersion(database)
     }
 
+    static func hasColumn(_ column: String, in table: String, _ handle: OpaquePointer) throws(FlightRecorderError) -> Bool {
+        let statement = try prepare("SELECT 1 FROM pragma_table_info(?) WHERE name = ?", on: handle)
+        defer { sqlite3_finalize(statement) }
+        bind(table, to: statement, at: 1)
+        bind(column, to: statement, at: 2)
+        return sqlite3_step(statement) == SQLITE_ROW
+    }
+
     private static func insert(_ events: [HistoryEvent], into handle: OpaquePointer) throws(FlightRecorderError) {
         guard !events.isEmpty else { return }
         let statement = try prepare(
@@ -462,10 +516,11 @@ public actor FlightRecorder {
         }
     }
 
-    private static func insert(_ records: [HistoryRecord], into handle: OpaquePointer) throws(FlightRecorderError) {
-        let placeholders = Array(repeating: "?", count: columns.count + 3).joined(separator: ", ")
+    private static func insert(_ records: [HistoryRecord], into handle: OpaquePointer,
+                               catalogue: HardwareCatalogue) throws(FlightRecorderError) {
+        let placeholders = Array(repeating: "?", count: columns.count + 4).joined(separator: ", ")
         let statement = try prepare(
-            "INSERT OR REPLACE INTO records (time, \(columns.joined(separator: ", ")), top_cpu, top_memory) VALUES (\(placeholders))",
+            "INSERT OR REPLACE INTO records (time, \(columns.joined(separator: ", ")), top_cpu, top_memory, hardware) VALUES (\(placeholders))",
             on: handle
         )
         defer { sqlite3_finalize(statement) }
@@ -477,6 +532,15 @@ public actor FlightRecorder {
             }
             bind(encode(record.topCPU), to: statement, at: Int32(columns.count + 2))
             bind(encode(record.topMemory), to: statement, at: Int32(columns.count + 3))
+            if let blob = try HardwareBlob.encode(record, catalogue: catalogue, on: handle) {
+                _ = blob.withUnsafeBytes { bytes in
+                    // SQLITE_TRANSIENT: SQLite copies the bytes before this returns.
+                    sqlite3_bind_blob(statement, Int32(columns.count + 4), bytes.baseAddress, Int32(bytes.count),
+                                      unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                }
+            } else {
+                sqlite3_bind_null(statement, Int32(columns.count + 4))
+            }
             guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
         }
     }
@@ -490,11 +554,11 @@ public actor FlightRecorder {
         guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
     }
 
-    private static func execute(_ sql: String, on handle: OpaquePointer) throws(FlightRecorderError) {
+    static func execute(_ sql: String, on handle: OpaquePointer) throws(FlightRecorderError) {
         guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
     }
 
-    private static func prepare(_ sql: String, on handle: OpaquePointer) throws(FlightRecorderError) -> OpaquePointer {
+    static func prepare(_ sql: String, on handle: OpaquePointer) throws(FlightRecorderError) -> OpaquePointer {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
             throw .sqlite(String(cString: sqlite3_errmsg(handle)))
@@ -510,7 +574,7 @@ public actor FlightRecorder {
         guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
     }
 
-    private static func bind(_ text: String, to statement: OpaquePointer, at index: Int32) {
+    static func bind(_ text: String, to statement: OpaquePointer, at index: Int32) {
         // SQLITE_TRANSIENT: SQLite copies the string before this returns.
         sqlite3_bind_text(statement, index, text, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
     }

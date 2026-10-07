@@ -67,7 +67,12 @@ Manager OG or any other proprietary task manager.
   events, `HistoryEvent` (app launches and quits from NSWorkspace, busy background
   processes from `ProcessEventTracker`, network changes, sleep and wake), go in the
   same database, its schema migrated by `PRAGMA user_version`, and in a file's
-  optional `events` key; Compare's figures, `HistoryIntervalStats` and
+  optional `events` key; hardware series (`HistoryHardwareSample`: core-type and
+  per-CPU loads, cluster clocks, the hottest dies, fans and power rails picked from
+  `SensorTable`'s rows, null where unread) go in each record's `hardware` blob
+  (schema 2, series named once in `hardware_series`) and a file's optional,
+  separately versioned `hardware` block, charted under History's folded Hardware
+  section; Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor

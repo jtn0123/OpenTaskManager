@@ -1,21 +1,72 @@
 import Foundation
 
-/// A figure the History page sums up over an interval and compares between two.
-public enum HistoryMetric: String, Sendable, CaseIterable, Identifiable {
-    case cpu
-    case memory
-    case gpu
-    case power
-    case diskRead
-    case diskWrite
-    case networkIn
-    case networkOut
+/// A figure the History page sums up over an interval and compares between
+/// two: one of the whole-system figures every record has, the hottest die,
+/// or a hardware series (`HistoryHardwareSeries`) the recording holds.
+public struct HistoryMetric: Sendable, Hashable, Identifiable, CaseIterable {
+    /// What the figure is read from.
+    enum Source: Sendable, Hashable {
+        case cpu, memory, gpu, power, diskRead, diskWrite, networkIn, networkOut, chipTemperature
+        case hardware(HistoryHardwareSeries)
+    }
+
+    /// "cpu", "chipTemperature", or "hardware." and the series' ID.
+    public let rawValue: String
+    let source: Source
 
     public var id: String { rawValue }
 
+    public static let cpu = Self(rawValue: "cpu", source: .cpu)
+    public static let memory = Self(rawValue: "memory", source: .memory)
+    public static let gpu = Self(rawValue: "gpu", source: .gpu)
+    public static let power = Self(rawValue: "power", source: .power)
+    public static let diskRead = Self(rawValue: "diskRead", source: .diskRead)
+    public static let diskWrite = Self(rawValue: "diskWrite", source: .diskWrite)
+    public static let networkIn = Self(rawValue: "networkIn", source: .networkIn)
+    public static let networkOut = Self(rawValue: "networkOut", source: .networkOut)
+    /// The hottest die sensor.
+    public static let chipTemperature = Self(rawValue: "chipTemperature", source: .chipTemperature)
+
+    /// The figures every recording may have, in the order a comparison lists
+    /// them; hardware series follow in chart order.
+    public static let allCases: [HistoryMetric] = [
+        .cpu, .memory, .gpu, .power, .diskRead, .diskWrite, .networkIn, .networkOut, .chipTemperature,
+    ]
+
+    private init(rawValue: String, source: Source) {
+        self.rawValue = rawValue
+        self.source = source
+    }
+
+    /// A hardware series as a figure to sum up.
+    public static func hardware(_ series: HistoryHardwareSeries) -> HistoryMetric {
+        HistoryMetric(rawValue: "hardware.\(series.id)", source: .hardware(series))
+    }
+
+    /// The hardware series behind it, if it's one.
+    public var series: HistoryHardwareSeries? {
+        if case .hardware(let series) = source { return series }
+        return nil
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool { lhs.rawValue == rhs.rawValue }
+
+    public func hash(into hasher: inout Hasher) { hasher.combine(rawValue) }
+
+    /// Where it sorts in a comparison: the whole-system figures first, then
+    /// the hardware series in chart order.
+    static func precedes(_ lhs: Self, _ rhs: Self) -> Bool {
+        switch (lhs.series, rhs.series) {
+        case let (left?, right?): left < right
+        case (nil, .some): true
+        case (.some, nil): false
+        case (nil, nil): (allCases.firstIndex(of: lhs) ?? 0) < (allCases.firstIndex(of: rhs) ?? 0)
+        }
+    }
+
     /// Its value in a record: the stretch's average. Nil where the Mac didn't report it.
     public func value(_ values: HistoryValues) -> Double? {
-        switch self {
+        switch source {
         case .cpu: values.cpu
         case .memory: values.memory
         case .gpu: values.gpu
@@ -24,6 +75,8 @@ public enum HistoryMetric: String, Sendable, CaseIterable, Identifiable {
         case .diskWrite: values.diskWrite
         case .networkIn: values.networkIn
         case .networkOut: values.networkOut
+        case .chipTemperature: values.chipCelsius
+        case .hardware(let series): values.hardware[series.id]
         }
     }
 
@@ -35,29 +88,44 @@ public enum HistoryMetric: String, Sendable, CaseIterable, Identifiable {
 
     /// A share from 0 to 1, whose change is in percentage points.
     public var isFraction: Bool {
-        switch self {
+        switch source {
         case .cpu, .memory, .gpu: true
-        case .power, .diskRead, .diskWrite, .networkIn, .networkOut: false
+        case .power, .diskRead, .diskWrite, .networkIn, .networkOut, .chipTemperature: false
+        case .hardware(let series): series.unit == .fraction
         }
     }
 
     /// A rate whose total over time means something: bytes moved, or for
     /// power, energy (joules).
-    public var accumulates: Bool { !isFraction }
+    public var accumulates: Bool {
+        switch source {
+        case .power, .diskRead, .diskWrite, .networkIn, .networkOut: true
+        case .cpu, .memory, .gpu, .chipTemperature: false
+        case .hardware(let series): series.unit == .watts
+        }
+    }
+
+    /// A temperature, whose change is in degrees, not relative.
+    var isTemperature: Bool {
+        source == .chipTemperature || series?.unit == .celsius
+    }
 
     /// What the comparison shows for it: a share's average and peak; a
-    /// throughput's total and peak rate; power's average and energy.
+    /// throughput's total and peak rate; power's average and energy; the
+    /// hottest die's average and peak; a hardware series' average, and the
+    /// busiest core's peak too.
     public var statistics: [HistoryStatistic] {
-        switch self {
-        case .cpu, .memory, .gpu: [.average, .peak]
+        switch source {
+        case .cpu, .memory, .gpu, .chipTemperature: [.average, .peak]
         case .power: [.average, .total]
         case .diskRead, .diskWrite, .networkIn, .networkOut: [.total, .peak]
+        case .hardware(let series): series.id == HistoryHardwareSeries.busiestCore ? [.average, .peak] : [.average]
         }
     }
 
     /// Its name as the History page's charts and moment panel give it.
     public var name: String {
-        switch self {
+        switch source {
         case .cpu: "CPU"
         case .memory: "Memory"
         case .gpu: "GPU"
@@ -66,6 +134,20 @@ public enum HistoryMetric: String, Sendable, CaseIterable, Identifiable {
         case .diskWrite: "Disk write"
         case .networkIn: "Received"
         case .networkOut: "Sent"
+        case .chipTemperature: "Hottest die"
+        case .hardware(let series): Self.name(of: series)
+        }
+    }
+
+    /// A hardware series' name out of its chart: "Fan 1 speed", "GPU clock",
+    /// "SSD temperature", "Neural Engine power".
+    static func name(of series: HistoryHardwareSeries) -> String {
+        switch series.kind {
+        case .load: series.label
+        case .clock: "\(series.label) clock"
+        case .temperature: series.label.hasSuffix(" die") ? series.label : "\(series.label) temperature"
+        case .fan: "\(series.label) speed"
+        case .power: "\(series.label) power"
         }
     }
 
@@ -81,13 +163,15 @@ public enum HistoryMetric: String, Sendable, CaseIterable, Identifiable {
 
     /// A figure as the History page writes it: a share as a percentage, a
     /// rate per second (network in bits, as its chart), a total in bytes,
-    /// energy in watt-hours.
+    /// energy in watt-hours, a hardware series in its unit.
     public func format(_ value: Double, _ statistic: HistoryStatistic) -> String {
         if isFraction { return Format.percent(value, digits: value < 0.1 ? 1 : 0) }
-        if statistic == .total { return self == .power ? Self.energy(joules: value) : Format.bytes(value) }
-        switch self {
+        if statistic == .total, accumulates { return series != nil || self == .power ? Self.energy(joules: value) : Format.bytes(value) }
+        switch source {
         case .power: return Format.watts(value)
         case .networkIn, .networkOut: return Format.bitsPerSecond(value)
+        case .chipTemperature: return SensorUnit.celsius.format(value)
+        case .hardware(let series): return series.unit == .watts ? Format.watts(value) : series.unit.format(value)
         case .cpu, .memory, .gpu, .diskRead, .diskWrite: return Format.bytesPerSecond(value)
         }
     }
@@ -147,6 +231,8 @@ public struct HistoryIntervalStats: Sendable, Equatable {
     /// The figures the recording has in the interval; one the Mac never
     /// reported (GPU in a VM) is missing.
     public let figures: [HistoryMetric: Figure]
+    /// The figures it has, in the order a comparison lists them.
+    public let metrics: [HistoryMetric]
 
     public var duration: TimeInterval { end.timeIntervalSince(start) }
     /// Seconds of the interval nothing was recorded: its gaps.
@@ -154,8 +240,10 @@ public struct HistoryIntervalStats: Sendable, Equatable {
 
     /// Sums up `records` that end within `start` (excluded) to `end`, each
     /// covering `recordSeconds` up to its time. Records two copies of the
-    /// app wrote for one stretch are averaged into one.
-    public init(records: [HistoryRecord], from start: Date, to end: Date, recordSeconds: TimeInterval = FlightRecorder.span) {
+    /// app wrote for one stretch are averaged into one. `hardware` names
+    /// the hardware series to sum up; nil takes the records' own.
+    public init(records: [HistoryRecord], from start: Date, to end: Date, recordSeconds: TimeInterval = FlightRecorder.span,
+                hardware: [HistoryHardwareSeries]? = nil) {
         self.start = min(start, end)
         self.end = max(start, end)
         let span = max(recordSeconds, 1)
@@ -167,7 +255,9 @@ public struct HistoryIntervalStats: Sendable, Equatable {
         // Oldest first, so the sums come out the same every time.
         let ordered = stretches.sorted { $0.key < $1.key }.map(\.value)
         var figures: [HistoryMetric: Figure] = [:]
-        for metric in HistoryMetric.allCases {
+        let series = hardware ?? Set(records.flatMap(\.hardwareSeries)).sorted()
+        let candidates = HistoryMetric.allCases + series.map(HistoryMetric.hardware)
+        for metric in candidates {
             var sum = 0.0
             var count = 0
             var peak = -Double.infinity
@@ -183,6 +273,7 @@ public struct HistoryIntervalStats: Sendable, Equatable {
                                      total: metric.accumulates ? sum * span : nil)
         }
         self.figures = figures
+        metrics = candidates.filter { figures[$0] != nil }
     }
 }
 
@@ -193,20 +284,29 @@ public struct HistoryComparison: Sendable, Equatable {
     public struct Change: Sendable, Equatable {
         public let a: Double
         public let b: Double
+        /// For a temperature, the unit its difference is given in ("+4.1 °C"),
+        /// since a ratio of temperatures means nothing.
+        public var absoluteUnit: SensorUnit?
         /// A minus B: percentage points for a share (as a fraction), else the figure's unit.
         public var difference: Double { a - b }
         /// A over B; nil when B is zero.
         public var ratio: Double? { b != 0 ? a / b : nil }
 
-        public init(a: Double, b: Double) {
+        public init(a: Double, b: Double, absoluteUnit: SensorUnit? = nil) {
             self.a = a
             self.b = b
+            self.absoluteUnit = absoluteUnit
         }
 
         /// How A differs, in a few characters: for a share, in percentage
-        /// points ("+7.0 pts"); for the rest, relative to B ("+140%",
-        /// "−35%", "×12"), or "from none" when B had none.
+        /// points ("+7.0 pts"); for a temperature, in degrees ("+4.1 °C");
+        /// for the rest, relative to B ("+140%", "−35%", "×12"), or "from
+        /// none" when B had none.
         public func label(isFraction: Bool) -> String {
+            if let absoluteUnit {
+                guard abs(difference) >= 0.05 else { return "no change" }
+                return Self.signed(difference, digits: 1) + " " + absoluteUnit.symbol
+            }
             if isFraction {
                 let points = difference * 100
                 guard abs(points) >= 0.05 else { return "no change" }
@@ -235,7 +335,7 @@ public struct HistoryComparison: Sendable, Equatable {
         /// Nil unless both have it.
         public var change: Change? {
             guard let a, let b else { return nil }
-            return Change(a: a, b: b)
+            return Change(a: a, b: b, absoluteUnit: metric.isTemperature ? .celsius : nil)
         }
     }
 
@@ -250,13 +350,15 @@ public struct HistoryComparison: Sendable, Equatable {
 
     public let a: HistoryIntervalStats
     public let b: HistoryIntervalStats
-    /// Each figure either interval has, in `HistoryMetric` order.
+    /// Each figure either interval has: the whole-system ones in
+    /// `HistoryMetric` order, then the hardware series in chart order.
     public let rows: [Row]
 
     public init(a: HistoryIntervalStats, b: HistoryIntervalStats) {
         self.a = a
         self.b = b
-        rows = HistoryMetric.allCases.flatMap { metric -> [Row] in
+        let metrics = (a.metrics + b.metrics.filter { a.figures[$0] == nil }).sorted(by: HistoryMetric.precedes)
+        rows = metrics.flatMap { metric -> [Row] in
             let first = a.figures[metric]
             let second = b.figures[metric]
             guard first != nil || second != nil else { return [] }
