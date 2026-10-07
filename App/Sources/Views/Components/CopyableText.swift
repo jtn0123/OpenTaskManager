@@ -23,6 +23,9 @@ struct CopyableText: View {
     /// `AddressBreaks`), for when it doesn't fit on its own lines. The first
     /// form that fits shows; copying always takes `value`.
     var forms: [String] = []
+    /// A search's words (the System page's), marked wherever the value holds them.
+    @Environment(\.searchTerms) private var searchTerms
+    @Environment(\.isCurrentSearchMatch) private var isCurrentMatch
     @State private var isHovering = false
     @State private var copied = false
 
@@ -81,6 +84,14 @@ struct CopyableText: View {
     }
 
     private func styled(_ text: String) -> some View {
-        Text(text).monospaced(monospaced).textSelection(.enabled)
+        marked(text).monospaced(monospaced).textSelection(.enabled)
+    }
+
+    /// `text` (the value, or a form of it) with a search's finds in the
+    /// value marked, across a form's line breaks too.
+    private func marked(_ text: String) -> Text {
+        guard !searchTerms.isEmpty else { return Text(text) }
+        let ranges = SystemReportSearch.highlights(of: searchTerms, in: value, shownAs: text)
+        return Text(SearchMarks.attributed(text, marking: ranges, current: isCurrentMatch))
     }
 }

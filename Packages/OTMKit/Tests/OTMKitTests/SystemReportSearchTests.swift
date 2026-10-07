@@ -137,6 +137,88 @@ struct SystemReportSearchTests {
         #expect(search.matches.isEmpty)
     }
 
+    // MARK: Highlights
+
+    /// The marked stretches of `text`, as text.
+    private func marked(_ query: String, in text: String) -> [String] {
+        SystemReportSearch.highlights(of: SystemReportSearch.terms(query), in: text).map { String(text[$0]) }
+    }
+
+    @Test func highlightsFoldAsTheSearchDoes() {
+        #expect(marked("wifi", in: "Wi-Fi") == ["Wi-Fi"])
+        #expect(marked("WI-FI", in: "Wi-Fi") == ["Wi-Fi"])
+        #expect(marked("fi", in: "Wi-Fi") == ["Fi"])
+        #expect(marked("filevault", in: "FíleVault") == ["FíleVault"])
+        #expect(marked("ipv6", in: "IPv4 by DHCP, IPv6 automatic") == ["IPv6"])
+        #expect(marked("ＩＰｖ６", in: "IPv6") == ["IPv6"])
+        #expect(marked("builtin", in: "Built-in Display") == ["Built-in"])
+    }
+
+    @Test func highlightsMarkEveryFindOfEveryWord() {
+        #expect(marked("en", in: "Ethernet (en1) · open") == ["en", "en"])
+        #expect(marked("wifi ipv6", in: "Wi-Fi IPv6") == ["Wi-Fi", "IPv6"])
+        // Overlapping or touching finds come out as one stretch.
+        #expect(marked("ip pv6", in: "IPv6") == ["IPv6"])
+        #expect(marked("aa", in: "aaaa") == ["aaaa"])
+    }
+
+    @Test func aCharacterThatFoldsToTwoIsMarkedWhole() {
+        #expect(marked("strasse", in: "Straße 5") == ["Straße"])
+        #expect(marked("s", in: "Straße") == ["S", "ß"])
+    }
+
+    @Test func nothingToMarkWithoutWordsOrFinds() {
+        #expect(marked("", in: "Wi-Fi").isEmpty)
+        #expect(marked("-", in: "Wi-Fi").isEmpty, "a hyphen alone folds away, as in the search")
+        #expect(marked("zebra", in: "Wi-Fi").isEmpty)
+        #expect(marked("wifi", in: "").isEmpty)
+        #expect(SystemReportSearch(sections, query: "").highlights(in: "Wi-Fi").isEmpty)
+        let wifi = "Wi-Fi"
+        #expect(SystemReportSearch(sections, query: "wifi").highlights(in: wifi).map { wifi[$0] } == ["Wi-Fi"])
+    }
+
+    @Test func highlightsAgreeWithTheSearch() {
+        // Every row's text is marked exactly when the search would find the word in it.
+        let words = ["wifi", "ipv6", "en1", "64", "apple", "on", "connected", "e7", "×", "file", "chip", "-", "5d"]
+        for row in sections.flatMap(\.rows) {
+            for text in [row.label, row.value, row.state ?? ""] {
+                for word in words {
+                    let found = SystemReportSearch.terms(word).contains { SystemReportSearch.fold(text).contains($0) }
+                    #expect(marked(word, in: text).isEmpty == !found, "\(word) in \(text)")
+                }
+            }
+        }
+    }
+
+    @Test func foldingACharacterAtATimeMatchesFoldingTheWhole() {
+        let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]
+        let samples = (0..<128).map { String(Character(Unicode.Scalar(UInt8($0)))) }
+            + ["Wi-Fi", "FíleVault", "Straße", "ＩＰｖ６", "İstanbul", "ﬁle", "3456 × 2234", "cafe\u{301}", "line\r\nbreak"]
+        for sample in samples {
+            let whole = sample.folding(options: options, locale: nil).replacingOccurrences(of: "-", with: "")
+            #expect(SystemReportSearch.fold(sample) == whole, "\(sample.debugDescription)")
+        }
+    }
+
+    @Test func highlightsFollowAnAddressBrokenOverLines() throws {
+        let text = "fd6c:adbe:19d6:5d7"
+        let form = "fd6c:adbe:\n19d6:5d7"
+        let terms = SystemReportSearch.terms("adbe:19d6")
+        // Found across the break, and marked on both sides of it.
+        #expect(SystemReportSearch.highlights(of: terms, in: text, shownAs: form).map { String(form[$0]) } == ["adbe:", "19d6"])
+        #expect(SystemReportSearch.highlights(of: SystemReportSearch.terms("5d7"), in: text, shownAs: form).map { String(form[$0]) } == ["5d7"])
+        #expect(SystemReportSearch.highlights(of: terms, in: text, shownAs: text).map { String(text[$0]) } == ["adbe:19d6"])
+        // A form that isn't the text with breaks put in is searched itself.
+        #expect(SystemReportSearch.highlights(of: terms, in: text, shownAs: "adbe:19d6 elsewhere").count == 1)
+
+        // A real form from AddressBreaks.
+        let address = "2001:db8:85a3:8d3:1319:8a2e:370:7348/64"
+        let broken = try #require(AddressBreaks.forms(address).first)
+        let marks = SystemReportSearch.highlights(of: SystemReportSearch.terms(address), in: address, shownAs: broken)
+        #expect(marks.map { String(broken[$0]) }.joined() == address)
+        #expect(marks.count == broken.split(separator: "\n").count)
+    }
+
     @Test func blocksKeepTheirPlaceInTheCard() throws {
         let bluetooth = try #require(sections.first { $0.kind == .bluetooth })
         #expect(bluetooth.blockIndices() == [.rows([0]), .device(1, details: [2, 3]), .rows([4])])

@@ -79,16 +79,32 @@ Manager OG or any other proprietary task manager.
   separately versioned `hardware` block, charted under History's folded Hardware
   section; Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
-  and B brackets over the rail; `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
+  and B brackets over the rail; each interval's column heading gives how much
+  of it was recorded, and `HistoryComparison.limitation` (a side under
+  `lowCoverage`, or under `unevenCoverage` of the other's share) puts a notice
+  over the figures, with Compare Recorded Overlap when `recordedOverlap()`
+  finds a minute or more both recorded at the same offsets (one-step holes
+  bridged), which narrows A and B to it until Back to Full Stretches;
+  `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
   opens Compare with them picked, counted back from the range's end, with B the
-  same length before A when left out),
+  same length before A when left out; the pinned rail folds to a strip (the
+  section at the top, the span, the moment, Play and speed, a slim track) once
+  the charts' top has scrolled under it, and comes back whole at the top or
+  from the strip's button: `RailFold` in OTMKit's Layout/ holds the rule, and
+  `HistoryPageScroll` follows the clip view's bounds, so it moves only on
+  scroll, never per tick, and only `HistoryPinnedRail` reads it, so the charts
+  never reload),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick; while it's on screen
   launchd's list alone, no plists, is read again every 10 s and noted in
   `LaunchJobStore`, whose `LaunchJobWatch` in OTMKit counts restarts by label,
   scope, PID and start time and names failed, crashed and restarting jobs for
-  the Problems filter; the CPU and Memory cells look launchd's PID up in the
+  the Problems filter; `LaunchItemStatus` in OTMKit is the one label for what
+  a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
+  running, Disabled, Not loaded) that the Status column, the details' header
+  and the Apps page share, with launchd's Loaded or Not loaded on a line of
+  its own, never in its place; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
   Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
   the main actor when the page opens and on Refresh, then streams bundle sizes in
@@ -178,6 +194,11 @@ Manager OG or any other proprietary task manager.
   The System page's jump bar and search (`SystemNavigator`; the matching is
   `SystemReportSearch` in OTMKit) scroll to stable ids (`SystemTarget`) through
   a `ScrollViewReader`, and follow the scrolling from the clip view's bounds.
+  The bar is in-page links, not tabs: "Jump to" and a link per group, the one
+  at the top underlined (a menu when narrow). A search marks its finds in the
+  cards' titles, labels and values (`SearchMarks`, ranges from
+  `SystemReportSearch.highlights`, which folds as the matching does), outlines
+  the match gone to, and puts Clear Search beside its count.
 - The Connections page's socket walk (`ConnectionSampler`, every process's
   descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
   runs it off the main actor every 3 s, only while the page is on screen.
@@ -188,7 +209,9 @@ Manager OG or any other proprietary task manager.
   with endpoints that must carry on, so a reused descriptor or PID is a new
   socket. It feeds the "Seen for" column (time this page has seen a socket,
   never its age), New on listeners seen opening (5 min), the details'
-  timeline, and Closed recently (15 min, at most 200). `ConnectionStore.shared`
+  timeline, and Closed recently (15 min, at most 200; empty, it says since
+  when it's been watched without a gap, `closedCoverage`, with Show Open
+  Sockets, under counts headed "Open now"). `ConnectionStore.shared`
   lasts the session, so time away from the page shows as an unwatched gap.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s or more, not `ps %cpu`, and only once the graphs'
@@ -356,7 +379,9 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   the window widens; a hide in a wide window is remembered (`sidebarHidden`)
   and a show in a narrow one lasts until the window crosses 900
   (`SidebarVisibility` in OTMKit). The View menu lists the pages (⌘1 to ⌘9).
-  With it hidden, a page menu (`PageSwitcher`, the page's icon) sits before
+  With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
+  "Pages", whatever the page, out of the toolbar's glass so it sits with the
+  title, not the live badge) sits before
   the title, and in a narrow window Pause drops its word to make room; keep
   the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
   overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
@@ -396,6 +421,8 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   Thermals table's rows are a step up (13 pt, body), since its readings are
   what the page is for, with its supporting text at 12 pt. The
   system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
+  Search finds are marked in primary ink, bold, over `TextTone.highlight`,
+  which keeps 4.5:1 on every card in both appearances.
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`
   (`TableFit.swift`), so no empty striped rows follow the last one.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

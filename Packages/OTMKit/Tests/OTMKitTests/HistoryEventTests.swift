@@ -388,6 +388,98 @@ struct HistoryComparisonTests {
         #expect(!HistoryHeadline.network.isFraction)
     }
 
+    /// A record every 10 s at these offsets (seconds) after `start`.
+    private func recorded(from start: Double, at offsets: some Sequence<Double>) -> [HistoryRecord] {
+        offsets.map { record(at: start + $0, values(cpu: 0.2)) }
+    }
+
+    /// `minutes` of records every 10 s from `start`, the first 10 s in.
+    private func recorded(from start: Double, minutes: Int) -> [HistoryRecord] {
+        recorded(from: start, at: stride(from: 10.0, through: Double(minutes * 60), by: 10))
+    }
+
+    @Test func notesStepsAndCoverageByOffset() {
+        let interval = stats(recorded(from: 1_000, at: [10, 20, 30, 640]), 1_000, 1_660)
+        #expect(Array(interval.recordedSteps) == [0, 1, 2, 63])
+        #expect(abs(interval.coverage - 40.0 / 660) < 1e-9)
+        #expect(stats([], 0, 0).coverage == 0)
+        // A record just after the start is in step 0, one at the end in the last step.
+        #expect(Array(stats(recorded(from: 0, at: [0.5, 900]), 0, 900).recordedSteps) == [0, 89])
+    }
+
+    @Test func saysWhenAComparisonIsLimited() throws {
+        // A holds 11 of its 15 minutes, B only 2.
+        let a = stats(recorded(from: 900, minutes: 11), 900, 1_800)
+        let b = stats(recorded(from: 0, minutes: 2), 0, 900)
+        let limited = try #require(HistoryComparison(a: a, b: b).limitation)
+        #expect(limited.kind == .low)
+        #expect(limited.sides == [.b])
+        #expect(limited.title == "Limited comparison")
+        #expect(limited.message == "B holds only 2 of its 15 minutes.")
+        #expect(HistoryInterval.recorded(a.coverage) == "73% recorded")
+        #expect(HistoryInterval.recorded(b.coverage) == "13% recorded")
+        // Both thin, one with nothing at all.
+        let empty = stats([], 0, 900)
+        let both = try #require(HistoryComparison(a: stats(recorded(from: 900, minutes: 3), 900, 1_800), b: empty).limitation)
+        #expect(both.sides == [.a, .b])
+        #expect(both.message == "A holds only 3 of its 15 minutes, and nothing was recorded in B.")
+        #expect(HistoryComparison(a: empty, b: a).limitation?.message == "Nothing was recorded in A.")
+    }
+
+    @Test func saysWhenAComparisonIsUneven() throws {
+        let whole = stats(recorded(from: 900, minutes: 15), 900, 1_800)
+        // 9 of 15 minutes is over half, but under two thirds of A's whole 15.
+        let uneven = try #require(HistoryComparison(a: whole, b: stats(recorded(from: 0, minutes: 9), 0, 900)).limitation)
+        #expect(uneven.kind == .uneven)
+        #expect(uneven.title == "Uneven comparison")
+        #expect(uneven.sides == [.b])
+        #expect(uneven.message == "B holds 9 of its 15 minutes; A holds 15 of its 15 minutes.")
+        let thinA = HistoryComparison(a: stats(recorded(from: 900, minutes: 9), 900, 1_800), b: stats(recorded(from: 0, minutes: 15), 0, 900))
+        #expect(thinA.limitation?.sides == [.a])
+        // 12 of 15 against 15 of 15 is even enough to stand.
+        #expect(HistoryComparison(a: whole, b: stats(recorded(from: 0, minutes: 12), 0, 900)).limitation == nil)
+        #expect(HistoryComparison(a: whole, b: whole).limitation == nil)
+    }
+
+    @Test func narrowsBothToTheirRecordedOverlap() throws {
+        // A holds its first 11 minutes; B only the 2 minutes from 5 min in.
+        let a = stats(recorded(from: 1_000, minutes: 11), 1_000, 1_900)
+        let b = stats(recorded(from: 100, at: stride(from: 300.0, through: 420, by: 10)), 100, 1_000)
+        let overlap = try #require(HistoryComparison(a: a, b: b).recordedOverlap())
+        // Steps 29 to 41: from 290 s to 420 s after each start.
+        #expect(overlap.a == date(1_290)...date(1_420))
+        #expect(overlap.b == date(390)...date(520))
+        #expect(overlap.duration == 130)
+        // Narrowed, each holds the same 13 records' worth: fully recorded, like for like.
+        let narrowedA = stats(recorded(from: 1_000, minutes: 11), 1_290, 1_420)
+        let narrowedB = stats(recorded(from: 100, at: stride(from: 300.0, through: 420, by: 10)), 390, 520)
+        #expect(narrowedA.coverage == 1)
+        #expect(narrowedB.coverage == 1)
+        #expect(HistoryComparison(a: narrowedA, b: narrowedB).limitation == nil)
+    }
+
+    @Test func aRecordsTimingDoesntBreakTheOverlap() throws {
+        // A misses the record at 50 s and B the one at 60 s: neither is a gap.
+        let a = stats(recorded(from: 1_000, at: stride(from: 10.0, through: 200, by: 10).filter { $0 != 50 }), 1_000, 1_900)
+        let b = stats(recorded(from: 100, at: stride(from: 10.0, through: 200, by: 10).filter { $0 != 60 }), 100, 1_000)
+        let overlap = try #require(HistoryComparison(a: a, b: b).recordedOverlap())
+        #expect(overlap.a == date(1_000)...date(1_200))
+        #expect(HistoryComparison.bridged(IndexSet([0, 1, 2, 4, 5, 8])) == IndexSet([0, 1, 2, 3, 4, 5, 8]))
+    }
+
+    @Test func offersNoOverlapTooShortOrNoNarrower() {
+        let a = stats(recorded(from: 1_000, minutes: 15), 1_000, 1_900)
+        // Under a minute in common.
+        let brief = stats(recorded(from: 100, at: stride(from: 10.0, through: 50, by: 10)), 100, 1_000)
+        #expect(HistoryComparison(a: a, b: brief).recordedOverlap() == nil)
+        // Both whole: narrowing changes nothing.
+        #expect(HistoryComparison(a: a, b: stats(recorded(from: 100, minutes: 15), 100, 1_000)).recordedOverlap() == nil)
+        // Nothing in common at all.
+        let late = stats(recorded(from: 100, at: stride(from: 600.0, through: 900, by: 10)), 100, 1_000)
+        let early = stats(recorded(from: 1_000, minutes: 5), 1_000, 1_900)
+        #expect(HistoryComparison(a: early, b: late).recordedOverlap() == nil)
+    }
+
     @Test func countsEventsByKind() {
         let a = [HistoryEvent(time: date(1), kind: .appLaunched, name: "X"),
                  HistoryEvent(time: date(2), kind: .processStarted, name: "clang", count: 4)]
@@ -416,6 +508,31 @@ struct HistoryIntervalTests {
     @Test func saysHowMuchOfASpanWasSampled() {
         #expect(HistoryInterval.coverage(span: 1_200, sampled: 660) == "20 min span · 11 min sampled")
         #expect(HistoryInterval.coverage(span: 600, sampled: 900) == "10 min span · 10 min sampled")
+    }
+
+    @Test func saysHowMuchOfAnIntervalWasRecorded() {
+        #expect(HistoryInterval.recorded(0.7333) == "73% recorded")
+        #expect(HistoryInterval.recorded(1) == "100% recorded")
+        #expect(HistoryInterval.recorded(0.003) == "under 1% recorded")
+        #expect(HistoryInterval.recorded(0) == "nothing recorded")
+        #expect(HistoryInterval.recorded(.nan) == "nothing recorded")
+    }
+
+    @Test func givesTheRecordedPartInTheIntervalsUnit() {
+        #expect(HistoryInterval.share(sampled: 120, span: 900) == "2 of its 15 minutes")
+        #expect(HistoryInterval.share(sampled: 660, span: 900) == "11 of its 15 minutes")
+        #expect(HistoryInterval.share(sampled: 0, span: 900) == "0 of its 15 minutes")
+        // Under one of the interval's unit, in the next one down.
+        #expect(HistoryInterval.share(sampled: 20, span: 900) == "20 seconds of its 15 minutes")
+        #expect(HistoryInterval.share(sampled: 60, span: 7_200) == "1 minute of its 2 hours")
+        #expect(HistoryInterval.share(sampled: 1_200, span: 21_600) == "20 minutes of its 6 hours")
+        #expect(HistoryInterval.share(sampled: 10_800, span: 21_600) == "3 of its 6 hours")
+        // The largest unit the interval holds two of: 90 minutes stay minutes, a minute is seconds.
+        #expect(HistoryInterval.share(sampled: 5_400, span: 5_400) == "90 of its 90 minutes")
+        #expect(HistoryInterval.share(sampled: 40, span: 60) == "40 of its 60 seconds")
+        #expect(HistoryInterval.share(sampled: 172_800, span: 604_800) == "2 of its 7 days")
+        // Never more than the whole.
+        #expect(HistoryInterval.share(sampled: 1_000, span: 900) == "15 of its 15 minutes")
     }
 
     @Test func saysWhatAnIntervalLeavesOut() {

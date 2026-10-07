@@ -222,18 +222,8 @@ public enum LaunchJobHealth: Hashable, Sendable {
 
     public var needsAttention: Bool { self != .healthy }
 
-    /// The state the table shows in place of "Running" or "Loaded", or nil
-    /// to keep it. A failed or crashed job that runs again still says Running.
-    public func stateTitle(isRunning: Bool) -> String? {
-        switch self {
-        case .healthy: nil
-        case .restarting: "Restarting"
-        case .crashed: isRunning ? nil : "Crashed"
-        case .failed: isRunning ? nil : "Failed"
-        }
-    }
-
-    /// A heading for the details.
+    /// A heading for the details. The state itself, which the table and the
+    /// details' header share, is `LaunchItemStatus`.
     public var headline: String? {
         switch self {
         case .healthy: nil
