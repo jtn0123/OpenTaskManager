@@ -24,6 +24,16 @@ enum IconCache {
         icons[path] = image
         return image
     }
+
+    /// An app bundle's icon, or the generic executable icon without one.
+    static func icon(forBundle path: String?) -> NSImage {
+        guard let path else { return generic }
+        if let cached = icons[path] { return cached }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        image.size = NSSize(width: 16, height: 16)
+        icons[path] = image
+        return image
+    }
 }
 
 /// The menu bar item: a bar graph of recent CPU load beside the current

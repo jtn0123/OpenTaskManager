@@ -20,11 +20,14 @@ Manager OG or any other proprietary task manager.
 ## Layout
 
 - `Packages/OTMKit`: sampling library (System/, Model/, Monitor/, Format/,
-  Graphing/ for axis and curve maths),
+  Graphing/ for axis and curve maths; System/LaunchItems, LaunchTriggers and
+  Launchctl read launchd plists and parse `launchctl` output),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
   Views/Processes (NSOutlineView table in `ProcessOutlineView`), Views/Performance,
+  Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
+  when the page opens and on Refresh, never per tick),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -59,7 +62,7 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance` sets the starting page, and
+`-openPage Overview|Processes|Performance|Startup` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), and `-openProcess <pid>`
 selects a process so its inspector shows. Don't pass

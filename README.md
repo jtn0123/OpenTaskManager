@@ -43,6 +43,16 @@ samples and scale their axes to round numbers.
   within its range, and every die sensor's lowest and highest reading since
   launch.
 
+**Startup**: everything launchd starts by itself, read from the LaunchAgents
+and LaunchDaemons folders. Each item shows whether it's yours, every user's or
+a daemon, whether it's running (with its PID), loaded, disabled or not loaded,
+what starts it (login or boot, a timer or schedule, a file change, or another
+process asking for it), and whether Apple or a third party installed it.
+Filter, sort and search, then check an item's full command line and triggers,
+reveal its property list in Finder or open it. macOS keeps Login Items where
+only an administrator can read them, so the page links to their pane in System
+Settings instead.
+
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
@@ -80,7 +90,9 @@ Root isn't needed. Most figures come from public kernel and IOKit
 interfaces: `libproc` and `proc_pid_rusage` for processes and energy,
 `host_processor_info` for each core, `host_statistics64` for memory (using the
 same arithmetic as Activity Monitor), IOKit for the GPU, disks and battery
-telemetry, and routing sockets for network counters.
+telemetry, and routing sockets for network counters. Startup items come from
+the launchd property lists themselves, plus `launchctl list` and
+`launchctl print` for what's loaded, running or disabled.
 
 Power by part of the chip and clock speeds come from IOReport,
 whole-system power and fan speeds from read-only SMC keys, and temperatures
