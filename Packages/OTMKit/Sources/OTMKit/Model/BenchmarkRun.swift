@@ -44,6 +44,16 @@ public enum BenchmarkUnit: String, Sendable, Codable {
     /// Whether a larger figure is the better one: every rate, but not a delay.
     public var higherIsBetter: Bool { self != .milliseconds }
 
+    /// Whether the figure is a rate of work, every unit a second, so the
+    /// higher of two is the faster. Responsiveness (round trips a minute) and
+    /// a delay aren't speeds: they're only higher or lower.
+    public var isSpeed: Bool {
+        switch self {
+        case .bytesPerSecond, .flopsPerSecond, .pixelsPerSecond, .megabytesPerSecond, .bitsPerSecond, .operationsPerSecond: true
+        case .roundTripsPerMinute, .milliseconds: false
+        }
+    }
+
     /// The unit for figures up to `largest`, and what to divide them by:
     /// ("GB/s", 1e9) for 12.4e9 B/s. Disk speeds, IOPS, RPM and milliseconds keep theirs.
     public func scale(_ largest: Double) -> (unit: String, divisor: Double) {

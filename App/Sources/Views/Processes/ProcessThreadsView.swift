@@ -189,9 +189,9 @@ private struct ThreadRow: View, Equatable {
 
     static let spacing: CGFloat = 8
     /// "100.0%" in the table's type.
-    static let cpuWidth: CGFloat = 44
+    static let cpuWidth: CGFloat = 48
     /// The longest states, "Stopped" and "Unknown".
-    static let stateWidth: CGFloat = 54
+    static let stateWidth: CGFloat = 60
     /// Three digits; the title reaches into State's room.
     static let priorityWidth: CGFloat = 28
 
@@ -238,7 +238,7 @@ private struct ThreadRow: View, Equatable {
     }
 
     @ViewBuilder private func secondary(_ text: String) -> some View {
-        let line = Text(text).foregroundStyle(.secondaryText).lineLimit(1)
+        let line = Text(text).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
         if isSelected { line.textSelection(.enabled) } else { line }
     }
 }

@@ -79,12 +79,16 @@ struct SensorsDetail: View {
         }
     }
 
+    /// The speed in rpm first, then its share of the fan's maximum, the
+    /// scale the graph and the Thermals table draw it on, so a fan at its
+    /// minimum never reads as stopped.
     private func fanCard(_ fan: SensorSample.Fan, count: Int) -> some View {
         let range = [fan.minimumRPM, fan.maximumRPM].compactMap { $0 }.map(Format.rpm).joined(separator: " – ")
+        let share = fan.shareOfMaximum.map { " · \(Format.percent($0)) of maximum" } ?? ""
         return ChartCard(title: count > 1 ? "Fan \(fan.id + 1)" : "Fan",
                          trailing: fan.isStopped ? "stopped" : Format.rpm(fan.rpm), tint: Theme.fan,
                          legend: [
-                             LegendItem(name: "Speed", color: Theme.fan, value: fan.fraction.map { "\(Format.percent($0)) of range" } ?? "—"),
+                             LegendItem(name: "Speed", color: Theme.fan, value: fan.isStopped ? "Stopped" : Format.rpm(fan.rpm) + share),
                              LegendItem(name: "Range", color: Theme.other, value: range.isEmpty ? "—" : range),
                          ]) {
             GraphView(series: [GraphSeries(values: model.sensorHistory.fans[fan.id]?.values ?? [], color: Theme.fan)],

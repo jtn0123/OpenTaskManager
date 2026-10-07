@@ -298,19 +298,29 @@ private struct ChangeTable: View {
             }
             .foregroundStyle(.secondaryText)
             ForEach(changes) { change in
-                // Figures keep their width; in a narrow window the name and
-                // the verdict wrap instead.
+                // Figures keep their width; in a narrow window the name drops
+                // its variant to a second line ("Floating point," over "1 worker"),
+                // the two spreads stack and the verdict wraps instead.
                 // A figure in doubt in either run is marked at its figures,
                 // which drop to secondary text, and its verdict isn't coloured.
                 GridRow {
-                    Text(change.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    ViewThatFits(in: .horizontal) {
+                        Text(change.title)
+                        Text(change.title.replacingOccurrences(of: ", ", with: ",\n")).lineLimit(2)
+                        Text(change.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    }
                     figure(change.unit.format(change.baseline), caveat: change.baselineCaveat)
                     figure(change.unit.format(change.compared), caveat: change.comparedCaveat)
                     Text(change.change.map(BenchmarkChange.formatChange) ?? "—")
                         .fontWeight(change.caveat == nil ? .semibold : .regular)
                         .foregroundStyle(change.caveat == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
                         .fixedSize()
-                    Text(change.spreadText).foregroundStyle(.secondaryText).fixedSize()
+                    ViewThatFits(in: .horizontal) {
+                        Text(change.spreadText)
+                        Text(change.spreadText.replacingOccurrences(of: " / ", with: " /\n")).lineLimit(2)
+                    }
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondaryText)
                     Label(change.verdict.title, systemImage: BenchmarkLook.symbol(change.verdict))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
