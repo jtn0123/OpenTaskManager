@@ -18,9 +18,10 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Status bar summary | ✅ | |
 | Always-available shortcut (⌃⇧⎋) | ✅ | |
 | App history (resource use per app over days) | ⬜ | Needs the history database below |
-| Startup apps | ⬜ | Login items, LaunchAgents and LaunchDaemons, with enable/disable |
+| Startup apps | 🚧 | LaunchAgents and LaunchDaemons with status, PID, triggers and publisher are done. Login Items and the background items apps register need root to read, so they wait for the privileged helper; for now the page opens their System Settings pane |
+| Enable and disable startup items | ⬜ | TODO: `launchctl enable`/`disable` with `bootstrap`/`bootout`, a confirmation step and a way to undo. Daemons need an administrator password. Left out until then because it's destructive |
 | Users tab | ⬜ | Per-user totals, log off other sessions |
-| Services tab | ⬜ | launchd services: state, start/stop, open plist |
+| Services tab | ⬜ | launchd services: state, start/stop, open plist. The Startup page already reads each job's state and opens its plist |
 | "Details" tab extras: priority, affinity-style tier pinning | 🚧 | Priority is done; QoS and tier pinning are planned |
 | Search, efficiency mode equivalent | 🚧 | Search is done; "efficiency mode" maps to background QoS |
 
