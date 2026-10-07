@@ -144,7 +144,7 @@ private struct StatusBar: View {
             }
             Text("Up \(Format.duration(snapshot.uptime))")
         }
-        .font(.caption)
+        .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)

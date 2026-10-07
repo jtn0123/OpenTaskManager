@@ -8,6 +8,7 @@ struct ProcessInspectorView: View {
     @State private var details = Details()
     @State private var tab: Tab = .overview
     @State private var socketsOnly = false
+    @State private var confirmingForceQuit = false
 
     struct Details {
         var arguments: ProcessArguments?
@@ -56,7 +57,7 @@ struct ProcessInspectorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName(for: process)).font(.headline).lineLimit(1)
                 Text("PID \(process.pid) · \(process.userName) · \(process.state.rawValue)")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
         }
     }
@@ -154,7 +155,7 @@ struct ProcessInspectorView: View {
                 labelled("Command line", command)
             } else if details.loaded {
                 Text("Command line and environment are only visible for your own processes.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
         }
     }
@@ -178,7 +179,7 @@ struct ProcessInspectorView: View {
 
     private var files: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Toggle("Sockets only", isOn: $socketsOnly).toggleStyle(.checkbox).font(.caption)
+            Toggle("Sockets only", isOn: $socketsOnly).toggleStyle(.checkbox).font(.subheadline)
             if let files = details.openFiles {
                 let shown = socketsOnly ? files.filter { $0.socket != nil } : files
                 ForEach(shown) { file in
@@ -190,7 +191,7 @@ struct ProcessInspectorView: View {
                     }
                 }
                 if shown.isEmpty {
-                    Text("Nothing open.").font(.caption).foregroundStyle(.secondary)
+                    Text("Nothing open.").font(.subheadline).foregroundStyle(.secondary)
                 }
             } else {
                 unavailable("Open files unavailable", "macOS only lists open files for your own processes.")
@@ -202,8 +203,8 @@ struct ProcessInspectorView: View {
     private func actions(_ process: ProcessSample) -> some View {
         HStack {
             Button("End Task") { model.endTask([pid]) }
-            Button("Force Quit") { model.forceQuit([pid]) }
-            Spacer()
+                .buttonStyle(.borderedProminent)
+                .help("Ask \(process.name) to quit, so it can save its work first")
             Menu {
                 if process.state == .stopped {
                     Button("Resume") { model.send(.continue, to: [pid]) }
@@ -218,6 +219,20 @@ struct ProcessInspectorView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            Spacer()
+            // Kept apart from End Task, and confirmed, because it can't be undone.
+            Button(role: .destructive) {
+                confirmingForceQuit = true
+            } label: {
+                Label("Force Quit", systemImage: "xmark.octagon")
+            }
+            .foregroundStyle(.red)
+            .help("Stop \(process.name) at once, without letting it save")
+            .confirmationDialog("Force quit \(process.name)?", isPresented: $confirmingForceQuit) {
+                Button("Force Quit", role: .destructive) { model.forceQuit([pid]) }
+            } message: {
+                Text("It stops immediately, and any unsaved work in it is lost.")
+            }
         }
     }
 
@@ -243,7 +258,7 @@ struct ProcessInspectorView: View {
 
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
             Text(value).font(.caption.monospaced()).textSelection(.enabled)
         }
     }
@@ -251,7 +266,7 @@ struct ProcessInspectorView: View {
     private func unavailable(_ title: String, _ detail: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.callout)
-            Text(detail).font(.caption).foregroundStyle(.secondary)
+            Text(detail).font(.subheadline).foregroundStyle(.secondary)
         }
     }
 

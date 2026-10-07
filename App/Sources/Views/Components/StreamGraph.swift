@@ -452,7 +452,7 @@ final class StreamGraphView: NSView {
         topLabel.isHidden = axis == nil
         midLabel.isHidden = axis == nil
         guard let axis else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .medium)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
         for (label, value, y) in [(topLabel, ceiling, plotRect.height - padding), (midLabel, ceiling / 2, padding + usable / 2)] {
             let color = NSColor(cgColor: labelColor) ?? .secondaryLabelColor
             let text = NSAttributedString(string: axis(value), attributes: [.font: font, .foregroundColor: color])
@@ -464,7 +464,7 @@ final class StreamGraphView: NSView {
             }
             label.string = text
             label.shadowColor = NSColor.windowBackgroundColor.cgColor
-            label.frame = CGRect(x: 5, y: y - 13, width: max(plotRect.width - 10, 0), height: 12)
+            label.frame = CGRect(x: 5, y: y - 14, width: max(plotRect.width - 10, 0), height: 14)
         }
     }
 }

@@ -96,7 +96,7 @@ struct SensorsDetail: View {
                     Text("Highest").gridColumnAlignment(.trailing)
                     Text("20 °C – 110 °C").frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 ForEach(sensors.temperatures) { reading in
                     let range = ranges[reading.name] ?? reading.celsius...reading.celsius

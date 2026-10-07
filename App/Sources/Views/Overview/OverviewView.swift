@@ -166,7 +166,7 @@ private struct GaugeCard: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title).font(.title3.weight(.semibold))
                         ForEach(details.indices, id: \.self) { index in
-                            Text(details[index]).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            Text(details[index]).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                     }
                     Spacer(minLength: 4)
@@ -191,7 +191,7 @@ private struct CoreMap: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Cores").font(.headline)
                 Spacer()
-                Text("\(topology.brand) · load by core type").font(.caption).foregroundStyle(.secondary)
+                Text("\(topology.brand) · load by core type").font(.subheadline).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: 24) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -227,7 +227,7 @@ private struct CoreMap: View {
                     Text(tier.name).font(.callout.weight(.medium))
                 }
                 Text("\(cpus.count) cores · \(Format.percent(average))")
-                    .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
             }
             .frame(width: 130, alignment: .leading)
             VStack(alignment: .leading, spacing: CoreTileRow.spacing) {
@@ -344,11 +344,11 @@ private struct StorageCard: View {
                             Text(volume.name).font(.callout.weight(.medium)).lineLimit(1)
                             Spacer()
                             Text("\(Format.bytes(volume.availableBytes)) free")
-                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                         }
                         StackedBar(segments: [.init(label: "Used", value: used, color: Theme.pressure(used))], total: 1, height: 8)
                         Text("\(Format.bytes(volume.usedBytes)) of \(Format.bytes(volume.totalBytes)) used")
-                            .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }
             }

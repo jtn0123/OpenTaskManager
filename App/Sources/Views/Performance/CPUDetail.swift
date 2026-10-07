@@ -140,7 +140,7 @@ struct CPUDetail: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(topology.tiers, id: \.level) { tier in
                 let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level }
-                Text("\(tier.name) cores").font(.caption).foregroundStyle(.secondary)
+                Text("\(tier.name) cores").font(.subheadline).foregroundStyle(.secondary)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(max(cpus.count, 1), 6)), spacing: 6) {
                     ForEach(cpus, id: \.self) { cpu in
                         coreGraph(cpu, color: Theme.tier(tier.level))

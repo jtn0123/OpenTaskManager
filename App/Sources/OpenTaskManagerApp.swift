@@ -110,10 +110,11 @@ struct ContentView: View {
                 } label: {
                     Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
+                .labelStyle(.titleAndIcon)
                 .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
             }
             ToolbarItem(placement: .navigation) {
-                LiveBadge(isPaused: model.isPaused, interval: model.updateSpeed.rawValue)
+                LiveBadge()
             }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })) {
@@ -127,26 +128,71 @@ struct ContentView: View {
     }
 }
 
-/// Says whether the numbers are moving, and how often they update.
+/// Says whether the numbers are moving and how often they update. Clicking
+/// it opens a popover to change the update speed.
 private struct LiveBadge: View {
-    var isPaused: Bool
-    var interval: Double
+    @Environment(AppModel.self) private var model
+    @State private var isChoosing = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(isPaused ? Color.orange : Color.green)
-                .frame(width: 7, height: 7)
-            Text(isPaused ? "Paused" : "Live · \(Format.timeSpan(interval))")
-                .font(.caption.weight(.medium))
-                .foregroundStyle(isPaused ? Color.orange : Color.secondary)
-                .monospacedDigit()
+        let isPaused = model.isPaused
+        Button {
+            isChoosing.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(isPaused ? Color.orange : Color.green)
+                    .frame(width: 7, height: 7)
+                Text(isPaused ? "Paused" : "Live")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(isPaused ? Color.orange : Color.primary)
+                Text("every \(Format.timeSpan(model.updateSpeed.rawValue))")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background((isPaused ? Color.orange : Color.green).opacity(0.13), in: Capsule())
+            .contentShape(Capsule())
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background((isPaused ? Color.orange : Color.green).opacity(0.12), in: Capsule())
-        .help(isPaused ? "Updates are frozen. Press ⇧⌘P to resume." : "Updating every \(Format.timeSpan(interval)). Change it in Settings.")
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .help(isPaused ? "Updates are frozen. Press ⇧⌘P to resume."
+              : "Updating every \(Format.timeSpan(model.updateSpeed.rawValue)). Click to change.")
+        .popover(isPresented: $isChoosing, arrowEdge: .bottom) {
+            UpdateSpeedPicker()
+                .environment(model)
+        }
+    }
+}
+
+/// The badge's popover: the update speed and the pause switch in one place.
+private struct UpdateSpeedPicker: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Update every").font(.headline)
+            Picker("Update every", selection: $model.updateSpeed) {
+                ForEach(UpdateSpeed.allCases) { Text(Format.timeSpan($0.rawValue)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            Text("Graphs hold the last \(AppModel.graphSpan) updates, so slower speeds show a longer stretch and use less CPU.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
+            Toggle("Pause updates", isOn: $model.isPaused)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 270)
     }
 }
 
@@ -183,7 +229,7 @@ struct MenuBarView: View {
                 }
 
                 Divider()
-                Text("Top processes").font(.caption).foregroundStyle(.secondary)
+                Text("Top processes").font(.subheadline).foregroundStyle(.secondary)
                 ForEach(snapshot.processes.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(5), id: \.pid) { process in
                     HStack(spacing: 6) {
                         Image(nsImage: IconCache.icon(for: process, app: model.regularApps[process.pid]))
@@ -215,7 +261,7 @@ struct MenuBarView: View {
     private func meter(_ title: String, _ value: String, _ values: [Double], _ color: Color, _ max: Double?) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(.subheadline).foregroundStyle(.secondary)
                 Text(value).font(.callout.weight(.medium)).monospacedDigit().lineLimit(1)
             }
             Spacer()

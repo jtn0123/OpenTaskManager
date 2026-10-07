@@ -12,7 +12,7 @@ struct StartupItemDetail: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     facts
-                    if let note { Text(note).font(.caption).foregroundStyle(.secondary) }
+                    if let note { Text(note).font(.subheadline).foregroundStyle(.secondary) }
                     program
                     launches
                     labelled("Property list", item.plistPath)
@@ -38,7 +38,7 @@ struct StartupItemDetail: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.headline).lineLimit(2)
                 Text(item.label)
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
                     .textSelection(.enabled)
             }
@@ -73,7 +73,7 @@ struct StartupItemDetail: View {
         let arguments = item.arguments.first == item.program ? Array(item.arguments.dropFirst()) : item.arguments
         if !arguments.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Arguments").font(.caption).foregroundStyle(.secondary)
+                Text("Arguments").font(.subheadline).foregroundStyle(.secondary)
                 ForEach(Array(arguments.enumerated()), id: \.offset) { _, argument in
                     Text(argument).font(.caption.monospaced()).textSelection(.enabled)
                 }
@@ -83,7 +83,7 @@ struct StartupItemDetail: View {
 
     private var launches: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Launches").font(.caption).foregroundStyle(.secondary)
+            Text("Launches").font(.subheadline).foregroundStyle(.secondary)
             if item.isUnreadable {
                 Text("Unknown: the property list can't be read").font(.callout)
             } else {
@@ -126,7 +126,7 @@ struct StartupItemDetail: View {
 
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
             Text(value).font(.caption.monospaced()).textSelection(.enabled)
         }
     }

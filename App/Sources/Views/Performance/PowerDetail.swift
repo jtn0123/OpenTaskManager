@@ -75,8 +75,8 @@ struct PowerDetail: View {
             GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
                 .chartFrame(height: 240, tint: Theme.power)
             Text("Rest of system covers the display, storage, radios, fans and power conversion.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
 

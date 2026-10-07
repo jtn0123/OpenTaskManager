@@ -259,7 +259,7 @@ private struct StartupStatusBar: View {
             }
             .controlSize(.small)
         }
-        .font(.caption)
+        .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)

@@ -31,7 +31,7 @@ struct ConnectionDetail: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.processName).font(.headline).lineLimit(1)
                     Text(verbatim: "PID \(connection.pid) · descriptor \(connection.id.fd)")
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
 

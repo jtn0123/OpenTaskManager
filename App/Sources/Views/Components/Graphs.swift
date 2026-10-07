@@ -79,9 +79,9 @@ struct GraphPanel: View {
         let tint = series.last?.color ?? .accentColor
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(title).font(.caption).foregroundStyle(.secondary)
+                Text(title).font(.subheadline).foregroundStyle(.secondary)
                 Spacer()
-                Text(trailing).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                Text(trailing).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
             }
             GraphView(series: series, maxValue: maxValue, capacity: capacity, glows: true, stacked: stacked,
                       minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits, cornerRadius: 8)
@@ -106,8 +106,8 @@ struct TimeAxis: View {
             Spacer()
             Text("now")
         }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 2)
     }
 }
@@ -155,7 +155,7 @@ struct Stat: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
             HStack(spacing: 6) {
                 if let color {
                     Circle().fill(color).frame(width: 7, height: 7)

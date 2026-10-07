@@ -104,7 +104,7 @@ struct ConnectionsView: View {
             Text("Updates every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page is open")
                 .help("The last walk of every process's sockets took \(Format.fixed(store.walkDuration * 1000, 1)) ms.")
         }
-        .font(.caption)
+        .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)

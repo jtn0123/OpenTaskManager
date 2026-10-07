@@ -146,7 +146,7 @@ struct HistoryChartCard: View {
                     .foregroundStyle(.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
                     .annotation(position: .overlay, alignment: .center) {
                         if earliest.timeIntervalSince(domain.lowerBound) > domain.upperBound.timeIntervalSince(domain.lowerBound) / 5 {
-                            Text("Not recorded yet").font(.caption).foregroundStyle(.tertiary)
+                            Text("Not recorded yet").font(.subheadline).foregroundStyle(.tertiary)
                         }
                     }
             }
@@ -187,7 +187,7 @@ struct HistoryChartCard: View {
         .chartXAxis {
             AxisMarks(values: ticks) { _ in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
-                AxisValueLabel(format: timeLabels).font(.caption2).foregroundStyle(.secondary)
+                AxisValueLabel(format: timeLabels).font(.system(size: 10.5)).foregroundStyle(.secondary)
             }
         }
         .chartPlotStyle { plot in
@@ -212,7 +212,7 @@ private struct HistoryPlotOverlay: View {
         ZStack(alignment: .topLeading) {
             ForEach(labels.indices, id: \.self) { index in
                 Text(labels[index])
-                    .font(.caption2)
+                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondary)
                     .offset(x: plot.minX + 6, y: plot.minY + 3 + plot.height / 2 * CGFloat(index))
             }

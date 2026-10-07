@@ -69,7 +69,7 @@ struct UsersView: View {
                 Text("Only your own processes are included. Turn on “Include system and other users' processes” in Settings to see everyone.")
             }
         }
-        .font(.caption)
+        .font(.subheadline)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -216,7 +216,7 @@ private struct UserGraph: View {
             HStack(alignment: .bottom) {
                 Stat(label: label, number: number, color: color, format: format)
                 Spacer(minLength: 8)
-                Text(caption).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(caption).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
             GraphView(series: [GraphSeries(values: values, color: color)], capacity: Self.span, glows: true,
                       minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits,
@@ -249,7 +249,7 @@ private struct SessionList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Sessions").font(.caption).foregroundStyle(.secondary)
+            Text("Sessions").font(.subheadline).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 6) {
                 ForEach(sessions) { session in
                     HStack(spacing: 6) {
@@ -345,7 +345,7 @@ private struct SystemAccountGrid: View {
                 Text("GPU").gridColumnAlignment(.trailing)
                 Text("Last minute")
             }
-            .font(.caption)
+            .font(.subheadline)
             .foregroundStyle(.secondary)
             ForEach(users) { user in
                 let isExpanded = expanded.contains(user.uid)
@@ -420,7 +420,7 @@ private struct TopProcessList: View {
                     Text("Memory").gridColumnAlignment(.trailing)
                     Text("Power").gridColumnAlignment(.trailing)
                 }
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
                 ForEach(processes, id: \.pid) { process in
                     GridRow {

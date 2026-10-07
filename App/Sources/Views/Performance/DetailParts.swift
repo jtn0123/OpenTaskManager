@@ -80,7 +80,7 @@ struct ChartLegend: View {
                     Spacer(minLength: 4)
                     Text(item.value).monospacedDigit().foregroundStyle(.secondary).fixedSize()
                 }
-                .font(.caption)
+                .font(.subheadline)
             }
         }
     }

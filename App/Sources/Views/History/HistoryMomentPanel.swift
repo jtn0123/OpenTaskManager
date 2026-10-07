@@ -48,7 +48,7 @@ struct HistoryMomentPanel: View {
             }
             Text(bucket <= FlightRecorder.span ? "Average of \(Int(FlightRecorder.span)) seconds"
                  : "Average of \(Format.timeSpan(bucket)) up to \(point.time.formatted(date: .omitted, time: .shortened))")
-                .font(.caption)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
     }
@@ -87,7 +87,7 @@ struct HistoryMomentPanel: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(value).fontWeight(.medium).monospacedDigit()
                 if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
                 }
             }
         }
@@ -125,7 +125,7 @@ private struct AppBars: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
             if apps.isEmpty {
                 Text("—").font(.callout).foregroundStyle(.tertiary)
             }
