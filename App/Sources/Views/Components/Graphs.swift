@@ -757,8 +757,8 @@ struct Card<Content: View>: View {
 }
 
 /// The card's background, drawn with Core Animation so the glow can ease
-/// between readings without SwiftUI re-rendering anything.
-private struct CardSurface: NSViewRepresentable {
+/// between readings without SwiftUI re-rendering anything; a strip's too.
+struct CardSurface: NSViewRepresentable {
     var tint: Color?
     var glow: Double
 

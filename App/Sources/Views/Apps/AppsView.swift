@@ -158,6 +158,7 @@ struct AppsView: View {
             } detail: {
                 if let row = all.first(where: { $0.id == selection }) {
                     AppDetail(app: row.app, size: row.size, isMeasuring: store.sizesLeft > 0, pids: row.pids,
+                              launchJobs: model.launchJobs.watch,
                               showInStartup: { showInStartup(row.app, item: $0) },
                               moveToTrash: AppActions.offersRemoval(row.app) ? { removing = row.app } : nil)
                 } else {

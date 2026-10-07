@@ -216,7 +216,7 @@ struct HistoryTimelineControls: View {
 }
 
 /// Play or pause, the speed, and a word while playback jumps a gap.
-private struct HistoryTransport: View {
+struct HistoryTransport: View {
     let scrubber: HistoryScrubber
     let player: HistoryPlayer
 

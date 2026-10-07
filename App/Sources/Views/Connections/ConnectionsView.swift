@@ -120,7 +120,16 @@ struct ConnectionsView: View {
                         .fitsTableToRows(shown.count)
                         .layoutPriority(1)
                     Divider()
-                    tableFooter(shown: shown.count)
+                    if list == .closed, listedRows.isEmpty {
+                        // In place of the footer's count: what the list
+                        // collects, and the way back to the sockets the
+                        // counts above are about.
+                        NoClosedSocketsNote(coverage: store.closedCoverage) { list = .open }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                    } else {
+                        tableFooter(shown: shown.count)
+                    }
                     Spacer(minLength: 0)
                 }
             } detail: {
@@ -268,10 +277,9 @@ struct ConnectionsView: View {
             \(Format.fixed(store.walkDuration * 1000, 1)) ms.\(since)
             """)
         case .closed:
+            // An empty list has `NoClosedSocketsNote` in place of this.
             let closed = Self.count(total, "closed socket", "closed sockets")
-            let none = store.watchingSince.map { "None closed since \(ConnectionClock.time($0))" } ?? "None closed"
-            count = total == 0 ? none : shown == total ? closed
-                : shown == 0 ? "None of \(closed) match" : "\(shown.formatted()) of \(closed)"
+            count = shown == total ? closed : shown == 0 ? "None of \(closed) match" : "\(shown.formatted()) of \(closed)"
             processes = nil
             note = ("Last \(Format.timeSpan(ConnectionWatch.closedWindow)), while this page is open", """
             Sockets are read every \(seconds) s, and only while this page is open, so one that opens and closes between \
@@ -322,6 +330,41 @@ enum ConnectionList: String, CaseIterable {
     case closed = "Closed recently"
 }
 
+/// Under an empty Closed recently list: since when none has been seen
+/// closing, that only this page collects them, and the way back to the open
+/// sockets, which the counts above are about. Its text changes only when the
+/// page comes back after a gap or the list starts covering its window alone,
+/// so it never moves the page with the reads.
+private struct NoClosedSocketsNote: View {
+    var coverage: ConnectionWatch.ClosedCoverage?
+    var showOpen: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Label("\(seen) Closed sockets are collected while this page is open.", systemImage: "clock.arrow.circlepath")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help("""
+                Sockets are read every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page \
+                is open, so one that opens and closes between two reads, or while the page is closed, isn't seen. \
+                Closed sockets stay \(Format.timeSpan(ConnectionWatch.closedWindow)) after they were last seen.
+                """)
+            Button("Show Open Sockets", action: showOpen)
+                .controlSize(.small)
+                .fixedSize()
+        }
+    }
+
+    private var seen: String {
+        switch coverage {
+        case let .since(date)?: "No sockets seen closing since \(date.formatted(date: .omitted, time: .shortened))."
+        case .window?: "No sockets seen closing in the last \(Format.timeSpan(ConnectionWatch.closedWindow))."
+        case nil: "No sockets seen closing yet."
+        }
+    }
+}
+
 /// The filter bar's two pickers: the filters at the start and the list at
 /// the end while both fit one line, else the list under the filters. A
 /// `Layout` rather than `ViewThatFits`, which measured both pickers again on
@@ -353,8 +396,9 @@ private struct FilterBarLayout: Layout {
 
 // MARK: - Summary
 
-/// Over the counts: whose sockets they are, and how many processes macOS
-/// keeps out of them, so "0 connected sockets" reads as none of yours
+/// Over the counts: that they're of sockets open now, even while the table
+/// lists those seen closing, whose sockets they are, and how many processes
+/// macOS keeps out of them, so "0 connected sockets" reads as none of yours
 /// rather than none on the Mac. The hidden count opens why. One plain row,
 /// no `ViewThatFits`: layout passes here come every tick (the traffic card).
 private struct ScopeHeader: View {
@@ -363,14 +407,19 @@ private struct ScopeHeader: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Label(hidden > 0 ? "Your account's sockets" : "Every process's sockets",
-                  systemImage: hidden > 0 ? "person.crop.circle" : "desktopcomputer")
-                .font(.explanation.weight(.semibold))
-                .foregroundStyle(.secondaryText)
-                .lineLimit(1)
-                .help(hidden > 0
-                    ? "The counts and the table cover the sockets of processes running as \(NSUserName())."
-                    : "Every process's sockets could be read, so the counts cover the whole Mac.")
+            Label {
+                Text("Open now").foregroundStyle(Color.primary)
+                    + Text(hidden > 0 ? " · your account's sockets" : " · every process's sockets")
+            } icon: {
+                Image(systemName: hidden > 0 ? "person.crop.circle" : "desktopcomputer")
+            }
+            .font(.explanation.weight(.semibold))
+            .foregroundStyle(.secondaryText)
+            .lineLimit(1)
+            .help(hidden > 0
+                ? "The counts are the sockets open at the latest read, of processes running as \(NSUserName())."
+                : "The counts are the sockets open at the latest read. Every process's sockets could be read, "
+                    + "so they cover the whole Mac.")
             Spacer(minLength: 8)
             if hidden > 0 {
                 Button {
