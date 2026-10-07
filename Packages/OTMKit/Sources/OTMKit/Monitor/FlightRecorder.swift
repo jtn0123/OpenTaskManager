@@ -18,13 +18,22 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// Each row is one `HistoryRecord` (ten seconds by default). Graph points are
 /// averaged by SQLite itself, so reading a week costs one grouped query
 /// rather than loading tens of thousands of rows. Sessions, stretches the
-/// user marked, sit beside the records and are exported as recording files;
-/// an opened file is replayed through an in-memory copy of the same tables.
+/// user marked, and events (`HistoryEvent`: apps launched and quit, the
+/// network changing) sit beside the records and are exported with them as
+/// recording files; an opened file is replayed through an in-memory copy of
+/// the same tables.
+///
+/// The database's `user_version` is its schema: 0, records and sessions;
+/// 1 added the events table. An older database is brought up to date when
+/// it opens, and an older build still opens a newer one: it never reads
+/// the tables it doesn't know.
 public actor FlightRecorder {
     /// Seconds each record covers.
     public static let span: TimeInterval = 10
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
+    /// The schema this build writes (`user_version`).
+    static let schemaVersion: Int32 = 1
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -75,6 +84,7 @@ public actor FlightRecorder {
         try Self.execute("BEGIN", on: connection.handle)
         try Self.insert(file.records, into: connection.handle)
         try Self.insert(file.session, into: connection.handle)
+        try Self.insert(file.events, into: connection.handle)
         try Self.execute("COMMIT", on: connection.handle)
         self.url = url
         self.connection = connection
@@ -97,9 +107,15 @@ public actor FlightRecorder {
         }
     }
 
-    /// Deletes the records before `date`, and the sessions that ended before it.
+    /// Saves events, in any order. One another copy of the app already
+    /// saved (the same kind and name in the same second) is left out.
+    public func append(_ events: [HistoryEvent]) throws(FlightRecorderError) {
+        try Self.insert(events, into: database)
+    }
+
+    /// Deletes the records and events before `date`, and the sessions that ended before it.
     public func prune(before date: Date) throws(FlightRecorderError) {
-        for sql in ["DELETE FROM records WHERE time < ?", "DELETE FROM sessions WHERE end_time < ?"] {
+        for sql in ["DELETE FROM records WHERE time < ?", "DELETE FROM sessions WHERE end_time < ?", "DELETE FROM events WHERE time < ?"] {
             let statement = try prepare(sql)
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
@@ -186,6 +202,72 @@ public actor FlightRecorder {
         return Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))...Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
     }
 
+    /// The figures between two dates summed up, gaps left out
+    /// (`HistoryIntervalStats`). Reads the figures alone, not the top
+    /// apps, so a week's records cost little.
+    public func stats(from start: Date, to end: Date) throws(FlightRecorderError) -> HistoryIntervalStats {
+        let statement = try prepare("""
+            SELECT time, \(Self.columns.joined(separator: ", ")) FROM records WHERE time > ? AND time <= ? ORDER BY time
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, min(start, end).timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, max(start, end).timeIntervalSince1970)
+        var records: [HistoryRecord] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            records.append(HistoryRecord(time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)),
+                                         values: Self.values(statement, from: 1)))
+        }
+        return HistoryIntervalStats(records: records, from: start, to: end)
+    }
+
+    /// The apps that used the most CPU between two dates, averaged over the
+    /// records as `HistoryRecord.topApps` does (an app missing from a
+    /// record's list counts as idle there), summed by SQLite rather than
+    /// decoding every record's list.
+    public func topCPU(from start: Date, to end: Date, count: Int) throws(FlightRecorderError) -> [HistoryApp] {
+        let counting = try prepare("SELECT COUNT(*) FROM records WHERE time > ? AND time <= ?")
+        defer { sqlite3_finalize(counting) }
+        sqlite3_bind_double(counting, 1, start.timeIntervalSince1970)
+        sqlite3_bind_double(counting, 2, end.timeIntervalSince1970)
+        guard sqlite3_step(counting) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
+        let records = Double(sqlite3_column_int64(counting, 0))
+        guard records > 0 else { return [] }
+        let statement = try prepare("""
+            SELECT json_extract(app.value, '$.n'), SUM(json_extract(app.value, '$.v'))
+            FROM records, json_each(records.top_cpu) AS app WHERE records.time > ? AND records.time <= ? GROUP BY 1
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
+        var totals: [String: Double] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let name = Self.text(statement, 0) else { continue }
+            totals[name] = sqlite3_column_double(statement, 1) / records
+        }
+        return HistoryRecord.ranked(totals, count: count)
+    }
+
+    /// The events from `start` to `end`, both included, oldest first.
+    public func events(from start: Date, to end: Date) throws(FlightRecorderError) -> [HistoryEvent] {
+        let statement = try prepare("""
+            SELECT time, kind, name, detail, count, approximate FROM events WHERE time >= ? AND time <= ? ORDER BY time, rowid
+            """)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
+        var events: [HistoryEvent] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            // A kind from a newer build is left out rather than misread.
+            guard let kind = Self.text(statement, 1).flatMap(HistoryEvent.Kind.init(rawValue:)) else { continue }
+            events.append(HistoryEvent(
+                time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)), kind: kind,
+                name: Self.text(statement, 2) ?? "", detail: Self.text(statement, 3) ?? "",
+                count: Int(sqlite3_column_int64(statement, 4)), isApproximate: sqlite3_column_int(statement, 5) != 0
+            ))
+        }
+        return events
+    }
+
     /// The oldest record kept, if any.
     public func earliest() throws(FlightRecorderError) -> Date? {
         let statement = try prepare("SELECT MIN(time) FROM records")
@@ -235,21 +317,24 @@ public actor FlightRecorder {
         try step(statement)
     }
 
-    /// A recording file of `session`, made on `machine`. Its records are read
-    /// in one transaction, so another copy of the app writing meanwhile
-    /// can't tear the snapshot.
+    /// A recording file of `session`, made on `machine`. Its records and
+    /// events are read in one transaction, so another copy of the app
+    /// writing meanwhile can't tear the snapshot.
     public func recording(of session: RecordingSession, machine: RecordingMachine, generator: String,
                           exported: Date = .now) throws(FlightRecorderError) -> RecordingFile {
         try Self.execute("BEGIN", on: database)
         let records: [HistoryRecord]
+        let events: [HistoryEvent]
         do throws(FlightRecorderError) {
             records = try self.records(from: session.start, to: session.end)
+            events = try self.events(from: session.start, to: session.end)
             try Self.execute("COMMIT", on: database)
         } catch {
             sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
             throw error
         }
-        return RecordingFile(session: session, machine: machine, generator: generator, exported: exported, records: records)
+        return RecordingFile(session: session, machine: machine, generator: generator, exported: exported, records: records,
+                             events: events)
     }
 
     // MARK: - Rows
@@ -288,6 +373,10 @@ public actor FlightRecorder {
         return (try? JSONEncoder().encode(rounded)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     }
 
+    private static func text(_ statement: OpaquePointer, _ column: Int32) -> String? {
+        sqlite3_column_text(statement, column).map { String(cString: $0) }
+    }
+
     private static func decode(_ statement: OpaquePointer, _ column: Int32) -> [HistoryApp] {
         guard let text = sqlite3_column_text(statement, column) else { return [] }
         return (try? JSONDecoder().decode([HistoryApp].self, from: Data(String(cString: text).utf8))) ?? []
@@ -306,12 +395,71 @@ public actor FlightRecorder {
         return Connection(handle)
     }
 
+    /// The first schema's tables, then the steps since (`migrate`).
     private static func createTables(on handle: OpaquePointer) throws(FlightRecorderError) {
         let columns = columns.map { "\($0) REAL" }.joined(separator: ", ")
         try execute("""
             CREATE TABLE IF NOT EXISTS records (time REAL PRIMARY KEY, \(columns), top_cpu TEXT, top_memory TEXT) WITHOUT ROWID;
             CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, start_time REAL NOT NULL, end_time REAL NOT NULL, note TEXT NOT NULL);
             """, on: handle)
+        try migrate(handle)
+    }
+
+    /// Brings a database from an older build up to `schemaVersion`, in one
+    /// transaction, which also keeps another copy of the app from migrating
+    /// it at the same moment. Its records and sessions stay as they are.
+    static func migrate(_ handle: OpaquePointer) throws(FlightRecorderError) {
+        guard try userVersion(handle) < schemaVersion else { return }
+        try execute("BEGIN IMMEDIATE", on: handle)
+        do throws(FlightRecorderError) {
+            // Read again: another copy may have migrated it while this one waited.
+            let version = try userVersion(handle)
+            if version < 1 {
+                // An event counts once per kind, name and second, whichever copy of the app saw it.
+                try execute("""
+                    CREATE TABLE IF NOT EXISTS events (time REAL NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+                        detail TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 1, approximate INTEGER NOT NULL DEFAULT 0);
+                    CREATE UNIQUE INDEX IF NOT EXISTS events_once ON events (kind, name, CAST(time AS INTEGER));
+                    CREATE INDEX IF NOT EXISTS events_time ON events (time);
+                    """, on: handle)
+            }
+            if version < schemaVersion { try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
+            try execute("COMMIT", on: handle)
+        } catch {
+            sqlite3_exec(handle, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+    }
+
+    /// The database's schema version (`user_version`).
+    static func userVersion(_ handle: OpaquePointer) throws(FlightRecorderError) -> Int32 {
+        let statement = try prepare("PRAGMA user_version", on: handle)
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+        return sqlite3_column_int(statement, 0)
+    }
+
+    /// The database's schema version, for tests.
+    func schemaVersionOnDisk() throws(FlightRecorderError) -> Int32 {
+        try Self.userVersion(database)
+    }
+
+    private static func insert(_ events: [HistoryEvent], into handle: OpaquePointer) throws(FlightRecorderError) {
+        guard !events.isEmpty else { return }
+        let statement = try prepare(
+            "INSERT OR IGNORE INTO events (time, kind, name, detail, count, approximate) VALUES (?, ?, ?, ?, ?, ?)", on: handle
+        )
+        defer { sqlite3_finalize(statement) }
+        for event in events {
+            sqlite3_reset(statement)
+            sqlite3_bind_double(statement, 1, event.time.timeIntervalSince1970)
+            bind(event.kind.rawValue, to: statement, at: 2)
+            bind(event.name, to: statement, at: 3)
+            bind(event.detail, to: statement, at: 4)
+            sqlite3_bind_int64(statement, 5, Int64(event.count))
+            sqlite3_bind_int(statement, 6, event.isApproximate ? 1 : 0)
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+        }
     }
 
     private static func insert(_ records: [HistoryRecord], into handle: OpaquePointer) throws(FlightRecorderError) {

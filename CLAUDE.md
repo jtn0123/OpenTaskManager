@@ -63,7 +63,12 @@ Manager OG or any other proprietary task manager.
   a `HistoryRecord` every 10 s to ~/Library/Application Support/OpenTaskManager,
   and saved sessions beside them; `RecordingFile` in OTMKit is the versioned
   `.otmrecording` format, which `HistoryRecordingStore` opens into an in-memory
-  recorder, and `-openRecording <path> -openPlayback 1|10|60` opens and plays one),
+  recorder, and `-openRecording <path> -openPlayback 1|10|60` opens and plays one;
+  events, `HistoryEvent` (app launches and quits from NSWorkspace, busy background
+  processes from `ProcessEventTracker`, network changes, sleep and wake), go in the
+  same database, its schema migrated by `PRAGMA user_version`, and in a file's
+  optional `events` key; Compare's figures, `HistoryIntervalStats` and
+  `HistoryComparison`, leave gaps out),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick),

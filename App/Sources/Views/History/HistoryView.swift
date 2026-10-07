@@ -23,6 +23,16 @@ enum HistoryRange: Int, CaseIterable, Identifiable {
         }
     }
 
+    /// The range as the coverage line starts: "Last hour".
+    var title: String {
+        switch self {
+        case .hour: "Last hour"
+        case .sixHours: "Last 6 hours"
+        case .day: "Last 24 hours"
+        case .week: "Last 7 days"
+        }
+    }
+
     /// The range in a sentence: "recorded in the last hour".
     var phrase: String {
         switch self {
@@ -74,6 +84,13 @@ final class HistoryScrubber {
     var draft: HistorySessionDraft?
     /// The saved session picked on the rail or from the Recordings menu.
     var session: RecordingSession?
+    /// The gap picked from the gaps menu, outlined on the rail and the
+    /// charts; a moment pinned elsewhere lets it go.
+    var selectedGap: HistoryGap?
+    /// The event picked on the rail or from the events menu.
+    var selectedEvent: HistoryEvent?
+    /// Two stretches being compared.
+    var compare: HistoryCompareDraft?
     /// Showing a recording file, whose last moment is its end rather than the latest.
     var showsFile = false
 
@@ -101,9 +118,10 @@ final class HistoryScrubber {
         if hoveredGap != gap { hoveredGap = gap }
     }
 
-    /// Pins `moment`, when it's another.
+    /// Pins `moment`, when it's another, letting a picked gap go.
     func pin(_ moment: Date?) {
         if pinned != moment { pinned = moment }
+        if selectedGap != nil { selectedGap = nil }
     }
 
     /// The stretch the charts and the rail shade: the session being marked
@@ -121,6 +139,9 @@ final class HistoryScrubber {
         playhead = nil
         draft = nil
         session = nil
+        selectedGap = nil
+        selectedEvent = nil
+        compare = nil
     }
 }
 
@@ -177,6 +198,8 @@ struct HistoryView: View {
     @State private var recorded: TimeInterval = 0
     /// The stretches within the range with nothing recorded, oldest first.
     @State private var gaps: [HistoryGap] = []
+    /// What happened within the range, oldest first.
+    @State private var events: [HistoryEvent] = []
     @State private var fileSize: Int64 = 0
     /// The page's width: it picks the layout and how often the axes are labelled.
     @State private var width: CGFloat = 0
@@ -217,7 +240,8 @@ struct HistoryView: View {
                 if !compact {
                     // In a scroll view of its own, so it sits under the toolbar like the charts.
                     ScrollView {
-                        HistoryMomentPanel(scrubber: scrubber, player: player, points: points ?? [], bucket: bucket, recorder: source)
+                        HistoryMomentPanel(scrubber: scrubber, player: player, points: points ?? [], bucket: bucket, recorder: source,
+                                           events: events)
                             .padding([.top, .bottom, .trailing], 20)
                     }
                     .frame(width: Self.panelWidth)
@@ -227,6 +251,7 @@ struct HistoryView: View {
         }
         .background {
             HistoryReplayReporter(player: player, store: store, showsFile: opened != nil)
+            HistoryOpeningFocus()
         }
         .toolbar {
             ToolbarItem {
@@ -288,24 +313,43 @@ struct HistoryView: View {
                     }
                 }
             }
-            HStack(spacing: 8) {
-                // One line: in a narrow window the cadence and retention move to the tooltip.
-                ViewThatFits(in: .horizontal) {
-                    recording(status).fixedSize()
-                    recording(shortStatus)
-                }
-                .help(recordedLabel + status)
-                // A recording file's gaps, counted, each listed a click away.
-                if opened != nil, let points, !gaps.isEmpty {
-                    HistoryGapsMenu(gaps: gaps, points: points, bucket: bucket, scrubber: scrubber)
-                }
+            // One line: in a narrow window the cadence and the size move to the tooltip.
+            ViewThatFits(in: .horizontal) {
+                coverage(tail: status)
+                coverage(tail: shortStatus)
+                coverage(tail: "")
             }
             .font(.callout)
+            .help(coverageHelp)
         }
     }
 
-    private func recording(_ status: String) -> Text {
-        Text(recordedLabel).foregroundStyle(.primary).fontWeight(.medium) + Text(status).foregroundStyle(.secondaryText)
+    /// The span shown and how much of it was sampled, then its gaps and
+    /// events, counted, each listed a click away, then `tail`.
+    private func coverage(tail: String) -> some View {
+        HStack(spacing: 5) {
+            Text(coverageLabel).fontWeight(.medium).fixedSize()
+            if let points, !points.isEmpty {
+                Self.separator
+                if gaps.isEmpty {
+                    Text("no gaps").foregroundStyle(.secondaryText).fixedSize()
+                } else {
+                    HistoryGapsMenu(gaps: gaps, points: points, bucket: bucket, scrubber: scrubber)
+                }
+                if !events.isEmpty {
+                    Self.separator
+                    HistoryEventsMenu(events: events, points: points, bucket: bucket, scrubber: scrubber, player: player)
+                }
+            }
+            if !tail.isEmpty {
+                Self.separator
+                Text(tail).foregroundStyle(.secondaryText).fixedSize()
+            }
+        }
+    }
+
+    private static var separator: some View {
+        Text("·").foregroundStyle(.secondaryText)
     }
 
     private var title: some View {
@@ -365,6 +409,7 @@ struct HistoryView: View {
         } else if let points {
             let axis = timeAxis
             let gapMarks = HistoryGapMarks(gaps: gaps, points: points, bucket: bucket, domain: domain, plotWidth: plotWidth)
+            HistoryComparisonSlot(scrubber: scrubber, recorder: source, bucket: bucket, revision: points.last?.time)
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, bucket: bucket, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
@@ -383,11 +428,12 @@ struct HistoryView: View {
         if let points, !points.isEmpty, source != nil {
             VStack(alignment: .leading, spacing: 10) {
                 if compact {
-                    HistoryMomentSummary(scrubber: scrubber, player: player, points: points, bucket: bucket, recorder: source)
+                    HistoryMomentSummary(scrubber: scrubber, player: player, points: points, bucket: bucket, recorder: source,
+                                         events: events)
                 }
                 // Sessions are marked in the live recording; a file is read-only.
                 HistoryRail(scrubber: scrubber, player: player, store: store, recorder: opened == nil ? model.recorder : nil,
-                            points: points, gaps: gaps, domain: domain, bucket: bucket)
+                            points: points, gaps: gaps, events: events, domain: domain, bucket: bucket)
             }
             .padding(.top, 4)
             .padding(.bottom, 8)
@@ -415,34 +461,46 @@ struct HistoryView: View {
         return (GraphMath.timeTicks(in: domain, step: step, width: Double(plot), labelWidth: Double(ceil(widest))), labels)
     }
 
-    /// How much of the range is recorded: "17 min recorded since 6:51 AM".
-    private var recordedLabel: String {
-        guard let recordedSpan, recorded > 0 else { return "" }
-        guard opened == nil else { return "\(Format.roughDuration(recorded)) recorded" }
-        guard startsLate else { return "\(Format.roughDuration(recorded)) recorded in \(range.phrase)" }
-        return "\(Format.roughDuration(recorded)) recorded since \(Self.clock(recordedSpan.lowerBound))"
+    /// Seconds the graphs span.
+    private var shownSpan: TimeInterval { domain.upperBound.timeIntervalSince(domain.lowerBound) }
+
+    /// Whether the graphs are fitted to less than the whole range.
+    private var fitted: Bool { opened == nil && shownSpan < range.seconds - 1 }
+
+    /// The span shown and how much of it holds records: "Last hour · 32 min
+    /// sampled", "41 min span · 32 min sampled" fitted, "20 min span · 11 min
+    /// sampled" for a file.
+    private var coverageLabel: String {
+        guard recordedSpan != nil, recorded > 0 else {
+            return opened == nil ? "Nothing recorded in \(range.phrase) yet" : "Nothing recorded"
+        }
+        guard opened == nil, !fitted else { return HistoryInterval.coverage(span: shownSpan, sampled: recorded) }
+        let since = startsLate ? recordedSpan.map { " since \(Self.clock($0.lowerBound))" } ?? "" : ""
+        return "\(range.title) · \(Format.roughDuration(recorded)) sampled\(since)"
     }
 
-    /// The rest of the line under the title, after `recordedLabel`.
+    /// The end of the coverage line: how often records are written, and the size on disk.
     private var status: String {
-        var parts: [String]
-        if opened != nil {
-            // Gaps, when there are any, have a menu of their own after the line.
-            parts = (gaps.isEmpty ? ["no gaps"] : []) + ["a record every \(Int(FlightRecorder.span)) s"]
-            if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " file") }
-        } else {
-            parts = ["every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept for 7 days"]
-            if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " on disk") }
-        }
-        let text = parts.joined(separator: " · ")
-        return recordedLabel.isEmpty ? "Recorded " + text : " · " + text
+        var parts = [opened == nil ? "a record every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept 7 days"
+            : "a record every \(Int(FlightRecorder.span)) s"]
+        if !shortStatus.isEmpty { parts.append(shortStatus) }
+        return parts.joined(separator: " · ")
     }
 
     /// `status` for a narrow window: just the size on disk.
     private var shortStatus: String {
         guard fileSize > 0 else { return "" }
-        let size = Format.bytes(UInt64(fileSize)) + (opened == nil ? " on disk" : " file")
-        return recordedLabel.isEmpty ? size : " · " + size
+        return Format.bytes(UInt64(fileSize)) + (opened == nil ? " on disk" : " file")
+    }
+
+    /// The coverage line spelled out, with what a narrow window leaves off it.
+    private var coverageHelp: String {
+        var text = "The graphs span \(fitted || opened != nil ? Format.roughDuration(shownSpan) : range.phrase)"
+        if recorded > 0 { text += ", of which \(Format.roughDuration(recorded)) was recorded" }
+        text += ". Gaps, where the app wasn't running, the Mac slept or updates were paused, are hatched on the graphs "
+            + "and the timeline and left out of every figure."
+        if !events.isEmpty { text += " Events are marked over the timeline." }
+        return text + " Recorded " + status + "."
     }
 
     /// Picks a saved session, switching to the shortest range that reaches back to it.
@@ -486,6 +544,7 @@ struct HistoryView: View {
         let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
         let seconds = (try? await recorder.recordedSeconds(from: shown.lowerBound, to: shown.upperBound)) ?? 0
         let span = try? await recorder.recordedSpan(from: shown.lowerBound, to: shown.upperBound)
+        let happened = (try? await recorder.events(from: shown.lowerBound, to: shown.upperBound)) ?? []
         guard !Task.isCancelled else { return }
         recorded = seconds
         earliest = nil
@@ -496,6 +555,7 @@ struct HistoryView: View {
         domain = shown
         points = loaded
         gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown)
+        if events != happened { events = happened }
         player.points = loaded
         if let speed = store.takeLaunchSpeed() {
             player.speed = speed
@@ -514,8 +574,10 @@ struct HistoryView: View {
         let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
         let seconds = (try? await recorder.recordedSeconds(from: start, to: end)) ?? 0
         let sessions = (try? await recorder.sessions()) ?? []
+        let happened = (try? await recorder.events(from: shown.lowerBound, to: shown.upperBound)) ?? []
         // The range changed or a file opened meanwhile: this load is stale.
         guard !Task.isCancelled else { return }
+        if events != happened { events = happened }
         recorded = seconds
         earliest = first
         recordedSpan = span
@@ -531,5 +593,6 @@ struct HistoryView: View {
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }
         if let playhead = scrubber.playhead, !domain.contains(playhead) { player.stop(scrubber) }
         if let picked = scrubber.session, !sessions.contains(picked) { scrubber.session = nil }
+        if let gap = scrubber.selectedGap, !gaps.contains(gap) { scrubber.selectedGap = nil }
     }
 }

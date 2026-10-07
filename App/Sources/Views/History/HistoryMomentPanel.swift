@@ -12,6 +12,8 @@ struct HistoryMomentPanel: View {
     let bucket: TimeInterval
     /// Where the busiest apps are read from: the live recording or an opened file.
     let recorder: FlightRecorder?
+    /// What happened within the range, oldest first.
+    let events: [HistoryEvent]
 
     var body: some View {
         let point = scrubber.point(in: points)
@@ -19,7 +21,7 @@ struct HistoryMomentPanel: View {
             if let point {
                 heading(point)
                 Divider()
-                HistoryMomentDetails(point: point, bucket: bucket, recorder: recorder)
+                HistoryMomentDetails(point: point, bucket: bucket, recorder: recorder, events: events, selected: scrubber.selectedEvent)
             } else {
                 Text("Nothing recorded yet").font(.headline)
                 Text("Click or drag on a graph to pick a moment and see it here.").font(.callout).foregroundStyle(.secondaryText)
@@ -41,10 +43,17 @@ struct HistoryMomentPanel: View {
             Text(HistoryMoment.label(point.time, bucket: bucket))
                 .font(.title2.weight(.semibold))
                 .monospacedDigit()
-            Text(bucket <= FlightRecorder.span ? "Average of \(Int(FlightRecorder.span)) seconds"
-                 : "Average of the \(Format.timeSpan(bucket)) up to this time")
+            Text("\(HistoryMoment.scope(bucket)) average")
                 .font(.callout)
                 .foregroundStyle(.secondaryText)
+                .help("Each figure below is its average over the \(Format.timeSpan(max(bucket, FlightRecorder.span))) "
+                    + "up to this time; CPU's peak is the busiest single update in it.")
+            if let gap = scrubber.selectedGap {
+                Text("After a gap: nothing recorded \(HistoryGapStyle.describe(gap))")
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let playback = scrubber.playback(bucket: bucket) {
                 playback.font(.callout)
             }
@@ -67,6 +76,8 @@ struct HistoryMomentSummary: View {
     let bucket: TimeInterval
     /// Where the busiest apps are read from: the live recording or an opened file.
     let recorder: FlightRecorder?
+    /// What happened within the range, for the details.
+    let events: [HistoryEvent]
     /// Wide enough for "Disk write" and "99.9 KB/s".
     private static let figureWidth = 76.0
 
@@ -94,7 +105,7 @@ struct HistoryMomentSummary: View {
                     if let playback = scrubber.playback(bucket: bucket) {
                         playback
                     } else {
-                        Text(bucket <= FlightRecorder.span ? "\(Int(FlightRecorder.span)) s average" : "\(Format.timeSpan(bucket)) average")
+                        Text("\(HistoryMoment.scope(bucket)) average")
                             .foregroundStyle(.secondaryText)
                     }
                 }
@@ -113,7 +124,8 @@ struct HistoryMomentSummary: View {
                 .help("Every figure at this moment, and the apps that were busiest")
                 .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
                     if let point {
-                        HistoryMomentDetails(point: point, bucket: bucket, recorder: recorder)
+                        HistoryMomentDetails(point: point, bucket: bucket, recorder: recorder, events: events,
+                                             selected: scrubber.selectedEvent)
                             .padding(16)
                             .frame(width: 300)
                     }
@@ -183,6 +195,10 @@ struct HistoryMomentDetails: View {
     let bucket: TimeInterval
     /// Where the busiest apps are read from.
     let recorder: FlightRecorder?
+    /// What happened within the range: those near the moment are listed.
+    let events: [HistoryEvent]
+    /// The event picked on the rail, set apart in the list.
+    let selected: HistoryEvent?
     @State private var topCPU: [HistoryApp] = []
     @State private var topMemory: [HistoryApp] = []
 
@@ -195,6 +211,11 @@ struct HistoryMomentDetails: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             figures(point.values)
+            // A recording from before events were kept has none to list.
+            if !events.isEmpty {
+                Divider()
+                HistoryMomentEvents(events: events, time: point.time, bucket: max(bucket, FlightRecorder.span), selected: selected)
+            }
             Divider()
             apps
         }
@@ -209,7 +230,7 @@ struct HistoryMomentDetails: View {
 
     private func figures(_ values: HistoryValues) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 5) {
-            row("CPU", Theme.cpu, Format.percent(values.cpu), detail: "peak \(Format.percent(values.cpuPeak))")
+            row("CPU", Theme.cpu, Format.percent(values.cpu), detail: "\(HistoryMoment.scope(bucket)) peak \(Format.percent(values.cpuPeak))")
             row("Memory", Theme.memory, Format.percent(values.memory), detail: "pressure \(Format.percent(values.memoryPressure))")
             if values.swapUsed > 0 {
                 row("Swap", Theme.swap, Format.bytes(values.swapUsed))
