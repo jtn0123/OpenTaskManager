@@ -90,12 +90,29 @@ Manager OG or any other proprietary task manager.
   `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
   opens Compare with them picked, counted back from the range's end, with B the
   same length before A when left out; the pinned rail folds to a strip (the
-  section at the top, the span, the moment, Play and speed, a slim track) once
-  the charts' top has scrolled under it, and comes back whole at the top or
+  section at the top, the span, the moment, Play and speed, a slim track that
+  marks spike events) once the charts' top has scrolled under it, and comes
+  back whole at the top or
   from the strip's button: `RailFold` in OTMKit's Layout/ holds the rule, and
   `HistoryPageScroll` follows the clip view's bounds, so it moves only on
   scroll, never per tick, and only `HistoryPinnedRail` reads it, so the charts
-  never reload),
+  never reload; spike captures, off until "Capture spikes automatically" (Settings'
+  History section, or the switch in History's Spikes toolbar list) is on: each
+  update's figures go into `SpikeRecorder` in OTMKit, a preallocated ring of about
+  2 min of samples with the top 5 CPU, top 5 memory and top 3 disk processes (name,
+  PID, start time), whose `SpikeTriggers` fire on the whole CPU at 80% or more for
+  10 s (until under 70%), memory pressure at warning or critical, thermal pressure
+  at serious or critical, and disk or network 4 times a 5-minute rolling baseline
+  (and over 64 MB/s or 8 MB/s) for 10 s, each kind then cooling down 10 min; a
+  trigger keeps the 2 min before and carries on 1 min, then `SpikeCaptureStore`
+  writes the `SpikeCapture` off the main actor, as a recording of 1-second records
+  with a `.spike` event and a file's optional, separately versioned `incident`
+  block (`SpikeIncident`: what crossed, when, the contributing processes), to
+  Application Support/OpenTaskManager/Captures (`SpikeCaptureLibrary`: newest 20,
+  at most 100 MB); a replay's `FlightRecorder.recordSpan` is the file's record
+  length, so it buckets by the second; a `-sensorFixture` run captures nothing;
+  `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
+  updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick; while it's on screen

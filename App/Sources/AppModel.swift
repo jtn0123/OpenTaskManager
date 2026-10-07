@@ -620,6 +620,8 @@ final class AppModel {
             group.process.map { AppUsage(name: displayName(for: $0), cpuPercent: group.totals.cpuPercent, memory: Double(group.totals.memory)) }
         }
         let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))
+        // One fixed-size sample into the spike recorder's ring, when captures are on.
+        SpikeCaptureStore.shared.add(values, snapshot: snapshot, history: recorder)
         // Core loads, clocks, fans, temperatures and power rails, picked from the Thermals table's rows.
         let hardware = HistoryHardwareSample(readings: sensorReadings, cpu: snapshot.cpu, topology: topology, sensorsRead: sensorsRead)
         guard let record = recording.add(values, hardware: hardware, apps: apps, interval: snapshot.interval,

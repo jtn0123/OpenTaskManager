@@ -164,7 +164,7 @@ struct HistoryChartSpec: Identifiable {
     /// within each 10-second record. Window peak: the highest over the
     /// window shown."
     static func definition(of line: HistoryLine, bucket: TimeInterval) -> String {
-        let stretch = "each \(HistoryInterval.adjective(max(bucket, FlightRecorder.span))) point"
+        let stretch = "each \(HistoryInterval.adjective(bucket)) point"
         let plotted = switch line.summary {
         case .average: "\(line.name): \(line.meaning), averaged over \(stretch)."
         case .maximum: "\(line.name): \(line.meaning) within \(stretch)."
@@ -430,9 +430,9 @@ enum HistoryMoment {
     }
 
     /// The stretch a point's figures cover, as their label puts it: "10-second"
-    /// (average, peak), "4-minute" for coarser points.
+    /// (average, peak), "4-minute" for coarser points, "1-second" in a spike capture.
     static func scope(_ bucket: TimeInterval) -> String {
-        HistoryInterval.adjective(max(bucket, FlightRecorder.span))
+        HistoryInterval.adjective(bucket)
     }
 
     /// "7:03:20 AM", with seconds while points are that fine and the day

@@ -46,7 +46,7 @@ struct HistoryMomentPanel: View {
             Text("\(HistoryMoment.scope(bucket)) average")
                 .font(.callout)
                 .foregroundStyle(.secondaryText)
-                .help("Each figure below is its average over the \(Format.timeSpan(max(bucket, FlightRecorder.span))) "
+                .help("Each figure below is its average over the \(Format.timeSpan(bucket)) "
                     + "up to this time; CPU's peak is the busiest single update in it.")
             if let gap = scrubber.selectedGap {
                 Text("After a gap: nothing recorded \(HistoryGapStyle.describe(gap))")
@@ -214,7 +214,7 @@ struct HistoryMomentDetails: View {
             // A recording from before events were kept has none to list.
             if !events.isEmpty {
                 Divider()
-                HistoryMomentEvents(events: events, time: point.time, bucket: max(bucket, FlightRecorder.span), selected: selected)
+                HistoryMomentEvents(events: events, time: point.time, bucket: bucket, selected: selected)
             }
             Divider()
             apps
