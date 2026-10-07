@@ -276,7 +276,10 @@ build, `-sensorFixture <file>` loads a recording from
   the window widens; a hide in a wide window is remembered (`sidebarHidden`)
   and a show in a narrow one lasts until the window crosses 900
   (`SidebarVisibility` in OTMKit). The View menu lists the pages (⌘1 to ⌘9).
-  With it hidden, `PageFocus` gives the focus to the page's main table, or to
+  With it hidden, a page menu (`PageSwitcher`, the page's icon) sits before
+  the title, and in a narrow window Pause drops its word to make room; keep
+  the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
+  overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
   nothing, never the toolbar's toggle (`HiddenSidebarFocus`). The detail column
   takes the window's height whatever its page asks for: a taller page moved the
   split view up and left a toolbar backdrop as a white band over the page.

@@ -91,6 +91,12 @@ enum Page: String, CaseIterable, Identifiable {
         case .storage: "internaldrive"
         }
     }
+
+    /// ⌘1 to ⌘9 for the first nine pages, in the View menu and the page menu.
+    var shortcut: KeyboardShortcut? {
+        guard let index = Self.allCases.firstIndex(of: self), index < 9 else { return nil }
+        return KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+    }
 }
 
 /// The pages in the View menu, the current one ticked, with ⌘1 to ⌘9 for the
@@ -102,12 +108,45 @@ private struct PageCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .sidebar) {
             Section {
-                ForEach(Array(Page.allCases.enumerated()), id: \.element) { index, item in
+                ForEach(Page.allCases) { item in
                     Toggle(item.rawValue, isOn: Binding(get: { page == item }, set: { if $0 { page = item } }))
-                        .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)"))) : nil)
+                        .keyboardShortcut(item.shortcut)
                 }
             }
         }
+    }
+}
+
+/// The toolbar's page menu, there only while the sidebar is hidden: the
+/// page's icon with a chevron, just before the title that names the page,
+/// and every page in its menu, the current one ticked, with its ⌘ shortcut.
+/// A narrow window hides the sidebar, and with it every page that could be
+/// seen; the View menu's list has to be known about. A real toolbar item,
+/// since a menu on the title itself did nothing on macOS 26. The title keeps
+/// the name: taking it out of the toolbar for a menu that carried the name
+/// sent the sidebar's own toggle to the overflow menu, for good, once the
+/// sidebar was shown in a narrow window (macOS 26).
+private struct PageSwitcher: View {
+    @Binding var page: Page
+
+    var body: some View {
+        Menu {
+            ForEach(Page.allCases) { item in
+                Toggle(isOn: Binding(get: { page == item }, set: { if $0 { page = item } })) {
+                    Label(item.rawValue, systemImage: item.symbol)
+                }
+                .keyboardShortcut(item.shortcut)
+            }
+        } label: {
+            Label(page.rawValue, systemImage: page.symbol)
+                .labelStyle(.iconOnly)
+        }
+        .fixedSize()
+        .help("Go to another page. ⌘1 to ⌘9 switch from anywhere, and the sidebar, hidden while the window "
+            + "is narrow, lists them too.")
+        .accessibilityLabel("Page")
+        .accessibilityValue(page.rawValue)
+        .accessibilityHint("Shows the list of pages")
     }
 }
 
@@ -182,7 +221,8 @@ struct ContentView: View {
         .background(PageFocus(page: page, sidebarShown: sidebar.isShown))
         .onChange(of: sidebar.hiddenByUser) { UserDefaults.standard.set(sidebar.hiddenByUser, forKey: Self.sidebarHiddenKey) }
         // With the sidebar hidden, the title still names the page, and the
-        // View menu (⌘1 to ⌘9, `PageCommands`) changes it.
+        // page menu just before it (`PageSwitcher`) and the View menu (⌘1
+        // to ⌘9, `PageCommands`) change it.
         .navigationTitle(page.rawValue)
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -191,11 +231,19 @@ struct ContentView: View {
                 } label: {
                     Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
-                .labelStyle(.titleAndIcon)
+                // Just the icon while the page menu shares a narrow window's
+                // toolbar: the word pushed Startup's, Apps' and Drivers'
+                // Refresh, and System's Copy Summary, into the overflow menu.
+                .labelStyle(showsTitle: sidebar.isShown || sidebar.isNarrow != true)
                 .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
             }
             ToolbarItem(placement: .navigation) {
                 LiveBadge()
+            }
+            if !sidebar.isShown {
+                ToolbarItem(placement: .navigation) {
+                    PageSwitcher(page: $page)
+                }
             }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })) {
@@ -205,6 +253,18 @@ struct ContentView: View {
         }
         .onAppear {
             WindowOpener.openMainWindow = { openWindow(id: "main") }
+        }
+    }
+}
+
+private extension View {
+    /// The label's title and icon, or the icon alone; the title still names
+    /// it to VoiceOver either way.
+    @ViewBuilder func labelStyle(showsTitle: Bool) -> some View {
+        if showsTitle {
+            labelStyle(.titleAndIcon)
+        } else {
+            labelStyle(.iconOnly)
         }
     }
 }
