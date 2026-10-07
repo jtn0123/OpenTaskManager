@@ -47,6 +47,13 @@ public struct SocketInfo: Sendable, Codable, Hashable {
     public var isListening: Bool { state == "LISTEN" || (proto == .udp && remotePort == nil) }
 }
 
+extension SocketInfo {
+    init(_ endpoints: SocketDecoder.Endpoints, proto: TransportProtocol, state: String?) {
+        self.init(proto: proto, localAddress: endpoints.local.address, localPort: endpoints.local.port,
+                  remoteAddress: endpoints.remote?.address, remotePort: endpoints.remote?.port, state: state)
+    }
+}
+
 /// On-demand, per-process details too expensive to gather every tick.
 public enum ProcessInspector {
     /// Arguments and environment from KERN_PROCARGS2. macOS only returns these
@@ -149,21 +156,11 @@ public enum ProcessInspector {
         switch Int32(psi.soi_kind) {
         case Int32(SOCKINFO_TCP):
             let tcp = psi.soi_proto.pri_tcp
-            let endpoints = inetEndpoints(tcp.tcpsi_ini)
-            socketInfo = SocketInfo(
-                proto: .tcp,
-                localAddress: endpoints.local, localPort: endpoints.localPort,
-                remoteAddress: endpoints.remote, remotePort: endpoints.remotePort,
-                state: tcpState(tcp.tcpsi_state)
-            )
+            socketInfo = SocketInfo(SocketDecoder.endpoints(tcp.tcpsi_ini), proto: .tcp,
+                                    state: TCPState(kernelValue: tcp.tcpsi_state)?.rawValue ?? "UNKNOWN")
         case Int32(SOCKINFO_IN):
-            let endpoints = inetEndpoints(psi.soi_proto.pri_in)
-            socketInfo = SocketInfo(
-                proto: psi.soi_protocol == IPPROTO_UDP ? .udp : .other,
-                localAddress: endpoints.local, localPort: endpoints.localPort,
-                remoteAddress: endpoints.remote, remotePort: endpoints.remotePort,
-                state: nil
-            )
+            socketInfo = SocketInfo(SocketDecoder.endpoints(psi.soi_proto.pri_in),
+                                    proto: psi.soi_protocol == IPPROTO_UDP ? .udp : .other, state: nil)
         case Int32(SOCKINFO_UN):
             let path = withUnsafeBytes(of: psi.soi_proto.pri_un.unsi_addr.ua_sun.sun_path) {
                 String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
@@ -176,53 +173,11 @@ public enum ProcessInspector {
         return OpenFile(descriptor: fd, kind: .socket, detail: describe(socketInfo), socket: socketInfo)
     }
 
-    private struct Endpoints {
-        let local: String?
-        let localPort: Int?
-        let remote: String?
-        let remotePort: Int?
-    }
-
-    private static func inetEndpoints(_ info: in_sockinfo) -> Endpoints {
-        let isIPv6 = info.insi_vflag & UInt8(INI_IPV6) != 0
-        let local = isIPv6 ? format(info.insi_laddr.ina_6) : format(info.insi_laddr.ina_46.i46a_addr4)
-        let remote = isIPv6 ? format(info.insi_faddr.ina_6) : format(info.insi_faddr.ina_46.i46a_addr4)
-        let localPort = Int(UInt16(bigEndian: UInt16(truncatingIfNeeded: info.insi_lport)))
-        let remotePort = Int(UInt16(bigEndian: UInt16(truncatingIfNeeded: info.insi_fport)))
-        return Endpoints(
-            local: local, localPort: localPort == 0 ? nil : localPort,
-            remote: remotePort == 0 ? nil : remote, remotePort: remotePort == 0 ? nil : remotePort
-        )
-    }
-
-    private static func format(_ address: in_addr) -> String {
-        var address = address
-        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-        inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count))
-        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-    }
-
-    private static func format(_ address: in6_addr) -> String {
-        var address = address
-        var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-        inet_ntop(AF_INET6, &address, &buffer, socklen_t(buffer.count))
-        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-    }
-
-    private static func tcpState(_ state: Int32) -> String {
-        let names = ["CLOSED", "LISTEN", "SYN_SENT", "SYN_RECEIVED", "ESTABLISHED", "CLOSE_WAIT",
-                     "FIN_WAIT_1", "CLOSING", "LAST_ACK", "FIN_WAIT_2", "TIME_WAIT"]
-        return names.indices.contains(Int(state)) ? names[Int(state)] : "UNKNOWN"
-    }
-
     static func describe(_ socket: SocketInfo) -> String {
-        func endpoint(_ address: String?, _ port: Int?) -> String {
-            let host = address.map { $0.contains(":") ? "[\($0)]" : $0 } ?? "*"
-            return port.map { "\(host):\($0)" } ?? host
-        }
-        var text = "\(socket.proto.rawValue) \(endpoint(socket.localAddress, socket.localPort))"
+        guard socket.proto != .unix else { return "UNIX \(socket.localAddress ?? "*")" }
+        var text = "\(socket.proto.rawValue) \(Endpoint.format(address: socket.localAddress, port: socket.localPort))"
         if socket.remoteAddress != nil || socket.remotePort != nil {
-            text += " → \(endpoint(socket.remoteAddress, socket.remotePort))"
+            text += " → \(Endpoint.format(address: socket.remoteAddress, port: socket.remotePort))"
         }
         if let state = socket.state { text += " (\(state))" }
         return text

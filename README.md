@@ -43,6 +43,22 @@ samples and scale their axes to round numbers.
   within its range, and every die sensor's lowest and highest reading since
   launch.
 
+**Connections**: every TCP and UDP socket on the Mac, by process.
+- Counts of open connections, listening ports, ports exposed to the network,
+  remote hosts and processes with sockets, beside a live network traffic graph.
+- A sortable table of process, PID, protocol, local and remote address, state
+  (listening in green, established in blue) and scope: loopback, local network
+  (private, link-local and unique-local addresses), internet, or all interfaces.
+- Listeners on every interface (`0.0.0.0`, `::`) or a network address are
+  flagged as reachable from other devices.
+- Filters for established, listening, exposed and UDP sockets, and search by
+  process, address or port.
+- Details for each socket: both ends, the well-known service, what its scope
+  means, and a jump to the owning process.
+- It refreshes every 3 seconds, and only while the page is open. macOS only
+  lists sockets for your own processes, so the page says how many root and
+  other users' processes it can't see.
+
 **Startup**: everything launchd starts by itself, read from the LaunchAgents
 and LaunchDaemons folders. Each item shows whether it's yours, every user's or
 a daemon, whether it's running (with its PID), loaded, disabled or not loaded,
@@ -90,7 +106,8 @@ Root isn't needed. Most figures come from public kernel and IOKit
 interfaces: `libproc` and `proc_pid_rusage` for processes and energy,
 `host_processor_info` for each core, `host_statistics64` for memory (using the
 same arithmetic as Activity Monitor), IOKit for the GPU, disks and battery
-telemetry, and routing sockets for network counters. Startup items come from
+telemetry, routing sockets for network counters, and each process's descriptor
+table (`proc_pidfdinfo`) for its sockets. Startup items come from
 the launchd property lists themselves, plus `launchctl list` and
 `launchctl print` for what's loaded, running or disabled.
 

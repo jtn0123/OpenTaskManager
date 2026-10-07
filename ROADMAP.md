@@ -41,11 +41,12 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | CPU cluster and GPU clock speeds | ✅ | From IOReport residencies and the device tree's clock tables |
 | Memory by app, paging and compressor rates | ✅ | Stacked over time |
 | GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
-| Privileged helper | ⬜ | Full details for root processes. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
+| Privileged helper | ⬜ | Full details for root processes, including their sockets. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
 | Flight recorder | ⬜ | SQLite history with a timeline scrubber: "what was hogging the CPU at 3 a.m.?" |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
 | Per-process network throughput | ⬜ | Per-socket byte counters |
-| "Who is using…" | 🚧 | Port, file or volume to process. `otm ports` exists; the UI and "can't eject" helper are planned |
+| Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. Your own processes only until the privileged helper |
+| "Who is using…" | 🚧 | Port to process is done (the Connections page and `otm ports`). File and volume to process, and the "can't eject" helper, are planned |
 | Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, and fan speeds with their range |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |

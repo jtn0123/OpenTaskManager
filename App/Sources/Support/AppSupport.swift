@@ -8,7 +8,8 @@ import SwiftUI
 @MainActor
 enum IconCache {
     private static var icons: [String: NSImage] = [:]
-    private static let generic: NSImage = {
+    /// For bare executables, and processes not in the latest snapshot yet.
+    static let generic: NSImage = {
         let image = NSWorkspace.shared.icon(for: .unixExecutable)
         image.size = NSSize(width: 16, height: 16)
         return image

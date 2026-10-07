@@ -233,17 +233,14 @@ struct ListeningPort: Encodable {
     let port: Int
 }
 
-func listeningPorts(_ snapshot: SystemSnapshot) -> [ListeningPort] {
-    var ports: [ListeningPort] = []
-    for process in snapshot.processes where !process.isRestricted {
-        for file in ProcessInspector.openFiles(of: process.pid) ?? [] {
-            guard let socket = file.socket, socket.isListening, let port = socket.localPort,
-                  socket.proto == .tcp || socket.proto == .udp else { continue }
-            ports.append(ListeningPort(pid: process.pid, process: process.name, proto: socket.proto.rawValue,
-                                       address: socket.localAddress ?? "*", port: port))
-        }
+/// TCP listeners and bound UDP sockets, from the system-wide connection walk.
+func listeningPorts(_ connections: [Connection]) -> [ListeningPort] {
+    connections.compactMap { connection -> ListeningPort? in
+        guard connection.kind.acceptsInbound, let port = connection.local.port else { return nil }
+        return ListeningPort(pid: connection.pid, process: connection.processName, proto: connection.transport.rawValue,
+                             address: connection.local.address, port: port)
     }
-    return ports.sorted { ($0.port, $0.pid) < ($1.port, $1.pid) }
+    .sorted { ($0.port, $0.pid, $0.proto) < ($1.port, $1.pid, $1.proto) }
 }
 
 struct Inspection: Encodable {
@@ -324,8 +321,8 @@ case "sensors":
     }
 
 case "ports":
-    let snapshot = await monitor.sample()
-    let ports = listeningPorts(snapshot)
+    let sample = ConnectionSampler.sample()
+    let ports = listeningPorts(sample.connections)
     if options.json {
         printJSON(ports)
     } else {
@@ -333,6 +330,9 @@ case "ports":
         for port in ports {
             print(pad(port.proto, 6) + pad(port.address, 26) + pad(String(port.port), 7, right: true)
                 + pad(String(port.pid), 8, right: true) + "  " + port.process)
+        }
+        if sample.hiddenProcesses > 0 {
+            print("\n\(sample.hiddenProcesses) processes of root and other users hidden (macOS restricts them; try sudo)")
         }
     }
 
