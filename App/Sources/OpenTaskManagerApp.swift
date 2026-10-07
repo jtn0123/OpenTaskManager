@@ -97,6 +97,9 @@ struct ContentView: View {
                 }
                 .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
             }
+            ToolbarItem(placement: .navigation) {
+                LiveBadge(isPaused: model.isPaused, interval: model.updateSpeed.rawValue)
+            }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })) {
             Button("OK") { model.dismissError() }
@@ -106,6 +109,29 @@ struct ContentView: View {
         .onAppear {
             WindowOpener.openMainWindow = { openWindow(id: "main") }
         }
+    }
+}
+
+/// Says whether the numbers are moving, and how often they update.
+private struct LiveBadge: View {
+    var isPaused: Bool
+    var interval: Double
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(isPaused ? Color.orange : Color.green)
+                .frame(width: 7, height: 7)
+            Text(isPaused ? "Paused" : "Live · \(Format.timeSpan(interval))")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(isPaused ? Color.orange : Color.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background((isPaused ? Color.orange : Color.green).opacity(0.12), in: Capsule())
+        .help(isPaused ? "Updates are frozen. Press ⇧⌘P to resume." : "Updating every \(Format.timeSpan(interval)). Change it in Settings.")
+        .accessibilityElement(children: .combine)
     }
 }
 

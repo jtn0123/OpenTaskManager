@@ -75,6 +75,7 @@ public enum Format {
     /// A graph's time span for its axis: "30 s", "5 min", "2 min 30 s", "1 h".
     public static func timeSpan(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }
+        if seconds < 10, seconds != seconds.rounded() { return "\(fixed(seconds, 1)) s" }
         let total = Int(seconds.rounded())
         if total < 60 { return "\(total) s" }
         if total < 3600 {

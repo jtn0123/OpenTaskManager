@@ -83,6 +83,8 @@ struct HistoryTests {
     }
 
     @Test func timeSpansReadNaturally() {
+        #expect(Format.timeSpan(0.5) == "0.5 s")
+        #expect(Format.timeSpan(1) == "1 s")
         #expect(Format.timeSpan(30) == "30 s")
         #expect(Format.timeSpan(60) == "1 min")
         #expect(Format.timeSpan(150) == "2 min 30 s")
