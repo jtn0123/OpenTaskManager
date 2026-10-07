@@ -32,6 +32,11 @@ struct LiveSystemTests {
         #expect(rates.allSatisfy { $0.isFinite && $0 >= 0 })
         #expect(snapshot.network.contains { $0.kind == .loopback })
         #expect(snapshot.volumes.contains { $0.isRoot })
+        // The startup volume sits on one of the disks being sampled.
+        let disks = Set(snapshot.disks.map(\.bsdName))
+        if let root = snapshot.volumes.first(where: \.isRoot), let disk = root.physicalDisk {
+            #expect(disks.contains(disk))
+        }
     }
 
     /// CI runs in a VM that may have no SMC, battery or adapter, so these

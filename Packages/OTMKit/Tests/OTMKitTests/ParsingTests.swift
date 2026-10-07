@@ -109,4 +109,12 @@ struct MiscParsingTests {
         #expect(sample(path: "/usr/bin/top").bundlePath == nil)
         #expect(sample(path: "/System/Library/Foo.framework/Contents/MacOS/Foo").bundlePath == nil)
     }
+
+    @Test func readsTheDeviceAVolumeIsMountedFrom() {
+        #expect(VolumeReader.bsdName(mountSource: "/dev/disk3s1s1") == "disk3s1s1")
+        #expect(VolumeReader.bsdName(mountSource: "/dev/disk6s1") == "disk6s1")
+        #expect(VolumeReader.bsdName(mountSource: "map auto_home") == nil)
+        #expect(VolumeReader.bsdName(mountSource: "//guest@nas/share") == nil)
+        #expect(VolumeReader.bsdName(mountSource: "devfs") == nil)
+    }
 }

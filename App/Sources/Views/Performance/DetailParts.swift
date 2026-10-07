@@ -92,6 +92,8 @@ struct ChartCard<Chart: View>: View {
     var trailing = ""
     var tint: Color
     var legend: [LegendItem] = []
+    /// Samples across the chart, for its time axis; nil for charts that aren't over time.
+    var span: Int? = AppModel.graphSpan
     @ViewBuilder var chart: Chart
 
     var body: some View {
@@ -101,7 +103,10 @@ struct ChartCard<Chart: View>: View {
                 Spacer()
                 Text(trailing).font(.callout).foregroundStyle(.secondary).monospacedDigit()
             }
-            chart
+            VStack(spacing: 3) {
+                chart
+                if let span { TimeAxis(samples: span) }
+            }
             if !legend.isEmpty { ChartLegend(items: legend) }
         }
     }

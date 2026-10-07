@@ -15,11 +15,11 @@ struct MemoryDetail: View {
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "Memory", subtitle: "\(Format.bytes(memory.physical)) · \(memory.pressure.rawValue) pressure")
             composition(memory)
-            HStack(alignment: .top, spacing: 16) {
+            FillGrid(minimum: 280) {
                 pressure(memory)
                 swap(memory)
             }
-            HStack(alignment: .top, spacing: 16) {
+            FillGrid(minimum: 280) {
                 paging(memory)
                 compressor(memory)
             }
@@ -139,7 +139,8 @@ struct MemoryDetail: View {
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map { LegendItem(name: $1.name, color: Theme.series($0), value: Format.bytes($1.current), icon: $1.icon) }
             + [LegendItem(name: "Everything else", color: Theme.other, value: Format.bytes(other.last ?? 0))]
-        return ChartCard(title: "Memory by app", trailing: "last 2 minutes", tint: Theme.memory, legend: legend) {
+        return ChartCard(title: "Memory by app", trailing: "", tint: Theme.memory, legend: legend,
+                         span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       axis: Self.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
                 .chartFrame(height: 200, tint: Theme.memory)

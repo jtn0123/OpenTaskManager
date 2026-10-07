@@ -66,7 +66,7 @@ struct GraphPanel: View {
 
     var body: some View {
         let tint = series.last?.color ?? .accentColor
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack {
                 Text(title).font(.caption).foregroundStyle(.secondary)
                 Spacer()
@@ -78,7 +78,26 @@ struct GraphPanel: View {
                 .background(LinearGradient(colors: [tint.opacity(0.12), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom),
                             in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.30)))
+            TimeAxis(samples: capacity)
         }
+    }
+}
+
+/// "5 min ago … now" under a scrolling graph. The span follows the update
+/// speed, so it stays true when sampling is faster or slower.
+struct TimeAxis: View {
+    @Environment(AppModel.self) private var model
+    var samples: Int
+
+    var body: some View {
+        HStack {
+            Text("\(Format.timeSpan(Double(samples) * model.updateSpeed.rawValue)) ago")
+            Spacer()
+            Text("now")
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, 2)
     }
 }
 
@@ -475,7 +494,9 @@ struct Card<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) { content }
             .padding(14)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            // Fills whatever height it's offered, so cards sharing a row
+            // (see `FillGrid`) end level with each other.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(CardSurface(tint: tint, glow: glow))
     }
 }

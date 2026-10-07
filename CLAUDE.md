@@ -43,6 +43,9 @@ Manager OG or any other proprietary task manager.
   per sample and a Core Animation scroll slides them between samples. Changing
   numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
   Don't swap either for SwiftUI `Path` or `Text` animations.
+- Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
+  every row edge to edge and evens out card heights, so a card that isn't
+  available on this Mac (no GPU, no power sensors) never leaves a hole.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s, not `ps %cpu`.
 

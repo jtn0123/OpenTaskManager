@@ -51,6 +51,27 @@ enum IORegistry {
         return parent
     }
 
+    /// The whole physical disk that `bsdName` lives on, following APFS
+    /// volumes, containers and partitions down to the media an
+    /// `IOBlockStorageDriver` publishes: "disk3s1s1" becomes "disk0". Nil for
+    /// disk images and anything else without a block storage driver below it.
+    static func physicalDisk(forBSDName bsdName: String) -> String? {
+        var entry = IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
+        guard entry != 0 else { return nil }
+        defer { IOObjectRelease(entry) }
+        // Registry chains are about a dozen deep; the bound guards against a loop.
+        for _ in 0..<32 {
+            guard let parent = parent(of: entry) else { return nil }
+            if IOObjectConformsTo(entry, "IOMedia") != 0, IOObjectConformsTo(parent, "IOBlockStorageDriver") != 0 {
+                IOObjectRelease(parent)
+                return property("BSD Name", of: entry) as? String
+            }
+            IOObjectRelease(entry)
+            entry = parent
+        }
+        return nil
+    }
+
     static func entry(path: String) -> io_registry_entry_t? {
         let entry = IORegistryEntryFromPath(kIOMainPortDefault, path)
         return entry == 0 ? nil : entry

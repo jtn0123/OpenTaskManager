@@ -81,4 +81,15 @@ struct HistoryTests {
         history.append(9)
         #expect(history.values == [9])
     }
+
+    @Test func timeSpansReadNaturally() {
+        #expect(Format.timeSpan(30) == "30 s")
+        #expect(Format.timeSpan(60) == "1 min")
+        #expect(Format.timeSpan(150) == "2 min 30 s")
+        #expect(Format.timeSpan(300) == "5 min")
+        #expect(Format.timeSpan(1500) == "25 min")
+        #expect(Format.timeSpan(3600) == "1 h")
+        #expect(Format.timeSpan(5400) == "1 h 30 min")
+        #expect(Format.timeSpan(-1) == "—")
+    }
 }

@@ -72,6 +72,19 @@ public enum Format {
         return "\(secs)s"
     }
 
+    /// A graph's time span for its axis: "30 s", "5 min", "2 min 30 s", "1 h".
+    public static func timeSpan(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "—" }
+        let total = Int(seconds.rounded())
+        if total < 60 { return "\(total) s" }
+        if total < 3600 {
+            let secs = total % 60
+            return secs == 0 ? "\(total / 60) min" : "\(total / 60) min \(secs) s"
+        }
+        let minutes = total % 3600 / 60
+        return minutes == 0 ? "\(total / 3600) h" : "\(total / 3600) h \(minutes) min"
+    }
+
     /// CPU time as `h:mm:ss.cc`, the way `ps` and Activity Monitor show it.
     public static func cpuTime(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }

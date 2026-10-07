@@ -139,6 +139,9 @@ public struct VolumeInfo: Sendable, Codable, Identifiable, Hashable {
     public let isInternal: Bool
     public let isRemovable: Bool
     public let isRoot: Bool
+    /// BSD name of the physical disk the volume lives on ("disk0"), matching
+    /// `DiskSample.bsdName`. Nil for disk images and network shares.
+    public let physicalDisk: String?
 
     public var usedBytes: UInt64 { totalBytes > availableBytes ? totalBytes - availableBytes : 0 }
 }

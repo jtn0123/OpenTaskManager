@@ -56,10 +56,11 @@ struct ProcessesView: View {
                 } label: {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
-                .help("Show details for the selected process")
+                .help(showInspector ? "Hide the details pane" : "Show details when a process is selected")
             }
         }
-        .inspector(isPresented: $showInspector) {
+        // The table gets the full width until there's something to inspect.
+        .inspector(isPresented: Binding(get: { showInspector && !selection.isEmpty }, set: { showInspector = $0 })) {
             Group {
                 if let pid = selection.first, selection.count == 1, model.process(pid) != nil {
                     ProcessInspectorView(pid: pid)

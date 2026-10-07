@@ -11,19 +11,19 @@ struct OverviewView: View {
             let groups = model.appGroups
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 16)], spacing: 16) {
+                    FillGrid(minimum: 210) {
                         cpuGauge(snapshot)
                         memoryGauge(snapshot)
                         if let gpu = snapshot.gpus.first { gpuGauge(gpu) }
                         if let watts = snapshot.power.systemWatts { powerGauge(watts, snapshot.power) }
                     }
                     CoreMap(snapshot: snapshot)
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+                    FillGrid(minimum: 280) {
                         diskCard(snapshot)
                         networkCard(snapshot)
                         if let components = snapshot.power.components { powerCard(components) }
                     }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+                    FillGrid(minimum: 280) {
                         TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
                                 metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
                         TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
@@ -48,7 +48,7 @@ struct OverviewView: View {
         return GaugeCard(
             title: "CPU", value: snapshot.cpu.usage * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: snapshot.cpu.usage, color: Theme.cpu,
-            detail: "\(topology.logicalCores) cores · load \(Format.fixed(snapshot.cpu.loadAverage.first ?? 0, 2))",
+            details: ["\(topology.logicalCores) cores", "Load \(Format.fixed(snapshot.cpu.loadAverage.first ?? 0, 2))"],
             history: model.cpuHistory.values, historyMax: 1
         )
     }
@@ -63,7 +63,7 @@ struct OverviewView: View {
         return GaugeCard(
             title: "Memory", value: memory.usedFraction * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: memory.usedFraction, color: color,
-            detail: "\(Format.bytes(memory.used)) of \(Format.bytes(memory.physical)) · \(memory.pressure.rawValue) pressure",
+            details: ["\(Format.bytes(memory.used)) of \(Format.bytes(memory.physical))", "\(memory.pressure.rawValue.capitalized) pressure"],
             history: model.memoryHistory.values, historyMax: 1
         )
     }
@@ -72,7 +72,7 @@ struct OverviewView: View {
         GaugeCard(
             title: "GPU", value: gpu.deviceUtilization * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: gpu.deviceUtilization, color: Theme.gpu,
-            detail: gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name,
+            details: [gpu.name] + (gpu.coreCount.map { ["\($0) cores"] } ?? []),
             history: model.gpuHistory[gpu.id]?.values ?? [], historyMax: 1
         )
     }
@@ -82,11 +82,11 @@ struct OverviewView: View {
         // Scale to the most this Mac has ever drawn, so the ring reads as
         // "how hard is it working" whether it's an Air or a Studio.
         let ceiling = max(model.peakSystemWatts, 20)
-        let source = power.battery.map { "Battery \($0.percent)%" + ($0.isPluggedIn ? " · plugged in" : "") } ?? "AC power"
+        let source = power.battery.map { "Battery \($0.percent)%" + ($0.isPluggedIn ? ", plugged in" : "") } ?? "AC power"
         return GaugeCard(
             title: "Power", value: watts, format: { Format.fixed($0, $0 < 10 ? 1 : 0) }, unit: "W",
             fraction: watts / ceiling, color: Theme.power,
-            detail: "\(source) · thermal \(power.thermalState.rawValue)",
+            details: [source, "Thermal \(power.thermalState.rawValue)"],
             history: history, historyMax: nil
         )
     }
@@ -158,7 +158,8 @@ private struct GaugeCard: View {
     var unit: String
     var fraction: Double
     var color: Color
-    var detail: String
+    /// One fact per line, each truncated rather than wrapped.
+    var details: [String]
     var history: [Double]
     var historyMax: Double?
 
@@ -174,17 +175,17 @@ private struct GaugeCard: View {
                 }
                 .frame(width: 96, height: 96)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.title3.weight(.semibold))
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title).font(.title3.weight(.semibold))
+                        ForEach(details.indices, id: \.self) { index in
+                            Text(details[index]).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
                     Spacer(minLength: 4)
                     GraphView(series: [GraphSeries(values: history, color: color)], maxValue: historyMax,
                               capacity: 60, showsGrid: false, lineWidth: 1.4, glows: true)
-                        .frame(height: 34)
+                        .frame(height: 30)
                 }
             }
             .frame(height: 96)

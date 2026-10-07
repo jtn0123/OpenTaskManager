@@ -100,8 +100,23 @@ enum VolumeReader {
                 availableBytes: available,
                 isInternal: values.volumeIsInternal ?? false,
                 isRemovable: values.volumeIsRemovable ?? false,
-                isRoot: values.volumeIsRootFileSystem ?? false
+                isRoot: values.volumeIsRootFileSystem ?? false,
+                physicalDisk: deviceName(of: url.path).flatMap(IORegistry.physicalDisk(forBSDName:))
             )
         }
+    }
+
+    /// The BSD device a volume is mounted from, e.g. "disk3s1s1".
+    private static func deviceName(of path: String) -> String? {
+        var stats = statfs()
+        guard statfs(path, &stats) == 0 else { return nil }
+        let source = withUnsafeBytes(of: stats.f_mntfromname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        return bsdName(mountSource: source)
+    }
+
+    /// "/dev/disk3s1s1" → "disk3s1s1". Network shares and automounts have no device.
+    static func bsdName(mountSource: String) -> String? {
+        guard mountSource.hasPrefix("/dev/disk") else { return nil }
+        return String(mountSource.dropFirst("/dev/".count))
     }
 }

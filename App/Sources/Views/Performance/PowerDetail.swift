@@ -99,7 +99,8 @@ struct PowerDetail: View {
             tint: Theme.power,
             legend: shares.map {
                 LegendItem(name: $0.name, color: $0.color, value: "\(Self.wattHours($0.joules)) · \(Format.percent($0.joules / total))")
-            }
+            },
+            span: nil
         ) {
             ShareBar(segments: shares.map { ($0.color, $0.joules) })
                 .frame(height: 14)
@@ -218,7 +219,8 @@ struct PowerDetail: View {
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.watts($1.current), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.watts(other.last ?? 0))]
-        return ChartCard(title: "Power by app", trailing: "CPU and GPU work, last 2 minutes", tint: Theme.power, legend: legend) {
+        return ChartCard(title: "Power by app", trailing: "CPU and GPU work", tint: Theme.power, legend: legend,
+                         span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 1, axis: Format.watts, cornerRadius: 8)
                 .chartFrame(height: 180, tint: Theme.power)

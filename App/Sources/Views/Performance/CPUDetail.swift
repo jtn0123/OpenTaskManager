@@ -111,7 +111,8 @@ struct CPUDetail: View {
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
-        return ChartCard(title: "CPU by app", trailing: "share of the whole CPU, last 2 minutes", tint: Theme.cpu, legend: legend) {
+        return ChartCard(title: "CPU by app", trailing: "share of the whole CPU", tint: Theme.cpu, legend: legend,
+                         span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 0.1, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
                 .chartFrame(height: 180, tint: Theme.cpu)

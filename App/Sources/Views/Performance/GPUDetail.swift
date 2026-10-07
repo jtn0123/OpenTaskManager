@@ -15,7 +15,7 @@ struct GPUDetail: View {
             DetailHeader(title: "GPU", subtitle: gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name)
             utilization()
             byApp()
-            HStack(alignment: .top, spacing: 16) {
+            FillGrid(minimum: 280) {
                 if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }
                 if let memory = gpu.memoryInUse { memoryCard(memory) }
             }
@@ -55,7 +55,8 @@ struct GPUDetail: View {
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
-        return ChartCard(title: "GPU time by app", trailing: "last 2 minutes", tint: Theme.gpu, legend: legend) {
+        return ChartCard(title: "GPU time by app", trailing: "share of GPU time", tint: Theme.gpu, legend: legend,
+                         span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
                 .chartFrame(height: 200, tint: Theme.gpu)

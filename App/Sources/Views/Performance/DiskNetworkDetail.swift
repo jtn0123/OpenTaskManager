@@ -31,25 +31,33 @@ struct DiskDetail: View {
                 FactRow(label: "Written since boot", value: Format.bytes(disk.totalWritten))
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Volumes").font(.headline)
-                ForEach(snapshot.volumes) { volume in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack {
-                            Text(volume.name)
-                            Spacer()
-                            Text("\(Format.bytes(volume.availableBytes)) free of \(Format.bytes(volume.totalBytes))")
-                                .foregroundStyle(.secondary).monospacedDigit()
-                        }
-                        .font(.callout)
-                        let used = Double(volume.usedBytes) / Double(max(volume.totalBytes, 1))
-                        ProgressView(value: used).tint(Theme.pressure(used))
-                    }
-                }
+            let volumes = snapshot.volumes.filter { $0.physicalDisk == disk.bsdName }
+            if !volumes.isEmpty {
+                volumeList(volumes)
             }
 
             TopAppsCard(title: "Disk I/O", symbol: "internaldrive", color: Theme.disk, groups: model.appGroups,
                         metric: \.diskRate, format: { Format.bytesPerSecond($0.diskRate) })
+        }
+    }
+
+    /// The volumes stored on this disk.
+    private func volumeList(_ volumes: [VolumeInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Volumes").font(.headline)
+            ForEach(volumes) { volume in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(volume.name)
+                        Spacer()
+                        Text("\(Format.bytes(volume.availableBytes)) free of \(Format.bytes(volume.totalBytes))")
+                            .foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    .font(.callout)
+                    let used = Double(volume.usedBytes) / Double(max(volume.totalBytes, 1))
+                    ProgressView(value: used).tint(Theme.pressure(used))
+                }
+            }
         }
     }
 }
