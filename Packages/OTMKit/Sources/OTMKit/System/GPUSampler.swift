@@ -64,7 +64,7 @@ final class GPUSampler {
         return Int32(digits)
     }
 
-    private static func parentModel(of entry: io_registry_entry_t) -> String? {
+    static func parentModel(of entry: io_registry_entry_t) -> String? {
         guard let parent = IORegistry.parent(of: entry) else { return nil }
         defer { IOObjectRelease(parent) }
         return IORegistry.properties(of: parent).string("model")

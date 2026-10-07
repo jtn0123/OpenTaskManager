@@ -51,6 +51,10 @@ USAGE:
                                  home volume), on a test file it always deletes:
                                  1024 MB unless --size, never over a tenth of
                                  the free space
+  otm cpubench [layout] [--json]
+                                 Integer, floating-point and memory speed on one
+                                 worker and on every core, about 20 s; layout
+                                 shows the chip's core types, clusters and caches
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -845,6 +849,9 @@ case "netquality":
 
 case "diskspeed":
     diskSpeedCommand(options)
+
+case "cpubench":
+    cpuBenchCommand(options)
 
 case "kill":
     guard let pid = options.positional.first.flatMap(Int32.init) else { fail("kill needs a PID") }

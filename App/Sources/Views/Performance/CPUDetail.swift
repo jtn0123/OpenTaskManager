@@ -8,21 +8,56 @@ struct CPUDetail: View {
     /// The auto-scaled graphs' bounds, held between samples.
     @State private var bounds = AutoScaleBounds()
     var snapshot: SystemSnapshot
+    /// Opens another resource's detail, for the chip layout's links.
+    var select: (Resource) -> Void
 
     var body: some View {
         let topology = model.topology
-        VStack(alignment: .leading, spacing: 16) {
-            DetailHeader(title: "CPU", subtitle: topology.brand)
-            stats(topology)
-            graph(topology)
-            byApp()
-            if let clusters = snapshot.power.components?.clusters, clusters.contains(where: { $0.activeFraction != nil }) {
-                clusterClocks(clusters)
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 16) {
+                DetailHeader(title: "CPU", subtitle: topology.brand)
+                stats(topology)
+                graph(topology)
+                    .id(Self.graphID)
+                byApp()
+                if let clusters = snapshot.power.components?.clusters, clusters.contains(where: { $0.activeFraction != nil }) {
+                    clusterClocks(clusters)
+                }
+                let layout = ChipLayoutStore.shared.layout(topology: topology)
+                ChipLayoutCard(layout: layout, activity: activity(layout), showGraphs: { showGraphs(layout, proxy: proxy) },
+                               select: select)
+                    .equatable()
+                TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: model.appGroups,
+                            metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+                CPUBenchmarkCard()
+                    .equatable()
             }
-            facts(topology)
-            TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: model.appGroups,
-                        metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
         }
+        .task { await ChipLayoutStore.shared.loadMemoryType() }
+    }
+
+    private static let graphID = "cpuGraph"
+
+    /// The chip layout's live readings, all from this sample.
+    private func activity(_ layout: ChipLayout) -> ChipActivity {
+        let single = layout.coreTypes.count == 1
+        var load: [Int: Double] = [:]
+        for type in layout.coreTypes {
+            load[type.level] = single ? snapshot.cpu.usage : tierUsage(type.level)
+        }
+        let components = snapshot.power.components
+        return ChipActivity(
+            load: load, clusters: components?.clusters ?? [],
+            gpuUtilization: snapshot.gpus.map(\.deviceUtilization), gpuIDs: snapshot.gpus.map(\.id),
+            neuralEngineWatts: components?.watts(.ane), memoryUsed: snapshot.memory.used, memoryTotal: snapshot.memory.physical,
+            hasPowerDetail: snapshot.power.systemWatts != nil || snapshot.power.battery != nil
+        )
+    }
+
+    /// The CPU graph by core type, or each core's with one kind, scrolled into view.
+    private func showGraphs(_ layout: ChipLayout, proxy: ScrollViewProxy) {
+        mode = layout.coreTypes.count > 1 ? "tiers" : "cores"
+        proxy.scrollTo(Self.graphID, anchor: .top)
     }
 
     private func stats(_ topology: CPUTopology) -> some View {
@@ -81,23 +116,6 @@ struct CPUDetail: View {
     /// The core graphs have no axis, so their caption gives the shared scale.
     private func coreScaleNote(_ top: Double) -> String {
         scale == .auto ? " · 0–\(CPUGraphScale.axisLabel(top)) scale, auto" : ""
-    }
-
-    private func facts(_ topology: CPUTopology) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
-            FactRow(label: "Architecture", value: topology.architecture)
-            FactRow(label: "Cores", value: "\(topology.physicalCores) physical, \(topology.logicalCores) logical")
-            ForEach(topology.tiers, id: \.level) { tier in
-                let cache = tier.l2CacheBytes.map { " · \(Format.bytes(UInt64($0))) L2" } ?? ""
-                FactRow(label: "\(tier.name) cores", value: "\(tier.physicalCPUs)\(cache)")
-            }
-            if let l1 = topology.l1DataCacheBytes {
-                FactRow(label: "L1 data cache", value: Format.bytes(UInt64(l1)) + " per core")
-            }
-            if let l3 = topology.l3CacheBytes {
-                FactRow(label: "L3 cache", value: Format.bytes(UInt64(l3)))
-            }
-        }
     }
 
     /// Each cluster's average clock while it ran. Clusters of one tier share a
