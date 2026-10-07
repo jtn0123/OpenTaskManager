@@ -121,6 +121,25 @@ public struct LaunchItem: Sendable, Codable, Hashable, Identifiable {
         return job == nil ? .notLoaded : .loaded
     }
 
+    /// What the state means for a process, which "Loaded" alone doesn't say:
+    /// its PID while it runs, "Not running" while launchd holds it until its
+    /// trigger, and for a disabled item whether launchd still holds it.
+    public var stateDetail: String? {
+        switch state {
+        // Interpolated as a string, so the PID isn't grouped like a quantity.
+        case let .running(pid): "PID \(pid)"
+        case .loaded: "Not running"
+        case .disabled: job == nil ? "Not loaded" : "Not running"
+        case .notLoaded: nil
+        }
+    }
+
+    /// The state in plain words for the details: "Running · PID 501",
+    /// "Loaded · Not running", "Not loaded".
+    public var statusSummary: String {
+        [state.title, stateDetail].compactMap(\.self).joined(separator: " · ")
+    }
+
     /// Starts by itself whenever it's enabled: at login for agents, at boot for daemons.
     public var startsAutomatically: Bool {
         !isMissingLabel && !isUnreadable && !isDisabled && triggers.startsWhenLoaded

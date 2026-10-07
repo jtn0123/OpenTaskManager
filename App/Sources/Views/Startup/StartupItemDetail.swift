@@ -16,39 +16,47 @@ struct StartupItemDetail: View {
     /// launchd's view of the job, read when the item is shown and after a
     /// rescan, never per tick. Nil while reading, or when it isn't loaded.
     @State private var service: LaunchServiceInfo?
+    /// Folded at first, and left as it is while the selection moves.
+    @State private var showsArguments = false
 
-    /// What launchd is doing with the job and what can be done about it sit
-    /// at the top, the plist's settings scroll below, and the lasting
-    /// changes (Disable) and the file itself stay in a footer.
+    /// The item, launchd's view of it in plain words and the action that
+    /// fits sit at the top; the lasting change (Disable) and the file itself
+    /// stay in a footer; and everything else scrolls between them, in the
+    /// pane's only scroll view.
     ///
     /// The pinned top is tall, and a pane's minimum height becomes the
-    /// window's: laid out alone it pushed the status bar out of a 760-point
-    /// window. So in a pane too short for it plus a few lines of settings,
-    /// the top scrolls with the settings, and only the footer stays put.
+    /// window's: laid out alone it pushed the status bar out of a short
+    /// window. So in a pane too short for it plus a few lines of details,
+    /// the top scrolls with the details, and only the footer stays put.
     var body: some View {
         let restriction = LaunchControl.restriction(for: item)
         ViewThatFits(in: .vertical) {
-            VStack(alignment: .leading, spacing: 12) {
-                top(restriction: restriction)
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    header
+                    state(restriction: restriction)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
-                ScrollView { settings }
-                    .frame(minHeight: Self.settingsMinimum, idealHeight: Self.settingsMinimum, maxHeight: .infinity)
+                ScrollView { details.padding(12) }
+                    .frame(minHeight: Self.detailsMinimum, idealHeight: Self.detailsMinimum, maxHeight: .infinity)
                 Divider()
                 footer(restriction: restriction)
             }
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(spacing: 0) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        top(restriction: restriction)
-                        Divider()
-                        settings
+                    VStack(alignment: .leading, spacing: 14) {
+                        header
+                        state(restriction: restriction)
+                        details
                     }
+                    .padding(12)
                 }
                 Divider()
                 footer(restriction: restriction)
             }
         }
-        .padding(12)
         .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID)) {
             let (label, scope) = (item.label, item.scope)
             service = await Task.detached(priority: .userInitiated) { Launchctl.service(label, scope: scope) }.value
@@ -61,50 +69,10 @@ struct StartupItemDetail: View {
         var refreshID: Date?
     }
 
-    /// Room the settings keep under the pinned top before it scrolls too.
-    private static let settingsMinimum: CGFloat = 96
+    /// Room the details keep under the pinned top before it scrolls too.
+    private static let detailsMinimum: CGFloat = 96
 
     // MARK: Sections
-
-    /// Who the item is, launchd's view of it, and the controls that change that.
-    @ViewBuilder private func top(restriction: String?) -> some View {
-        header
-        status
-        if restriction == nil, let service {
-            serviceControls(service)
-        }
-    }
-
-    /// The property list's settings.
-    private var settings: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            metadata
-            if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
-            program
-            launches
-            labelled("Property list", item.plistPath)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The lasting change, Disable or Enable, with what it does, and the file itself.
-    @ViewBuilder private func footer(restriction: String?) -> some View {
-        if restriction == nil {
-            HStack(alignment: .firstTextBaseline) {
-                Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
-                Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
-            }
-        } else if item.publisher == .thirdParty, let restriction {
-            Text(restriction).font(.explanation).foregroundStyle(.secondaryText)
-        }
-        HStack {
-            Button("Reveal in Finder") { StartupActions.reveal(item) }
-            Button("Show plist") { StartupActions.openPlist(item) }
-            Spacer()
-        }
-    }
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -122,25 +90,80 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// launchd's view of the job now, right above the controls that change it.
-    private var status: some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-            GridRow {
-                Text("Status").foregroundStyle(.secondaryText)
-                LaunchStateLabel(state: item.state)
+    /// launchd's view in plain words ("Loaded · Not running"), and right
+    /// below it the action that fits: Start Now while nothing runs, Restart
+    /// and Stop while it does.
+    private func state(restriction: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Circle().fill(item.state.color).frame(width: 8, height: 8)
+                Text(item.statusSummary).font(.callout.weight(.medium)).lineLimit(1)
             }
-            .font(.callout)
-            if let disabledBy {
-                FactRow(label: "Disabled by", value: disabledBy)
+            .help(stateHelp)
+            if restriction == nil, item.job != nil {
+                controls
             }
-            if let service { serviceRows(service) }
-            FactRow(label: "Last exit", value: lastExit)
         }
     }
 
-    /// What the property list says about the item, which doesn't change as it runs.
-    private var metadata: some View {
+    /// launchd's figures for the job, then what the property list says. The
+    /// arguments fold away and paths keep to one line, so nothing here needs
+    /// a scroll view of its own.
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            facts
+            if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
+            launches
+            program
+            labelled("Property list", item.plistPath)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The lasting change, Disable or Enable, with what it does, and the file itself.
+    private func footer(restriction: String?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if restriction == nil {
+                HStack(alignment: .firstTextBaseline) {
+                    Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
+                    Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
+                        .font(.explanation)
+                        .foregroundStyle(.secondaryText)
+                }
+            } else if item.publisher == .thirdParty, let restriction {
+                Text(restriction).font(.explanation).foregroundStyle(.secondaryText)
+            }
+            HStack {
+                Button("Reveal in Finder") { StartupActions.reveal(item) }
+                Button("Show plist") { StartupActions.openPlist(item) }
+                Spacer()
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// What launchd has done with the job, then what the property list says
+    /// about it, which doesn't change as it runs.
+    private var facts: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            if let disabledBy {
+                FactRow(label: "Disabled by", value: disabledBy)
+            }
+            if let pid = item.pid {
+                // The state above already shows the PID.
+                GridRow {
+                    Text("Process").foregroundStyle(.secondaryText)
+                    Button("Show in Processes") { showProcess(pid) }
+                        .buttonStyle(.link)
+                        .help("Select PID \(String(pid)) on the Processes page")
+                }
+                .font(.callout)
+            }
+            if let service { serviceRows(service) }
+            FactRow(label: "Last exit", value: lastExit)
+            // A gap rather than a rule, which would read as another region.
+            Color.clear.frame(height: 2).gridCellUnsizedAxes(.horizontal)
             FactRow(label: "Kind", value: item.scope.title)
             FactRow(label: "Publisher", value: item.publisher.title)
             if let modified = item.modified {
@@ -157,10 +180,12 @@ struct StartupItemDetail: View {
         }
         let arguments = item.arguments.first == item.program ? Array(item.arguments.dropFirst()) : item.arguments
         if !arguments.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Arguments").font(.subheadline).foregroundStyle(.secondaryText)
-                ForEach(Array(arguments.enumerated()), id: \.offset) { _, argument in
-                    CopyableText(value: argument).font(.subheadline)
+            DetailDisclosure(arguments.count == 1 ? "Argument" : "Arguments (\(arguments.count))",
+                             preview: arguments.joined(separator: " "), isExpanded: $showsArguments) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(arguments.enumerated()), id: \.offset) { _, argument in
+                        CopyableText(value: argument).font(.subheadline)
+                    }
                 }
             }
         }
@@ -185,20 +210,14 @@ struct StartupItemDetail: View {
     }
 
     @ViewBuilder private func serviceRows(_ service: LaunchServiceInfo) -> some View {
-        if let pid = service.pid {
-            // The status row above already shows the PID.
+        if let runs = service.runs {
             GridRow {
-                Text("Process").foregroundStyle(.secondaryText)
-                Button("Show in Processes") { showProcess(pid) }
-                    .buttonStyle(.link)
-                    .help("Select PID \(String(pid)) on the Processes page")
+                Text("Started").foregroundStyle(.secondaryText).help(runsHelp)
+                Text(LaunchServiceInfo.describe(runs: runs, scope: item.scope)).help(runsHelp)
             }
             .font(.callout)
         }
-        if let runs = service.runs {
-            FactRow(label: "Runs", value: "\(runs) since \(item.scope == .daemon ? "startup" : "login")")
-        }
-        if service.isRunning, let reason = service.startReason {
+        if item.pid != nil, let reason = service.startReason {
             GridRow {
                 Text("Started by").foregroundStyle(.secondaryText)
                 Text(LaunchServiceInfo.describe(startReason: reason))
@@ -217,13 +236,13 @@ struct StartupItemDetail: View {
 
     /// Start, restart and stop, for a loaded job this app may control, each
     /// with what it does beside it.
-    private func serviceControls(_ service: LaunchServiceInfo) -> some View {
+    private var controls: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 6) {
-            if service.isRunning {
+            if item.pid != nil {
                 GridRow {
                     Button("Restart") { control(.restart) }
                         .help("Stop the job and start it again")
-                    consequence("Quits it and starts it again straight away.")
+                    consequence("Quits it and starts it again.")
                 }
                 GridRow {
                     Button("Stop") { control(.stop) }
@@ -248,6 +267,21 @@ struct StartupItemDetail: View {
     }
 
     // MARK: Text
+
+    private var stateHelp: String {
+        switch item.state {
+        case let .running(pid): "launchd started it, and its process (PID \(pid)) is running now."
+        case .loaded: "launchd has loaded it and starts it whenever something launches it (see Launches). Nothing is running now."
+        case .disabled: "Disabled: launchd won't start it until it's enabled again."
+        case .notLoaded: "launchd hasn't loaded this property list, so nothing starts it."
+        }
+    }
+
+    private var runsHelp: String {
+        let since = item.scope == .daemon ? "the Mac started up" : "you logged in"
+        return "How many times launchd has started the job since \(since). Between runs a loaded job waits "
+            + "for whatever launches it, so it isn't always running."
+    }
 
     private var afterStop: String {
         switch item.triggers.keepAlive {
@@ -289,10 +323,12 @@ struct StartupItemDetail: View {
         return nil
     }
 
+    /// A path keeps to one line, cut in the middle, with the whole of it in
+    /// a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String, isCode: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.subheadline).foregroundStyle(.secondaryText)
-            CopyableText(value: value, monospaced: isCode).font(.subheadline)
+            CopyableText(value: value, monospaced: isCode, truncatesMiddle: isCode).font(.subheadline)
         }
     }
 }
