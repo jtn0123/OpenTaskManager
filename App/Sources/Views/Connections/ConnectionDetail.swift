@@ -12,9 +12,9 @@ struct ConnectionDetail: View {
         let connection = row.connection
         Card {
             HStack(spacing: 8) {
-                Text("Connection").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text("Connection").font(.metadata.weight(.medium)).foregroundStyle(.secondaryText)
                 Text(connection.stateLabel)
-                    .font(.caption.weight(.semibold))
+                    .font(.metadata.weight(.semibold))
                     .foregroundStyle(connection.kind.tint)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
@@ -31,7 +31,7 @@ struct ConnectionDetail: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.processName).font(.headline).lineLimit(1)
                     Text(verbatim: "PID \(connection.pid) · descriptor \(connection.id.fd)")
-                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                        .font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
                 }
             }
 

@@ -124,4 +124,10 @@ locked or the window is on another Space.
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
   the status bar out of a 730-point window. Plain wrapping text is enough.
+- Secondary text (labels, captions, units, footnotes) takes
+  `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt), and table
+  and list rows `.font(.tableText)` (12 pt), all from `Graphs.swift`. The
+  system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
+  A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`
+  (`TableFit.swift`), so no empty striped rows follow the last one.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

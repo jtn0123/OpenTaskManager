@@ -108,7 +108,7 @@ private struct HeroCard: View {
                         Text(hardware.displayName).font(.largeTitle.weight(.semibold))
                         Text(([info.software.computerName, hardware.modelIdentifier].compactMap { $0 }).joined(separator: " · "))
                             .font(.title3)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                     }
                     .textSelection(.enabled)
                     ViewThatFits(in: .horizontal) {
@@ -129,30 +129,46 @@ private struct HeroCard: View {
         Chip(symbol: "macwindow", text: info.software.macOSDescription, color: Theme.gpu)
     }
 
+    /// On one line while it fits; otherwise a line each, rather than
+    /// labels cut down to "Serial num…".
     private func identifiers(_ hardware: MacHardware) -> some View {
-        HStack(spacing: 14) {
-            ForEach(SystemReport.identifiers(hardware), id: \.label) { row in
-                HStack(spacing: 5) {
-                    Text(row.label).foregroundStyle(.secondary)
-                    if showsIdentifiers {
-                        CopyableText(value: row.value)
-                    } else {
-                        Text(Self.mask).foregroundStyle(.tertiary).accessibilityLabel("Hidden")
-                    }
-                }
-                .lineLimit(1)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                identifierRows(hardware)
+                showButton
             }
-            Button {
-                showsIdentifiers.toggle()
-            } label: {
-                Label(showsIdentifiers ? "Hide" : "Show", systemImage: showsIdentifiers ? "eye.slash" : "eye")
+            VStack(alignment: .leading, spacing: 4) {
+                identifierRows(hardware)
+                showButton
             }
-            .buttonStyle(.borderless)
-            .help(showsIdentifiers
-                ? "Hide the serial number, hardware UUID and MAC addresses"
-                : "Show the serial number, hardware UUID and MAC addresses, and include them when copying")
         }
         .font(.callout)
+    }
+
+    private func identifierRows(_ hardware: MacHardware) -> some View {
+        ForEach(SystemReport.identifiers(hardware), id: \.label) { row in
+            HStack(spacing: 5) {
+                Text(row.label).foregroundStyle(.secondaryText)
+                if showsIdentifiers {
+                    CopyableText(value: row.value)
+                } else {
+                    Text(Self.mask).foregroundStyle(.tertiaryText).accessibilityLabel("Hidden")
+                }
+            }
+            .lineLimit(1)
+        }
+    }
+
+    private var showButton: some View {
+        Button {
+            showsIdentifiers.toggle()
+        } label: {
+            Label(showsIdentifiers ? "Hide" : "Show", systemImage: showsIdentifiers ? "eye.slash" : "eye")
+        }
+        .buttonStyle(.borderless)
+        .help(showsIdentifiers
+            ? "Hide the serial number, hardware UUID and MAC addresses"
+            : "Show the serial number, hardware UUID and MAC addresses, and include them when copying")
     }
 }
 
@@ -196,7 +212,7 @@ private struct InfoCard: View {
                     } else {
                         GridRow {
                             Text(row.label)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.secondaryText)
                                 .fixedSize()
                                 .padding(.leading, section.rows[..<index].contains(where: \.isHeading) ? 10 : 0)
                             value(row)
@@ -212,7 +228,7 @@ private struct InfoCard: View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(row.label).fontWeight(.semibold).lineLimit(1)
             if !row.value.isEmpty {
-                Text(row.value).foregroundStyle(.secondary).lineLimit(1)
+                Text(row.value).foregroundStyle(.secondaryText).lineLimit(1)
             }
         }
         .textSelection(.enabled)
@@ -226,7 +242,7 @@ private struct InfoCard: View {
                 StatusIcon(status: status)
             }
             if row.isSensitive && !showsIdentifiers {
-                Text(Self.mask).foregroundStyle(.tertiary).accessibilityLabel("Hidden")
+                Text(Self.mask).foregroundStyle(.tertiaryText).accessibilityLabel("Hidden")
                     .help("Hidden. Use Show at the top of the page to reveal it.")
             } else if row.isCode {
                 CopyableText(value: row.value)
@@ -242,22 +258,31 @@ private struct InfoCard: View {
 }
 
 private struct StatusIcon: View {
+    private static let good = Theme.data(.systemGreen)
+    private static let warning = Theme.data(.systemOrange)
+
     var status: InfoRow.Status
 
     var body: some View {
         switch status {
         case .good:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Self.good)
         case .warning:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Self.warning)
         case .unknown:
-            Image(systemName: "questionmark.circle").foregroundStyle(.secondary)
+            Image(systemName: "questionmark.circle").foregroundStyle(.secondaryText)
         }
     }
 }
 
 /// Each card's colour and symbol.
 private struct SystemStyle {
+    // Data colours like the rest, so headings deepen in light mode.
+    private static let displays = Theme.data(0.36, 0.62, 0.98)
+    private static let battery = Theme.data(0.30, 0.80, 0.40)
+    private static let software = Theme.data(0.52, 0.50, 0.96)
+    private static let security = Theme.data(0.24, 0.74, 0.56)
+
     let tint: Color
     let symbol: String
 
@@ -266,12 +291,12 @@ private struct SystemStyle {
         case .processor: (Theme.cpu, "cpu")
         case .memory: (Theme.memory, "memorychip")
         case .graphics: (Theme.gpu, "cube.transparent")
-        case .displays: (Color(red: 0.36, green: 0.62, blue: 0.98), "display")
+        case .displays: (Self.displays, "display")
         case .storage: (Theme.disk, "internaldrive")
         case .network: (Theme.network, "network")
-        case .battery: (Color(red: 0.30, green: 0.80, blue: 0.40), "battery.75percent")
-        case .software: (Color(red: 0.52, green: 0.50, blue: 0.96), "gearshape")
-        case .security: (Color(red: 0.24, green: 0.74, blue: 0.56), "lock.shield")
+        case .battery: (Self.battery, "battery.75percent")
+        case .software: (Self.software, "gearshape")
+        case .security: (Self.security, "lock.shield")
         }
         tint = style.tint
         symbol = style.symbol

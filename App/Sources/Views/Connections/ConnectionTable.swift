@@ -26,14 +26,14 @@ struct ConnectionTable: View {
             .width(min: 90, ideal: 120)
 
             TableColumn("PID", value: \.pid) { row in
-                Text(verbatim: String(row.pid)).monospacedDigit().foregroundStyle(.secondary)
+                Text(verbatim: String(row.pid)).monospacedDigit().foregroundStyle(.secondaryText)
             }
             .width(min: 38, ideal: 46, max: 80)
 
             TableColumn("Protocol", value: \.protocolName) { row in
                 HStack(spacing: 4) {
                     Text(row.connection.transport.rawValue)
-                    Text(row.connection.family.shortLabel).foregroundStyle(.secondary)
+                    Text(row.connection.family.shortLabel).foregroundStyle(.secondaryText)
                 }
                 .lineLimit(1)
             }
@@ -48,7 +48,7 @@ struct ConnectionTable: View {
                 if let remote = row.connection.remote {
                     Text(remote.formatted).monospacedDigit().lineLimit(1).truncationMode(.middle)
                 } else {
-                    Text("—").foregroundStyle(.tertiary)
+                    Text("—").foregroundStyle(.tertiaryText)
                 }
             }
             .width(min: 80, ideal: 130)

@@ -123,7 +123,7 @@ private struct StorageStartView: View {
                     .accessibilityHidden(true)
                 Text("What's using your disk space?").font(.title2.weight(.semibold))
                 Text("Pick a place to scan. Nothing is read until you do, and nothing is ever deleted.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .multilineTextAlignment(.center)
             }
             FillGrid(minimum: 220, spacing: 14) {
@@ -141,8 +141,8 @@ private struct StorageStartView: View {
             .frame(maxWidth: 820)
             Text("Folders macOS keeps private (Mail, Messages, other apps' data) are counted as unreadable "
                 + "unless OpenTaskManager has Full Disk Access.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
         }
@@ -180,17 +180,17 @@ private struct ScopeCard: View {
                     Image(systemName: symbol).font(.title2).foregroundStyle(Theme.disk).frame(width: 30)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title).font(.headline)
-                        Text(subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Text(subtitle).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
                     }
                 }
-                Text(detail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(detail).font(.metadata).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
                 if let volume, volume.totalBytes > 0 {
                     let used = Double(volume.usedBytes) / Double(volume.totalBytes)
                     VStack(alignment: .leading, spacing: 4) {
                         ShareBar(segments: [(Theme.disk, used), (Color.secondary.opacity(0.25), 1 - used)]).frame(height: 6)
                         Text("\(Format.bytes(volume.usedBytes)) used of \(Format.bytes(volume.totalBytes))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.metadata)
+                            .foregroundStyle(.secondaryText)
                             .monospacedDigit()
                     }
                 }
@@ -223,7 +223,7 @@ private struct StorageProgressView: View {
                     Image(systemName: scope.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(Theme.disk).frame(width: 40)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Scanning \(scope.title)…").font(.title3.weight(.semibold))
-                        Text(scope.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        Text(scope.subtitle).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer(minLength: 0)
                     Button("Stop", role: .cancel) { store.stop() }
@@ -244,8 +244,8 @@ private struct StorageProgressView: View {
                     }
                 }
                 Text(progress.map { ($0.currentFolder as NSString).abbreviatingWithTildeInPath } ?? "Starting…")
-                    .font(.subheadline.monospaced())
-                    .foregroundStyle(.secondary)
+                    .font(.metadata.monospaced())
+                    .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,8 +253,8 @@ private struct StorageProgressView: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: 560)
             Text("You can switch pages; the scan carries on and its results stay until you quit.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
                 .padding(.top, 10)
         }
         .padding(24)
@@ -263,7 +263,7 @@ private struct StorageProgressView: View {
 
     private func figure(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Text(label).font(.metadata).foregroundStyle(.secondaryText)
             Text(value).font(.title3.weight(.medium)).monospacedDigit()
         }
     }
@@ -331,11 +331,11 @@ private struct SummaryCard: View {
         Card(tint: Theme.disk, glow: 0.15) {
             VStack(alignment: .leading, spacing: 1) {
                 Label(result.scope.title, systemImage: result.scope.symbol).font(.headline).foregroundStyle(Theme.disk)
-                Text(result.scope.subtitle).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(result.scope.subtitle).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(Format.bytes(usage.root.allocatedSize)).font(.system(size: 28, weight: .semibold)).monospacedDigit()
-                Text("on disk").foregroundStyle(.secondary)
+                Text("on disk").foregroundStyle(.secondaryText)
             }
             .help("Space on disk: whole blocks, with each hard-linked file counted once")
             VStack(alignment: .leading, spacing: 2) {
@@ -344,8 +344,8 @@ private struct SummaryCard: View {
                 Text("\(usage.fileCount.formatted()) files in \(usage.folderCount.formatted()) folders")
                 Text("Scanned at \(usage.finishedAt.formatted(date: .omitted, time: .shortened)), took \(Self.duration(usage.duration))")
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .font(.metadata)
+            .foregroundStyle(.secondaryText)
             .monospacedDigit()
         }
     }
@@ -369,7 +369,7 @@ private struct CategoriesCard: View {
         Card(tint: shown.first.map { Theme.category($0.category) } ?? Theme.disk) {
             Text("By Category").font(.headline)
             if shown.isEmpty {
-                Text("Nothing here takes up space.").font(.subheadline).foregroundStyle(.secondary)
+                Text("Nothing here takes up space.").font(.metadata).foregroundStyle(.secondaryText)
             }
             ShareBar(segments: shown.map { (Theme.category($0.category), Double($0.allocatedSize)) })
                 .frame(height: 12)
@@ -382,11 +382,11 @@ private struct CategoriesCard: View {
                         Spacer(minLength: 4)
                         Text(Format.bytes(entry.allocatedSize)).monospacedDigit()
                         Text(Format.percent(share, digits: share < 0.1 ? 1 : 0))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                             .monospacedDigit()
                             .frame(minWidth: 36, alignment: .trailing)
                     }
-                    .font(.subheadline)
+                    .font(.metadata)
                     .fixedSize(horizontal: false, vertical: true)
                     .help("\(entry.category.title): \(Format.bytes(entry.allocatedSize)) on disk, "
                         + "\(Format.percent(share, digits: 1)) of the total")
@@ -451,8 +451,8 @@ private struct TreemapCard: View {
                 TreemapCaption(usage: usage, folder: folder, hover: hover)
                 Spacer(minLength: 8)
                 Text("\(Format.bytes(folder.allocatedSize)) · \(folder.itemCount.formatted()) items")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(.metadata)
+                    .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .fixedSize()
             }
@@ -508,7 +508,7 @@ private struct StorageFooter: View {
                         ? "1 folder couldn't be read."
                         : "\(usage.unreadableFolders.formatted()) folders couldn't be read.")
                         .fontWeight(.medium)
-                    Text("Give OpenTaskManager Full Disk Access to count them.").foregroundStyle(.secondary)
+                    Text("Give OpenTaskManager Full Disk Access to count them.").foregroundStyle(.secondaryText)
                     Button("Open Full Disk Access Settings") { store.openFullDiskAccessSettings() }
                         .buttonStyle(.link)
                 }
@@ -516,10 +516,10 @@ private struct StorageFooter: View {
                 .help(usage.unreadableExamples.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
             }
             Text(Self.explanation)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.subheadline)
+        .font(.metadata)
     }
 }

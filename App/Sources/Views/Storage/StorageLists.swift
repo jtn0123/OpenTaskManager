@@ -42,19 +42,38 @@ private struct FolderContentsList: View {
         let children = usage.children(of: folder)
         if children.isEmpty {
             Text(folder.isUnreadable ? "Couldn't read this folder." : folder.contentsOmitted ? "Contents weren't kept." : "Empty folder.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(spacing: 1) {
-                    ForEach(children) { item in
-                        ContentRow(store: store, usage: usage, item: item, total: folder.allocatedSize, hover: hover, open: open)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(children) { item in
+                            ContentRow(store: store, usage: usage, item: item, total: folder.allocatedSize, hover: hover, open: open)
+                        }
                     }
                 }
+                .background(ListFollower(hover: hover, proxy: proxy))
             }
             .id(folder.id)
         }
+    }
+}
+
+/// Scrolls the row for the tile under the pointer into view, so its
+/// highlight shows. Its own view, so only it reads the hover here.
+private struct ListFollower: View {
+    let hover: StorageHover
+    let proxy: ScrollViewProxy
+
+    var body: some View {
+        Color.clear
+            .onChange(of: hover.item) {
+                // Hovers in the list itself are already in view.
+                guard hover.source == .treemap, let id = hover.item else { return }
+                proxy.scrollTo(id)
+            }
     }
 }
 
@@ -80,17 +99,17 @@ private struct ContentRow: View {
                 .font(.callout)
                 HStack(spacing: 6) {
                     ShareLine(share: share, color: StorageStyle.color(item)).frame(height: 4)
-                    Text(detail(share: share)).font(.subheadline).foregroundStyle(.secondary).monospacedDigit().fixedSize()
+                    Text(detail(share: share)).font(.metadata).foregroundStyle(.secondaryText).monospacedDigit().fixedSize()
                 }
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .opacity(item.isFolder ? 1 : 0)
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
-        .background(RowHighlight(id: item.id, folder: item.parent ?? 0, hover: hover))
+        .background(RowHighlight(id: item.id, folder: item.parent ?? 0, color: StorageStyle.color(item), hover: hover))
         .contentShape(Rectangle())
         .onHover { inside in
             if inside { hover.enter(item.id) } else { hover.leave(item.id) }
@@ -117,19 +136,26 @@ private struct ContentRow: View {
 }
 
 /// The row background: lit while the pointer is over the item here or in
-/// the treemap. Its own view, so a hover change redraws only these.
+/// the treemap, in the item's tile colour so the two read as one. Its own
+/// view, so a hover change redraws only these.
 private struct RowHighlight: View {
     let id: Int
     let folder: Int
+    let color: Color
     let hover: StorageHover
 
     var body: some View {
         let isHovered = hover.item == id
         let isMarked = hover.marked.map { $0.folder == folder && $0.item == id } ?? false
-        RoundedRectangle(cornerRadius: 6)
-            .fill(Color.primary.opacity(isHovered ? 0.09 : isMarked ? 0.06 : 0))
+        let shape = RoundedRectangle(cornerRadius: 6)
+        shape
+            .fill(isHovered ? color.fillShade.opacity(0.22) : Color.primary.opacity(isMarked ? 0.06 : 0))
             .overlay {
-                if isMarked { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1) }
+                if isHovered {
+                    shape.strokeBorder(color.opacity(0.6), lineWidth: 1)
+                } else if isMarked {
+                    shape.strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1)
+                }
             }
     }
 }
@@ -204,8 +230,8 @@ private struct LargestFilesList: View {
     var body: some View {
         if usage.largestFiles.isEmpty {
             Text("No files.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
@@ -243,8 +269,8 @@ private struct FileRow: View {
                     Circle().fill(Theme.category(file.category)).frame(width: 7, height: 7)
                     Text(location).lineLimit(1).truncationMode(.head)
                 }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
             }
         }
         .padding(.vertical, 5)

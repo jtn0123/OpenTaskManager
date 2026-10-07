@@ -107,3 +107,52 @@ struct LargestKeptTests {
         #expect(kept.count == 0)
     }
 }
+
+struct TreemapLabelTests {
+    @Test func headerDropsTheSizeBeforeTheName() {
+        #expect(TreemapLabel.header(name: 60, size: 40, spacing: 5, room: 120) == .nameAndSize)
+        #expect(TreemapLabel.header(name: 60, size: 40, spacing: 5, room: 105) == .nameAndSize)
+        #expect(TreemapLabel.header(name: 60, size: 40, spacing: 5, room: 104) == .name)
+        #expect(TreemapLabel.header(name: 60, size: 40, spacing: 5, room: 60) == .name)
+        // "Applications" in a narrow strip: no "Ap…ns", nothing at all.
+        #expect(TreemapLabel.header(name: 60, size: 40, spacing: 5, room: 59) == .none)
+    }
+
+    @Test func tileNeedsTheWholeNameAndALineForIt() {
+        let line = 13.0
+        #expect(TreemapLabel.tile(name: 50, size: 40, lineHeight: line, room: CGSize(width: 80, height: 30)) == .nameAndSize)
+        #expect(TreemapLabel.tile(name: 50, size: 40, lineHeight: line, room: CGSize(width: 80, height: 20)) == .name,
+                "no room for the second line")
+        #expect(TreemapLabel.tile(name: 50, size: 60, lineHeight: line, room: CGSize(width: 55, height: 30)) == .name,
+                "the size is wider than the tile")
+        #expect(TreemapLabel.tile(name: 50, size: 40, lineHeight: line, room: CGSize(width: 49, height: 30)) == .none)
+        #expect(TreemapLabel.tile(name: 50, size: 40, lineHeight: line, room: CGSize(width: 80, height: 12)) == .none)
+    }
+
+    static let bounds = CGSize(width: 400, height: 300)
+    static let tag = CGSize(width: 120, height: 40)
+
+    @Test func tagSitsUnderItsTileWhenThereIsRoom() {
+        let tile = CGRect(x: 20, y: 10, width: 100, height: 80)
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds) == CGPoint(x: 20, y: 96))
+    }
+
+    @Test func tagGoesAboveATileAtTheBottom() {
+        let tile = CGRect(x: 20, y: 200, width: 100, height: 100)
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds) == CGPoint(x: 20, y: 154))
+    }
+
+    @Test func tagGoesInsideATileAsTallAsTheTreemap() {
+        let tile = CGRect(x: 0, y: 0, width: 200, height: 300)
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds) == CGPoint(x: 6, y: 6))
+    }
+
+    @Test func tagNeverPokesOutSideways() {
+        let tile = CGRect(x: 360, y: 10, width: 40, height: 40)
+        let origin = TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds)
+        #expect(origin.x == Self.bounds.width - Self.tag.width)
+        // A tag wider than the treemap starts at its left edge.
+        let wide = TreemapLabel.tagOrigin(size: CGSize(width: 500, height: 40), tile: tile, bounds: Self.bounds)
+        #expect(wide.x == 0)
+    }
+}

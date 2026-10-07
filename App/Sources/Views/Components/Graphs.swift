@@ -110,6 +110,57 @@ enum Theme {
 
     /// The "smaller items" rest of a folder on the Storage page.
     static let smallerItems = Color(white: 0.48)
+
+    // MARK: Text
+
+    /// Secondary text: labels, captions, units and other metadata. Stronger
+    /// than the system's secondary label colour, which washes out on the
+    /// tinted cards (see `TextTone`). Pair it with `Font.metadata` or larger.
+    static let secondaryText = TextStyle(level: .secondary)
+    /// Placeholders such as "—" and other text meant to recede, still legible.
+    static let tertiaryText = TextStyle(level: .tertiary)
+}
+
+/// A text colour from `TextTone` for the current appearance. On a selected
+/// table row, where the system's own styles turn white over the accent
+/// colour, it gives way to the system's hierarchical style; with Increase
+/// Contrast on it draws stronger still.
+struct TextStyle: ShapeStyle {
+    var level: TextTone.Level
+
+    func resolve(in environment: EnvironmentValues) -> AnyShapeStyle {
+        if environment.backgroundProminence == .increased {
+            return AnyShapeStyle(level == .secondary ? HierarchicalShapeStyle.secondary : .tertiary)
+        }
+        let dark = environment.colorScheme == .dark
+        let boost = environment.colorSchemeContrast == .increased ? 0.15 : 0
+        return AnyShapeStyle(Color(white: dark ? 1 : 0, opacity: TextTone.opacity(level, dark: dark) + boost))
+    }
+}
+
+extension ShapeStyle where Self == TextStyle {
+    /// See `Theme.secondaryText`.
+    static var secondaryText: TextStyle { Theme.secondaryText }
+    /// See `Theme.tertiaryText`.
+    static var tertiaryText: TextStyle { Theme.tertiaryText }
+}
+
+extension NSColor {
+    /// `Theme.secondaryText` for text AppKit and Core Animation draw.
+    static var secondaryText: NSColor {
+        NSColor(name: nil) { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor(white: dark ? 1 : 0, alpha: TextTone.opacity(.secondary, dark: dark))
+        }
+    }
+}
+
+extension Font {
+    /// Metadata: labels, captions, units and footnotes. 11 pt at the default
+    /// text size, the smallest text the app draws.
+    static let metadata = Font.subheadline
+    /// Rows of tables and lists: 12 pt.
+    static let tableText = Font.callout
 }
 
 extension NSColor {
@@ -154,9 +205,9 @@ struct GraphPanel: View {
         VStack(alignment: .leading, spacing: 3) {
             if !title.isEmpty || !trailing.isEmpty {
                 HStack {
-                    Text(title).font(.subheadline).foregroundStyle(.secondary)
+                    Text(title).font(.metadata).foregroundStyle(.secondaryText)
                     Spacer()
-                    Text(trailing).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    Text(trailing).font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
                 }
             }
             GraphView(series: series, maxValue: maxValue, capacity: capacity, glows: true, stacked: stacked,
@@ -182,8 +233,8 @@ struct TimeAxis: View {
             Spacer()
             Text("now")
         }
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .font(.metadata)
+        .foregroundStyle(.secondaryText)
         .padding(.horizontal, 2)
     }
 }
@@ -265,7 +316,7 @@ struct Stat: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Text(label).font(.metadata).foregroundStyle(.secondaryText)
             HStack(spacing: 6) {
                 if let color {
                     Circle().fill(color).frame(width: 7, height: 7)
@@ -289,7 +340,7 @@ struct FactRow: View {
 
     var body: some View {
         GridRow {
-            Text(label).foregroundStyle(.secondary).gridColumnAlignment(.leading)
+            Text(label).foregroundStyle(.secondaryText).gridColumnAlignment(.leading)
             Text(value).textSelection(.enabled).gridColumnAlignment(.leading)
         }
         .font(.callout)
@@ -796,9 +847,9 @@ struct ProcessBarRow: View {
             Image(nsImage: icon).resizable().frame(width: 16, height: 16)
             Text(name).lineLimit(1)
             Spacer(minLength: 8)
-            Text(value).monospacedDigit().foregroundStyle(.secondary)
+            Text(value).monospacedDigit().foregroundStyle(.secondaryText)
         }
-        .font(.callout)
+        .font(.tableText)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(alignment: .leading) {

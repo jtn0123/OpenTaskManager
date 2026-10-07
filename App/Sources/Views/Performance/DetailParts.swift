@@ -21,7 +21,7 @@ struct DetailHeader: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title).font(.largeTitle.weight(.semibold))
             Spacer()
-            Text(subtitle).font(.title3).foregroundStyle(.secondary).lineLimit(1)
+            Text(subtitle).font(.title3).foregroundStyle(.secondaryText).lineLimit(1)
         }
     }
 }
@@ -71,7 +71,7 @@ struct TopAppsCard: View {
             if let unavailable {
                 UnavailableNote(text: unavailable)
             } else if top.isEmpty {
-                Text("Quiet right now.").font(.callout).foregroundStyle(.secondary)
+                Text("Quiet right now.").font(.callout).foregroundStyle(.secondaryText)
             }
             VStack(spacing: 4) {
                 ForEach(Array(top), id: \.id) { group in
@@ -98,7 +98,7 @@ struct UnavailableNote: View {
     var body: some View {
         Label(text, systemImage: "questionmark.circle")
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.secondaryText)
     }
 }
 
@@ -135,7 +135,7 @@ struct ChartLegend: View {
                     }
                     Text(item.name).lineLimit(1).truncationMode(.middle).layoutPriority(1)
                     Spacer(minLength: 4)
-                    Text(item.value).monospacedDigit().foregroundStyle(.secondary).fixedSize()
+                    Text(item.value).monospacedDigit().foregroundStyle(.secondaryText).fixedSize()
                 }
                 .font(.subheadline)
             }
@@ -158,7 +158,7 @@ struct ChartCard<Chart: View>: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(title).font(.headline)
                 Spacer()
-                Text(trailing).font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                Text(trailing).font(.callout).foregroundStyle(.secondaryText).monospacedDigit()
             }
             VStack(spacing: 3) {
                 chart

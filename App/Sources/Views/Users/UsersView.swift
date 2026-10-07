@@ -69,8 +69,8 @@ struct UsersView: View {
                 Text("Only your own processes are included. Turn on “Include system and other users' processes” in Settings to see everyone.")
             }
         }
-        .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .font(.callout)
+        .foregroundStyle(.secondaryText)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -178,16 +178,16 @@ private struct PersonCard: View {
                 HStack(spacing: 8) {
                     Text(account?.fullName ?? user.name).font(.title3.weight(.semibold)).lineLimit(1)
                     if isSignedIn {
-                        Badge(text: "Signed in", color: .green)
+                        Badge(text: "Signed in", color: Theme.data(.systemGreen))
                             .help("This user is signed in at the screen.")
                     } else if !sessions.isEmpty {
-                        Badge(text: "Logged in", color: .blue)
+                        Badge(text: "Logged in", color: Theme.data(.systemBlue))
                             .help("This user has a terminal or remote login but isn't at the screen.")
                     }
                 }
                 Text(([user.name, "uid \(user.uid)"] + (account?.homeDirectory.map { [$0] } ?? [])).joined(separator: " · "))
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                     .textSelection(.enabled)
             }
@@ -216,7 +216,7 @@ private struct UserGraph: View {
             HStack(alignment: .bottom) {
                 Stat(label: label, number: number, color: color, format: format)
                 Spacer(minLength: 8)
-                Text(caption).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(caption).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
             }
             GraphView(series: [GraphSeries(values: values, color: color)], capacity: Self.span, glows: true,
                       minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits,
@@ -249,14 +249,14 @@ private struct SessionList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Sessions").font(.subheadline).foregroundStyle(.secondary)
+            Text("Sessions").font(.metadata).foregroundStyle(.secondaryText)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 6) {
                 ForEach(sessions) { session in
                     HStack(spacing: 6) {
                         Image(systemName: session.isConsole ? "display" : session.host == nil ? "terminal" : "network")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                         Text(session.place).lineLimit(1).truncationMode(.middle)
-                        Text(UsersText.since(session.loginTime)).foregroundStyle(.secondary).lineLimit(1)
+                        Text(UsersText.since(session.loginTime)).foregroundStyle(.secondaryText).lineLimit(1)
                     }
                     .font(.callout)
                     .padding(.horizontal, 9)
@@ -285,26 +285,29 @@ private struct SystemAccountsCard: View {
         let cpuHistory = AppModel.tailSum(users.compactMap { model.userHistory[$0.uid]?.cpu.values }).map(scale.value)
         Card(tint: UsersText.systemTint, glow: min(totals.cpuPercent / Double(100 * max(scale.logicalCores, 1)), 1)) {
             Button { isOpen.toggle() } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "chevron.right")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                        .frame(width: 14)
-                    Image(systemName: "gearshape.2")
-                        .font(.title2)
-                        .foregroundStyle(UsersText.systemTint)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(UsersText.systemTint.opacity(0.15)))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("System accounts").font(.title3.weight(.semibold))
-                        Text(subtitle(totals)).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                HeadingRow(spacing: 12, indent: 82) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "chevron.right")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.secondaryText)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            .frame(width: 14)
+                        Image(systemName: "gearshape.2")
+                            .font(.title2)
+                            .foregroundStyle(UsersText.systemTint)
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(UsersText.systemTint.fillShade.opacity(0.18)))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("System accounts").font(.title3.weight(.semibold)).lineLimit(1)
+                            Text(subtitle(totals)).font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
+                        }
                     }
-                    Spacer(minLength: 12)
-                    Stat(label: "CPU", number: scale.value(totals.cpuPercent), color: Theme.cpu, format: { Format.fixed($0, 1) + "%" })
-                    Stat(label: "Memory", number: Double(totals.memory), color: Theme.memory, format: MemoryDetail.bytesAxis)
-                    Sparkline(values: cpuHistory, color: Theme.cpu, capacity: AppModel.userHistoryCapacity - 2)
-                        .frame(width: 140, height: 34)
+                    HStack(spacing: 12) {
+                        Stat(label: "CPU", number: scale.value(totals.cpuPercent), color: Theme.cpu, format: { Format.fixed($0, 1) + "%" })
+                        Stat(label: "Memory", number: Double(totals.memory), color: Theme.memory, format: MemoryDetail.bytesAxis)
+                        Sparkline(values: cpuHistory, color: Theme.cpu, capacity: AppModel.userHistoryCapacity - 2)
+                            .frame(width: 140, height: 34)
+                    }
                 }
                 .contentShape(Rectangle())
             }
@@ -327,6 +330,40 @@ private struct SystemAccountsCard: View {
     }
 }
 
+/// A heading with its figures at the trailing end, or under it, indented,
+/// when the two don't fit side by side, so the heading never wraps.
+private struct HeadingRow: Layout {
+    var spacing: CGFloat
+    /// How far in the figures start on their own row.
+    var indent: CGFloat
+    private let rowGap: CGFloat = 10
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let (heading, figures) = sizes(subviews) else { return .zero }
+        let sideBySide = heading.width + spacing + figures.width
+        let width = proposal.width ?? sideBySide
+        if sideBySide <= width { return CGSize(width: width, height: max(heading.height, figures.height)) }
+        return CGSize(width: width, height: heading.height + rowGap + figures.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let (heading, figures) = sizes(subviews) else { return }
+        if heading.width + spacing + figures.width <= bounds.width {
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(heading))
+            subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: ProposedViewSize(figures))
+        } else {
+            subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: heading.height))
+            subviews[1].place(at: CGPoint(x: bounds.minX + indent, y: bounds.minY + heading.height + rowGap),
+                               proposal: ProposedViewSize(figures))
+        }
+    }
+
+    private func sizes(_ subviews: Subviews) -> (CGSize, CGSize)? {
+        guard subviews.count == 2 else { return nil }
+        return (subviews[0].sizeThatFits(.unspecified), subviews[1].sizeThatFits(.unspecified))
+    }
+}
+
 /// One row per system account, each opening onto its busiest processes.
 private struct SystemAccountGrid: View {
     @Environment(AppModel.self) private var model
@@ -345,8 +382,8 @@ private struct SystemAccountGrid: View {
                 Text("GPU").gridColumnAlignment(.trailing)
                 Text("Last minute")
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .font(.metadata)
+            .foregroundStyle(.secondaryText)
             ForEach(users) { user in
                 let isExpanded = expanded.contains(user.uid)
                 GridRow {
@@ -378,13 +415,13 @@ private struct SystemAccountGrid: View {
         HStack(spacing: 8) {
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.tertiaryText)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 .frame(width: 10)
             UserAvatar(name: user.name, color: UsersText.systemTint, size: 22)
             Text(user.name).lineLimit(1)
             if let fullName = model.account(for: user.uid)?.fullName {
-                Text(fullName).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                Text(fullName).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.tail)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -397,7 +434,7 @@ private struct SystemAccountGrid: View {
 }
 
 extension UsersText {
-    static let systemTint = Color(red: 0.56, green: 0.60, blue: 0.68)
+    static let systemTint = Theme.data(0.56, 0.60, 0.68)
 }
 
 // MARK: - Parts
@@ -409,7 +446,7 @@ private struct TopProcessList: View {
 
     var body: some View {
         if processes.isEmpty {
-            Text("No processes right now.").font(.callout).foregroundStyle(.secondary)
+            Text("No processes right now.").font(.callout).foregroundStyle(.secondaryText)
         } else {
             let scale = model.cpuScale
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
@@ -420,8 +457,8 @@ private struct TopProcessList: View {
                     Text("Memory").gridColumnAlignment(.trailing)
                     Text("Power").gridColumnAlignment(.trailing)
                 }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
                 ForEach(processes, id: \.pid) { process in
                     GridRow {
                         HStack(spacing: 6) {
@@ -431,7 +468,7 @@ private struct TopProcessList: View {
                             Text(model.displayName(for: process)).lineLimit(1).truncationMode(.middle)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(String(process.pid)).foregroundStyle(.secondary)
+                        Text(String(process.pid)).foregroundStyle(.secondaryText)
                         Text(scale.format(process.cpuPercent))
                         Text(Format.bytes(process.memory))
                         Text(process.powerWatts.map(Format.watts) ?? "—")
@@ -460,7 +497,7 @@ private struct Expander: View {
                 Text(title)
             }
             .font(.callout.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.secondaryText)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -501,10 +538,10 @@ private struct Badge: View {
             Circle().fill(color).frame(width: 6, height: 6)
             Text(text)
         }
-        .font(.caption.weight(.medium))
+        .font(.metadata.weight(.medium))
         .foregroundStyle(color)
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
-        .background(color.opacity(0.14), in: Capsule())
+        .background(color.fillShade.opacity(0.18), in: Capsule())
     }
 }
