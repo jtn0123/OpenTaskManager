@@ -78,7 +78,8 @@ struct NetworkAppsSection: View {
     private func breakdown(_ history: NetworkActivityHistory<Int32>, store: NetworkActivityStore) -> some View {
         let ranking = history.ranking(bands: Self.bands, rows: Self.rows)
         let other = history.remainder(excluding: ranking.bands)
-        let series = ranking.bands.enumerated().map { GraphSeries(values: history.totals[$1] ?? [], color: Theme.series($0)) }
+        let colors = Theme.appColors(for: ranking.bands.map(Int64.init), in: byProcess ? "network processes" : "network")
+        let series = ranking.bands.enumerated().map { GraphSeries(values: history.totals[$1] ?? [], color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
         let peak = ranking.rows.compactMap { history.latest[$0]?.total }.max() ?? 0
         // The throughput graph's window, in the store's readings.
@@ -99,7 +100,7 @@ struct NetworkAppsSection: View {
                     let identity = store.identity(pid)
                     let band = ranking.bands.firstIndex(of: pid)
                     NetworkUsageRow(
-                        swatch: band.map { Theme.series($0) } ?? Theme.other, icon: identity.icon, name: identity.name,
+                        swatch: band.map { colors[$0] } ?? Theme.other, icon: identity.icon, name: identity.name,
                         badge: !byProcess && usage.processes > 1 ? "(\(usage.processes))" : nil,
                         usage: usage, fraction: peak > 0 ? usage.total / peak : 0
                     )

@@ -33,7 +33,9 @@ struct GraphView: NSViewRepresentable {
     /// Samples across the full width.
     var capacity = AppModel.graphSpan
     var showsGrid = true
-    var lineWidth: CGFloat = 1.5
+    /// A little over the grid's and the unrecorded hatch's, so a low trace
+    /// still stands out from them.
+    var lineWidth: CGFloat = 1.75
     /// Bloom under each line and a glowing marker on the newest value.
     var glows = false
     /// Draw each series on top of the ones before it, as filled bands.
@@ -482,9 +484,10 @@ final class StreamGraphView: NSView {
     private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration) {
         grid.isHidden = !configuration.showsGrid
         columns.isHidden = !configuration.showsGrid
-        // Light mode needs a firmer grid to hold up on a pale plot.
+        // Light mode needs a firmer grid to hold up on a pale plot. Both stay
+        // faint enough that a trace near the floor isn't lost among them.
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let lineColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.09 : 0.15).cgColor
+        let lineColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.065 : 0.11).cgColor
         let labelColor = NSColor.secondaryText.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
@@ -558,8 +561,10 @@ enum UnrecordedLook {
 
     /// The window background's opacity over the plot.
     static func washOpacity(dark: Bool) -> CGFloat { dark ? 0.22 : 0.35 }
-    /// The label colour's opacity in the hatch.
-    static func hatchOpacity(dark: Bool) -> CGFloat { dark ? 0.045 : 0.04 }
+    /// The label colour's opacity in the hatch: a texture that says "nothing
+    /// here", fainter than the grid's lines, while the wash and the edge
+    /// mark the stretch out.
+    static func hatchOpacity(dark: Bool) -> CGFloat { dark ? 0.035 : 0.03 }
     /// The label colour's opacity in the edge where recording starts.
     static func edgeOpacity(dark: Bool) -> CGFloat { dark ? 0.35 : 0.4 }
 }

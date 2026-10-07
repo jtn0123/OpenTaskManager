@@ -148,10 +148,11 @@ struct CPUDetail: View {
         let cores = Double(max(model.topology.logicalCores, 1))
         let apps = model.topApps(by: .cpu, scale: 1 / 100 / cores, count: 5)
         let other = AppModel.remainder(of: model.cpuHistory.values, minus: apps.map(\.values))
-        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
+        let colors = Theme.appColors(for: apps.map(\.id), in: "cpu")
+        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
-            LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
+            LegendItem(name: $1.name, color: colors[$0], value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
         // The same window as the utilization graph above, so the two line up.
         let capacity = AppModel.graphSpan

@@ -2,63 +2,68 @@ import OTMKit
 import SwiftUI
 
 /// The data colours. Each is a bright tone that glows on dark cards and, in
-/// light mode, a deeper shade of the same hue for lines and text (see
-/// `data(_:)`). Fills and washes take `fillShade`, which stays pastel.
+/// light mode, a deeper shade of the same hue for lines and text. Fills and
+/// washes take `fillShade`, which stays pastel. The graph colours come from
+/// the palette picked in Settings (`GraphColors`, presets in OTMKit's
+/// `GraphPalette`): reading one in a view's body observes it, so the view
+/// redraws when the palette changes. `data(_:)` makes the fixed colours of
+/// other pages the same way.
 enum Theme {
-    static let cpu = data(0.24, 0.56, 1.00)
-    static let memory = data(0.64, 0.42, 0.96)
-    static let disk = data(0.20, 0.74, 0.44)
-    static let diskSecondary = data(0.55, 0.86, 0.40)
-    static let network = data(0.98, 0.55, 0.20)
-    static let networkSecondary = data(0.98, 0.80, 0.30)
-    static let gpu = data(0.10, 0.74, 0.80)
-    static let power = data(0.95, 0.72, 0.12)
-    static let thermal = data(1.00, 0.42, 0.30)
-    static let fan = data(0.38, 0.78, 0.98)
+    static var cpu: Color { color(.cpu) }
+    static var memory: Color { color(.memory) }
+    static var disk: Color { color(.disk) }
+    static var diskSecondary: Color { color(.diskSecondary) }
+    static var network: Color { color(.network) }
+    static var networkSecondary: Color { color(.networkSecondary) }
+    static var gpu: Color { color(.gpu) }
+    static var power: Color { color(.power) }
+    static var thermal: Color { color(.thermal) }
+    static var fan: Color { color(.fan) }
 
-    // Memory composition.
-    static let wired = data(0.93, 0.36, 0.62)
-    static let compressed = data(0.98, 0.62, 0.24)
-    static let cached = data(0.32, 0.70, 0.86)
-    static let swap = data(0.96, 0.42, 0.36)
+    // Memory composition and paging.
+    static var wired: Color { color(.wired) }
+    static var compressed: Color { color(.compressed) }
+    static var cached: Color { color(.cached) }
+    static var swap: Color { color(.swap) }
+    static var pageIn: Color { color(.pageIn) }
+    static var pageOut: Color { color(.pageOut) }
 
-    // Power components.
-    static let neuralEngine = data(0.90, 0.40, 0.86)
-    static let dram = data(0.62, 0.50, 0.98)
-    static let restOfSystem = data(0.62, 0.58, 0.48)
+    // Power components and supply.
+    static var neuralEngine: Color { color(.neuralEngine) }
+    static var dram: Color { color(.dram) }
+    static var restOfSystem: Color { color(.restOfSystem) }
+    static var charging: Color { color(.charging) }
+    static var discharging: Color { color(.discharging) }
+
+    // GPU engines and clock.
+    static var gpuRenderer: Color { color(.gpuRenderer) }
+    static var gpuTiler: Color { color(.gpuTiler) }
+    static var gpuClock: Color { color(.gpuClock) }
 
     /// Everything not broken out on its own.
-    static let other = data(0.50, 0.50, 0.50)
+    static var other: Color { color(.other) }
 
-    /// Distinct colours for "by app" series, in rank order.
-    static let series: [Color] = [
-        data(0.26, 0.58, 1.00),
-        data(0.98, 0.58, 0.22),
-        data(0.16, 0.80, 0.70),
-        data(0.94, 0.40, 0.62),
-        data(0.62, 0.82, 0.30),
-        data(0.70, 0.52, 0.98),
-    ]
-
-    private static let slowerTier = data(0.22, 0.82, 0.86)
-    private static let storageSensor = data(0.30, 0.80, 0.62)
-    private static let batterySensor = data(0.98, 0.78, 0.26)
-
-    static func series(_ index: Int) -> Color {
-        series[index % series.count]
+    static func color(_ role: GraphPalette.Role) -> Color {
+        GraphColors.shared.color(role)
     }
 
-    /// Colour for a core tier: the fastest tier (level 0) gets the CPU blue.
+    /// The `index`th colour for series without an app of their own (core
+    /// clusters, users), round the palette's.
+    static func series(_ index: Int) -> Color {
+        GraphColors.shared.seriesColor(index)
+    }
+
+    /// Colour for a core tier: the fastest tier (level 0) gets the CPU's.
     static func tier(_ level: Int) -> Color {
-        level == 0 ? cpu : slowerTier
+        level == 0 ? cpu : color(.slowerTier)
     }
 
     /// Colour for each kind of temperature sensor.
     static func sensor(_ kind: SensorKind) -> Color {
         switch kind {
         case .chip: thermal
-        case .storage: storageSensor
-        case .battery: batterySensor
+        case .storage: color(.storageSensor)
+        case .battery: color(.batterySensor)
         }
     }
 
@@ -260,7 +265,7 @@ struct Sparkline: View {
 
     var body: some View {
         GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue,
-                  capacity: capacity, showsGrid: false, lineWidth: 1.2, glows: true, cornerRadius: 3)
+                  capacity: capacity, showsGrid: false, lineWidth: 1.35, glows: true, cornerRadius: 3)
             .plotFrame(tint: color, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
     }
 }

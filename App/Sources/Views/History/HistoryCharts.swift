@@ -18,8 +18,8 @@ struct HistoryLine: Identifiable {
 
         var style: StrokeStyle {
             switch self {
-            case .solid: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
-            case .dashed: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round, dash: [4, 3])
+            case .solid: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+            case .dashed: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round, dash: [4, 3])
             // Zero-length dashes with round caps draw as dots.
             case .dotted: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: [0, 3.6])
             }
@@ -353,13 +353,14 @@ struct HistoryChartCard: View {
         .chartXScale(domain: domain)
         .chartYScale(domain: 0...top)
         .chartYAxis {
+            // Faint, as on the live graphs, so a low line isn't lost among them.
             AxisMarks(values: [0, top / 2, top]) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.10))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.08))
             }
         }
         .chartXAxis {
             AxisMarks(values: ticks) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.055))
                 // Centred under its line, as `GraphMath.timeTicks` spaces them: a
                 // label hanging right of its tick ran past the plot's end and was cut.
                 AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 11)).foregroundStyle(.secondaryText)

@@ -5,8 +5,8 @@ struct PowerDetail: View {
     @Environment(AppModel.self) private var model
     var snapshot: SystemSnapshot
 
-    private static let charging = Theme.data(0.30, 0.85, 0.45)
-    private static let discharging = Theme.data(0.98, 0.45, 0.35)
+    private static var charging: Color { Theme.charging }
+    private static var discharging: Color { Theme.discharging }
 
     var body: some View {
         let power = snapshot.power
@@ -231,10 +231,11 @@ struct PowerDetail: View {
     private func byApp() -> some View {
         let apps = model.topApps(by: .power, count: 5)
         let other = AppModel.remainder(of: model.processPowerHistory.values, minus: apps.map(\.values))
-        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
+        let colors = Theme.appColors(for: apps.map(\.id), in: "power")
+        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
-            LegendItem(name: $1.name, color: Theme.series($0), value: Format.watts($1.current), icon: $1.icon)
+            LegendItem(name: $1.name, color: colors[$0], value: Format.watts($1.current), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.watts(other.last ?? 0))]
         // Over the same window as the graphs above, so they line up.
         return ChartCard(title: "Power by app", trailing: "CPU and GPU work", tint: Theme.power, legend: legend) {
