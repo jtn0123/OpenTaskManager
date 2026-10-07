@@ -17,9 +17,13 @@ struct OverviewView: View {
                     FillGrid(minimum: 210) {
                         cpuGauge(snapshot)
                         memoryGauge(snapshot)
-                        if let gpu = snapshot.gpus.first { gpuGauge(gpu) }
+                        if let gpu = snapshot.gpus.first, let busy = gpu.deviceUtilization { gpuGauge(gpu, busy: busy) }
                         if let watts = snapshot.power.systemWatts { powerGauge(watts, snapshot.power) }
                     }
+                    // A GPU that doesn't say how busy it is (a virtual
+                    // machine's) would only fill a gauge with an empty ring,
+                    // so it takes a line and the cards below move up.
+                    if let gpu = snapshot.gpus.first, gpu.deviceUtilization == nil { gpuStrip(gpu) }
                     CoreMap(snapshot: snapshot)
                     FillGrid(minimum: 280) {
                         diskCard(snapshot)
@@ -91,14 +95,26 @@ struct OverviewView: View {
         )
     }
 
-    private func gpuGauge(_ gpu: GPUSample) -> some View {
-        let busy = gpu.deviceUtilization
-        return GaugeCard(
-            title: "GPU", value: busy.map { $0 * 100 }, format: { Format.fixed($0, 0) }, unit: "%",
-            fraction: busy ?? 0, color: Theme.gpu,
-            details: [gpu.name] + (gpu.coreCount.map { ["\($0) cores"] } ?? []) + (busy == nil ? [Unavailable.gpuUtilization] : []),
+    private func gpuGauge(_ gpu: GPUSample, busy: Double) -> some View {
+        GaugeCard(
+            title: "GPU", value: busy * 100, format: { Format.fixed($0, 0) }, unit: "%",
+            fraction: busy, color: Theme.gpu,
+            details: [gpu.name] + (gpu.coreCount.map { ["\($0) cores"] } ?? []),
             history: model.gpuHistory[gpu.id]?.values ?? [], historyMax: 1
         )
+    }
+
+    /// The GPU's name and memory in use on one line, for a GPU that doesn't
+    /// report utilization. Performance › GPU keeps its memory graph and GPU
+    /// time by app.
+    private func gpuStrip(_ gpu: GPUSample) -> some View {
+        // A paravirtual GPU's name is just "GPU", which the title already says.
+        let name = gpu.name.caseInsensitiveCompare("GPU") == .orderedSame ? nil : gpu.name
+        let memory = gpu.memoryInUse.map { (label: "Memory in use", value: Format.bytes($0)) }
+        return NoticeStrip(title: "GPU", symbol: "cpu.fill", color: Theme.gpu,
+                           text: [name, Unavailable.gpuUtilization].compactMap { $0 }.joined(separator: " · "),
+                           help: Unavailable.gpuUtilizationDetail + " Performance › GPU shows its memory in use and GPU time by app.",
+                           trailing: memory)
     }
 
     private func powerGauge(_ watts: Double, _ power: PowerSample) -> some View {
@@ -164,8 +180,7 @@ private struct GaugeCard: View {
     private static let valueFont = NSFont.numeric(size: 26, weight: .semibold, rounded: true)
 
     var title: String
-    /// nil when this Mac doesn't report the reading: the ring shows "—", not 0.
-    var value: Double?
+    var value: Double
     var format: (Double) -> String
     var unit: String
     var fraction: Double
@@ -181,12 +196,8 @@ private struct GaugeCard: View {
                 ZStack {
                     RingGauge(fraction: fraction, color: color, lineWidth: 10)
                     VStack(spacing: -2) {
-                        if let value {
-                            AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
-                            Text(unit).font(.metadata.weight(.medium)).foregroundStyle(.secondaryText)
-                        } else {
-                            Text("—").font(.system(size: 26, weight: .semibold, design: .rounded)).foregroundStyle(.secondaryText)
-                        }
+                        AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
+                        Text(unit).font(.metadata.weight(.medium)).foregroundStyle(.secondaryText)
                     }
                 }
                 .frame(width: 96, height: 96)
@@ -228,6 +239,8 @@ struct NoticeStrip: View {
     var isMissing = true
     /// Metadata-sized, for a row among an inspector's graphs.
     var compact = false
+    /// A reading that is measured, at the end of the line: "Memory in use 301 MB".
+    var trailing: (label: String, value: String)?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: compact ? 8 : 10)
@@ -236,6 +249,10 @@ struct NoticeStrip: View {
             Text(title).fontWeight(.medium).fixedSize()
             Text(text).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
+            if let trailing {
+                Text(trailing.label).foregroundStyle(.secondaryText).lineLimit(1).fixedSize()
+                Text(trailing.value).fontWeight(.medium).monospacedDigit().lineLimit(1).fixedSize()
+            }
         }
         .font(compact ? .metadata : .callout)
         .padding(.horizontal, compact ? 10 : 14)

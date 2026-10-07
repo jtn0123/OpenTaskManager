@@ -10,8 +10,16 @@ struct InternetQualityCard: View, Equatable {
     let interface: String
     /// "Wi-Fi", "Ethernet".
     let name: String
+    /// Bumped by the shortcut beside the detail's title: the card rings for a
+    /// moment and Run Test takes the keyboard focus. Nothing starts.
+    let reveal: Int
+    @FocusState private var runFocused: Bool
 
     private static let available = NetworkQuality.isAvailable
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.interface == rhs.interface && lhs.name == rhs.name && lhs.reveal == rhs.reveal
+    }
 
     var body: some View {
         let store = NetworkQualityStore.shared
@@ -46,6 +54,8 @@ struct InternetQualityCard: View, Equatable {
                 history(results)
             }
         }
+        .modifier(SpeedTestReveal(reveal: reveal))
+        .onChange(of: reveal) { runFocused = true }
         .task {
             await store.load()
             store.handleLaunchArgument(interface: interface)
@@ -64,6 +74,7 @@ struct InternetQualityCard: View, Equatable {
             } else {
                 Button("Run Test") { store.start(interface: interface) }
                     .disabled(run != nil || !Self.available)
+                    .focused($runFocused)
                     .help("Measure \(name)'s Internet speed and responsiveness for about \(Int(NetworkQuality.typicalSeconds)) s")
             }
         }
@@ -197,6 +208,39 @@ struct SpeedTestRunning: View {
                 ProgressView(value: min(max(fraction, 0), 1)).tint(Theme.disk)
             }
         }
+    }
+}
+
+/// Rings a speed test's card for a moment when the shortcut beside the
+/// detail's title scrolls to it, so the eye lands on it. Only that click
+/// changes it, so the fade never runs per tick.
+struct SpeedTestReveal: ViewModifier {
+    /// How long the ring stays before it fades.
+    private static let hold = Duration.seconds(2.5)
+
+    var reveal: Int
+    @State private var ringed = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .opacity(ringed ? 1 : 0)
+                    .animation(.easeOut(duration: 0.4), value: ringed)
+                    .allowsHitTesting(false)
+            }
+            .task(id: reveal) {
+                guard reveal > 0 else { return }
+                ringed = true
+                do {
+                    try await Task.sleep(for: Self.hold)
+                } catch {
+                    // A newer click took over; its own task clears the ring.
+                    return
+                }
+                ringed = false
+            }
     }
 }
 

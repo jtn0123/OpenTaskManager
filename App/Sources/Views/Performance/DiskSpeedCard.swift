@@ -11,9 +11,17 @@ struct DiskSpeedCard: View, Equatable {
     /// The BSD name, "disk0".
     let disk: String
     let volumes: [DiskSpeedVolumeChoice]
+    /// Bumped by the shortcut beside the detail's title: the card rings for a
+    /// moment and Run Test takes the keyboard focus. Nothing starts.
+    let reveal: Int
+    @FocusState private var runFocused: Bool
 
     /// Reads first, the figures people compare.
     private static let order: [DiskSpeedPhase] = [.sequentialRead, .sequentialWrite, .randomRead, .randomWrite]
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.disk == rhs.disk && lhs.volumes == rhs.volumes && lhs.reveal == rhs.reveal
+    }
 
     var body: some View {
         let store = DiskSpeedStore.shared
@@ -55,6 +63,8 @@ struct DiskSpeedCard: View, Equatable {
                 history(results, on: target)
             }
         }
+        .modifier(SpeedTestReveal(reveal: reveal))
+        .onChange(of: reveal) { runFocused = true }
         .task(id: target) {
             await store.load()
             let current = store.target(disk: disk, volumes: volumes)
@@ -84,6 +94,7 @@ struct DiskSpeedCard: View, Equatable {
                     if let target { store.start(disk: disk, target: target) }
                 }
                 .disabled(run != nil || target == nil)
+                .focused($runFocused)
                 .help(target.map { "Measure read and write speed in \($0.title) (\($0.subtitle))" } ?? "Choose a folder to test first")
             }
         }

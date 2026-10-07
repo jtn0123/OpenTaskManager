@@ -86,7 +86,10 @@ Manager OG or any other proprietary task manager.
   `reloadData()` every tick.
 - The Thermals table (`SensorTableView`) is AppKit rows made only when the set
   of rows changes; a tick sets just the figures that changed. Its rows and
-  ranges are `SensorTable` and `SensorExtremes` in OTMKit.
+  ranges are `SensorTable` and `SensorExtremes` in OTMKit. Its header (the
+  since line, Reset and the column titles) pins to the page's visible top by
+  watching the enclosing clip view's bounds (`StickyHeader` in OTMKit), so it
+  moves only on scroll, never per tick; rows are added below it.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
   per sample and a Core Animation scroll slides them between samples. Changing
   numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
