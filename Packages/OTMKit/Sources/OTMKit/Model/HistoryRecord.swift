@@ -224,3 +224,46 @@ public struct HistoryPoint: Sendable, Identifiable, Equatable {
         }
     }
 }
+
+// MARK: - Export
+
+extension HistoryRecord {
+    static let csvHeader = [
+        "time", "cpu_percent", "cpu_peak_percent", "memory_percent", "memory_pressure_percent", "swap_bytes",
+        "gpu_percent", "system_watts", "cpu_watts", "gpu_watts", "disk_read_bytes_per_s", "disk_write_bytes_per_s",
+        "network_in_bytes_per_s", "network_out_bytes_per_s", "chip_celsius", "top_cpu_apps", "top_memory_apps",
+    ]
+
+    /// The records as CSV, one row per record, with ISO 8601 times. CPU
+    /// for apps is in Activity Monitor percent (100 = one core). Figures the
+    /// Mac didn't report are left empty.
+    public static func csv(_ records: [HistoryRecord]) -> String {
+        func number(_ value: Double?, scale: Double = 1, digits: Int = 2) -> String {
+            guard let value, value.isFinite else { return "" }
+            return String(format: "%.\(digits)f", value * scale)
+        }
+        func field(_ text: String) -> String {
+            guard text.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" }) else { return text }
+            return "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        let time = ISO8601DateFormatter()
+        var lines = [csvHeader.joined(separator: ",")]
+        for record in records {
+            let values = record.values
+            let row = [
+                time.string(from: record.time),
+                number(values.cpu, scale: 100, digits: 1), number(values.cpuPeak, scale: 100, digits: 1),
+                number(values.memory, scale: 100, digits: 1), number(values.memoryPressure, scale: 100, digits: 1),
+                number(values.swapUsed, digits: 0), number(values.gpu, scale: 100, digits: 1),
+                number(values.systemWatts), number(values.cpuWatts), number(values.gpuWatts),
+                number(values.diskRead, digits: 0), number(values.diskWrite, digits: 0),
+                number(values.networkIn, digits: 0), number(values.networkOut, digits: 0),
+                number(values.chipCelsius, digits: 1),
+                field(record.topCPU.map { "\($0.name) \(number($0.value, digits: 1))%" }.joined(separator: "; ")),
+                field(record.topMemory.map { "\($0.name) \(Format.bytes($0.value))" }.joined(separator: "; ")),
+            ]
+            lines.append(row.joined(separator: ","))
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+}

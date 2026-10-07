@@ -154,3 +154,22 @@ struct FlightRecorderTests {
         #expect(records.map(\.values.cpu) == [0.2])
     }
 }
+
+struct HistoryExportTests {
+    @Test func writesOneCSVRowPerRecordAndQuotesAwkwardNames() throws {
+        var values = HistoryValues()
+        values.cpu = 0.256
+        values.cpuPeak = 0.5
+        values.memory = 0.6
+        values.systemWatts = 12.345
+        let record = HistoryRecord(time: Date(timeIntervalSince1970: 0), values: values,
+                                   topCPU: [HistoryApp(name: "Code, Helper", value: 12.34), HistoryApp(name: "Mail", value: 2)],
+                                   topMemory: [HistoryApp(name: "Safari", value: 1_073_741_824)])
+        let lines = HistoryRecord.csv([record]).split(separator: "\n").map(String.init)
+        #expect(lines.count == 2)
+        #expect(lines[0].hasPrefix("time,cpu_percent,cpu_peak_percent,"))
+        let expected = "1970-01-01T00:00:00Z,25.6,50.0,60.0,0.0,0,,12.35,,,0,0,0,0,,\"Code, Helper 12.3%; Mail 2.0%\",Safari 1.00 GB"
+        #expect(lines[1] == expected)
+        #expect(lines[1].split(separator: ",", omittingEmptySubsequences: false).count == HistoryRecord.csvHeader.count + 1)
+    }
+}

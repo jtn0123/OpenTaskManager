@@ -1,5 +1,7 @@
+import AppKit
 import OTMKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// How far back the History page looks.
 enum HistoryRange: Int, CaseIterable, Identifiable {
@@ -77,6 +79,17 @@ struct HistoryView: View {
             }
             .frame(width: 310)
         }
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    Task { await export() }
+                } label: {
+                    Label("Export CSV…", systemImage: "square.and.arrow.up")
+                }
+                .help("Save every record in this range as a CSV file")
+                .disabled(model.recorder == nil)
+            }
+        }
         .task(id: range) {
             while !Task.isCancelled {
                 await load()
@@ -112,7 +125,7 @@ struct HistoryView: View {
         } else if let points {
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, domain: domain, earliest: earliest,
-                                 ticks: GraphMath.timeTicks(in: domain, step: range.tickStep),
+                                 ticks: GraphMath.timeTicks(in: domain, step: range.tickStep, margin: 0.08),
                                  timeLabels: range.timeLabels, scrubber: scrubber)
             }
         }
@@ -125,6 +138,21 @@ struct HistoryView: View {
         }
         if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " on disk") }
         return parts.joined(separator: " · ")
+    }
+
+    /// Saves the records in the range shown, at full resolution, as CSV.
+    private func export() async {
+        guard let recorder = model.recorder else { return }
+        let records = (try? await recorder.records(from: domain.lowerBound, to: .now)) ?? []
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "OpenTaskManager history \(Date.now.formatted(.iso8601.year().month().day())).csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try HistoryRecord.csv(records).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     private func load() async {
