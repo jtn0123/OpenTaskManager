@@ -235,6 +235,24 @@ public struct DiskUsage: Sendable, Codable {
         }
         return current
     }
+
+    /// The item that stands for `path` in the tree, for outlining it: the
+    /// item itself when the scan kept it; otherwise, if it `exists`, the
+    /// "smaller items" row of the deepest kept item holding it; else that
+    /// item (a folder whose contents weren't kept, a package, or the folder
+    /// something removed was in).
+    public func closestItem(to path: String, exists: Bool = true) -> DiskItem {
+        guard path.hasPrefix(rootPath) else { return root }
+        var current = root
+        for name in path.dropFirst(rootPath.count).split(separator: "/") {
+            guard let next = children(of: current).first(where: { $0.name == name && $0.kind != .smallerItems }) else {
+                guard exists, current.isFolder else { return current }
+                return children(of: current).first { $0.kind == .smallerItems } ?? current
+            }
+            current = next
+        }
+        return current
+    }
 }
 
 /// Live figures while a scan runs.

@@ -174,6 +174,10 @@ struct DiskUsageScannerTests {
         #expect(usage.ancestry(of: modules.id).map(\.name) == [fixture.root.lastPathComponent, "Projects", "site", "node_modules"])
         #expect(usage.item(atPath: fixture.url("Projects/site").path)?.name == "site")
         #expect(usage.closestFolder(to: fixture.url("Projects/site/node_modules/pkg/index.js").path).name == "pkg")
+        #expect(usage.closestItem(to: fixture.url("Projects/site/node_modules/pkg/index.js").path).name == "index.js")
+        // Gone: the folder it was in.
+        #expect(usage.closestItem(to: fixture.url("Projects/site/old.js").path, exists: false).name == "site")
+        #expect(usage.closestItem(to: fixture.root.path).id == usage.root.id)
 
         let byCategory = Dictionary(uniqueKeysWithValues: usage.categories.map { ($0.category, $0.allocatedSize) })
         #expect(byCategory[.media] == (try fixture.allocated("movie.mov")))

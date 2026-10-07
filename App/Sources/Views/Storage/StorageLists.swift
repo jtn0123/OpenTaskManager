@@ -12,6 +12,8 @@ struct StorageListCard: View {
     var open: (Int) -> Void
     /// Opens the folder holding a path and outlines its tile, if it's still there.
     var show: (_ path: String, _ exists: Bool) -> Void
+    /// Picks a change and outlines it in the treemap (`opening` its folder too).
+    var pick: (_ change: DiskSizeChange, _ exists: Bool, _ opening: Bool) -> Void
 
     var body: some View {
         Card(tint: nil) {
@@ -26,7 +28,7 @@ struct StorageListCard: View {
             case .largest:
                 LargestFilesList(store: store, usage: usage, hover: hover) { show($0.path, true) }
             case .changes:
-                ChangesList(store: store, usage: usage, folder: folder, show: show)
+                ChangesList(store: store, usage: usage, folder: folder, hover: hover, pick: pick)
             }
         }
     }
@@ -120,7 +122,7 @@ private struct ContentRow: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
-        .background(RowHighlight(id: item.id, folder: item.parent ?? 0, color: StorageStyle.color(item), hover: hover))
+        .background(RowHighlight(id: item.id, color: StorageStyle.color(item), hover: hover))
         .contentShape(Rectangle())
         .onHover { inside in
             if inside { hover.enter(item.id) } else { hover.leave(item.id) }
@@ -151,13 +153,13 @@ private struct ContentRow: View {
 /// view, so a hover change redraws only these.
 private struct RowHighlight: View {
     let id: Int
-    let folder: Int
     let color: Color
     let hover: StorageHover
 
     var body: some View {
         let isHovered = hover.item == id
-        let isMarked = hover.marked.map { $0.folder == folder && $0.item == id } ?? false
+        // The picked item, or the folder here that holds it.
+        let isMarked = hover.marked.contains(id)
         let shape = RoundedRectangle(cornerRadius: 6)
         shape
             .fill(isHovered ? color.fillShade.opacity(0.22) : Color.primary.opacity(isMarked ? 0.06 : 0))

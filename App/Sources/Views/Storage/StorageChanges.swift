@@ -85,17 +85,26 @@ enum StorageChangeStyle {
     }
 }
 
+extension DiskScanComparison {
+    /// What the Changes list shows for the open folder.
+    func report(for folder: DiskItem, in usage: DiskUsage) -> DiskScanReport {
+        let path = later.scope.relativePath(usage.path(of: folder.id)) ?? ""
+        return report(under: path, limit: 8, ignoringUnder: StorageChangeStyle.threshold(for: folder.allocatedSize))
+    }
+}
+
 /// Beside the treemap in Changes mode: what changed in the open folder
 /// since an earlier scan of the same place.
 struct ChangesList: View {
     let store: StorageStore
     let usage: DiskUsage
     let folder: DiskItem
-    var show: (_ path: String, _ exists: Bool) -> Void
+    let hover: StorageHover
+    var pick: (_ change: DiskSizeChange, _ exists: Bool, _ opening: Bool) -> Void
 
     var body: some View {
         if let comparison = store.comparison, comparison.later.scannedAt == usage.finishedAt {
-            ChangesReport(store: store, usage: usage, folder: folder, comparison: comparison, show: show)
+            ChangesReport(store: store, usage: usage, folder: folder, comparison: comparison, hover: hover, pick: pick)
         } else {
             VStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
@@ -127,12 +136,13 @@ private struct ChangesReport: View {
     let usage: DiskUsage
     let folder: DiskItem
     let comparison: DiskScanComparison
-    var show: (String, Bool) -> Void
+    let hover: StorageHover
+    var pick: (DiskSizeChange, Bool, Bool) -> Void
 
     var body: some View {
-        let path = comparison.later.scope.relativePath(usage.path(of: folder.id)) ?? ""
         let threshold = StorageChangeStyle.threshold(for: folder.allocatedSize)
-        let report = comparison.report(under: path, limit: 8, ignoringUnder: threshold)
+        let report = comparison.report(for: folder, in: usage)
+        let path = report.path
         let direction = report.total.direction(ignoringUnder: threshold)
         let name = folder.name.isEmpty ? "this folder" : folder.name
         VStack(alignment: .leading, spacing: 8) {
@@ -150,27 +160,30 @@ private struct ChangesReport: View {
             }
             .help("Since \(comparison.earlier.scannedAt.formatted(date: .abbreviated, time: .shortened))")
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    if report.isEmpty {
-                        Text("Nothing in \(name) changed by more than \(Format.bytes(threshold)).")
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        if report.isEmpty {
+                            Text("Nothing in \(name) changed by more than \(Format.bytes(threshold)).")
+                                .font(.metadata)
+                                .foregroundStyle(.secondaryText)
+                                .padding(.vertical, 4)
+                        }
+                        section("Grew", report.grew, under: path, amount: \.growth, grew: true)
+                        section("Shrank", report.shrank, under: path, amount: \.shrinkage, grew: false)
+                        section("Large files added", report.filesAdded, under: path, amount: \.growth, grew: true)
+                        section("Large files removed", report.filesRemoved, under: path, amount: \.shrinkage, grew: false)
+                        readability("Couldn't be read this time", report.becameUnreadable, under: path,
+                                    note: "Not counted as space freed")
+                        readability("Could be read this time", report.becameReadable, under: path, note: "Not counted as growth")
+                        Text(Self.caveat)
                             .font(.metadata)
                             .foregroundStyle(.secondaryText)
-                            .padding(.vertical, 4)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 10)
                     }
-                    section("Grew", report.grew, under: path, amount: \.growth, grew: true)
-                    section("Shrank", report.shrank, under: path, amount: \.shrinkage, grew: false)
-                    section("Large files added", report.filesAdded, under: path, amount: \.growth, grew: true)
-                    section("Large files removed", report.filesRemoved, under: path, amount: \.shrinkage, grew: false)
-                    readability("Couldn't be read this time", report.becameUnreadable, under: path,
-                                note: "Not counted as space freed")
-                    readability("Could be read this time", report.becameReadable, under: path, note: "Not counted as growth")
-                    Text(Self.caveat)
-                        .font(.metadata)
-                        .foregroundStyle(.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 10)
                 }
+                .background(PickFollower(hover: hover, proxy: proxy))
             }
         }
     }
@@ -183,7 +196,7 @@ private struct ChangesReport: View {
             ForEach(changes) { change in
                 ChangeRow(store: store, root: usage.rootPath, under: path, change: change,
                           amount: Format.byteChange(change[keyPath: amount], grew: grew, exact: change.isExact),
-                          direction: grew ? .grew : .shrank, detail: StorageChangeStyle.sizes(change), show: show)
+                          direction: grew ? .grew : .shrank, detail: StorageChangeStyle.sizes(change), hover: hover, pick: pick)
             }
         }
     }
@@ -194,7 +207,7 @@ private struct ChangesReport: View {
             SectionTitle(title: title)
             ForEach(changes) { change in
                 ChangeRow(store: store, root: usage.rootPath, under: path, change: change, amount: nil, direction: .unclear,
-                          detail: note, show: show)
+                          detail: note, hover: hover, pick: pick)
             }
         }
     }
@@ -215,7 +228,8 @@ private struct SectionTitle: View {
 }
 
 /// One folder or file that changed: its name and change, then where it is
-/// and its size before and after. Click to find it in the treemap.
+/// and its size before and after. Click to pick it and outline it in the
+/// treemap.
 private struct ChangeRow: View {
     let store: StorageStore
     let root: String
@@ -225,7 +239,8 @@ private struct ChangeRow: View {
     let amount: String?
     let direction: DiskSizeChange.Direction
     let detail: String
-    var show: (String, Bool) -> Void
+    let hover: StorageHover
+    var pick: (DiskSizeChange, Bool, Bool) -> Void
     @State private var isHovering = false
 
     var body: some View {
@@ -257,12 +272,13 @@ private struct ChangeRow: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(isHovering ? 0.06 : 0)))
+        .background(ChangeHighlight(id: change.id, isHovering: isHovering, hover: hover))
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
-        .onTapGesture { show(fullPath, !gone) }
+        .onTapGesture { pick(change, !gone, false) }
         .contextMenu {
-            Button("Show in Treemap") { show(fullPath, !gone) }
+            Button("Show in Treemap") { pick(change, !gone, false) }
+            Button("Open Enclosing Folder") { pick(change, !gone, true) }
             Divider()
             if !gone { Button("Reveal in Finder") { store.reveal(fullPath) } }
             Button("Copy Path") { store.copyPath(fullPath) }
@@ -290,6 +306,37 @@ private struct ChangeRow: View {
             parent = String(parent.dropFirst(under.count).drop { $0 == "/" })
         }
         return parent.isEmpty ? nil : parent
+    }
+}
+
+/// Scrolls the picked change's row into view, such as the largest change
+/// when the list opens. Its own view, so only it reads the pick here.
+private struct PickFollower: View {
+    let hover: StorageHover
+    let proxy: ScrollViewProxy
+
+    var body: some View {
+        Color.clear
+            .onChange(of: hover.markedChange, initial: true) {
+                if let id = hover.markedChange { proxy.scrollTo(id) }
+            }
+    }
+}
+
+/// A change row's background: the picked one in the accent colour, like
+/// its outline in the treemap. Its own view, so a pick redraws only these.
+private struct ChangeHighlight: View {
+    let id: String
+    let isHovering: Bool
+    let hover: StorageHover
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 6)
+        if hover.markedChange == id {
+            shape.fill(Color.accentColor.opacity(0.16)).overlay(shape.strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1))
+        } else {
+            shape.fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+        }
     }
 }
 

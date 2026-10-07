@@ -69,6 +69,26 @@ struct DiskScanComparisonTests {
         #expect(paths == ["Projects", "Projects/app/build"])
     }
 
+    @Test func theLargestChangeComesFirst() throws {
+        let earlier = summary([("", 1_000), ("Movies", 600), ("Downloads", 300), ("Documents", 100)], files: [("Movies/a.mov", 500)])
+        let later = summary([("", 950), ("Movies", 600), ("Downloads", 350), ("Documents", 0)], files: [("Movies/a.mov", 500)])
+        let report = DiskScanComparison(earlier: earlier, later: later).report()
+        // Documents lost 100, more than Downloads gained.
+        let largest = try #require(report.largest)
+        #expect(largest.path == "Documents" && largest.shrinkage == 100)
+        #expect(report.lists(largest.id))
+        #expect(report.lists(try #require(report.grew.first).id))
+        #expect(!report.lists("folder:Movies"))
+        // A folder beats the equal file inside it that explains it, as the list puts it first.
+        let built = summary([("", 1_150), ("Movies", 600), ("Downloads", 300), ("Documents", 250), ("Documents/build", 150)],
+                            files: [("Movies/a.mov", 500), ("Documents/build/app.bin", 150)])
+        let added = DiskScanComparison(earlier: earlier, later: built).report()
+        #expect(added.filesAdded.map(\.path) == ["Documents/build/app.bin"])
+        #expect(added.largest?.path == "Documents/build")
+        // Nothing moved: nothing to show.
+        #expect(DiskScanComparison(earlier: earlier, later: earlier).report().largest == nil)
+    }
+
     @Test func reportsCoverOnlyTheOpenFolder() {
         let earlier = summary([("", 1_000), ("A", 500), ("A/x", 200), ("B", 500), ("B/y", 300)])
         let later = summary([("", 1_400), ("A", 600), ("A/x", 300), ("B", 800), ("B/y", 600)])
