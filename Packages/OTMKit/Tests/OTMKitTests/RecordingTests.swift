@@ -239,4 +239,40 @@ struct HistoryPlaybackTests {
         #expect(step(650, speed: 10) == nil)
         #expect(step(9_999, speed: 10) == nil)
     }
+
+    @Test func startsFromThePinThenThePlayhead() {
+        func start(playhead: Double?, pinned: Double?) -> Date? {
+            HistoryPlayback.start(playhead: playhead.map { Date(timeIntervalSince1970: $0) },
+                                  pinned: pinned.map { Date(timeIntervalSince1970: $0) }, in: points)
+        }
+        // A moment picked to play from wins over where playback was paused.
+        #expect(start(playhead: 20, pinned: 640) == Date(timeIntervalSince1970: 640))
+        #expect(start(playhead: 20, pinned: nil) == Date(timeIntervalSince1970: 20))
+        // One that can't be played from gives way to the other, else the start.
+        #expect(start(playhead: 20, pinned: 9_999) == Date(timeIntervalSince1970: 20))
+        #expect(start(playhead: 650, pinned: nil) == nil)
+        #expect(start(playhead: -5, pinned: nil) == nil)
+        #expect(start(playhead: nil, pinned: nil) == nil)
+        #expect(HistoryPlayback.start(playhead: nil, pinned: Date(timeIntervalSince1970: 0), in: []) == nil)
+    }
+}
+
+struct HistoryFocusTests {
+    private let moment = Date(timeIntervalSince1970: 100)
+    private let other = Date(timeIntervalSince1970: 200)
+
+    @Test func previewThenPinThenPlaybackThenEnd() {
+        #expect(HistoryFocus(hovered: moment, pinned: other, playhead: other, isPlaying: true) == .preview(moment))
+        #expect(HistoryFocus(hovered: nil, pinned: moment, playhead: other, isPlaying: true) == .pinned(moment))
+        #expect(HistoryFocus(hovered: nil, pinned: nil, playhead: moment, isPlaying: true) == .playback(moment, playing: true))
+        #expect(HistoryFocus(hovered: nil, pinned: nil, playhead: moment, isPlaying: false) == .playback(moment, playing: false))
+        #expect(HistoryFocus(hovered: nil, pinned: nil, playhead: nil, isPlaying: false) == .end)
+    }
+
+    @Test func timeIsNilOnlyAtTheEnd() {
+        #expect(HistoryFocus.preview(moment).time == moment)
+        #expect(HistoryFocus.pinned(moment).time == moment)
+        #expect(HistoryFocus.playback(moment, playing: false).time == moment)
+        #expect(HistoryFocus.end.time == nil)
+    }
 }

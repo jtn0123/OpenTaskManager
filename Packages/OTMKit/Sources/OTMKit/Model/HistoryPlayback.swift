@@ -33,6 +33,15 @@ public enum HistoryPlayback {
         }
     }
 
+    /// Where Play starts among `points`: from the pinned moment (a moment
+    /// picked to play from), else on from the playhead, where playback was
+    /// paused, whichever is set and lies before the last point; else nil,
+    /// the first point.
+    public static func start(playhead: Date?, pinned: Date?, in points: [HistoryPoint]) -> Date? {
+        guard let first = points.first?.time, let last = points.last?.time else { return nil }
+        return [pinned, playhead].compactMap { $0 }.first { $0 >= first && $0 < last }
+    }
+
     /// The step after the moment `current` among `points` (oldest first,
     /// numbered by `HistoryPoint.segmented`), or nil once playback reaches
     /// the last point. With no current moment, or one before the first
@@ -56,5 +65,40 @@ public enum HistoryPlayback {
         }
         let delay = points[index].time.timeIntervalSince(current) / speed
         return Step(time: points[index].time, delay: max(delay, shortestStep))
+    }
+}
+
+/// Which moment the History page's side panel shows, and what it's called:
+/// the one under the pointer, else one pinned with a click, else where
+/// playback has reached, else the latest (a recording file's end). So the
+/// panel follows playback whenever no preview or pin is set apart from it.
+public enum HistoryFocus: Sendable, Equatable {
+    /// The moment under the pointer.
+    case preview(Date)
+    /// A moment picked with a click or drag, held while playback moves on.
+    case pinned(Date)
+    /// Where playback has reached, playing or paused.
+    case playback(Date, playing: Bool)
+    /// The last moment recorded.
+    case end
+
+    public init(hovered: Date?, pinned: Date?, playhead: Date?, isPlaying: Bool) {
+        if let hovered {
+            self = .preview(hovered)
+        } else if let pinned {
+            self = .pinned(pinned)
+        } else if let playhead {
+            self = .playback(playhead, playing: isPlaying)
+        } else {
+            self = .end
+        }
+    }
+
+    /// The moment shown; nil for the end, which is the last point.
+    public var time: Date? {
+        switch self {
+        case .preview(let time), .pinned(let time), .playback(let time, _): time
+        case .end: nil
+        }
     }
 }

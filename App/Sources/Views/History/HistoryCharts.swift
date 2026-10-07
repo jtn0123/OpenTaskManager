@@ -117,6 +117,8 @@ struct HistoryChartCard: View {
     let domain: ClosedRange<Date>
     /// When the recording began; the chart dims the time before it.
     let earliest: Date?
+    /// The stretches with nothing recorded, and how they're drawn.
+    let gaps: HistoryGapMarks
     /// Where the time axis is labelled.
     let ticks: [Date]
     let timeLabels: Date.FormatStyle
@@ -174,8 +176,8 @@ struct HistoryChartCard: View {
                 .chartOverlay { proxy in
                     GeometryReader { geometry in
                         if let anchor = proxy.plotFrame {
-                            HistoryPlotOverlay(plot: geometry[anchor], domain: domain, points: points, scrubber: scrubber,
-                                               labels: axisLabels(top: top), tint: spec.tint)
+                            HistoryPlotOverlay(plot: geometry[anchor], domain: domain, points: points, gaps: gaps,
+                                               scrubber: scrubber, labels: axisLabels(top: top), tint: spec.tint)
                         }
                     }
                 }
@@ -183,7 +185,8 @@ struct HistoryChartCard: View {
     }
 
     private func chart(top: Double) -> some View {
-        Chart {
+        let wash = HistoryGapStyle.wash(dark: colorScheme == .dark)
+        return Chart {
             if let earliest, earliest > domain.lowerBound {
                 RectangleMark(xStart: .value("Time", domain.lowerBound), xEnd: .value("Time", min(earliest, domain.upperBound)))
                     .foregroundStyle(.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
@@ -193,17 +196,29 @@ struct HistoryChartCard: View {
                         }
                     }
             }
+            // Fills first, then each gap's wash with a fade either side, so a
+            // fill dissolves into a gap instead of ending in an edge that
+            // reads as the value dropping; the lines go over both.
+            ForEach(spec.lines.filter(\.fill)) { line in
+                ForEach(points) { point in
+                    if let value = line.value(point.values) {
+                        AreaMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
+                                 series: .value("Series", "\(line.name) \(point.segment)"), stacking: .unstacked)
+                            .foregroundStyle(LinearGradient(colors: [line.color.opacity(0.42), line.color.opacity(0.03)],
+                                                            startPoint: .top, endPoint: .bottom))
+                            .interpolationMethod(.monotone)
+                    }
+                }
+            }
+            ForEach(gaps.shades.indices, id: \.self) { index in
+                let shade = gaps.shades[index]
+                RectangleMark(xStart: .value("Time", shade.start), xEnd: .value("Time", shade.end))
+                    .foregroundStyle(Self.style(of: shade.kind, wash: wash))
+            }
             ForEach(spec.lines) { line in
                 ForEach(points) { point in
                     if let value = line.value(point.values) {
                         let series = "\(line.name) \(point.segment)"
-                        if line.fill {
-                            AreaMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
-                                     series: .value("Series", series), stacking: .unstacked)
-                                .foregroundStyle(LinearGradient(colors: [line.color.opacity(0.42), line.color.opacity(0.03)],
-                                                                startPoint: .top, endPoint: .bottom))
-                                .interpolationMethod(.monotone)
-                        }
                         // A wide faint stroke under the line, for the glow.
                         LineMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
                                  series: .value("Series", series + " glow"))
@@ -216,6 +231,17 @@ struct HistoryChartCard: View {
                             .lineStyle(StrokeStyle(lineWidth: line.dashed ? 1.1 : 1.6, lineCap: .round, lineJoin: .round,
                                                    dash: line.dashed ? [4, 3] : []))
                             .interpolationMethod(.monotone)
+                    }
+                }
+            }
+            // A dot where each line breaks off at a gap and where it picks up,
+            // so the break reads as a pause, and a lone point between gaps shows.
+            ForEach(spec.lines.filter { !$0.dashed }) { line in
+                ForEach(gaps.borders, id: \.self) { index in
+                    if index < points.count, let value = line.value(points[index].values) {
+                        PointMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)))
+                            .foregroundStyle(line.color)
+                            .symbolSize(18)
                     }
                 }
             }
@@ -238,19 +264,35 @@ struct HistoryChartCard: View {
         .chartPlotStyle { plot in
             plot.background(LinearGradient(colors: [spec.tint.opacity(0.10), spec.tint.opacity(0.02)],
                                            startPoint: .top, endPoint: .bottom))
+                .overlay { HistoryGapHatch(gaps: gaps.drawn, domain: domain) }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
+    }
+
+    /// A gap's wash, or a fade from nothing into it or out of it.
+    private static func style(of kind: HistoryGap.Shade.Kind, wash: Color) -> LinearGradient {
+        let colors: [Color] = switch kind {
+        case .fadeIn: [wash.opacity(0), wash]
+        case .gap: [wash, wash]
+        case .fadeOut: [wash, wash.opacity(0)]
+        }
+        return LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing)
     }
 }
 
 /// Where moments sit on the History page's time axes, and how they read.
 enum HistoryMoment {
+    /// The time at `x` across a plot `width` wide spanning `domain`.
+    static func time(at x: CGFloat, width: CGFloat, domain: ClosedRange<Date>) -> Date {
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        return domain.lowerBound.addingTimeInterval(span * min(max(x / max(width, 1), 0), 1))
+    }
+
     /// The recorded moment nearest `x` across a plot `width` wide spanning
     /// `domain`, so a pin always lands on a point with figures behind it.
     static func at(x: CGFloat, width: CGFloat, domain: ClosedRange<Date>, points: [HistoryPoint]) -> Date? {
         guard width > 0 else { return nil }
-        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
-        let time = domain.lowerBound.addingTimeInterval(span * min(max(x / width, 0), 1))
+        let time = time(at: x, width: width, domain: domain)
         return HistoryPoint.nearest(to: time, in: points)?.time ?? time
     }
 
@@ -270,11 +312,13 @@ enum HistoryMoment {
 }
 
 /// Axis labels inside the plot, the target where hovering previews a moment
-/// and a click or drag pins one, and the moment markers.
+/// (or names the gap under the pointer) and a click or drag pins one, and
+/// the moment markers.
 private struct HistoryPlotOverlay: View {
     let plot: CGRect
     let domain: ClosedRange<Date>
     let points: [HistoryPoint]
+    let gaps: HistoryGapMarks
     let scrubber: HistoryScrubber
     /// Top and middle of the scale.
     let labels: [String]
@@ -295,12 +339,21 @@ private struct HistoryPlotOverlay: View {
                 .offset(x: plot.minX, y: plot.minY)
                 .onContinuousHover { phase in
                     switch phase {
-                    case .active(let location): scrubber.hovered = moment(at: location.x)
-                    case .ended: scrubber.hovered = nil
+                    case .active(let location): hover(at: location.x)
+                    case .ended: scrubber.hover(nil)
                     }
                 }
-                .gesture(DragGesture(minimumDistance: 0).onChanged { scrubber.pinned = moment(at: $0.location.x) })
-            HistoryMarkers(scrubber: scrubber, plot: plot, domain: domain, tint: tint)
+                .gesture(DragGesture(minimumDistance: 0).onChanged { scrubber.pin(moment(at: $0.location.x)) })
+            HistoryMarkers(scrubber: scrubber, plot: plot, domain: domain, gaps: gaps, tint: tint)
+        }
+    }
+
+    /// Previews the moment under the pointer, or names the gap it's over.
+    private func hover(at x: CGFloat) {
+        if let gap = gaps.gap(at: HistoryMoment.time(at: x, width: plot.width, domain: domain)) {
+            scrubber.hover(nil, gap: gap)
+        } else {
+            scrubber.hover(moment(at: x))
         }
     }
 
@@ -309,30 +362,44 @@ private struct HistoryPlotOverlay: View {
     }
 }
 
-/// The pinned moment's line, with a bead at the top under the rail's
-/// handle, a fainter dashed line at a moment the pointer previews, and the
-/// session being marked or picked shaded. It alone reads the scrubber, so
-/// it's the only part of a chart that redraws as the pointer moves or
-/// playback steps.
+/// The moments on a chart, each marked its own way: where playback is, a
+/// solid line in the replay's tint under a notch; a pinned moment, a line in
+/// the chart's tint under a bead, as the rail's handle sits over it; a
+/// moment the pointer previews, a fainter dashed line; and a gap the pointer
+/// is over, edged. The session being marked or picked is shaded. It alone
+/// reads the scrubber, so it's the only part of a chart that redraws as the
+/// pointer moves or playback steps.
 private struct HistoryMarkers: View {
     let scrubber: HistoryScrubber
     let plot: CGRect
     let domain: ClosedRange<Date>
+    let gaps: HistoryGapMarks
     let tint: Color
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let marked = scrubber.marked {
                 band(marked.start, marked.end)
             }
-            if let hovered = scrubber.hovered, hovered != scrubber.pinned, domain.contains(hovered) {
+            if let gap = scrubber.hoveredGap {
+                edges(of: gaps.drawn(gap))
+            }
+            if let playhead = scrubber.playhead, domain.contains(playhead) {
+                let x = x(of: playhead)
+                Rectangle()
+                    .fill(HistorySessionStyle.tint)
+                    .frame(width: 2, height: plot.height)
+                    .offset(x: x - 1, y: plot.minY)
                 Path { path in
-                    path.move(to: CGPoint(x: 0.5, y: 0))
-                    path.addLine(to: CGPoint(x: 0.5, y: plot.height))
+                    path.move(to: .zero)
+                    path.addLine(to: CGPoint(x: 10, y: 0))
+                    path.addLine(to: CGPoint(x: 5, y: 7))
+                    path.closeSubpath()
                 }
-                .stroke(Color.primary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                .frame(width: 1, height: plot.height)
-                .offset(x: x(of: hovered) - 0.5, y: plot.minY)
+                .fill(HistorySessionStyle.tint)
+                .frame(width: 10, height: 7)
+                .offset(x: x - 5, y: plot.minY - 3)
             }
             if let pinned = scrubber.pinned, domain.contains(pinned) {
                 let x = x(of: pinned)
@@ -345,6 +412,15 @@ private struct HistoryMarkers: View {
                     .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.5))
                     .frame(width: 9, height: 9)
                     .offset(x: x - 4.5, y: plot.minY - 4.5)
+            }
+            if let hovered = scrubber.hovered, hovered != scrubber.pinned, hovered != scrubber.playhead, domain.contains(hovered) {
+                Path { path in
+                    path.move(to: CGPoint(x: 0.5, y: 0))
+                    path.addLine(to: CGPoint(x: 0.5, y: plot.height))
+                }
+                .stroke(Color.primary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .frame(width: 1, height: plot.height)
+                .offset(x: x(of: hovered) - 0.5, y: plot.minY)
             }
         }
         .allowsHitTesting(false)
@@ -367,6 +443,25 @@ private struct HistoryMarkers: View {
                     .frame(width: 1, height: plot.height)
                     .offset(x: x(of: edge) - 0.5, y: plot.minY)
             }
+        }
+    }
+
+    /// The gap under the pointer, darkened a touch between dashed edges.
+    @ViewBuilder private func edges(of gap: HistoryGap) -> some View {
+        if gap.start <= domain.upperBound, gap.end >= domain.lowerBound {
+            let lower = x(of: max(gap.start, domain.lowerBound))
+            let upper = max(x(of: min(gap.end, domain.upperBound)), lower + 1)
+            Rectangle()
+                .fill(Color.primary.opacity(0.05))
+                .frame(width: upper - lower, height: plot.height)
+                .offset(x: lower, y: plot.minY)
+            Path { path in
+                for edge in [lower, upper] {
+                    path.move(to: CGPoint(x: edge, y: plot.minY))
+                    path.addLine(to: CGPoint(x: edge, y: plot.maxY))
+                }
+            }
+            .stroke(HistoryGapStyle.edge(dark: colorScheme == .dark), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
     }
 

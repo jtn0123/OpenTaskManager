@@ -142,43 +142,63 @@ struct ContentView: View {
 }
 
 /// Says whether the numbers are moving and how often they update. Clicking
-/// it opens a popover to change the update speed.
+/// it opens a popover to change the update speed. While the History page
+/// shows a recording file, the replay's badge follows it, in the replay's
+/// tint, so "Pause · Live" stays this Mac's own; it drops the cadence to
+/// leave the page's toolbar items room at 820 points, and a pause there
+/// reads "Live paused", never just "Paused".
 private struct LiveBadge: View {
     @Environment(AppModel.self) private var model
     @State private var isChoosing = false
 
     var body: some View {
         let isPaused = model.isPaused
-        Button {
-            isChoosing.toggle()
-        } label: {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(isPaused ? Color.orange : Color.green)
-                    .frame(width: 7, height: 7)
-                Text(isPaused ? "Paused" : "Live")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(isPaused ? Color.orange : Color.primary)
-                Text("every \(Format.timeSpan(model.updateSpeed.rawValue))")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.secondary)
+        let replay = HistoryRecordingStore.shared.replay
+        HStack(spacing: 6) {
+            Button {
+                isChoosing.toggle()
+            } label: {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(isPaused ? Color.orange : Color.green)
+                        .frame(width: 7, height: 7)
+                    Text(replay != nil && isPaused ? "Live paused" : isPaused ? "Paused" : "Live")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(isPaused ? Color.orange : Color.primary)
+                    if replay == nil {
+                        Text("every \(Format.timeSpan(model.updateSpeed.rawValue))")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background((isPaused ? Color.orange : Color.green).opacity(0.13), in: Capsule())
+                .contentShape(Capsule())
             }
-            .font(.subheadline)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background((isPaused ? Color.orange : Color.green).opacity(0.13), in: Capsule())
-            .contentShape(Capsule())
+            .buttonStyle(.plain)
+            .help(help(replaying: replay != nil))
+            .popover(isPresented: $isChoosing, arrowEdge: .bottom) {
+                UpdateSpeedPicker()
+                    .environment(model)
+            }
+            if let replay {
+                HistoryReplayBadge(status: replay)
+            }
         }
-        .buttonStyle(.plain)
-        .help(isPaused ? "Updates are frozen. Press ⇧⌘P to resume."
-              : "Updating every \(Format.timeSpan(model.updateSpeed.rawValue)). Click to change.")
-        .popover(isPresented: $isChoosing, arrowEdge: .bottom) {
-            UpdateSpeedPicker()
-                .environment(model)
+    }
+
+    private func help(replaying: Bool) -> String {
+        let every = Format.timeSpan(model.updateSpeed.rawValue)
+        guard replaying else {
+            return model.isPaused ? "Updates are frozen. Press ⇧⌘P to resume." : "Updating every \(every). Click to change."
         }
+        return model.isPaused ? "This Mac's live updates are frozen; the recording replays on its own. Press ⇧⌘P to resume them."
+            : "This Mac's live updates carry on every \(every) while the recording replays. Pause stops them, not the replay."
     }
 }
 

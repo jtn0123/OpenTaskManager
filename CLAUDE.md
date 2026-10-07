@@ -90,7 +90,9 @@ Manager OG or any other proprietary task manager.
   Don't swap either for SwiftUI `Path` or `Text` animations. The History page
   is the exception: its graphs are static Swift Charts, reloaded once per graph
   point, and its scrubber line is an overlay that alone reads the pointer, so
-  hovering never redraws the charts. Until a live graph's window fills, the
+  hovering never redraws the charts. Playback moves the scrubber's playhead,
+  apart from a pin or a preview, and gaps (`HistoryGap` in OTMKit) are drawn
+  with the charts, so neither does replay. Until a live graph's window fills, the
   stretch before its first sample is a neutral wash with a faint hatch in the
   scroller (paths built once per size, only moved per sample), its "Not
   recorded yet" label a `CATextLayer` that glides in the render server, and its

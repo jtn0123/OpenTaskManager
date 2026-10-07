@@ -37,9 +37,12 @@ extension HistoryMoment {
 }
 
 /// The timeline over the charts. Its track shows which stretches of the
-/// range were recorded, and its handle carries the pinned moment's time
-/// (or sits at the right end, "Latest"), with times along it below. Clicking
-/// or dragging along it pins a moment, like the charts, hovering previews
+/// range were recorded, and its handle carries the moments shown: where
+/// playback is ("Playing"), a pinned moment, and one the pointer previews
+/// ("Preview"), each its own pill, or "Latest" (a file's "End") at the right
+/// end when nothing is picked; over a gap, what wasn't recorded. Times run
+/// along it below. Clicking or dragging along it moves playback while there
+/// is any, and otherwise pins a moment, like the charts; hovering previews
 /// one, and a Shift-drag marks a session. Saved sessions ride above the
 /// track, and the controls to mark, export and play back sit under it.
 ///
@@ -54,6 +57,8 @@ struct HistoryRail: View {
     /// file, which is read-only.
     let recorder: FlightRecorder?
     let points: [HistoryPoint]
+    /// The stretches with nothing recorded.
+    let gaps: [HistoryGap]
     let domain: ClosedRange<Date>
     /// Seconds each point averages.
     let bucket: TimeInterval
@@ -61,6 +66,8 @@ struct HistoryRail: View {
     /// What a drag along the track does, decided as it starts.
     private enum Drag {
         case pinning
+        /// Moving the playhead, while there's playback.
+        case seeking
         /// Marking a session from this moment, for a Shift-drag.
         case marking(Date)
     }
@@ -91,8 +98,8 @@ struct HistoryRail: View {
             .contentShape(Rectangle())
             .onContinuousHover { phase in
                 switch phase {
-                case .active(let location): scrubber.hovered = moment(at: location.x, width: width)
-                case .ended: scrubber.hovered = nil
+                case .active(let location): hover(at: location.x, width: width)
+                case .ended: scrubber.hover(nil)
                 }
             }
             .gesture(DragGesture(minimumDistance: 0)
@@ -100,22 +107,39 @@ struct HistoryRail: View {
                 .onEnded { _ in drag = nil })
         }
         .frame(height: 22)
-        .help(recorder == nil ? "Click or drag along the timeline or a graph to pin a moment"
-            : "Click or drag along the timeline or a graph to pin a moment. Shift-drag along the timeline to mark a session.")
+        .help(recorder == nil ? "Click or drag along the timeline to move playback, or to pin a moment when there's none"
+            : "Click or drag along the timeline to move playback, or to pin a moment when there's none. "
+            + "Shift-drag along the timeline to mark a session.")
+    }
+
+    /// Previews the moment under the pointer, or names the gap it's over
+    /// (one under 8 points wide counts as that wide).
+    private func hover(at x: CGFloat, width: CGFloat) {
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        let time = HistoryMoment.time(at: x, width: width, domain: domain)
+        if let gap = HistoryGap.gap(at: time, in: gaps, minimumSpan: 8 * span / Double(max(width, 1))) {
+            scrubber.hover(nil, gap: gap)
+        } else {
+            scrubber.hover(moment(at: x, width: width))
+        }
     }
 
     private func dragged(from start: CGFloat, to end: CGFloat, width: CGFloat) {
         guard let time = moment(at: end, width: width) else { return }
         if drag == nil {
             let from = recorder != nil && NSEvent.modifierFlags.contains(.shift) ? moment(at: start, width: width) : nil
-            drag = from.map(Drag.marking) ?? .pinning
+            drag = from.map(Drag.marking) ?? (scrubber.playhead != nil ? .seeking : .pinning)
         }
         switch drag {
         case .marking(let from):
             scrubber.session = nil
             scrubber.draft = HistorySessionDraft(from: from, to: time == from ? nil : time, bucket: bucket)
+        case .seeking:
+            // The panel follows playback to where it's moved.
+            scrubber.pin(nil)
+            if scrubber.playhead != time { scrubber.playhead = time }
         case .pinning, nil:
-            scrubber.pinned = time
+            scrubber.pin(time)
         }
     }
 
@@ -291,38 +315,61 @@ private struct HistoryCoverage: View {
     }
 }
 
-/// The rail's handle, a pill with the pinned moment's time or "Latest" (a
-/// file's "End") at the right end, and a thin line where the pointer previews a moment.
+/// The rail's handle: a pill for each moment shown, each its own look. Where
+/// playback is, in the replay's tint, "Playing" or "Paused"; a pinned moment
+/// in the accent colour; a moment the pointer previews, outlined and dashed
+/// like its line on the charts, "Preview"; and "Latest" (a file's "End") at
+/// the right end while nothing is pinned or played. Over a gap, a tag with
+/// what wasn't recorded takes the preview's place.
 private struct HistoryRailHandle: View {
     let scrubber: HistoryScrubber
     let domain: ClosedRange<Date>
     let bucket: TimeInterval
     let width: CGFloat
 
+    private var plain: Color { Color(nsColor: .controlBackgroundColor) }
+
     var body: some View {
-        if let hovered = scrubber.hovered, hovered != scrubber.pinned, domain.contains(hovered) {
-            let x = HistoryMoment.x(of: hovered, width: width, domain: domain)
-            Capsule()
-                .fill(Color.primary.opacity(0.5))
-                .frame(width: 2, height: 18)
-                .alignmentGuide(.leading) { _ in -(x - 1) }
+        let pinned = scrubber.pinned.flatMap { domain.contains($0) ? $0 : nil }
+        let playhead = scrubber.playhead.flatMap { domain.contains($0) ? $0 : nil }
+        if pinned == nil, playhead == nil {
+            pill(Text(scrubber.endName), at: width, fill: plain, text: Color.accentColor, border: Color.accentColor.opacity(0.7))
         }
-        if let pinned = scrubber.pinned, domain.contains(pinned) {
-            pill(HistoryMoment.label(pinned, bucket: bucket), at: HistoryMoment.x(of: pinned, width: width, domain: domain), pinned: true)
-        } else {
-            pill(scrubber.endName, at: width, pinned: false)
+        if let playhead {
+            let playing = scrubber.isPlaying
+            let label = HistoryMoment.label(playhead, bucket: bucket)
+            pill(Text("\(Image(systemName: playing ? "play.fill" : "pause.fill")) \(playing ? "Playing" : "Paused") \(label)"),
+                 at: x(of: playhead), fill: HistorySessionStyle.tint, text: Color.white)
+        }
+        if let pinned {
+            pill(Text("\(Image(systemName: "pin.fill")) \(HistoryMoment.label(pinned, bucket: bucket))"),
+                 at: x(of: pinned), fill: Color.accentColor, text: Color.white)
+        }
+        if let hovered = scrubber.hovered, hovered != pinned, hovered != playhead, domain.contains(hovered) {
+            pill(Text("Preview \(HistoryMoment.label(hovered, bucket: bucket))"), at: x(of: hovered),
+                 fill: plain, text: Color.primary, border: Color.primary.opacity(0.45), dashed: true)
+        } else if let gap = scrubber.hoveredGap {
+            let middle = min(max(gap.start.addingTimeInterval(gap.duration / 2), domain.lowerBound), domain.upperBound)
+            pill(Text("Not recorded · \(HistoryGapStyle.describe(gap))"), at: x(of: middle),
+                 fill: plain, text: .secondaryText, border: Color.primary.opacity(0.35), dashed: true)
         }
     }
 
+    private func x(of time: Date) -> CGFloat {
+        HistoryMoment.x(of: time, width: width, domain: domain)
+    }
+
     /// A pill centred on `x`, kept within the track.
-    private func pill(_ text: String, at x: CGFloat, pinned: Bool) -> some View {
-        Text(text)
+    private func pill(_ label: Text, at x: CGFloat, fill: Color, text: some ShapeStyle, border: Color = .clear,
+                      dashed: Bool = false) -> some View {
+        label
             .font(.system(size: 11, weight: .semibold).monospacedDigit())
-            .foregroundStyle(pinned ? Color.white : Color.accentColor)
+            .foregroundStyle(text)
+            .lineLimit(1)
             .padding(.horizontal, 8)
             .frame(height: 20)
-            .background(Capsule().fill(pinned ? Color.accentColor : Color(nsColor: .controlBackgroundColor)))
-            .overlay(Capsule().strokeBorder(Color.accentColor.opacity(pinned ? 0 : 0.7)))
+            .background(Capsule().fill(fill))
+            .overlay(Capsule().strokeBorder(border, style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 2] : [])))
             .fixedSize()
             .alignmentGuide(.leading) { size in -min(max(x - size.width / 2, 0), width - size.width) }
     }

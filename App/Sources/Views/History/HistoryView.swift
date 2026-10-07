@@ -49,37 +49,61 @@ enum HistoryRange: Int, CaseIterable, Identifiable {
 }
 
 /// What's picked on the History page's timeline. A click or drag on a graph
-/// or the rail pins a moment, and it stays when the pointer leaves; hovering
-/// previews another moment without moving the pin; playback moves the pin
-/// from point to point. A session being marked and a saved session picked
-/// are shaded on the charts and the rail. Only the markers, the rail and the
-/// side panel read it, so neither the pointer nor playback redraws the charts.
+/// pins a moment, and it stays when the pointer leaves; hovering previews
+/// another moment (or names the gap under the pointer) without moving the
+/// pin. Playback moves a playhead of its own, which stays where it paused;
+/// dragging along the rail moves the playhead while there is one, and pins
+/// a moment otherwise. A session being marked and a saved session picked are
+/// shaded on the charts and the rail. Only the markers, the rail and the side
+/// panel read it, so neither the pointer nor playback redraws the charts.
 @Observable
 @MainActor
 final class HistoryScrubber {
-    /// The moment a click or drag picked; nil follows the latest.
+    /// A moment a click or drag picked; nil follows playback, else the latest.
     var pinned: Date?
     /// The moment under the pointer while it's over a graph or the rail.
     var hovered: Date?
+    /// The stretch with nothing recorded under the pointer, in place of a moment.
+    var hoveredGap: HistoryGap?
+    /// Where playback has reached: it moves while playback plays and stays
+    /// where it paused; nil when there's no playback to go back to.
+    var playhead: Date?
+    /// Set while playback moves the playhead.
+    var isPlaying = false
     /// A session being marked.
     var draft: HistorySessionDraft?
     /// The saved session picked on the rail or from the Recordings menu.
     var session: RecordingSession?
-    /// Set while playback moves the pinned moment.
-    var isPlaying = false
     /// Showing a recording file, whose last moment is its end rather than the latest.
     var showsFile = false
 
-    /// What the moment shown is called when nothing is pinned.
+    /// What the moment shown is called when nothing is pinned or playing.
     var endName: String { showsFile ? "End" : "Latest" }
 
-    /// What the side panel shows: the previewed moment, else the pinned one,
-    /// else (nil) the latest.
-    var time: Date? { hovered ?? pinned }
+    /// Which moment the side panel shows: the preview, else the pinned
+    /// moment, else the playhead, else the latest.
+    var focus: HistoryFocus {
+        HistoryFocus(hovered: hovered, pinned: pinned, playhead: playhead, isPlaying: isPlaying)
+    }
+
+    /// The moment a session is marked from or to: the pinned one, else the playhead's.
+    var picked: Date? { pinned ?? playhead }
 
     /// The point the moment panel shows, among `points`.
     func point(in points: [HistoryPoint]) -> HistoryPoint? {
-        time.flatMap { HistoryPoint.nearest(to: $0, in: points) } ?? points.last
+        focus.time.flatMap { HistoryPoint.nearest(to: $0, in: points) } ?? points.last
+    }
+
+    /// Previews `moment`, or names `gap`, under the pointer. Each is set only
+    /// when it changes: every set redraws the markers, the rail and the panel.
+    func hover(_ moment: Date?, gap: HistoryGap? = nil) {
+        if hovered != moment { hovered = moment }
+        if hoveredGap != gap { hoveredGap = gap }
+    }
+
+    /// Pins `moment`, when it's another.
+    func pin(_ moment: Date?) {
+        if pinned != moment { pinned = moment }
     }
 
     /// The stretch the charts and the rail shade: the session being marked
@@ -93,6 +117,8 @@ final class HistoryScrubber {
     func reset() {
         pinned = nil
         hovered = nil
+        hoveredGap = nil
+        playhead = nil
         draft = nil
         session = nil
     }
@@ -149,6 +175,8 @@ struct HistoryView: View {
     @State private var startsLate = false
     /// Seconds recorded within the range, gaps left out.
     @State private var recorded: TimeInterval = 0
+    /// The stretches within the range with nothing recorded, oldest first.
+    @State private var gaps: [HistoryGap] = []
     @State private var fileSize: Int64 = 0
     /// The page's width: it picks the layout and how often the axes are labelled.
     @State private var width: CGFloat = 0
@@ -189,13 +217,16 @@ struct HistoryView: View {
                 if !compact {
                     // In a scroll view of its own, so it sits under the toolbar like the charts.
                     ScrollView {
-                        HistoryMomentPanel(scrubber: scrubber, points: points ?? [], bucket: bucket, recorder: source)
+                        HistoryMomentPanel(scrubber: scrubber, player: player, points: points ?? [], bucket: bucket, recorder: source)
                             .padding([.top, .bottom, .trailing], 20)
                     }
                     .frame(width: Self.panelWidth)
                 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        }
+        .background {
+            HistoryReplayReporter(player: player, store: store, showsFile: opened != nil)
         }
         .toolbar {
             ToolbarItem {
@@ -222,10 +253,10 @@ struct HistoryView: View {
             }
         }
         .onChange(of: opened?.id) {
-            player.stop()
+            player.pause()
             scrubber.reset()
         }
-        .onDisappear { player.stop() }
+        .onDisappear { player.pause() }
     }
 
     private var header: some View {
@@ -257,13 +288,19 @@ struct HistoryView: View {
                     }
                 }
             }
-            // One line: in a narrow window the cadence and retention move to the tooltip.
-            ViewThatFits(in: .horizontal) {
-                recording(status).fixedSize()
-                recording(shortStatus)
+            HStack(spacing: 8) {
+                // One line: in a narrow window the cadence and retention move to the tooltip.
+                ViewThatFits(in: .horizontal) {
+                    recording(status).fixedSize()
+                    recording(shortStatus)
+                }
+                .help(recordedLabel + status)
+                // A recording file's gaps, counted, each listed a click away.
+                if opened != nil, let points, !gaps.isEmpty {
+                    HistoryGapsMenu(gaps: gaps, points: points, bucket: bucket, scrubber: scrubber)
+                }
             }
             .font(.callout)
-            .help(recordedLabel + status)
         }
     }
 
@@ -327,11 +364,17 @@ struct HistoryView: View {
             }
         } else if let points {
             let axis = timeAxis
+            let gapMarks = HistoryGapMarks(gaps: gaps, points: points, bucket: bucket, domain: domain, plotWidth: plotWidth)
             ForEach(HistoryChartSpec.all(for: points)) { spec in
-                HistoryChartCard(spec: spec, points: points, domain: domain, earliest: earliest,
+                HistoryChartCard(spec: spec, points: points, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
             }
         }
+    }
+
+    /// The charts' plot width: their column, less the page's and the cards' padding and a scroll bar.
+    private var plotWidth: CGFloat {
+        (compact ? width : width - Self.panelWidth) - 40 - 28 - 16
     }
 
     /// The timeline over the charts, once there's something to pick from,
@@ -340,11 +383,11 @@ struct HistoryView: View {
         if let points, !points.isEmpty, source != nil {
             VStack(alignment: .leading, spacing: 10) {
                 if compact {
-                    HistoryMomentSummary(scrubber: scrubber, points: points, bucket: bucket, recorder: source)
+                    HistoryMomentSummary(scrubber: scrubber, player: player, points: points, bucket: bucket, recorder: source)
                 }
                 // Sessions are marked in the live recording; a file is read-only.
                 HistoryRail(scrubber: scrubber, player: player, store: store, recorder: opened == nil ? model.recorder : nil,
-                            points: points, domain: domain, bucket: bucket)
+                            points: points, gaps: gaps, domain: domain, bucket: bucket)
             }
             .padding(.top, 4)
             .padding(.bottom, 8)
@@ -365,8 +408,7 @@ struct HistoryView: View {
             labels = step < 60 ? .dateTime.hour().minute().second()
                 : step >= 86_400 ? .dateTime.weekday(.abbreviated).day() : .dateTime.hour().minute()
         }
-        // The charts' column, less the page's and the cards' padding and a scroll bar.
-        let plot = (compact ? width : width - Self.panelWidth) - 40 - 28 - 16
+        let plot = plotWidth
         let widest = GraphMath.timeTicks(in: domain, step: step).map {
             ($0.formatted(labels) as NSString).size(withAttributes: [.font: Self.axisFont]).width
         }.max() ?? 0
@@ -385,8 +427,8 @@ struct HistoryView: View {
     private var status: String {
         var parts: [String]
         if opened != nil {
-            let gaps = points?.last?.segment ?? 0
-            parts = [gaps == 0 ? "no gaps" : gaps == 1 ? "1 gap" : "\(gaps) gaps", "a record every \(Int(FlightRecorder.span)) s"]
+            // Gaps, when there are any, have a menu of their own after the line.
+            parts = (gaps.isEmpty ? ["no gaps"] : []) + ["a record every \(Int(FlightRecorder.span)) s"]
             if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " file") }
         } else {
             parts = ["every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept for 7 days"]
@@ -453,6 +495,7 @@ struct HistoryView: View {
         bucket = step
         domain = shown
         points = loaded
+        gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown)
         player.points = loaded
         if let speed = store.takeLaunchSpeed() {
             player.speed = speed
@@ -481,10 +524,12 @@ struct HistoryView: View {
         bucket = step
         domain = shown
         points = loaded
+        gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown, since: first)
         player.points = loaded
         store.update(sessions)
-        // A pinned moment that has slid out of the range goes back to the latest.
+        // A pinned moment or playhead that has slid out of the range goes back to the latest.
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }
+        if let playhead = scrubber.playhead, !domain.contains(playhead) { player.stop(scrubber) }
         if let picked = scrubber.session, !sessions.contains(picked) { scrubber.session = nil }
     }
 }
