@@ -397,9 +397,9 @@ private struct HistoryComparisonCard: View {
     }
 
     private var footnote: String {
-        "Averages and peaks cover sampled time only, and totals add up only that time, so a gap counts "
-            + "as nothing rather than as zero. A peak is the busiest \(HistoryInterval.adjective(FlightRecorder.span)) record "
-            + "(for CPU, its busiest update)."
+        let record = HistoryInterval.adjective(recorder?.recordSpan ?? FlightRecorder.span)
+        return "Averages and peaks cover sampled time only, and totals add up only that time, so a gap counts "
+            + "as nothing rather than as zero. A peak is the busiest \(record) record (for CPU, its busiest update)."
     }
 
     private func load() async {
