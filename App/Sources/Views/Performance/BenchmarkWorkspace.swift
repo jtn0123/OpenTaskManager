@@ -5,9 +5,11 @@ import UniformTypeIdentifiers
 
 /// The Benchmarks workspace's own state, kept for the session: the newest
 /// saved result's date for the resource list, the two runs picked for
-/// comparison in each test (remembered between launches), and Run all,
-/// which starts the tests' own stores one after another, so a run started
-/// here is the same run each resource's card shows. Nothing here runs per tick.
+/// comparison in each test and the baseline of its trends (both remembered
+/// between launches), a resource card's request to open the workspace at a
+/// comparison, and Run all, which starts the tests' own stores one after
+/// another, so a run started here is the same run each resource's card
+/// shows. Nothing here runs per tick.
 @Observable
 @MainActor
 final class BenchmarkWorkspace {
@@ -33,6 +35,8 @@ final class BenchmarkWorkspace {
         let kind: BenchmarkKind
         /// Scrolled to the top of the page, under the pinned strip.
         let aligned: Bool
+        /// To the test's section, as there's no pair to show the comparison of.
+        var section = false
         let serial: Int
     }
 
@@ -45,6 +49,7 @@ final class BenchmarkWorkspace {
     }
 
     private static let picksKey = "benchmarkComparePicks"
+    private static let baselinesKey = "benchmarkTrendBaselines"
     private static let includesDiskKey = "benchmarkSuiteIncludesDisk"
     private static let includesNetworkKey = "benchmarkSuiteIncludesNetwork"
 
@@ -57,6 +62,11 @@ final class BenchmarkWorkspace {
     private(set) var picks: [BenchmarkKind: [String]]
     /// The last request to show a comparison; the workspace scrolls when it changes.
     private(set) var reveal: Reveal?
+    /// Each test's trend baseline, by run id: the run every other is measured against.
+    private(set) var baselines: [BenchmarkKind: String]
+    /// Bumped by a resource card's Compare in Benchmarks; the Performance
+    /// page opens the workspace when it changes.
+    private(set) var openRequest = 0
     /// Whether Run all adds the disk test, which writes a temporary file.
     var includesDisk: Bool {
         didSet { UserDefaults.standard.set(includesDisk, forKey: Self.includesDiskKey) }
@@ -71,11 +81,15 @@ final class BenchmarkWorkspace {
     @ObservationIgnored private var suiteTask: Task<Void, Never>?
     @ObservationIgnored private var current: BenchmarkKind?
     @ObservationIgnored private var handledLaunchArguments = false
+    /// The test whose comparison to show once the workspace opens.
+    @ObservationIgnored private var pendingReveal: (kind: BenchmarkKind, section: Bool)?
 
     private init() {
         let defaults = UserDefaults.standard
         let saved = defaults.dictionary(forKey: Self.picksKey) as? [String: [String]] ?? [:]
         picks = Dictionary(uniqueKeysWithValues: saved.compactMap { key, ids in BenchmarkKind(rawValue: key).map { ($0, ids) } })
+        let bases = defaults.dictionary(forKey: Self.baselinesKey) as? [String: String] ?? [:]
+        baselines = Dictionary(uniqueKeysWithValues: bases.compactMap { key, id in BenchmarkKind(rawValue: key).map { ($0, id) } })
         includesDisk = defaults.bool(forKey: Self.includesDiskKey)
         includesNetwork = defaults.bool(forKey: Self.includesNetworkKey)
     }
@@ -118,8 +132,8 @@ final class BenchmarkWorkspace {
         savePicks()
     }
 
-    private func requestReveal(_ kind: BenchmarkKind, aligned: Bool) {
-        reveal = Reveal(kind: kind, aligned: aligned, serial: (reveal?.serial ?? 0) + 1)
+    private func requestReveal(_ kind: BenchmarkKind, aligned: Bool, section: Bool = false) {
+        reveal = Reveal(kind: kind, aligned: aligned, section: section, serial: (reveal?.serial ?? 0) + 1)
     }
 
     func clearPicks(_ kind: BenchmarkKind) {
@@ -129,6 +143,38 @@ final class BenchmarkWorkspace {
 
     private func savePicks() {
         UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: picks.map { ($0.key.rawValue, $0.value) }), forKey: Self.picksKey)
+    }
+
+    // MARK: - From a resource's card
+
+    /// Compare in Benchmarks, under a card's saved runs: ticks the newest of
+    /// `runs` (a test's, on one Mac, volume or interface) and the newest
+    /// earlier one it can be compared with, then opens the workspace at their
+    /// comparison, or at the test's section when no earlier run compares.
+    func compareInWorkspace(_ runs: [BenchmarkRun]) {
+        guard let kind = runs.first?.kind else { return }
+        let pair = BenchmarkComparison.latestPair(runs)
+        if let pair {
+            picks[kind] = [pair.earlier.id, pair.later.id]
+            savePicks()
+        }
+        pendingReveal = (kind, pair == nil)
+        openRequest += 1
+    }
+
+    /// Called once the workspace is on screen, so it can scroll to what a card asked for.
+    func revealPending() {
+        guard let pending = pendingReveal else { return }
+        pendingReveal = nil
+        requestReveal(pending.kind, aligned: true, section: pending.section)
+    }
+
+    // MARK: - Trend baselines
+
+    /// The run `kind`'s trends are measured against, or none.
+    func setBaseline(_ kind: BenchmarkKind, to id: String?) {
+        baselines[kind] = id
+        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: baselines.map { ($0.key.rawValue, $0.value) }), forKey: Self.baselinesKey)
     }
 
     // MARK: - Run all
@@ -223,20 +269,28 @@ final class BenchmarkWorkspace {
 
     /// For screenshots: `-openBenchmarkCompare gpu:1,2` picks a test's
     /// first and second saved runs, newest first, for this launch only, and
-    /// scrolls to their comparison; `-openResource benchmarks -openSpeedTest
-    /// start` starts Run all.
+    /// scrolls to their comparison; `-openBenchmarkBaseline cpu:3` makes a
+    /// test's third newest run its trends' baseline, for this launch only;
+    /// `-openResource benchmarks -openSpeedTest start` starts Run all.
     func handleLaunchArguments(runs: [BenchmarkKind: [BenchmarkRun]], targets: SuiteTargets) {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
-        if let request = LaunchArgument.string("openBenchmarkCompare") {
-            let parts = request.split(separator: ":")
-            if parts.count == 2, let kind = BenchmarkKind(rawValue: String(parts[0])), let saved = runs[kind] {
-                let ids = parts[1].split(separator: ",").compactMap { Int($0) }.compactMap { saved.indices.contains($0 - 1) ? saved[$0 - 1].id : nil }
-                picks[kind] = Array(ids.prefix(2))
-                if ids.count >= 2 { requestReveal(kind, aligned: true) }
-            }
+        if let (kind, ids) = Self.requestedRuns("openBenchmarkCompare", among: runs) {
+            picks[kind] = Array(ids.prefix(2))
+            if ids.count >= 2 { requestReveal(kind, aligned: true) }
+        }
+        if let (kind, ids) = Self.requestedRuns("openBenchmarkBaseline", among: runs), let id = ids.first {
+            baselines[kind] = id
         }
         if LaunchArgument.startsTest(on: "benchmarks") { runAll(targets: targets) }
+    }
+
+    /// "gpu:1,2" in launch argument `name`: the test and those of its saved runs, newest first, 1-based.
+    private static func requestedRuns(_ name: String, among runs: [BenchmarkKind: [BenchmarkRun]]) -> (BenchmarkKind, [String])? {
+        guard let request = LaunchArgument.string(name) else { return nil }
+        let parts = request.split(separator: ":")
+        guard parts.count == 2, let kind = BenchmarkKind(rawValue: String(parts[0])), let saved = runs[kind] else { return nil }
+        return (kind, parts[1].split(separator: ",").compactMap { Int($0) }.compactMap { saved.indices.contains($0 - 1) ? saved[$0 - 1].id : nil })
     }
 
     // MARK: - Export

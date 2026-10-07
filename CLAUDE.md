@@ -54,6 +54,11 @@ Manager OG or any other proprietary task manager.
   Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`,
   `BenchmarkWorkspace`: Run all through the tests' own stores, picks and ticks in
   UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
+  Model/BenchmarkTrend splits a test's runs into lines only comparable runs
+  share and gives each figure's points their spread and verdict against a
+  picked baseline, for the workspace's static Swift Charts (`BenchmarkTrendView`,
+  `-openBenchmarkBaseline cpu:3`); the resource cards fold their runs into
+  `SavedRunsDisclosure`, whose Compare in Benchmarks ticks the latest pair;
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.

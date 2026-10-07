@@ -64,8 +64,9 @@ struct BenchmarksDetail: View, Equatable {
                 Task {
                     // The comparison appears with the pick; scroll once it's laid out.
                     try? await Task.sleep(for: .milliseconds(120))
+                    let target = reveal.section ? BenchmarkAnchor.section(reveal.kind) : BenchmarkAnchor.comparison(reveal.kind)
                     withAnimation(.easeInOut(duration: 0.3)) {
-                        proxy.scrollTo(BenchmarkAnchor.comparison(reveal.kind), anchor: reveal.aligned ? .top : nil)
+                        proxy.scrollTo(target, anchor: reveal.aligned ? .top : nil)
                     }
                 }
             }
@@ -75,6 +76,8 @@ struct BenchmarksDetail: View, Equatable {
             await NetworkQualityStore.shared.load()
             let runs = Dictionary(uniqueKeysWithValues: BenchmarkKind.allCases.map { ($0, BenchmarkHistories.runs($0)) })
             BenchmarkWorkspace.shared.handleLaunchArguments(runs: runs, targets: places.suiteTargets)
+            // A card's Compare in Benchmarks opened the workspace.
+            BenchmarkWorkspace.shared.revealPending()
         }
     }
 }
@@ -160,6 +163,25 @@ enum BenchmarkLook {
         case .gpu: "GPU"
         case .disk: "Disk"
         case .network: "Internet"
+        }
+    }
+
+    /// A verdict's mark, in a comparison's table and beside a trend.
+    static func symbol(_ verdict: BenchmarkChange.Verdict) -> String {
+        switch verdict {
+        case .better: "checkmark.circle.fill"
+        case .worse: "exclamationmark.circle.fill"
+        case .withinSpread, .negligible, .unchanged: "equal.circle"
+        case .measuredOnce: "questionmark.circle"
+        }
+    }
+
+    /// Better and worse in colour; the verdicts that aren't a change in secondary text.
+    static func color(_ verdict: BenchmarkChange.Verdict) -> AnyShapeStyle {
+        switch verdict {
+        case .better: AnyShapeStyle(better)
+        case .worse: AnyShapeStyle(worse)
+        case .withinSpread, .negligible, .measuredOnce, .unchanged: AnyShapeStyle(.secondaryText)
         }
     }
 
@@ -689,6 +711,10 @@ private struct BenchmarkSection: View {
             if let latest {
                 LatestFigures(run: latest, tint: tint)
                     .equatable()
+                if runs.count > 1 {
+                    BenchmarkTrendView(kind: kind, runs: runs)
+                        .equatable()
+                }
                 SavedRuns(kind: kind, runs: runs)
                     .equatable()
             } else if run == nil {
@@ -862,7 +888,8 @@ private struct FigureTile: View {
     }
 }
 
-private extension String {
+extension String {
+    /// "Low Power Mode on; thermal state fair" with its first letter raised, for a sentence of conditions.
     var capitalizedFirst: String {
         prefix(1).uppercased() + dropFirst()
     }

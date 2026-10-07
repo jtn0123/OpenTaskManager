@@ -63,6 +63,8 @@ struct PerformanceView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onAppear { openRequestedResource(snapshot) }
             .task { await BenchmarkWorkspace.shared.loadSummary() }
+            // A card's Compare in Benchmarks; the workspace scrolls to the comparison itself.
+            .onChange(of: BenchmarkWorkspace.shared.openRequest) { selected = .benchmarks }
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
