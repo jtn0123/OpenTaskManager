@@ -39,7 +39,7 @@ struct DiskSpeedCard: View, Equatable {
                 tiles(result: nil, progress: progress)
             } else {
                 Text(caption)
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if let run {
@@ -54,7 +54,7 @@ struct DiskSpeedCard: View, Equatable {
                     tiles(result: latest, progress: nil)
                     Text("Tested \(latest.date.formatted(date: .abbreviated, time: .shortened)) on \(latest.volume.name). "
                         + DiskSpeedTest.methodNote(latest))
-                        .font(.metadata)
+                        .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -133,7 +133,7 @@ struct DiskSpeedCard: View, Equatable {
     /// A tile per phase: figures once it's done, the speed so far while it
     /// runs, a dash until then.
     private func tiles(result: DiskSpeedResult?, progress: DiskSpeedProgress?) -> some View {
-        FillGrid(minimum: 120, spacing: 10) {
+        FillGrid(minimum: 130, spacing: 10) {
             ForEach(Self.order, id: \.self) { phase in
                 if let measurement = result?.measurement(phase) ?? progress?.finished[phase] {
                     SpeedTile(title: phase.title, value: Format.megabytesPerSecond(measurement.bytesPerSecond),
@@ -150,7 +150,7 @@ struct DiskSpeedCard: View, Equatable {
 
     private func history(_ results: [DiskSpeedResult], on target: DiskSpeedTarget) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Recent tests on \(results.first?.volume.name ?? target.title)").font(.subheadline.weight(.semibold))
+            Text("Recent tests on \(results.first?.volume.name ?? target.title)").font(.callout.weight(.semibold))
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 GridRow {
                     Text("When")
@@ -159,7 +159,7 @@ struct DiskSpeedCard: View, Equatable {
                     Text("4K read").gridColumnAlignment(.trailing)
                     Text("4K write").gridColumnAlignment(.trailing)
                 }
-                .font(.metadata)
+                .font(.tableText)
                 .foregroundStyle(.secondaryText)
                 ForEach(results) { result in
                     GridRow {
@@ -189,13 +189,13 @@ private struct SpeedTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
+            Text(title).font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
             Text(value)
                 .font(.title3.weight(.medium))
                 .monospacedDigit()
                 .lineLimit(1)
                 .foregroundStyle(provisional ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
-            Text(detail).font(.metadata).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(1)
+            Text(detail).font(.callout).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

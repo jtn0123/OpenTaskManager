@@ -32,7 +32,7 @@ struct InternetQualityCard: View, Equatable {
                                  expected: "about \(Int(NetworkQuality.typicalSeconds)) s")
             } else {
                 Text(caption(lastBytes: results.first?.bytesTransferred))
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if let run {
@@ -102,7 +102,7 @@ struct InternetQualityCard: View, Equatable {
                 RatingLine(rating: NetworkResponsiveness(rpm: rpm), rpm: rpm)
             }
             Text(Self.details(result))
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -125,7 +125,7 @@ struct InternetQualityCard: View, Equatable {
 
     private func history(_ results: [NetworkQualityResult]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Recent tests on \(interface)").font(.subheadline.weight(.semibold))
+            Text("Recent tests on \(interface)").font(.callout.weight(.semibold))
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 GridRow {
                     Text("When")
@@ -133,7 +133,7 @@ struct InternetQualityCard: View, Equatable {
                     Text("Upload").gridColumnAlignment(.trailing)
                     Text("Responsiveness")
                 }
-                .font(.metadata)
+                .font(.tableText)
                 .foregroundStyle(.secondaryText)
                 ForEach(results) { result in
                     GridRow {

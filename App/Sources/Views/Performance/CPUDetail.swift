@@ -193,7 +193,7 @@ struct CPUDetail: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(topology.tiers, id: \.level) { tier in
                 let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level && histories.indices.contains($0) }
-                Text("\(tier.name) cores").font(.subheadline).foregroundStyle(.secondaryText)
+                Text("\(tier.name) cores").font(.callout).foregroundStyle(.secondaryText)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(max(cpus.count, 1), 6)), spacing: 6) {
                     ForEach(cpus, id: \.self) { cpu in
                         coreGraph(cpu, values: histories[cpu], top: top, color: Theme.tier(tier.level))
@@ -216,9 +216,10 @@ struct CPUDetail: View {
                 HStack {
                     Text("\(cpu)").foregroundStyle(.secondaryText)
                     Spacer()
-                    Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? color : .secondary)
+                    Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? AnyShapeStyle(color) : AnyShapeStyle(.secondaryText))
                 }
-                .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+                // The metadata size: in a small multiple, a bigger label would hide the graph's top.
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
                 .padding(.horizontal, 5)
                 .padding(.top, 3)
             }

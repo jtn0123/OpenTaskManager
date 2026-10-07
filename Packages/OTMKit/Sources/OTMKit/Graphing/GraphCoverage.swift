@@ -37,19 +37,19 @@ public struct GraphCoverage: Equatable, Sendable {
         return "\(Format.timeSpan(collectedSeconds)) collected"
     }
 
-    /// "45 s collected · 5-minute window", while the window is filling.
+    /// "45 s collected · 5 min window", while the window is filling: the
+    /// graph's one note on its unrecorded stretch, at its foot.
     public var caption: String? {
         shortCaption.map { "\($0) · \(Self.window(Double(capacity) * interval))" }
     }
 
-    /// "5-minute window", "30-second window", or "2 min 30 s window" for a
-    /// span that isn't a whole number of one unit.
+    /// The caption as VoiceOver reads it, saying what the shaded stretch is.
+    public var spokenCaption: String? {
+        caption.map { "\($0). Not recorded before that." }
+    }
+
+    /// "5 min window", "30 s window", "2 min 30 s window": in the time axis's units.
     static func window(_ seconds: TimeInterval) -> String {
-        let whole = Int(seconds.rounded())
-        guard Double(whole) == seconds, whole > 0 else { return "\(Format.timeSpan(seconds)) window" }
-        if whole % 3600 == 0 { return "\(whole / 3600)-hour window" }
-        if whole % 60 == 0 { return "\(whole / 60)-minute window" }
-        if whole < 60 { return "\(whole)-second window" }
-        return "\(Format.timeSpan(seconds)) window"
+        "\(Format.timeSpan(seconds)) window"
     }
 }
