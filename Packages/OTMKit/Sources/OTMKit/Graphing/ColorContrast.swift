@@ -17,6 +17,7 @@ public enum ColorContrast {
         }
 
         public static let white = RGB(red: 1, green: 1, blue: 1)
+        public static let black = RGB(red: 0, green: 0, blue: 0)
 
         /// Every component times `factor`: the same hue and saturation, darker.
         func scaled(_ factor: Double) -> RGB {
@@ -37,6 +38,14 @@ public enum ColorContrast {
     public static func ratio(_ first: RGB, _ second: RGB) -> Double {
         let (a, b) = (luminance(first), luminance(second))
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
+
+    /// `color` laid over `background` at `opacity`: what the eye sees of a
+    /// translucent wash or ink.
+    public static func composite(_ color: RGB, opacity: Double, over background: RGB) -> RGB {
+        let alpha = min(max(opacity, 0), 1)
+        func mix(_ top: Double, _ bottom: Double) -> Double { top * alpha + bottom * (1 - alpha) }
+        return RGB(red: mix(color.red, background.red), green: mix(color.green, background.green), blue: mix(color.blue, background.blue))
     }
 
     /// `color` darkened just enough to reach `minimum` contrast against white.

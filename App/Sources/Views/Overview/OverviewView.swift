@@ -9,6 +9,8 @@ struct OverviewView: View {
     var body: some View {
         if let snapshot = model.snapshot {
             let groups = model.appGroups
+            // Unknown until the first samples say; until then the card stays.
+            let measuresEnergy = snapshot.measuresProcessEnergy != false
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     FillGrid(minimum: 210) {
@@ -28,10 +30,15 @@ struct OverviewView: View {
                                 metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
                         TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
                                 metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
-                        TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
-                                metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01,
-                                unavailable: snapshot.measuresProcessEnergy == false ? Unavailable.energy : nil)
+                        if measuresEnergy {
+                            TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
+                                    metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
+                        }
                         TopNetworkCard()
+                    }
+                    // A whole card would only say there's nothing to rank.
+                    if !measuresEnergy {
+                        CapabilityNotice(title: "Top Energy", symbol: "bolt.fill", color: Theme.power, text: Unavailable.energy)
                     }
                     StorageCard(volumes: snapshot.volumes)
                 }
@@ -162,9 +169,9 @@ private struct GaugeCard: View {
                     VStack(spacing: -2) {
                         if let value {
                             AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
-                            Text(unit).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                            Text(unit).font(.metadata.weight(.medium)).foregroundStyle(.secondaryText)
                         } else {
-                            Text("—").font(.system(size: 26, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                            Text("—").font(.system(size: 26, weight: .semibold, design: .rounded)).foregroundStyle(.secondaryText)
                         }
                     }
                 }
@@ -174,7 +181,12 @@ private struct GaugeCard: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title).font(.title3.weight(.semibold))
                         ForEach(details.indices, id: \.self) { index in
-                            Text(details[index]).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            Text(details[index])
+                                .font(.metadata)
+                                .foregroundStyle(.secondaryText)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                         }
                     }
                     Spacer(minLength: 4)
@@ -185,6 +197,33 @@ private struct GaugeCard: View {
             }
             .frame(height: 96)
         }
+    }
+}
+
+/// A one-line note where a card would be, for a ranking this Mac can't
+/// make, so saying so doesn't take a whole card's room. The dashed edge
+/// marks it as something missing rather than a reading.
+private struct CapabilityNotice: View {
+    var title: String
+    var symbol: String
+    var color: Color
+    var text: String
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 10)
+        HStack(spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(color)
+            Text(title).fontWeight(.medium).fixedSize()
+            Text(text).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .font(.callout)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(color.fillShade.opacity(0.06), in: shape)
+        .overlay(shape.strokeBorder(Color.primary.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+        .help("\(title) isn't available. \(text)")
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -199,7 +238,7 @@ private struct CoreMap: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Cores").font(.headline)
                 Spacer()
-                Text("\(topology.brand) · load by core type").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(topology.brand) · load by core type").font(.metadata).foregroundStyle(.secondaryText)
             }
             HStack(alignment: .top, spacing: 24) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -234,7 +273,7 @@ private struct CoreMap: View {
                     Text(tier.name).font(.callout.weight(.medium))
                 }
                 Text("\(cpus.count) cores · \(Format.percent(average))")
-                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    .font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
             }
             .frame(width: 130, alignment: .leading)
             VStack(alignment: .leading, spacing: CoreTileRow.spacing) {
@@ -294,8 +333,8 @@ struct ThroughputCard: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         Label(title, systemImage: symbol)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
+                            .font(.metadata.weight(.medium))
+                            .foregroundStyle(.secondaryText)
                         rate(rates.0, symbol: "arrow.down", color: color).help(labels.0)
                         rate(rates.1, symbol: "arrow.up", color: secondaryColor).help(labels.1)
                     }
@@ -351,11 +390,11 @@ private struct StorageCard: View {
                             Text(volume.name).font(.callout.weight(.medium)).lineLimit(1)
                             Spacer()
                             Text("\(Format.bytes(volume.availableBytes)) free")
-                                .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                                .font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
                         }
                         StackedBar(segments: [.init(label: "Used", value: used, color: Theme.pressure(used))], total: 1, height: 8)
                         Text("\(Format.bytes(volume.usedBytes)) of \(Format.bytes(volume.totalBytes)) used")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                            .font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
                     }
                 }
             }

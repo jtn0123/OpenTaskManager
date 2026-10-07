@@ -147,17 +147,17 @@ struct TopNetworkCard: View {
                 Spacer(minLength: 8)
                 Text("every \(Format.timeSpan(NetworkActivityStore.refreshSeconds))")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .help("Read with nettop every \(Format.timeSpan(NetworkActivityStore.refreshSeconds)) while this page is open")
             }
             if !store.hasMeasured {
                 if store.isUnavailable {
                     UnavailableNote(text: Unavailable.processNetwork)
                 } else {
-                    Text("Measuring…").font(.callout).foregroundStyle(.secondary)
+                    Text("Measuring…").font(.callout).foregroundStyle(.secondaryText)
                 }
             } else if top.isEmpty {
-                Text("Quiet right now.").font(.callout).foregroundStyle(.secondary)
+                Text("Quiet right now.").font(.callout).foregroundStyle(.secondaryText)
             }
             VStack(spacing: 4) {
                 ForEach(top, id: \.self) { pid in
@@ -198,7 +198,7 @@ struct NetworkUsageRow: View {
             Image(nsImage: icon).resizable().frame(width: 16, height: 16)
             Text(name).lineLimit(1)
             if let badge {
-                Text(badge).foregroundStyle(.secondary).fixedSize()
+                Text(badge).foregroundStyle(.secondaryText).fixedSize()
             }
             Spacer(minLength: 8)
             rate(usage.received, symbol: "arrow.down", color: Theme.network)
@@ -221,7 +221,7 @@ struct NetworkUsageRow: View {
     private func rate(_ value: Double, symbol: String, color: Color) -> some View {
         HStack(spacing: 3) {
             Image(systemName: symbol).font(.caption2.weight(.bold)).foregroundStyle(color)
-            Text(Format.bitsPerSecond(value)).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+            Text(Format.bitsPerSecond(value)).monospacedDigit().foregroundStyle(.secondaryText).lineLimit(1)
         }
         .frame(width: Self.rateColumnWidth, alignment: .trailing)
     }

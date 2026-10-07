@@ -475,7 +475,7 @@ final class StreamGraphView: NSView {
         // Light mode needs a firmer grid to hold up on a pale plot.
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let lineColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.09 : 0.15).cgColor
-        let labelColor = NSColor.secondaryLabelColor.cgColor
+        let labelColor = NSColor.secondaryText.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
         if configuration.showsGrid {
@@ -509,9 +509,9 @@ final class StreamGraphView: NSView {
         topLabel.isHidden = axis == nil
         midLabel.isHidden = axis == nil
         guard let axis else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         for (label, value, y) in [(topLabel, ceiling, plotRect.height - padding), (midLabel, ceiling / 2, padding + usable / 2)] {
-            let color = NSColor(cgColor: labelColor) ?? .secondaryLabelColor
+            let color = NSColor(cgColor: labelColor) ?? .secondaryText
             let text = NSAttributedString(string: axis(value), attributes: [.font: font, .foregroundColor: color])
             if (label.string as? NSAttributedString)?.string != text.string, hasDrawn {
                 let fade = CATransition()

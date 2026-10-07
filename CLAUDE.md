@@ -136,4 +136,10 @@ locked or the window is on another Space.
   list is an `HStack` column sized from the page width, not an `HSplitView`,
   whose minimum widths pushed the page past both window edges. Below 760 points
   History moves its moment panel into a summary over the charts.
+- Secondary text (labels, captions, units, footnotes) takes
+  `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt), and table
+  and list rows `.font(.tableText)` (12 pt), all from `Graphs.swift`. The
+  system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
+  A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`
+  (`TableFit.swift`), so no empty striped rows follow the last one.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

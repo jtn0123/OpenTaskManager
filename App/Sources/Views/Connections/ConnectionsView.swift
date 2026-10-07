@@ -54,8 +54,16 @@ struct ConnectionsView: View {
                 widthKey: "connectionInspectorWidth",
                 backTitle: "Connections"
             ) {
-                ConnectionTable(rows: shown, selection: $selection, sortOrder: $sortOrder)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 0) {
+                    // Only as tall as its rows, so no empty stripes follow the
+                    // last socket; with more rows than room it fills and scrolls.
+                    ConnectionTable(rows: shown, selection: $selection, sortOrder: $sortOrder)
+                        .fitsTableToRows(shown.count)
+                        .layoutPriority(1)
+                    Divider()
+                    tableFooter(shown: shown.count)
+                    Spacer(minLength: 0)
+                }
             } detail: {
                 if let selected {
                     ScrollView {
@@ -65,8 +73,6 @@ struct ConnectionsView: View {
                     }
                 }
             }
-            Divider()
-            statusBar(shown: shown.count)
         }
         .onAppear(perform: selectRequestedConnection)
         // The details come with a selection here, so in a narrow window
@@ -98,31 +104,58 @@ struct ConnectionsView: View {
             .fixedSize()
             .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
             Spacer()
+        }
+    }
+
+    /// Right under the last row: how many sockets show, and that only the
+    /// user's own processes' sockets can be listed. Detail drops out as the
+    /// table narrows, so it stays one line.
+    private func tableFooter(shown: Int) -> some View {
+        let total = store.rows.count
+        let sockets = Self.count(total, "socket", "sockets")
+        let count = shown == total ? sockets : shown == 0 ? "None of \(sockets) match" : "\(shown.formatted()) of \(sockets)"
+        let processes = Self.count(store.summary.processesWithSockets, "process", "processes") + " with sockets"
+        return ViewThatFits(in: .horizontal) {
+            footerLine(count: count, processes: processes, longNote: true, showsCadence: true)
+            footerLine(count: count, processes: processes, longNote: false, showsCadence: true)
+            footerLine(count: count, processes: nil, longNote: false, showsCadence: false)
+        }
+        .font(.metadata)
+        .foregroundStyle(.secondaryText)
+        .monospacedDigit()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func footerLine(count: String, processes: String?, longNote: Bool, showsCadence: Bool) -> some View {
+        HStack(spacing: 14) {
+            Text(count).foregroundStyle(Color.primary)
+            if let processes { Text(processes) }
             if store.hiddenProcesses > 0 {
-                Label("\(store.hiddenProcesses) processes hidden", systemImage: "eye.slash")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                let hidden = store.hiddenProcesses.formatted()
+                Label(longNote ? "Only your own processes' sockets are listed · \(hidden) processes hidden"
+                                : "Your processes only · \(hidden) hidden",
+                      systemImage: "eye.slash")
                     .help("""
                     macOS only lets an app list the sockets of your own processes. Sockets held by root and \
                     other users, such as system daemons, aren't shown. A privileged helper that lifts this is planned.
                     """)
             }
+            if showsCadence {
+                Spacer(minLength: 12)
+                Text("Updates every \(Int(ConnectionStore.refreshInterval.components.seconds)) s")
+                    .help("""
+                    Read every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page is open. The last \
+                    walk of every process's sockets took \(Format.fixed(store.walkDuration * 1000, 1)) ms.
+                    """)
+            }
         }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func statusBar(shown: Int) -> some View {
-        HStack(spacing: 16) {
-            Text("\(shown) of \(store.rows.count) sockets")
-            Text("\(store.summary.processesWithSockets) processes with sockets")
-            Spacer()
-            Text("Updates every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page is open")
-                .help("The last walk of every process's sockets took \(Format.fixed(store.walkDuration * 1000, 1)) ms.")
-        }
-        .font(.subheadline)
-        .monospacedDigit()
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
+    private static func count(_ value: Int, _ singular: String, _ plural: String) -> String {
+        "\(value.formatted()) \(value == 1 ? singular : plural)"
     }
 
     private func showProcess(_ pid: Int32) {
@@ -175,8 +208,8 @@ private struct SummaryCard: View {
             } icon: {
                 Image(systemName: symbol).foregroundStyle(tint)
             }
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .font(.metadata.weight(.medium))
+            .foregroundStyle(.secondaryText)
             // A title that wraps to two lines makes its card the row's
             // height; the numbers stay on one line across the row.
             Spacer(minLength: 0)
