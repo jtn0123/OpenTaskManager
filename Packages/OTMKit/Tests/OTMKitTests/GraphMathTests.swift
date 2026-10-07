@@ -121,6 +121,32 @@ struct GraphMathTests {
         #expect(stacked[2] == [1, 12, 123])
     }
 
+    @Test func tailSumAlignsOnNewestValues() {
+        #expect(GraphMath.tailSum([[1, 2, 3], [10, 20], [-5]]) == [1, 12, 18])
+        #expect(GraphMath.tailSum([]).isEmpty)
+        #expect(GraphMath.tailSum([[], [4]]) == [4])
+    }
+
+    @Test func remainderIsWhatThePartsLeaveAndNeverNegative() {
+        // Parts newer than the total's start line up on its newest values.
+        #expect(GraphMath.remainder(of: [10, 10, 10, 10], minus: [[1, 2], [3]]) == [10, 10, 9, 5])
+        // More used than the total, from rounding, floors at zero.
+        #expect(GraphMath.remainder(of: [1, 2], minus: [[5, 1]]) == [0, 1])
+        // Parts longer than the total: only their newest values count.
+        #expect(GraphMath.remainder(of: [5, 5], minus: [[9, 9, 1, 2]]) == [4, 3])
+        #expect(GraphMath.remainder(of: [3, 4], minus: []) == [3, 4])
+        #expect(GraphMath.remainder(of: [], minus: [[1]]).isEmpty)
+    }
+
+    @Test func finitePeakSkipsUnreadableValuesAndLooksOnlyAtTheTail() {
+        #expect(GraphMath.finitePeak([1, .nan, 7, .infinity, 3]) == 7)
+        #expect(GraphMath.finitePeak([9, 1, 2], last: 2) == 2)
+        #expect(GraphMath.finitePeak([9, 1, 2], last: 10) == 9)
+        #expect(GraphMath.finitePeak([]) == 0)
+        #expect(GraphMath.finitePeak([.nan]) == 0)
+        #expect(GraphMath.finitePeak([-3, -1]) == -1)
+    }
+
     @Test func timeTicksLandOnRoundTimesAwayFromTheEnds() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "UTC"))

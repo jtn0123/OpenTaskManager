@@ -301,7 +301,7 @@ private struct SystemAccountsCard: View {
     var body: some View {
         let totals = UserUsageBuilder.total(users)
         let scale = model.cpuScale
-        let cpuHistory = AppModel.tailSum(users.compactMap { model.userHistory[$0.uid]?.cpu.values }).map(scale.value)
+        let cpuHistory = GraphMath.tailSum(users.compactMap { model.userHistory[$0.uid]?.cpu.values }).map(scale.value)
         Card(tint: UsersText.systemTint, glow: min(totals.cpuPercent / Double(100 * max(scale.logicalCores, 1)), 1)) {
             Button { isOpen.toggle() } label: {
                 HeadingRow(spacing: 12, indent: 82) {

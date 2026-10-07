@@ -149,7 +149,7 @@ struct CPUDetail: View {
     private func byApp() -> some View {
         let cores = Double(max(model.topology.logicalCores, 1))
         let apps = model.topApps(by: .cpu, scale: 1 / 100 / cores, count: 5)
-        let other = AppModel.remainder(of: model.cpuHistory.values, minus: apps.map(\.values))
+        let other = GraphMath.remainder(of: model.cpuHistory.values, minus: apps.map(\.values))
         let colors = Theme.appColors(for: apps.map(\.id), in: "cpu")
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]

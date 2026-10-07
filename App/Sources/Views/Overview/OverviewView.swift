@@ -176,8 +176,8 @@ struct OverviewView: View {
             title: "Disk", symbol: "internaldrive", color: Theme.disk, secondaryColor: Theme.diskSecondary,
             labels: ("Read", "Write"),
             rates: (snapshot.disks.reduce(0) { $0 + $1.readBytesPerSecond }, snapshot.disks.reduce(0) { $0 + $1.writeBytesPerSecond }),
-            histories: (AppModel.tailSum(ids.map { model.diskReadHistory[$0]?.values ?? [] }),
-                        AppModel.tailSum(ids.map { model.diskWriteHistory[$0]?.values ?? [] })),
+            histories: (GraphMath.tailSum(ids.map { model.diskReadHistory[$0]?.values ?? [] }),
+                        GraphMath.tailSum(ids.map { model.diskWriteHistory[$0]?.values ?? [] })),
             format: Format.bytesPerSecond, minimumScale: 1_048_576, units: .binaryBytes, compact: isNarrow
         )
     }
@@ -495,8 +495,8 @@ struct NetworkTrafficCard: View {
             title: title, symbol: "network", color: Theme.network, secondaryColor: Theme.networkSecondary,
             labels: ("Receive", "Send"),
             rates: (links.reduce(0) { $0 + $1.receivedBytesPerSecond }, links.reduce(0) { $0 + $1.sentBytesPerSecond }),
-            histories: (AppModel.tailSum(ids.map { model.networkInHistory[$0]?.values ?? [] }),
-                        AppModel.tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
+            histories: (GraphMath.tailSum(ids.map { model.networkInHistory[$0]?.values ?? [] }),
+                        GraphMath.tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
             format: Format.bitsPerSecond, minimumScale: 125_000, units: .bits, compact: compact
         )
     }

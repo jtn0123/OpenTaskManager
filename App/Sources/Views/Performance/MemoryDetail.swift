@@ -135,7 +135,7 @@ struct MemoryDetail: View {
 
     private func byApp() -> some View {
         let apps = model.topApps(by: .memory, count: 6)
-        let other = AppModel.remainder(of: model.processMemoryHistory.values, minus: apps.map(\.values))
+        let other = GraphMath.remainder(of: model.processMemoryHistory.values, minus: apps.map(\.values))
         let colors = Theme.appColors(for: apps.map(\.id), in: "memory")
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]

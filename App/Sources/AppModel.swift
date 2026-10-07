@@ -661,26 +661,6 @@ final class AppModel {
         }
     }
 
-    /// Adds histories element-wise, aligned on their newest values.
-    static func tailSum(_ series: [[Double]]) -> [Double] {
-        let length = series.map(\.count).max() ?? 0
-        var result = [Double](repeating: 0, count: length)
-        for values in series {
-            let offset = length - values.count
-            for index in values.indices { result[offset + index] += values[index] }
-        }
-        return result
-    }
-
-    /// `total` minus the sum of `parts`, aligned on the newest value and never negative.
-    static func remainder(of total: [Double], minus parts: [[Double]]) -> [Double] {
-        let used = tailSum(parts)
-        return total.enumerated().map { index, value in
-            let offset = index - (total.count - used.count)
-            return max(value - (offset >= 0 ? used[offset] : 0), 0)
-        }
-    }
-
     /// Average load of one core tier over time, aligned on the newest sample.
     func tierHistory(level: Int) -> [Double] {
         let histories = topology.tierForCPU.indices

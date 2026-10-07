@@ -301,7 +301,8 @@ final class StreamGraphView: NSView {
         let previousCeiling = ceiling
         // The peak is scanned for only when there's no fixed top.
         ceiling = configuration.maxValue
-            ?? min(GraphMath.ceiling(peak: shown.joined().max() ?? 0, floor: configuration.minimumCeiling, units: configuration.axisUnits),
+            ?? min(GraphMath.ceiling(peak: shown.map { GraphMath.finitePeak($0) }.max() ?? 0,
+                                     floor: configuration.minimumCeiling, units: configuration.axisUnits),
                    configuration.maximumCeiling)
         let rescales = hasDrawn && newSample && previousCeiling != ceiling && !reduceMotion
 

@@ -230,7 +230,7 @@ struct PowerDetail: View {
     /// GPU work, so this sits below the whole-system figure.
     private func byApp() -> some View {
         let apps = model.topApps(by: .power, count: 5)
-        let other = AppModel.remainder(of: model.processPowerHistory.values, minus: apps.map(\.values))
+        let other = GraphMath.remainder(of: model.processPowerHistory.values, minus: apps.map(\.values))
         let colors = Theme.appColors(for: apps.map(\.id), in: "power")
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
