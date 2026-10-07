@@ -25,7 +25,9 @@ Manager OG or any other proprietary task manager.
   parse `launchctl` output; System/DiskUsageScanner walks a folder for the
   Storage page and `otm du`, with the category rules in Model/DiskCategoryRules;
   System/InstalledApps, MachO and CodeSigning find and read app bundles for the
-  Apps page and `otm apps`),
+  Apps page and `otm apps`; Layout/ holds the width maths for the details
+  pane, `SplitMath`, and the process table's columns, `ColumnFit`;
+  System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
@@ -127,6 +129,11 @@ locked or the window is on another Space.
 - When the process table runs out of width it hides optional columns, lowest
   `ProcessColumn.priority` first (the maths is `ColumnFit` in OTMKit's Layout/),
   apart from the user's Columns choices, and shows them again when there's room.
+- Pages with a table and details (Processes, Startup, Apps, Drivers,
+  Connections) use `InspectorSplit`: the pane appears beside the table once
+  something is selected, its width is draggable and remembered, and in a
+  window too narrow for both it covers the table under a Back button (Esc).
+  Double-click opens it. Give it the table's real minimum width.
 - In a details pane beside a table, wrapping text outside the pane's scroll
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
