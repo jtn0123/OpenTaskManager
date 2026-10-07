@@ -115,7 +115,7 @@ struct ChangesList: View {
                     .font(.callout.weight(.medium))
                 Text("Each scan is saved, the last \(DiskScanHistory.keptPerScope) of each folder. "
                     + "Scan again later to see what grew and shrank since this one.")
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .multilineTextAlignment(.center)
             }
@@ -153,7 +153,7 @@ private struct ChangesReport: View {
                     .foregroundStyle(StorageChangeStyle.textStyle(direction))
                     .monospacedDigit()
                 Text(direction == .unclear ? StorageChangeStyle.reason(report.total) ?? "" : "\(StorageChangeStyle.sizes(report.total)) in \(name)")
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
@@ -165,7 +165,7 @@ private struct ChangesReport: View {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         if report.isEmpty {
                             Text("Nothing in \(name) changed by more than \(Format.bytes(threshold)).")
-                                .font(.metadata)
+                                .font(.explanation)
                                 .foregroundStyle(.secondaryText)
                                 .padding(.vertical, 4)
                         }
@@ -177,7 +177,7 @@ private struct ChangesReport: View {
                                     note: "Not counted as space freed")
                         readability("Could be read this time", report.becameReadable, under: path, note: "Not counted as growth")
                         Text(Self.caveat)
-                            .font(.metadata)
+                            .font(.explanation)
                             .foregroundStyle(.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 10)
@@ -218,7 +218,7 @@ private struct SectionTitle: View {
 
     var body: some View {
         Text(title)
-            .font(.metadata.weight(.semibold))
+            .font(.explanation.weight(.semibold))
             .foregroundStyle(.secondaryText)
             .padding(.top, 8)
             .padding(.bottom, 2)
@@ -263,7 +263,7 @@ private struct ChangeRow: View {
                 }
                 .font(.callout)
                 Text(location.map { "\($0) · \(detail)" } ?? detail)
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .lineLimit(1)

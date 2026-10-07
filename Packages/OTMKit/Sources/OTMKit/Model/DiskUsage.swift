@@ -32,6 +32,17 @@ public enum DiskCategory: Int, CaseIterable, Sendable, Codable, Identifiable, Co
     public static func < (lhs: DiskCategory, rhs: DiskCategory) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
+
+    /// The order a breakdown shows them in, whatever their sizes, so the
+    /// bar and its legend line up the same way from one scan to the next:
+    /// your own files, then apps and developer files, then what the system
+    /// keeps. (The raw values are saved, so they keep their own order.)
+    public static let displayOrder: [DiskCategory] = [.media, .audio, .documents, .archives, .apps, .developer, .caches, .system, .other]
+
+    /// Sorts totals into `displayOrder`.
+    public static func inDisplayOrder(_ totals: [DiskCategoryTotal]) -> [DiskCategoryTotal] {
+        totals.sorted { displayOrder.firstIndex(of: $0.category) ?? .max < displayOrder.firstIndex(of: $1.category) ?? .max }
+    }
 }
 
 public enum DiskItemKind: String, Sendable, Codable {

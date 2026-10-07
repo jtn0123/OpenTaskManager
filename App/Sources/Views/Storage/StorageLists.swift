@@ -9,6 +9,8 @@ struct StorageListCard: View {
     let usage: DiskUsage
     let folder: DiskItem
     let hover: StorageHover
+    /// The picker takes focus when the results open (see `StorageView`).
+    var focus: FocusState<StorageStage?>.Binding
     var open: (Int) -> Void
     /// Opens the folder holding a large file and outlines its tile.
     var show: (DiskFile) -> Void
@@ -39,6 +41,7 @@ struct StorageListCard: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+        .focused(focus, equals: .results)
     }
 }
 
@@ -55,7 +58,7 @@ private struct FolderContentsList: View {
         let children = usage.children(of: folder)
         if children.isEmpty {
             Text(folder.isUnreadable ? "Couldn't read this folder." : folder.contentsOmitted ? "Contents weren't kept." : "Empty folder.")
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -112,7 +115,7 @@ private struct ContentRow: View {
                 .font(.callout)
                 HStack(spacing: 6) {
                     ShareLine(share: share, color: StorageStyle.color(item)).frame(height: 4)
-                    Text(detail(share: share)).font(.metadata).foregroundStyle(.secondaryText).monospacedDigit().fixedSize()
+                    Text(detail(share: share)).font(.explanation).foregroundStyle(.secondaryText).monospacedDigit().fixedSize()
                 }
             }
             Image(systemName: "chevron.right")
@@ -243,7 +246,7 @@ private struct LargestFilesList: View {
     var body: some View {
         if usage.largestFiles.isEmpty {
             Text("No files.")
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -282,7 +285,7 @@ private struct FileRow: View {
                     Circle().fill(Theme.category(file.category)).frame(width: 7, height: 7)
                     Text(location).lineLimit(1).truncationMode(.head)
                 }
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
             }
         }
