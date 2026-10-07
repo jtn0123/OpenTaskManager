@@ -291,6 +291,18 @@ struct LiveSystemInfoTests {
         #expect(Date().timeIntervalSince(start) < 5)
     }
 
+    @Test func keepsTheChosenStreamsAndExitStatus() {
+        let script = ["-c", "echo out; echo err >&2; exit 3"]
+        let both = CommandRunner.execute("/bin/sh", script, timeout: 5)
+        #expect(both?.status == 3)
+        #expect(both?.text.contains("out\n") == true)
+        #expect(both?.text.contains("err\n") == true)
+        #expect(CommandRunner.execute("/bin/sh", script, capture: .output, timeout: 5)?.text == "out\n")
+        #expect(CommandRunner.execute("/bin/sh", script, capture: .errors, timeout: 5)?.text == "err\n")
+        // Killed by a signal rather than exiting: no result.
+        #expect(CommandRunner.execute("/bin/sh", ["-c", "kill -9 $$"], timeout: 5) == nil)
+    }
+
     @Test func readsSecurityStateWithoutRoot() async {
         let start = Date()
         let status = await SecurityReader.read(timeout: 5)

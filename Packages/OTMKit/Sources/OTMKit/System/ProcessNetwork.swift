@@ -45,23 +45,12 @@ public enum ProcessNetwork {
     /// With `excludingLoopback`, only sockets on real interfaces count, so a
     /// local server talking to a browser on the same Mac isn't network traffic.
     public static func read(excludingLoopback: Bool = false) -> [Int32: ProcessTraffic]? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/nettop")
         // Per process (-P), one CSV sample (-L 1), raw numbers (-x), two columns (-J);
         // `-t external` keeps every interface but loopback.
-        process.arguments = ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"] + (excludingLoopback ? ["-t", "external"] : [])
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return parse(String(decoding: data, as: UTF8.self)).mapValues { traffic in
+        let arguments = ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"] + (excludingLoopback ? ["-t", "external"] : [])
+        guard let result = CommandRunner.execute("/usr/bin/nettop", arguments, capture: .output, timeout: 5),
+              result.status == 0 else { return nil }
+        return parse(result.text).mapValues { traffic in
             // Only when it starts with nettop's name, in case the PID was reused in between.
             guard let full = fullName(traffic.pid), full.count > traffic.name.count, full.hasPrefix(traffic.name) else { return traffic }
             return ProcessTraffic(pid: traffic.pid, name: full, bytesIn: traffic.bytesIn, bytesOut: traffic.bytesOut)

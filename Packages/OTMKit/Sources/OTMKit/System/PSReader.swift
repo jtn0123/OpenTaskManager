@@ -76,20 +76,7 @@ enum PSReader {
     }
 
     private static func run(_ arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        // Read before waiting so a large listing cannot fill the pipe and stall ps.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
+        // ps exits non-zero when some processes vanished mid-listing; the rest still counts.
+        CommandRunner.execute("/bin/ps", arguments, capture: .output, timeout: 5)?.text
     }
 }

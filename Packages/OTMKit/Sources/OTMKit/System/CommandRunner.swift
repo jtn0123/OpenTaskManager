@@ -2,17 +2,30 @@ import Darwin
 import Foundation
 
 /// Runs a system tool and returns what it printed, giving up after a timeout.
+/// Every tool the app runs goes through here: a tool that hangs would
+/// otherwise hold up whatever was waiting for it, such as the sampler.
 enum CommandRunner {
-    /// Standard output and error together, or nil when the tool couldn't
-    /// start, was killed by a signal, or ran past `timeout` seconds (it's
-    /// then terminated). Blocks the calling thread; see `output(of:_:timeout:)`.
-    static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval) -> String? {
+    /// Which of the tool's streams to keep; the others are discarded.
+    enum Capture {
+        case output, errors, both
+    }
+
+    /// What a tool printed and how it exited.
+    struct Result {
+        var status: Int32
+        var text: String
+    }
+
+    /// Runs a tool to completion. Nil when it couldn't start, was killed by a
+    /// signal, or ran past `timeout` seconds (it's then terminated). Blocks
+    /// the calling thread; see `output(of:_:timeout:)`.
+    static func execute(_ executable: String, _ arguments: [String], capture: Capture = .both, timeout: TimeInterval) -> Result? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        process.standardOutput = capture == .errors ? FileHandle.nullDevice : pipe
+        process.standardError = capture == .output ? FileHandle.nullDevice : pipe
         process.standardInput = FileHandle.nullDevice
         do {
             try process.run()
@@ -38,7 +51,13 @@ enum CommandRunner {
         terminate.cancel()
         forceKill.cancel()
         guard process.terminationReason == .exit else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        return Result(status: process.terminationStatus, text: String(decoding: data, as: UTF8.self))
+    }
+
+    /// Standard output and error together, whatever the exit status, or nil
+    /// as for `execute`.
+    static func run(_ executable: String, _ arguments: [String], timeout: TimeInterval) -> String? {
+        execute(executable, arguments, timeout: timeout)?.text
     }
 
     /// `run` on a background queue, so waiting doesn't tie up a Swift concurrency thread.

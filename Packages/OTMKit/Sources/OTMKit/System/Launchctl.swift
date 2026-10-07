@@ -163,38 +163,15 @@ public enum Launchctl {
 
     /// Runs `launchctl` for its exit status and error text, for calls that change something.
     static func execute(_ arguments: [String]) -> (status: Int32, error: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = pipe
-        do {
-            try process.run()
-        } catch {
-            return (-1, error.localizedDescription)
+        guard let result = CommandRunner.execute("/bin/launchctl", arguments, capture: .errors, timeout: 15) else {
+            return (-1, "launchctl couldn't run or didn't finish.")
         }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+        return (result.status, result.text)
     }
 
     private static func run(_ arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        // Read before waiting so a long listing cannot fill the pipe and stall launchctl.
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        guard let result = CommandRunner.execute("/bin/launchctl", arguments, capture: .output, timeout: 10),
+              result.status == 0 else { return nil }
+        return result.text
     }
 }
