@@ -159,8 +159,9 @@ Manager OG or any other proprietary task manager.
   from `GraphCoverage` changes.
 - Graphs on one page cover the same window under a `TimeAxis` ("Last 5 min …
   now"): `AppModel.graphSpan` on Performance, by-app graphs too (each process's
-  history is as long, `Float`, appended in place, ranked by running totals,
-  `ProcessTotal` of OTMKit's `RunningSum`, never re-summed), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
+  history, and each app group's as it stood each tick, is as long, `Float`,
+  appended in place, ranked by running totals, `ProcessTotal` of OTMKit's
+  `RunningSum`, never re-summed; a graph reads one ring per app), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
   their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump.
   Performance's Fit collected data toggle (`GraphFit`, in the main graph's
   time axis until the window is nearly full) narrows that one window, through

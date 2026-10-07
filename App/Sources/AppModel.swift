@@ -340,6 +340,12 @@ final class AppModel {
     /// Each process's history added up, kept with `processHistory`, which
     /// is what views observe.
     @ObservationIgnored private var processTotals: [ProcessIdentity: ProcessTotal] = [:]
+    /// Each app group's figures as the group stood each tick, by the group's
+    /// own process, for the "by app" graphs. A helper that quits leaves its
+    /// part of the past in place, and a graph reads one ring per app rather
+    /// than adding up every member's.
+    @ObservationIgnored private var groupHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
+    @ObservationIgnored private var groupTotals: [ProcessIdentity: ProcessTotal] = [:]
     /// The latest tick's processes by PID, for pages that know only a PID
     /// (launchd's, on Startup).
     private(set) var processIdentityByPID: [Int32: ProcessIdentity] = [:]
@@ -561,7 +567,35 @@ final class AppModel {
         processMemoryHistory.append(totalMemory)
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
+        appendGroupHistories()
         record(snapshot, sensorsRead: fixture(or: sensors)?.isEmpty == false)
+    }
+
+    /// Adds each app group's totals to its history and running total, as
+    /// `appendProcessHistories` does for processes. A group whose process
+    /// has quit leaves both.
+    private func appendGroupHistories() {
+        var previous = groupHistory
+        groupHistory = [:]
+        var previousTotals = groupTotals
+        groupTotals = [:]
+        var histories: [ProcessIdentity: History<ProcessPoint>] = [:]
+        histories.reserveCapacity(appGroups.count)
+        var totals: [ProcessIdentity: ProcessTotal] = [:]
+        totals.reserveCapacity(appGroups.count)
+        for group in appGroups {
+            guard let identity = group.process?.identity else { continue }
+            var history = previous.removeValue(forKey: identity) ?? History(capacity: Self.processHistoryCapacity)
+            var total = previousTotals.removeValue(forKey: identity) ?? ProcessTotal()
+            let point = ProcessPoint(cpuPercent: group.totals.cpuPercent, memory: group.totals.memory,
+                                     gpuFraction: group.totals.gpuFraction, powerWatts: group.totals.powerWatts)
+            if let dropped = history.append(point) { total.remove(dropped) }
+            total.add(point)
+            histories[identity] = history
+            totals[identity] = total
+        }
+        groupHistory = histories
+        groupTotals = totals
     }
 
     /// Adds each process's sample to its history and running total. A process
@@ -694,34 +728,21 @@ final class AppModel {
     }
 
     /// The `count` apps that used the most of `figure` over the histories'
-    /// window, each with its history summed over the app's processes and
-    /// multiplied by `scale`. Apps are ranked on the running totals, and
-    /// only those that make the cut have their series built.
+    /// window, each with its history as the app's processes added up each
+    /// tick, multiplied by `scale`. Apps are ranked on the running totals,
+    /// and only those that make the cut have their series built.
     func topApps(by figure: ProcessFigure, scale: Double = 1, count: Int) -> [AppSeries] {
-        func members(_ group: ProcessNode) -> [ProcessIdentity] {
-            var members: [ProcessIdentity] = []
-            func collect(_ node: ProcessNode) {
-                if let process = node.process { members.append(process.identity) }
-                node.children.forEach(collect)
-            }
-            collect(group)
-            return members
-        }
         var ranked: [(score: Double, group: ProcessNode)] = []
-        for group in appGroups where group.process != nil {
-            let score = members(group).reduce(0) { $0 + (processTotals[$1]?[figure] ?? 0) }
+        for group in appGroups {
+            guard let identity = group.process?.identity else { continue }
+            let score = groupTotals[identity]?[figure] ?? 0
             // Exactly zero for an app idle across the window (see RunningSum).
             if score > 0 { ranked.append((score, group)) }
         }
         return ranked.sorted { $0.score > $1.score }.prefix(count).compactMap { entry in
-            guard let process = entry.group.process else { return nil }
-            // Added straight from each ring, aligned on the newest: no copy
-            // of each member's window first, since apps can have dozens.
-            let histories = members(entry.group).compactMap { processHistory[$0] }
-            var values = [Double](repeating: 0, count: histories.map(\.count).max() ?? 0)
-            for history in histories {
-                history.addValues(to: &values) { $0[figure] * scale }
-            }
+            guard let process = entry.group.process, let history = groupHistory[process.identity] else { return nil }
+            var values = [Double](repeating: 0, count: history.count)
+            history.addValues(to: &values) { $0[figure] * scale }
             return AppSeries(id: entry.group.id, name: displayName(for: process),
                              icon: IconCache.icon(for: process, app: regularApps[process.pid]), values: values)
         }
