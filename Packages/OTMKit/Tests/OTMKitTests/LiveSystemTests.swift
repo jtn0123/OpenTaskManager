@@ -190,7 +190,8 @@ struct LiveSystemTests {
         child.arguments = ["30"]
         try child.run()
         let pid = child.processIdentifier
-        defer { if child.isRunning { child.terminate() } }
+        // SIGKILL, since SIGTERM would sit pending if the child is still stopped.
+        defer { if child.isRunning { kill(pid, SIGKILL) } }
 
         try ProcessControl.send(.stop, to: pid)
         try await Task.sleep(for: .milliseconds(100))
@@ -198,7 +199,13 @@ struct LiveSystemTests {
 
         try ProcessControl.send(.continue, to: pid)
         try ProcessControl.send(.terminate, to: pid)
-        child.waitUntilExit()
+        // Poll rather than block in waitUntilExit(), which once hung the suite
+        // on a Swift concurrency thread: a missed exit fails here instead.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while child.isRunning, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try #require(!child.isRunning, "/bin/sleep was still running 5 s after SIGTERM")
         #expect(child.terminationReason == .uncaughtSignal)
         #expect(child.terminationStatus == SIGTERM)
     }
