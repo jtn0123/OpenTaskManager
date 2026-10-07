@@ -1,6 +1,18 @@
 import OTMKit
 import SwiftUI
 
+/// Plot heights on the detail pages. Kept modest so that in the default
+/// window the header, the key readings, the main graph and the first
+/// breakdown are on screen together.
+enum DetailGraph {
+    /// The resource's main graph.
+    static let primary: CGFloat = 200
+    /// Breakdowns and other full-width graphs below it.
+    static let secondary: CGFloat = 130
+    /// Graphs in cards that share a row, and small multiples such as each core tier.
+    static let compact: CGFloat = 100
+}
+
 struct DetailHeader: View {
     var title: String
     var subtitle: String
@@ -11,6 +23,25 @@ struct DetailHeader: View {
             Spacer()
             Text(subtitle).font(.title3).foregroundStyle(.secondary).lineLimit(1)
         }
+    }
+}
+
+/// A resource's key readings in one band under the header, so they sit
+/// beside the main graph instead of below the fold. The readings stay on one
+/// line while they fit and wrap into even rows when the pane is narrow.
+struct MetricStrip<Content: View>: View {
+    var tint: Color
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        FlowRow(spacing: 18, lineSpacing: 10) { content }
+            .environment(\.statMinWidth, 60)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(LinearGradient(colors: [tint.opacity(0.10), tint.opacity(0.03)], startPoint: .top, endPoint: .bottom),
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(tint.opacity(0.22)))
     }
 }
 

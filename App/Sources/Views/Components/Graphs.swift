@@ -60,7 +60,9 @@ enum Theme {
     }
 }
 
-/// Graph with a border and a caption row, used in detail pages.
+/// Graph with a border and a caption row, used in detail pages. With no
+/// title or trailing text the caption row is left out, for a graph whose
+/// caption sits in a row of its own with controls.
 struct GraphPanel: View {
     var title: String
     var trailing: String
@@ -78,10 +80,12 @@ struct GraphPanel: View {
     var body: some View {
         let tint = series.last?.color ?? .accentColor
         VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(title).font(.subheadline).foregroundStyle(.secondary)
-                Spacer()
-                Text(trailing).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+            if !title.isEmpty || !trailing.isEmpty {
+                HStack {
+                    Text(title).font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(trailing).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                }
             }
             GraphView(series: series, maxValue: maxValue, capacity: capacity, glows: true, stacked: stacked,
                       minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits, cornerRadius: 8)
@@ -128,11 +132,17 @@ struct Sparkline: View {
     }
 }
 
+extension EnvironmentValues {
+    /// The narrowest a `Stat` gets. Compact strips lower it so more fit on a line.
+    @Entry var statMinWidth: CGFloat = 110
+}
+
 /// Labelled value in the stats grids under each graph. Given a number and a
 /// formatter, the value counts to each new reading instead of jumping.
 struct Stat: View {
     private static let valueFont = NSFont.numeric(size: NSFont.preferredFont(forTextStyle: .title3).pointSize, weight: .medium)
 
+    @Environment(\.statMinWidth) private var minWidth
     var label: String
     var value: String
     var color: Color?
@@ -168,7 +178,7 @@ struct Stat: View {
                 }
             }
         }
-        .frame(minWidth: 110, alignment: .leading)
+        .frame(minWidth: minWidth, alignment: .leading)
     }
 }
 

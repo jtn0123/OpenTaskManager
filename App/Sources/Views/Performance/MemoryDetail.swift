@@ -14,6 +14,7 @@ struct MemoryDetail: View {
         let memory = snapshot.memory
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "Memory", subtitle: "\(Format.bytes(memory.physical)) · \(memory.pressure.rawValue) pressure")
+            stats(memory)
             composition(memory)
             FillGrid(minimum: 280) {
                 pressure(memory)
@@ -24,7 +25,6 @@ struct MemoryDetail: View {
                 compressor(memory)
             }
             byApp()
-            stats(memory)
             TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: model.appGroups,
                         metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
         }
@@ -53,24 +53,20 @@ struct MemoryDetail: View {
                 ],
                 maxValue: Double(memory.physical), glows: true, stacked: true, axis: Self.bytesAxis, cornerRadius: 8
             )
-            .chartFrame(height: 220, tint: Theme.memory)
+            .chartFrame(height: DetailGraph.primary, tint: Theme.memory)
         }
     }
 
     private func pressure(_ memory: MemorySample) -> some View {
         let history = model.memoryDetail.pressure
-        let color: Color = switch memory.pressure {
-        case .normal: .green
-        case .warning: .yellow
-        case .critical: .red
-        }
+        let color = Self.color(memory.pressure)
         let available = memory.availablePercent.map { " · \($0)% available" } ?? ""
         return ChartCard(title: "Pressure", trailing: memory.pressure.rawValue.capitalized + available, tint: color, legend: [
             LegendItem(name: "Pressure", color: color, value: history.values.last.map { Format.percent($0) } ?? "—"),
         ]) {
             GraphView(series: [GraphSeries(values: history.values, color: color)], maxValue: 1, glows: true,
                       axis: { Format.percent($0) }, cornerRadius: 8)
-                .chartFrame(height: 130, tint: color)
+                .chartFrame(height: DetailGraph.compact, tint: color)
         }
     }
 
@@ -88,7 +84,7 @@ struct MemoryDetail: View {
                 ],
                 glows: true, minimumCeiling: 1_073_741_824, axis: Self.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8
             )
-            .chartFrame(height: 130, tint: Theme.swap)
+            .chartFrame(height: DetailGraph.compact, tint: Theme.swap)
         }
     }
 
@@ -110,7 +106,7 @@ struct MemoryDetail: View {
                 ],
                 glows: true, minimumCeiling: 1_048_576, axis: Self.rateAxis, axisUnits: .binaryBytes, cornerRadius: 8
             )
-            .chartFrame(height: 130, tint: Self.pageIn)
+            .chartFrame(height: DetailGraph.compact, tint: Self.pageIn)
         }
     }
 
@@ -128,7 +124,7 @@ struct MemoryDetail: View {
                 ],
                 glows: true, minimumCeiling: 1_048_576, axis: Self.rateAxis, axisUnits: .binaryBytes, cornerRadius: 8
             )
-            .chartFrame(height: 130, tint: Theme.compressed)
+            .chartFrame(height: DetailGraph.compact, tint: Theme.compressed)
         }
     }
 
@@ -143,20 +139,26 @@ struct MemoryDetail: View {
                          span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       axis: Self.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
-                .chartFrame(height: 200, tint: Theme.memory)
+                .chartFrame(height: DetailGraph.secondary, tint: Theme.memory)
         }
     }
 
+    /// The headline figures. The composition's legend has the rest.
     private func stats(_ memory: MemorySample) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 18, alignment: .leading)], alignment: .leading, spacing: 14) {
+        MetricStrip(tint: Theme.memory) {
             Stat(label: "In use", number: Double(memory.used), color: Theme.memory, format: Self.bytesAxis)
             Stat(label: "Available", number: Double(memory.free + memory.cached), format: Self.bytesAxis)
-            Stat(label: "App", number: Double(memory.app), format: Self.bytesAxis)
-            Stat(label: "Wired", number: Double(memory.wired), format: Self.bytesAxis)
-            Stat(label: "Compressed", number: Double(memory.compressed), format: Self.bytesAxis)
-            Stat(label: "Cached files", number: Double(memory.cached), format: Self.bytesAxis)
+            Stat(label: "Pressure", value: memory.pressure.rawValue.capitalized, color: Self.color(memory.pressure))
             Stat(label: "Swap used", number: Double(memory.swapUsed), format: Self.bytesAxis)
             Stat(label: "Page-ins since boot", value: memory.pageIns.formatted())
+        }
+    }
+
+    private static func color(_ pressure: MemoryPressure) -> Color {
+        switch pressure {
+        case .normal: .green
+        case .warning: .yellow
+        case .critical: .red
         }
     }
 }

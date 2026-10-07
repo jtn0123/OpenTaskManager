@@ -13,13 +13,13 @@ struct GPUDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "GPU", subtitle: gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name)
+            stats()
             utilization()
             byApp()
             FillGrid(minimum: 280) {
                 if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }
                 if let memory = gpu.memoryInUse { memoryCard(memory) }
             }
-            stats()
             TopAppsCard(title: "GPU", symbol: "cpu.fill", color: Theme.gpu, groups: model.appGroups,
                         metric: \.gpuFraction, format: { Format.percent($0.gpuFraction, digits: 1) }, minimum: 0.0005)
         }
@@ -43,7 +43,7 @@ struct GPUDetail: View {
                 ],
                 maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8
             )
-            .chartFrame(height: 220, tint: Theme.gpu)
+            .chartFrame(height: DetailGraph.primary, tint: Theme.gpu)
         }
     }
 
@@ -59,7 +59,7 @@ struct GPUDetail: View {
                          span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
-                .chartFrame(height: 200, tint: Theme.gpu)
+                .chartFrame(height: DetailGraph.secondary, tint: Theme.gpu)
         }
     }
 
@@ -75,7 +75,7 @@ struct GPUDetail: View {
         return ChartCard(title: "Clock speed", trailing: "average while powered on", tint: Self.clock, legend: legend) {
             GraphView(series: [GraphSeries(values: history, color: Self.clock)], glows: true, minimumCeiling: 500,
                       axis: { Format.frequency(megahertz: $0) }, cornerRadius: 8)
-                .chartFrame(height: 120, tint: Self.clock)
+                .chartFrame(height: DetailGraph.compact, tint: Self.clock)
         }
     }
 
@@ -84,24 +84,27 @@ struct GPUDetail: View {
         return ChartCard(title: "GPU memory in use", trailing: Format.bytes(inUse), tint: Theme.gpu) {
             GraphView(series: [GraphSeries(values: history, color: Theme.gpu)], glows: true, minimumCeiling: 268_435_456,
                       axis: MemoryDetail.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
-                .chartFrame(height: 120, tint: Theme.gpu)
+                .chartFrame(height: DetailGraph.compact, tint: Theme.gpu)
         }
     }
 
     private func stats() -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 18, alignment: .leading)], alignment: .leading, spacing: 14) {
+        MetricStrip(tint: Theme.gpu) {
             Stat(label: "Utilization", number: gpu.deviceUtilization, color: Theme.gpu) { Format.percent($0) }
             if let renderer = gpu.rendererUtilization {
-                Stat(label: "Renderer", number: renderer) { Format.percent($0) }
+                Stat(label: "Renderer", number: renderer, color: Self.renderer) { Format.percent($0) }
             }
             if let tiler = gpu.tilerUtilization {
-                Stat(label: "Tiler", number: tiler) { Format.percent($0) }
+                Stat(label: "Tiler", number: tiler, color: Self.tiler) { Format.percent($0) }
+            }
+            if let frequency = gpu.frequencyMHz {
+                Stat(label: "Clock", number: frequency) { Format.frequency(megahertz: $0) }
             }
             if let memory = gpu.memoryInUse {
                 Stat(label: "Memory in use", number: Double(memory), format: MemoryDetail.bytesAxis)
             }
-            if let cores = gpu.coreCount {
-                Stat(label: "Cores", value: String(cores))
+            if let watts = snapshot.power.components?.watts(.gpu) {
+                Stat(label: "Power", number: watts, format: Format.watts)
             }
         }
     }

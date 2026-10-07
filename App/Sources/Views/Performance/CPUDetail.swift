@@ -10,68 +10,81 @@ struct CPUDetail: View {
         let topology = model.topology
         VStack(alignment: .leading, spacing: 16) {
             DetailHeader(title: "CPU", subtitle: topology.brand)
-            Picker("Graph", selection: $mode) {
-                Text("Overall").tag("overall")
-                Text("By core type").tag("tiers")
-                Text("Every core").tag("cores")
+            stats(topology)
+            graph(topology)
+            byApp()
+            if let clusters = snapshot.power.components?.clusters, clusters.contains(where: { $0.activeFraction != nil }) {
+                clusterClocks(clusters)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 360)
+            facts(topology)
+            TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: model.appGroups,
+                        metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+        }
+    }
 
+    private func stats(_ topology: CPUTopology) -> some View {
+        MetricStrip(tint: Theme.cpu) {
+            Stat(label: "Utilization", number: snapshot.cpu.usage, color: Theme.cpu) { Format.percent($0) }
+            Stat(label: "User", number: snapshot.cpu.user) { Format.percent($0) }
+            Stat(label: "System", number: snapshot.cpu.system) { Format.percent($0) }
+            // With one kind of core, its load is the overall figure.
+            if topology.tiers.count > 1 {
+                ForEach(topology.tiers, id: \.level) { tier in
+                    Stat(label: "\(tier.name) cores (\(tier.logicalCPUs))", number: tierUsage(tier.level),
+                         color: Theme.tier(tier.level)) { Format.percent($0) }
+                }
+            }
+            Stat(label: "Load average (1, 5, 15 min)",
+                 value: snapshot.cpu.loadAverage.map { Format.fixed($0, 2) }.joined(separator: "  "))
+            Stat(label: "Processes", value: String(snapshot.processes.count))
+            Stat(label: "Threads", value: String(snapshot.threadCount))
+            Stat(label: "Up time", value: Format.duration(snapshot.uptime))
+        }
+    }
+
+    /// The utilization graph in the chosen form, with the choice on its caption row.
+    private func graph(_ topology: CPUTopology) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(mode == "cores" ? "% Utilization of each core" : mode == "tiers" ? "% Utilization by core type"
+                     : "% Utilization over \(AppModel.graphSpan)s")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("Graph", selection: $mode) {
+                    Text("Overall").tag("overall")
+                    Text("By core type").tag("tiers")
+                    Text("Every core").tag("cores")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 320)
+            }
             switch mode {
             case "cores": coreGrid(topology)
             case "tiers": tierGraphs(topology)
             default:
-                GraphPanel(title: "% Utilization over \(AppModel.graphSpan)s", trailing: "100%",
-                           series: [GraphSeries(values: model.cpuHistory.values, color: Theme.cpu)], maxValue: 1, height: 240,
-                           axis: { Format.percent($0) })
+                GraphPanel(title: "", trailing: "",
+                           series: [GraphSeries(values: model.cpuHistory.values, color: Theme.cpu)], maxValue: 1,
+                           height: DetailGraph.primary, axis: { Format.percent($0) })
             }
+        }
+    }
 
-            HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 24) {
-                        Stat(label: "Utilization", number: snapshot.cpu.usage, color: Theme.cpu) { Format.percent($0) }
-                        Stat(label: "User", number: snapshot.cpu.user) { Format.percent($0) }
-                        Stat(label: "System", number: snapshot.cpu.system) { Format.percent($0) }
-                    }
-                    HStack(spacing: 24) {
-                        Stat(label: "Processes", value: String(snapshot.processes.count))
-                        Stat(label: "Threads", value: String(snapshot.threadCount))
-                        Stat(label: "Up time", value: Format.duration(snapshot.uptime))
-                    }
-                    HStack(spacing: 24) {
-                        Stat(label: "Load average (1, 5, 15 min)",
-                             value: snapshot.cpu.loadAverage.map { Format.fixed($0, 2) }.joined(separator: "  "))
-                    }
-                    HStack(spacing: 24) {
-                        ForEach(topology.tiers, id: \.level) { tier in
-                            Stat(label: "\(tier.name) cores (\(tier.logicalCPUs))", number: tierUsage(tier.level)) { Format.percent($0) }
-                        }
-                    }
-                }
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
-                    FactRow(label: "Architecture", value: topology.architecture)
-                    FactRow(label: "Cores", value: "\(topology.physicalCores) physical, \(topology.logicalCores) logical")
-                    ForEach(topology.tiers, id: \.level) { tier in
-                        let cache = tier.l2CacheBytes.map { " · \(Format.bytes(UInt64($0))) L2" } ?? ""
-                        FactRow(label: "\(tier.name) cores", value: "\(tier.physicalCPUs)\(cache)")
-                    }
-                    if let l1 = topology.l1DataCacheBytes {
-                        FactRow(label: "L1 data cache", value: Format.bytes(UInt64(l1)) + " per core")
-                    }
-                    if let l3 = topology.l3CacheBytes {
-                        FactRow(label: "L3 cache", value: Format.bytes(UInt64(l3)))
-                    }
-                }
+    private func facts(_ topology: CPUTopology) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+            FactRow(label: "Architecture", value: topology.architecture)
+            FactRow(label: "Cores", value: "\(topology.physicalCores) physical, \(topology.logicalCores) logical")
+            ForEach(topology.tiers, id: \.level) { tier in
+                let cache = tier.l2CacheBytes.map { " · \(Format.bytes(UInt64($0))) L2" } ?? ""
+                FactRow(label: "\(tier.name) cores", value: "\(tier.physicalCPUs)\(cache)")
             }
-
-            if let clusters = snapshot.power.components?.clusters, clusters.contains(where: { $0.activeFraction != nil }) {
-                clusterClocks(clusters)
+            if let l1 = topology.l1DataCacheBytes {
+                FactRow(label: "L1 data cache", value: Format.bytes(UInt64(l1)) + " per core")
             }
-            byApp()
-            TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: model.appGroups,
-                        metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+            if let l3 = topology.l3CacheBytes {
+                FactRow(label: "L3 cache", value: Format.bytes(UInt64(l3)))
+            }
         }
     }
 
@@ -96,7 +109,7 @@ struct CPUDetail: View {
                 },
                 glows: true, minimumCeiling: 1_000, axis: { Format.frequency(megahertz: $0) }, cornerRadius: 8
             )
-            .chartFrame(height: 160, tint: Theme.cpu)
+            .chartFrame(height: DetailGraph.secondary, tint: Theme.cpu)
         }
     }
 
@@ -115,7 +128,7 @@ struct CPUDetail: View {
                          span: AppModel.processHistoryCapacity - 2) {
             GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
                       minimumCeiling: 0.1, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
-                .chartFrame(height: 180, tint: Theme.cpu)
+                .chartFrame(height: DetailGraph.secondary, tint: Theme.cpu)
         }
     }
 
@@ -131,7 +144,7 @@ struct CPUDetail: View {
             ForEach(topology.tiers, id: \.level) { tier in
                 GraphPanel(title: "\(tier.name) cores (\(tier.logicalCPUs))", trailing: Format.percent(tierUsage(tier.level)),
                            series: [GraphSeries(values: model.tierHistory(level: tier.level), color: Theme.tier(tier.level))],
-                           maxValue: 1, height: 110, axis: { Format.percent($0) })
+                           maxValue: 1, height: DetailGraph.compact, axis: { Format.percent($0) })
             }
         }
     }
