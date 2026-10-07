@@ -1,18 +1,20 @@
 import Foundation
 import IOKit
 
-/// Reads temperatures and fan speeds. It is separate from `SystemMonitor`
-/// because the temperature sensors answer slowly (about 50 ms of waiting per
-/// pass on an M5 Pro, for under 2 ms of CPU), so the app samples both at once
-/// rather than holding up the rest of each tick.
+/// Reads temperatures, fan speeds and the SMC's DC input rails. It is
+/// separate from `SystemMonitor` because the temperature sensors answer slowly
+/// (about 50 ms of waiting per pass on an M5 Pro, for under 2 ms of CPU), so
+/// the app samples both at once rather than holding up the rest of each tick.
 public actor SensorMonitor {
     private let temperatures = HIDTemperatureReader()
-    private let fans = FanReader()
+    private let smc: SMCSensorReader?
 
-    public init() {}
+    public init() {
+        smc = SMCConnection().map(SMCSensorReader.init)
+    }
 
     public func sample() -> SensorSample {
-        SensorSample(temperatures: temperatures?.read() ?? [], fans: fans?.read() ?? [])
+        SensorSample(temperatures: temperatures?.read() ?? [], fans: smc?.fans() ?? [], rails: smc?.rails() ?? [])
     }
 }
 
@@ -80,24 +82,28 @@ final class HIDTemperatureReader {
     }
 }
 
-/// Fan speeds from the SMC: `FNum` fans, each with its actual (`F0Ac`),
-/// minimum (`F0Mn`) and maximum (`F0Mx`) speed in rpm.
-final class FanReader {
+/// Fan speeds and rails from the SMC. Fans: `FNum` fans, each with its
+/// actual (`F0Ac`), minimum (`F0Mn`) and maximum (`F0Mx`) speed in rpm.
+/// Rails: the keys in `SMCRail`, each one kernel call a tick once the SMC has
+/// said it has the key, and none after it has said it hasn't.
+final class SMCSensorReader {
     private let smc: SMCConnection
-    private let count: Int
+    private let fanCount: Int
 
-    init?() {
-        guard let smc = SMCConnection() else { return nil }
-        let count = smc.double("FNum").map { Int($0) } ?? (smc.double("F0Ac") != nil ? 1 : 0)
-        guard count > 0 else { return nil }
+    init(smc: SMCConnection) {
         self.smc = smc
-        self.count = min(count, 8)
+        let count = smc.double("FNum").map { Int($0) } ?? (smc.double("F0Ac") != nil ? 1 : 0)
+        fanCount = min(max(count, 0), 8)
     }
 
-    func read() -> [SensorSample.Fan] {
-        (0..<count).compactMap { index in
+    func fans() -> [SensorSample.Fan] {
+        (0..<fanCount).compactMap { index in
             guard let rpm = smc.double("F\(index)Ac"), rpm.isFinite, rpm >= 0 else { return nil }
             return SensorSample.Fan(id: index, rpm: rpm, minimumRPM: smc.double("F\(index)Mn"), maximumRPM: smc.double("F\(index)Mx"))
         }
+    }
+
+    func rails() -> [SensorSample.Rail] {
+        SMCRail.keys.compactMap { SMCRail.rail(key: $0.key, label: $0.label, unit: $0.unit, value: smc.double($0.key)) }
     }
 }

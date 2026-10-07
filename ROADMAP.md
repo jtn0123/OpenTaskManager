@@ -53,7 +53,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Per-process network throughput | ✅ | By app or process from `nettop` every 3 s, only while shown: stacked on Performance → Network and as Top Network on the Overview. Also `otm net` |
 | Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. Your own processes only until the privileged helper |
 | "Who is using…" | 🚧 | Port to process is done (the Connections page and `otm ports`). File and volume to process, and the "can't eject" helper, are planned |
-| Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, and fan speeds with their range |
+| Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, fan speeds, clocks and DC input in one table with lowest and highest since a reset |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |
 | Widgets | ⬜ | WidgetKit gauges |

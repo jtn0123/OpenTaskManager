@@ -176,13 +176,11 @@ struct CPUScale: Equatable {
     }
 }
 
-/// Temperatures and fan speeds over time, plus each sensor's range since launch.
+/// Temperatures and fan speeds over time.
 struct SensorHistory {
     private(set) var hottest: [SensorKind: History<Double>] = [:]
     private(set) var chipAverage = History<Double>(capacity: AppModel.historyCapacity)
     private(set) var fans: [Int: History<Double>] = [:]
-    /// Lowest and highest reading of each sensor, by sensor name.
-    private(set) var ranges: [String: ClosedRange<Double>] = [:]
 
     mutating func append(_ sample: SensorSample) {
         for kind in SensorKind.allCases {
@@ -193,10 +191,6 @@ struct SensorHistory {
         if let average = sample.average(.chip) { chipAverage.append(average) }
         for fan in sample.fans {
             fans[fan.id, default: History(capacity: AppModel.historyCapacity)].append(fan.rpm)
-        }
-        for reading in sample.temperatures {
-            let range = ranges[reading.name] ?? reading.celsius...reading.celsius
-            ranges[reading.name] = min(range.lowerBound, reading.celsius)...max(range.upperBound, reading.celsius)
         }
     }
 }
@@ -226,6 +220,19 @@ final class AppModel {
     /// Temperatures and fans, read alongside each snapshot. Empty in a VM.
     private(set) var sensors: SensorSample?
     private(set) var sensorHistory = SensorHistory()
+    /// The Thermals table: every sensor, clock and power rail, rebuilt each
+    /// tick from what the samplers read (`SensorTable` in OTMKit).
+    private(set) var sensorRows: [SensorReading] = []
+    /// Each row's lowest and highest since launch or the last Reset.
+    private(set) var sensorExtremes = SensorExtremes(since: Date())
+    /// This tick's readings without the rows kept for channels that stopped
+    /// reporting, so Reset can start the ranges from them.
+    @ObservationIgnored private var sensorReadings: [SensorReading] = []
+    #if DEBUG
+    /// `-sensorFixture <file>`: a report from `otm sensors --extremes N --json`
+    /// shown in place of this Mac's sensors, for screenshots in a VM that has none.
+    @ObservationIgnored private let sensorFixture = SensorFixture.load()
+    #endif
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
     private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
@@ -376,10 +383,11 @@ final class AppModel {
         // The first sample has no baseline, so its rates are all zero; keep it
         // for the process list but leave it out of the graphs.
         defer { self.snapshot = snapshot }
-        if let sensors, !sensors.isEmpty {
+        if let sensors = fixture(or: sensors), !sensors.isEmpty {
             self.sensors = sensors
             if snapshot.interval > 0 { sensorHistory.append(sensors) }
         }
+        updateSensorTable(snapshot)
         refreshRegularApps()
         users = UserUsageBuilder.build(snapshot.processes)
         guard snapshot.interval > 0 else { return }
@@ -449,6 +457,39 @@ final class AppModel {
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
         record(snapshot)
+    }
+
+    /// Records this tick's sensors, clocks and power rails in the Thermals
+    /// table's ranges: a few dozen dictionary updates, so it runs every tick
+    /// and the ranges cover the whole session, not just while the page shows.
+    private func updateSensorTable(_ snapshot: SystemSnapshot) {
+        let readings = fixtureReadings() ?? SensorTable.readings(sensors: sensors, power: snapshot.power, gpus: snapshot.gpus)
+        sensorReadings = readings
+        sensorExtremes.record(readings, thermalState: snapshot.power.thermalState)
+        sensorRows = sensorExtremes.rows(readings)
+    }
+
+    /// The sensors to show: this Mac's, or in a debug build the fixture's.
+    private func fixture(or sensors: SensorSample?) -> SensorSample? {
+        #if DEBUG
+        if let sensorFixture { return sensorFixture.sensors }
+        #endif
+        return sensors
+    }
+
+    /// In a debug build with a fixture, its rows, with its ranges seeded into the table's.
+    private func fixtureReadings() -> [SensorReading]? {
+        #if DEBUG
+        if let sensorFixture { return sensorFixture.readings(seeding: &sensorExtremes) }
+        #endif
+        return nil
+    }
+
+    /// Starts the Thermals table's lowest and highest again from the latest readings.
+    func resetSensorExtremes() {
+        sensorExtremes.reset(at: Date())
+        sensorExtremes.record(sensorReadings, thermalState: snapshot?.power.thermalState)
+        sensorRows = sensorExtremes.rows(sensorReadings)
     }
 
     /// Feeds the flight recorder, which writes a record every few seconds.

@@ -92,7 +92,9 @@ struct PerformanceView: View {
         list += snapshot.disks.map { .disk($0.id) }
         list += snapshot.network.filter(\.isPrimary).map { .network($0.id) }
         if snapshot.power.systemWatts != nil || snapshot.power.battery != nil { list.append(.power) }
-        if model.sensors != nil { list.append(.sensors) }
+        // Always listed: thermal pressure comes from macOS on every Mac, and
+        // the page says so where there are no sensors.
+        list.append(.sensors)
         return list
     }
 
@@ -102,8 +104,7 @@ struct PerformanceView: View {
         case .cpu: CPUDetail(snapshot: snapshot)
         case .memory: MemoryDetail(snapshot: snapshot)
         case .power: PowerDetail(snapshot: snapshot)
-        case .sensors:
-            if let sensors = model.sensors { SensorsDetail(sensors: sensors, snapshot: snapshot) }
+        case .sensors: SensorsDetail(sensors: model.sensors, snapshot: snapshot)
         case let .gpu(id):
             if let gpu = snapshot.gpus.first(where: { $0.id == id }) { GPUDetail(gpu: gpu, snapshot: snapshot) }
         case let .disk(id):
@@ -355,9 +356,12 @@ private struct ResourceText {
         case .sensors:
             let chip = sensors?.hottest(.chip).map(Format.celsius)
             let fans = sensors?.fans.map { $0.isStopped ? "off" : Format.rpm($0.rpm) } ?? []
+            let pressure = snapshot.power.thermalState
             title = "Thermals"
             subtitle = [chip, fans.isEmpty ? nil : "Fans " + fans.joined(separator: ", ")].compactMap { $0 }.joined(separator: "\n")
-            figure = chip ?? fans.first ?? "—"
+            // With no sensors (a VM), macOS's thermal pressure is all there is.
+            if subtitle.isEmpty { subtitle = "Pressure \(pressure.rawValue)" }
+            figure = chip ?? fans.first ?? pressure.title
         case let .gpu(id):
             let gpu = snapshot.gpus.first { $0.id == id }
             let usage = gpu?.deviceUtilization.map { Format.percent($0) }

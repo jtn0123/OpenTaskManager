@@ -1,34 +1,62 @@
 import OTMKit
 import SwiftUI
 
-/// Temperatures and fans: the chip's hottest and average die, the SSD and the
-/// battery over time, each fan's speed within its range, and every sensor's
-/// lowest and highest reading since launch.
+/// Temperatures, fans, clocks and power rails: the chip's hottest and
+/// average die, the SSD and the battery over time, each fan's speed within
+/// its range, and a table of every reading this Mac gives with its lowest
+/// and highest since a reset point. macOS's thermal pressure has a row of its
+/// own: it's a level, not a temperature.
 struct SensorsDetail: View {
-    /// The sensor table's narrowest width with range bars: a label, three
-    /// temperatures and a bar of `RangeBar`'s minimum, with the spacing between.
-    private static let barsWidth: CGFloat = 490
+    /// Below this many rows the table is short enough to read without a search field.
+    private static let searchThreshold = 12
 
     @Environment(AppModel.self) private var model
-    @State private var tableWidth: CGFloat = 0
-    var sensors: SensorSample
+    @State private var query = ""
+    /// nil on a Mac (or VM) that reports no temperatures or fans.
+    var sensors: SensorSample?
     var snapshot: SystemSnapshot
 
     var body: some View {
+        let thermalState = snapshot.power.thermalState
         VStack(alignment: .leading, spacing: 16) {
-            DetailHeader(title: "Thermals", subtitle: "Thermal state \(snapshot.power.thermalState.rawValue)")
-            stats()
-            temperatures()
-            if !sensors.fans.isEmpty {
+            DetailHeader(title: "Thermals", subtitle: "Thermal pressure \(thermalState.rawValue)")
+            stats(thermalState)
+            if let sensors, !sensors.temperatures.isEmpty {
+                temperatures(sensors)
+            }
+            if let sensors, !sensors.fans.isEmpty {
                 FillGrid(minimum: 280) {
-                    ForEach(sensors.fans) { fan in fanCard(fan) }
+                    ForEach(sensors.fans) { fan in fanCard(fan, count: sensors.fans.count) }
                 }
             }
-            sensorTable()
+            sensorTable(thermalState)
         }
     }
 
-    private func temperatures() -> some View {
+    private func stats(_ thermalState: ThermalState) -> some View {
+        MetricStrip(tint: Theme.thermal) {
+            if let chip = sensors?.hottest(.chip) {
+                Stat(label: "Hottest die", number: chip, color: Theme.thermal, format: Format.celsius)
+            }
+            if let average = sensors?.average(.chip) {
+                Stat(label: "Chip average", number: average, format: Format.celsius)
+            }
+            if let storage = sensors?.hottest(.storage) {
+                Stat(label: "SSD", number: storage, color: Theme.sensor(.storage), format: Format.celsius)
+            }
+            if let battery = sensors?.hottest(.battery) {
+                Stat(label: "Battery", number: battery, color: Theme.sensor(.battery), format: Format.celsius)
+            }
+            Stat(label: "Thermal pressure", value: thermalState.title, color: thermalState.color)
+                .help(ThermalState.explanation)
+            if sensors?.temperatures.isEmpty ?? true {
+                CapabilityNote(label: "Temperatures", text: "Not reported",
+                               detail: "macOS shares no temperature sensors on this Mac.")
+            }
+        }
+    }
+
+    private func temperatures(_ sensors: SensorSample) -> some View {
         let history = model.sensorHistory
         var series: [GraphSeries] = []
         var legend: [LegendItem] = []
@@ -51,9 +79,9 @@ struct SensorsDetail: View {
         }
     }
 
-    private func fanCard(_ fan: SensorSample.Fan) -> some View {
+    private func fanCard(_ fan: SensorSample.Fan, count: Int) -> some View {
         let range = [fan.minimumRPM, fan.maximumRPM].compactMap { $0 }.map(Format.rpm).joined(separator: " – ")
-        return ChartCard(title: sensors.fans.count > 1 ? "Fan \(fan.id + 1)" : "Fan",
+        return ChartCard(title: count > 1 ? "Fan \(fan.id + 1)" : "Fan",
                          trailing: fan.isStopped ? "stopped" : Format.rpm(fan.rpm), tint: Theme.fan,
                          legend: [
                              LegendItem(name: "Speed", color: Theme.fan, value: fan.fraction.map { "\(Format.percent($0)) of range" } ?? "—"),
@@ -65,101 +93,106 @@ struct SensorsDetail: View {
         }
     }
 
-    private func stats() -> some View {
-        MetricStrip(tint: Theme.thermal) {
-            if let chip = sensors.hottest(.chip) {
-                Stat(label: "Hottest die", number: chip, color: Theme.thermal, format: Format.celsius)
+    /// Every reading grouped by part, with its lowest and highest since the
+    /// reset point. The rows are AppKit (`SensorReadingTable`), so a tick only sets
+    /// the figures that changed.
+    private func sensorTable(_ thermalState: ThermalState) -> some View {
+        let all = model.sensorRows
+        let rows = SensorTable.filter(all, matching: query)
+        let pressure = SensorTable.pressureMatches(query)
+        return Card(tint: Theme.thermal) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Sensors and clocks").font(.headline).lineLimit(1).layoutPriority(1)
+                Spacer(minLength: 0)
+                if all.count >= Self.searchThreshold || !query.isEmpty {
+                    SensorSearchField(text: $query)
+                        .frame(minWidth: 110, idealWidth: 180, maxWidth: 180)
+                }
             }
-            if let average = sensors.average(.chip) {
-                Stat(label: "Chip average", number: average, format: Format.celsius)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Lowest and highest since \(Self.time(model.sensorExtremes.since))")
+                    .font(.callout)
+                    .foregroundStyle(.secondaryText)
+                    .lineLimit(1)
+                    .help("Every reading counts toward the range, one each \(Format.timeSpan(model.updateSpeed.rawValue)). "
+                        + "A sensor that gives no reading leaves its range alone.")
+                Button {
+                    model.resetSensorExtremes()
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+                .controlSize(.small)
+                .help("Start every lowest and highest again from now")
+                Spacer(minLength: 0)
             }
-            if let storage = sensors.hottest(.storage) {
-                Stat(label: "SSD", number: storage, color: Theme.sensor(.storage), format: Format.celsius)
+            SensorReadingTable(rows: rows, extremes: model.sensorExtremes, thermalState: pressure ? thermalState : nil)
+            if all.isEmpty {
+                noSensors()
+            } else if rows.isEmpty, !pressure {
+                Text("No sensor matches \u{201C}\(query)\u{201D}.")
+                    .font(.callout)
+                    .foregroundStyle(.secondaryText)
+                    .padding(.horizontal, SensorColumns.inset)
             }
-            if let battery = sensors.hottest(.battery) {
-                Stat(label: "Battery", number: battery, color: Theme.sensor(.battery), format: Format.celsius)
-            }
-            Stat(label: "Thermal state", value: snapshot.power.thermalState.rawValue.capitalized)
         }
     }
 
-    /// Every sensor with its reading now and its range since launch, drawn as
-    /// a bar from lowest to highest with a tick at the current reading. In a
-    /// narrow pane the figures stay and the bars go, so no row runs past the card.
-    private func sensorTable() -> some View {
-        let ranges = model.sensorHistory.ranges
-        let bars = tableWidth == 0 || tableWidth >= Self.barsWidth
-        return Card(tint: Theme.thermal) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Sensors").font(.headline)
-                Spacer()
-                Text("lowest and highest since launch").font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
-            }
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                GridRow {
-                    Text("Sensor")
-                    Text("Now").gridColumnAlignment(.trailing)
-                    Text("Lowest").gridColumnAlignment(.trailing)
-                    Text("Highest").gridColumnAlignment(.trailing)
-                    if bars {
-                        Text("20 °C – 110 °C").frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .font(.subheadline)
+    /// What a Mac with no sensors (a virtual machine) shows under the
+    /// thermal pressure row, so the empty table reads as deliberate.
+    private func noSensors() -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "thermometer.medium.slash")
+                .font(.title2)
                 .foregroundStyle(.secondaryText)
-                ForEach(sensors.temperatures) { reading in
-                    let range = ranges[reading.name] ?? reading.celsius...reading.celsius
-                    GridRow {
-                        HStack(spacing: 6) {
-                            Circle().fill(Theme.sensor(reading.kind)).frame(width: 7, height: 7)
-                            Text(reading.label)
-                        }
-                        Text(Format.celsius(reading.celsius)).fontWeight(.medium)
-                        Text(Format.celsius(range.lowerBound)).foregroundStyle(.secondaryText)
-                        Text(Format.celsius(range.upperBound)).foregroundStyle(.secondaryText)
-                        if bars {
-                            RangeBar(range: range, value: reading.celsius, color: Theme.sensor(reading.kind))
-                                .frame(minWidth: 120, maxWidth: .infinity)
-                                .frame(height: 8)
-                        }
-                    }
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No sensors on this Mac").font(.headline)
+                Text("macOS reports no temperatures, fan speeds, clocks or power rails here, as is usual in a virtual "
+                    + "machine. Thermal pressure comes from macOS itself, so it's always shown.")
                     .font(.callout)
-                    .monospacedDigit()
-                }
+                    .foregroundStyle(.secondaryText)
             }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tableWidth = $0 }
+        .padding(.horizontal, SensorColumns.inset)
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "14:02:31", with the day too when it isn't today.
+    private static func time(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .standard)
+            : date.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
-/// A sensor's range since launch on a fixed 20–110 °C scale, with a tick at
-/// the current reading.
-private struct RangeBar: View {
-    private static let scale = 20.0...110.0
-    var range: ClosedRange<Double>
-    var value: Double
-    var color: Color
+/// A small search field for the sensor table: a magnifying glass, the
+/// text, and a clear button once there's something to clear. Esc clears it.
+private struct SensorSearchField: View {
+    @Binding var text: String
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            let start = position(range.lowerBound) * width
-            let end = max(position(range.upperBound) * width, start + 3)
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule()
-                    .fill(LinearGradient(colors: [color.opacity(0.35), color.opacity(0.85)], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: end - start)
-                    .offset(x: start)
-                Capsule()
-                    .fill(.white)
-                    .frame(width: 2.5)
-                    .offset(x: min(max(position(value) * width - 1.25, 0), width - 2.5))
+        HStack(spacing: 4) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondaryText)
+            TextField("Filter", text: $text, prompt: Text("Filter"))
+                .textFieldStyle(.plain)
+                .onExitCommand { text = "" }
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .help("Clear the filter")
             }
         }
-    }
-
-    private func position(_ celsius: Double) -> Double {
-        min(max((celsius - Self.scale.lowerBound) / (Self.scale.upperBound - Self.scale.lowerBound), 0), 1)
+        .font(.callout)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.background.opacity(0.6)))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Filter sensors")
     }
 }
