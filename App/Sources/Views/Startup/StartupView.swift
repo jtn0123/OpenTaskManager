@@ -22,6 +22,10 @@ enum StartupFilter: String, CaseIterable, Identifiable {
         case .daemons: item.scope == .daemon
         }
     }
+
+    /// Whether rows can differ in publisher. Under Apple or Third party the
+    /// column would say the same thing on every row, so it gives its room to Name.
+    var showsPublisher: Bool { self != .apple && self != .thirdParty }
 }
 
 /// Everything launchd starts by itself: the agents and daemons in the
@@ -119,7 +123,7 @@ struct StartupView: View {
             .padding(.bottom, 10)
 
             InspectorSplit(
-                listMinimum: StartupTable.minimumWidth,
+                listMinimum: StartupTable.minimumWidth(showsPublisher: filter.showsPublisher),
                 // Like the Processes inspector, the details take room only once
                 // something is selected.
                 wantsInspector: showInspector && selection != nil,
@@ -128,7 +132,8 @@ struct StartupView: View {
                 widthKey: "startupInspectorWidth",
                 backTitle: "Startup"
             ) {
-                StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder, toggle: toggle, open: openDetails)
+                StartupTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,
+                             toggle: toggle, open: openDetails)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } detail: {
                 if let item = items.first(where: { $0.id == selection }) {
@@ -237,43 +242,54 @@ private struct SummaryCard: View {
 // MARK: - Table
 
 private struct StartupTable: View {
-    /// The columns' minimum widths and the gaps between them.
-    static let minimumWidth: CGFloat = 130 + 80 + 110 + 80 + 70 + 5 * 17
+    typealias Column = TableColumnContent<LaunchItem, KeyPathComparator<LaunchItem>>
+
+    /// Narrowest each column gets: room for its usual values, so Name is
+    /// the one that gives way. All five fit the narrowest window.
+    private enum Minimum {
+        static let name: CGFloat = 150
+        static let kind: CGFloat = 90
+        static let status: CGFloat = 120
+        static let launches: CGFloat = 80
+        static let publisher: CGFloat = 70
+    }
+
+    /// The columns at their narrowest, the gaps between them, and the
+    /// table's own insets and scroller.
+    static func minimumWidth(showsPublisher: Bool) -> CGFloat {
+        let columns = Minimum.name + Minimum.kind + Minimum.status + Minimum.launches + (showsPublisher ? Minimum.publisher : 0)
+        return columns + (showsPublisher ? 5 : 4) * 17 + 32
+    }
+
     var rows: [LaunchItem]
+    /// Off while the filter leaves one publisher, as every row would say it.
+    var showsPublisher: Bool
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<LaunchItem>]
     var toggle: (LaunchItem) -> Void
     var open: () -> Void
 
+    /// The other columns hold short values that repeat down the table, so they
+    /// start at the width those need and stop soon after; Name takes the rest.
     var body: some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name) { item in
-                HStack(spacing: 6) {
-                    Image(nsImage: IconCache.icon(forBundle: item.appBundlePath))
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                    Text(item.name).lineLimit(1)
+        Group {
+            // Two tables rather than a conditional column, which needs macOS 14.4.
+            if showsPublisher {
+                Table(rows, selection: $selection, sortOrder: $sortOrder) {
+                    nameColumn
+                    kindColumn
+                    statusColumn
+                    launchesColumn
+                    publisherColumn
                 }
-                .help(item.label)
+            } else {
+                Table(rows, selection: $selection, sortOrder: $sortOrder) {
+                    nameColumn
+                    kindColumn
+                    statusColumn
+                    launchesColumn
+                }
             }
-            .width(min: 130, ideal: 200)
-            TableColumn("Kind", value: \.scope) { item in
-                Text(item.scope.title)
-            }
-            .width(min: 80, ideal: 100)
-            TableColumn("Status", value: \.state) { item in
-                LaunchStateLabel(state: item.state)
-            }
-            .width(min: 110, ideal: 155)
-            TableColumn("Launches", value: \.timing) { item in
-                Text(item.launchSummary).lineLimit(1)
-            }
-            .width(min: 80, ideal: 120)
-            TableColumn("Publisher", value: \.publisher) { item in
-                Text(item.publisher.title)
-                    .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
-            }
-            .width(min: 70, ideal: 90)
         }
         .contextMenu(forSelectionType: LaunchItem.ID.self) { ids in
             if let id = ids.first, let item = rows.first(where: { $0.id == id }) {
@@ -289,6 +305,50 @@ private struct StartupTable: View {
         } primaryAction: { _ in
             open()
         }
+    }
+
+    private var nameColumn: some Column {
+        TableColumn("Name", value: \.name) { item in
+            HStack(spacing: 6) {
+                Image(nsImage: IconCache.icon(forBundle: item.appBundlePath))
+                    .resizable()
+                    .frame(width: 16, height: 16)
+                Text(item.name).lineLimit(1)
+            }
+            // The whole name, for when the column cuts it short.
+            .help("\(item.name)\n\(item.label)")
+        }
+        .width(min: Minimum.name, ideal: 260)
+    }
+
+    private var kindColumn: some Column {
+        TableColumn("Kind", value: \.scope) { item in
+            Text(item.scope.title).lineLimit(1)
+        }
+        .width(min: Minimum.kind, ideal: 95, max: 110)
+    }
+
+    private var statusColumn: some Column {
+        TableColumn("Status", value: \.state) { item in
+            LaunchStateLabel(state: item.state)
+                .help(item.pid.map { "\(item.state.title), PID \($0)" } ?? item.state.title)
+        }
+        .width(min: Minimum.status, ideal: 130, max: 160)
+    }
+
+    private var launchesColumn: some Column {
+        TableColumn("Launches", value: \.timing) { item in
+            Text(item.launchSummary).lineLimit(1).help(item.launchSummary)
+        }
+        .width(min: Minimum.launches, ideal: 100, max: 150)
+    }
+
+    private var publisherColumn: some Column {
+        TableColumn("Publisher", value: \.publisher) { item in
+            Text(item.publisher.title)
+                .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
+        }
+        .width(min: Minimum.publisher, ideal: 75, max: 100)
     }
 }
 

@@ -43,13 +43,33 @@ enum ProcessColumn: String, CaseIterable {
         }
     }
 
-    /// Narrowest a column can be dragged: its header's name and total stay whole.
+    /// Narrowest a column can be dragged: its header's name and total stay
+    /// whole. Name's is room for an app's name, icon and child count at the
+    /// first level of the outline: columns give way before Name goes below it.
     var minWidth: CGFloat {
         switch self {
-        case .name: 150
+        case .name: 220
         case .disk: 76
         case .user: 56
         default: 48
+        }
+    }
+
+    /// When the table runs short of room, columns give way lowest priority
+    /// first (`ColumnFit`), so the ones that say which process a row is and
+    /// what it costs stay. Nil for Name, PID, CPU and Memory, which always stay.
+    /// User ranks low: on most Macs it says the same thing on every row.
+    var priority: Int? {
+        switch self {
+        case .name, .pid, .cpu, .memory: nil
+        case .disk: 8
+        case .power: 7
+        case .gpu: 6
+        case .user: 5
+        case .threads: 4
+        case .wakeups: 3
+        case .topTier: 2
+        case .kind: 1
         }
     }
 
@@ -58,6 +78,15 @@ enum ProcessColumn: String, CaseIterable {
     var hiddenByDefault: Bool {
         self == .threads || self == .wakeups || self == .kind || self == .topTier
     }
+
+    /// The column's line in the Columns menus, saying so when it's on but
+    /// hidden for now because the table is too narrow.
+    func menuTitle(hiddenToFit: Bool) -> String {
+        hiddenToFit ? "\(title) (hidden to fit)" : title
+    }
+
+    /// Closes the Columns menus while a column is hidden to fit.
+    static let hiddenToFitNote = "Columns hidden to fit come back when there's room"
 
     var sortKey: ProcessSortKey? {
         switch self {
@@ -93,9 +122,9 @@ enum ProcessColumn: String, CaseIterable {
     /// column fits beside the inspector in the default window.
     static let spacing: CGFloat = 8
 
-    /// Width the table needs for the default columns, Name at its narrowest,
-    /// until the table measures its own. The 4 is the table's edge insets.
-    static let defaultTableMinimum: CGFloat = allCases.filter { !$0.hiddenByDefault }.reduce(4) { width, column in
+    /// Width the table needs for the columns that always stay, Name at its
+    /// narrowest, until the table measures its own. The 4 is the table's edge insets.
+    static let defaultTableMinimum: CGFloat = allCases.filter { $0.priority == nil }.reduce(4) { width, column in
         width + (column == .name ? column.minWidth : column.width) + spacing
     }
 }

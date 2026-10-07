@@ -11,8 +11,10 @@ struct ProcessesView: View {
     @AppStorage("hiddenProcessColumns") private var hiddenColumns = HiddenProcessColumns.defaults
     @State private var search = ""
     @State private var selection: Set<Int32> = []
-    /// Width the table needs for its visible columns, as it last measured.
+    /// Width the table needs for the columns that always stay, as it last measured.
     @State private var tableMinimum = ProcessColumn.defaultTableMinimum
+    /// Columns that are on but hidden because the table is too narrow.
+    @State private var hiddenToFit: Set<ProcessColumn> = []
     /// The window is too narrow for the table and the inspector side by side.
     @State private var isNarrow = false
     /// In a narrow window, the inspector covers the table.
@@ -39,7 +41,8 @@ struct ProcessesView: View {
                         model: model,
                         onShowInspector: openDetails,
                         onToggleColumn: { hiddenColumns.toggle($0) },
-                        onMinimumWidthChange: { tableMinimum = $0 }
+                        onMinimumWidthChange: { tableMinimum = $0 },
+                        onHiddenToFitChange: { hiddenToFit = $0 }
                     )
                 } detail: {
                     inspector
@@ -52,16 +55,18 @@ struct ProcessesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .searchable(text: $search, placement: .toolbar, prompt: "Name, PID, user or path")
+        .onChange(of: isNarrow) {
+            // The split covers the table with an open inspector when the window
+            // turns narrow. At launch it can decide that before `-openProcess`'s
+            // selection reaches it, so apply the same rule to the selection as it is now.
+            if isNarrow, showInspector, !selection.isEmpty { showsFullDetail = true }
+        }
+        // Matches names, PIDs, users and paths; a short prompt stays whole in the toolbar.
+        .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
         .toolbar {
+            // First, so it's the last to fold into the overflow menu.
             ToolbarItem {
-                Picker("View", selection: $mode) {
-                    Label("Grouped", systemImage: "square.stack.3d.up").tag(ProcessViewMode.grouped)
-                    Label("Tree", systemImage: "list.bullet.indent").tag(ProcessViewMode.tree)
-                    Label("Flat", systemImage: "list.bullet").tag(ProcessViewMode.flat)
-                }
-                .pickerStyle(.segmented)
-                .help("Group helpers under their app, show the parent/child tree, or list every process")
+                modeMenu
             }
             ToolbarItem {
                 columnsMenu
@@ -73,7 +78,8 @@ struct ProcessesView: View {
                     Label("End Task", systemImage: "xmark.octagon")
                 }
                 .disabled(selection.isEmpty)
-                .help("Quit the selected processes (Delete)")
+                .help(selection.count > 1 ? "End Task: ask the \(selection.count) selected processes to quit (Delete)"
+                    : "End Task: ask the selected process to quit (Delete)")
             }
             ToolbarItem {
                 Button(action: toggleDetails) {
@@ -103,29 +109,56 @@ struct ProcessesView: View {
         }
     }
 
+    /// How the rows are arranged, named in the toolbar rather than three
+    /// look-alike icons, with the choices ticked in its menu.
+    private var modeMenu: some View {
+        Menu {
+            Picker("View", selection: $mode) {
+                ForEach(ProcessViewMode.allCases, id: \.self) { mode in
+                    Label(mode.title, systemImage: mode.symbol).tag(mode)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Label(mode.title, systemImage: mode.symbol)
+        }
+        .labelStyle(.titleAndIcon)
+        .fixedSize()
+        .help("View: group helpers under their app (Grouped), show which process started which (Tree), "
+            + "or list every process on its own (Flat)")
+    }
+
     /// Optional columns, also in the header's context menu. Hiding one makes
-    /// room rather than squeezing the others' headings.
+    /// room rather than squeezing the others' headings. A column that's on
+    /// but hidden to fit the width stays ticked and says so.
     private var columnsMenu: some View {
         Menu {
             ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
-                Toggle(column.title, isOn: Binding(
+                Toggle(column.menuTitle(hiddenToFit: hiddenToFit.contains(column)), isOn: Binding(
                     get: { !hiddenColumns.contains(column) },
                     set: { if $0 == hiddenColumns.contains(column) { hiddenColumns.toggle(column) } }
                 ))
+            }
+            if !hiddenToFit.isEmpty {
+                Divider()
+                Text(ProcessColumn.hiddenToFitNote)
             }
             Divider()
             Button("Default Columns") { hiddenColumns = .defaults }
         } label: {
             Label("Columns", systemImage: "tablecells")
         }
-        .help("Choose the table's columns")
+        .help(hiddenToFit.isEmpty ? "Columns: choose what the table shows"
+            : "Columns: choose what the table shows. Some are hidden until there's room for them")
     }
 
     private var detailsHelp: String {
         if isNarrow {
-            return showsFullDetail ? "Back to the process list" : "Show the selected process's details"
+            return showsFullDetail ? "Details: go back to the process list" : "Details: show everything about the selected process"
         }
-        return showInspector ? "Hide the details pane" : "Show details when a process is selected"
+        return showInspector ? "Details: hide the pane beside the table"
+            : "Details: show a pane with the selected process's graphs, environment and open files"
     }
 
     /// Double-click, Get Info and requests from other pages: the pane in a
@@ -189,6 +222,24 @@ struct ProcessesView: View {
         let disk = snapshot.disks.reduce(0) { $0 + $1.readBytesPerSecond + $1.writeBytesPerSecond }
         totals[.disk] = Format.bytesPerSecond(disk)
         return totals
+    }
+}
+
+extension ProcessViewMode {
+    var title: String {
+        switch self {
+        case .grouped: "Grouped"
+        case .tree: "Tree"
+        case .flat: "Flat"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .grouped: "square.stack.3d.up"
+        case .tree: "list.bullet.indent"
+        case .flat: "list.bullet"
+        }
     }
 }
 

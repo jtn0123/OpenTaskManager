@@ -22,9 +22,12 @@ struct ProcessOutlineView: NSViewRepresentable {
     var model: AppModel
     var onShowInspector: () -> Void
     var onToggleColumn: (ProcessColumn) -> Void
-    /// Called when the width the visible columns need (Name at its
+    /// Called when the width the columns that always stay need (Name at its
     /// narrowest) changes, so the page knows when the inspector fits beside.
     var onMinimumWidthChange: (CGFloat) -> Void
+    /// Called when the columns that are on but hidden to fit the width change,
+    /// so the Columns menu can say so.
+    var onHiddenToFitChange: (Set<ProcessColumn>) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -73,6 +76,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         outline.target = coordinator
         outline.doubleAction = #selector(Coordinator.doubleClicked(_:))
         outline.onDelete = { [weak coordinator] in coordinator?.endSelected() }
+        outline.onHiddenToFitChange = { [weak coordinator] in coordinator?.reportHiddenToFit($0) }
         let columnMenu = NSMenu()
         columnMenu.delegate = coordinator
         outline.headerView?.menu = columnMenu
@@ -203,31 +207,34 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
 
         private func updateColumns(_ outline: ProcessOutline, configuration: ProcessTableConfiguration) {
-            var shownOrHidden = false
+            // Shows and hides columns only when the choice changed, or a
+            // column was resized while the pointer was down.
+            outline.userHidden = configuration.hiddenColumns.columns
+            if outline.needsColumnFit { outline.fitColumns() }
             for (index, tableColumn) in outline.tableColumns.enumerated() {
                 guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue) else { continue }
-                let hidden = column != .name && configuration.hiddenColumns.contains(column)
-                if tableColumn.isHidden != hidden {
-                    tableColumn.isHidden = hidden
-                    shownOrHidden = true
-                }
                 let title = column == .topTier ? "\(configuration.fastTierName) %" : column.title
                 if tableColumn.title != title { tableColumn.title = title }
                 let total = configuration.headerTotals[column] ?? ""
                 if let header = tableColumn.headerCell as? ProcessHeaderCell, header.total != total {
                     header.total = total
-                    if !hidden, let headerView = outline.headerView {
+                    if !tableColumn.isHidden, let headerView = outline.headerView {
                         headerView.setNeedsDisplay(headerView.headerRect(ofColumn: index))
                     }
                 }
             }
-            if shownOrHidden { outline.fitNameColumn() }
             let minimum = outline.minimumWidth
             guard minimum != reportedMinimumWidth else { return }
             reportedMinimumWidth = minimum
             let report = parent.onMinimumWidthChange
             // Not during SwiftUI's update.
             DispatchQueue.main.async { report(minimum) }
+        }
+
+        func reportHiddenToFit(_ hidden: Set<ProcessColumn>) {
+            let report = parent.onHiddenToFitChange
+            // The table fits its columns during SwiftUI's update too.
+            DispatchQueue.main.async { report(hidden) }
         }
 
         /// Row operations that turn the outline's current rows into the new layout.
@@ -419,10 +426,11 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
 
         func outlineViewColumnDidResize(_ notification: Notification) {
-            // A column the user dragged wider or narrower takes its room from Name.
+            // A column the user dragged wider or narrower takes its room from
+            // Name, and from the columns that give way once Name is at its narrowest.
             guard let column = notification.userInfo?["NSTableColumn"] as? NSTableColumn,
                   column.identifier.rawValue != ProcessColumn.name.rawValue else { return }
-            (outline as? ProcessOutline)?.fitNameColumn()
+            (outline as? ProcessOutline)?.columnWasResized()
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -552,7 +560,7 @@ extension ProcessOutlineView.Coordinator {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        if let outline, menu === outline.headerView?.menu {
+        if let outline = outline as? ProcessOutline, menu === outline.headerView?.menu {
             buildColumnMenu(menu, outline: outline)
             return
         }
@@ -641,75 +649,26 @@ extension ProcessOutlineView.Coordinator {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    private func buildColumnMenu(_ menu: NSMenu, outline: NSOutlineView) {
+    /// The same choices as the toolbar's Columns menu: ticked means on, even
+    /// while the column is hidden to fit.
+    private func buildColumnMenu(_ menu: NSMenu, outline: ProcessOutline) {
         let toggle = parent.onToggleColumn
         for tableColumn in outline.tableColumns {
             guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue), column != .name else { continue }
-            let item = ActionItem(column.title) { toggle(column) }
-            item.state = tableColumn.isHidden ? .off : .on
+            let item = ActionItem(column.menuTitle(hiddenToFit: outline.hiddenToFit.contains(column))) { toggle(column) }
+            item.state = outline.userHidden.contains(column) ? .off : .on
             menu.addItem(item)
+        }
+        if !outline.hiddenToFit.isEmpty {
+            menu.addItem(.separator())
+            let note = NSMenuItem(title: ProcessColumn.hiddenToFitNote, action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            menu.addItem(note)
         }
     }
 }
 
 // MARK: - Supporting views
-
-/// Adds Delete-to-end-task to the outline view.
-final class ProcessOutline: NSOutlineView {
-    var onDelete: (() -> Void)?
-
-    /// Width the visible columns need with Name at its narrowest, plus a
-    /// scroller that takes room of its own.
-    var minimumWidth: CGFloat {
-        guard let name = outlineTableColumn else { return 0 }
-        var width = otherColumnsWidth + name.minWidth
-        if let scrollView = enclosingScrollView, scrollView.scrollerStyle == .legacy,
-           let scroller = scrollView.verticalScroller {
-            width += scroller.frame.width
-        }
-        return width.rounded(.up)
-    }
-
-    /// Everything but Name: the end of the last visible column less Name's width.
-    private var otherColumnsWidth: CGFloat {
-        guard let name = outlineTableColumn, let last = tableColumns.lastIndex(where: { !$0.isHidden }) else { return 0 }
-        return rect(ofColumn: last).maxX - name.width
-    }
-
-    /// Gives Name whatever width the other columns leave, down to its
-    /// minimum, so the table fills the view and only scrolls sideways when
-    /// it has to. Done by hand because AppKit's first-column autoresizing
-    /// missed resizes that came from SwiftUI.
-    func fitNameColumn() {
-        guard let name = outlineTableColumn, let clip = enclosingScrollView?.contentView else { return }
-        let width = max(name.minWidth, (clip.bounds.width - otherColumnsWidth).rounded(.down))
-        if name.width != width { name.width = width }
-    }
-
-    override func viewDidMoveToSuperview() {
-        super.viewDidMoveToSuperview()
-        NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: nil)
-        guard let clip = superview as? NSClipView else { return }
-        clip.postsFrameChangedNotifications = true
-        NotificationCenter.default.addObserver(self, selector: #selector(clipViewResized), name: NSView.frameDidChangeNotification, object: clip)
-    }
-
-    @objc private func clipViewResized(_ notification: Notification) {
-        fitNameColumn()
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete
-            onDelete?()
-        } else {
-            super.keyDown(with: event)
-        }
-    }
-}
 
 /// NSMenuItem that runs a closure.
 final class ActionItem: NSMenuItem {
