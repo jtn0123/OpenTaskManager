@@ -16,6 +16,13 @@ final class ProcessSampler {
         let start: Int64
     }
 
+    private struct Lasting {
+        /// Nil until the path has been read; macOS won't give some.
+        let path: String?
+        let name: String?
+        let responsiblePID: Int32
+    }
+
     private struct Counters {
         let cpuSeconds: Double
         let topTierSeconds: Double?
@@ -27,7 +34,9 @@ final class ProcessSampler {
     }
 
     private var previous: [Key: Counters] = [:]
-    private var paths: [Key: String] = [:]
+    /// What a process keeps for its life, read once rather than every tick:
+    /// its executable's path and name, and the process responsible for it.
+    private var lasting: [Key: Lasting] = [:]
     private var userNames: [UInt32: String] = [:]
     private var restrictedThreads: [Int32: Int] = [:]
     private var restrictedThreadsRead = Date.distantPast
@@ -100,7 +109,7 @@ final class ProcessSampler {
         }
 
         previous = current
-        paths = paths.filter { current[$0.key] != nil }
+        lasting = lasting.filter { current[$0.key] != nil }
         return samples
     }
 
@@ -138,16 +147,16 @@ final class ProcessSampler {
     // MARK: - Building samples
 
     private func makeSample(_ info: KernelProcess, key: Key, restricted: Bool) -> ProcessSample {
-        let path = executablePath(for: key)
-        let name = path.map { ($0 as NSString).lastPathComponent } ?? Self.shortName(info.pid) ?? info.command
+        let known = lastingFacts(for: key)
+        let name = known.name ?? Self.shortName(info.pid) ?? info.command
         return ProcessSample(
             pid: info.pid,
             parentPID: info.parentPID,
-            responsiblePID: Responsibility.responsiblePID(for: info.pid),
+            responsiblePID: known.responsiblePID,
             uid: info.uid,
             userName: userName(for: info.uid),
             name: info.pid == 0 ? "kernel_task" : name,
-            executablePath: path,
+            executablePath: known.path,
             state: info.state,
             nice: info.nice,
             startTime: ProcessIdentity.startTime(microseconds: info.startMicroseconds),
@@ -165,13 +174,18 @@ final class ProcessSampler {
         )
     }
 
-    private func executablePath(for key: Key) -> String? {
-        if let cached = paths[key] { return cached }
+    /// A path that can't be read is tried again next tick, as before, and the
+    /// name then comes from `proc_name`, which can change on exec.
+    private func lastingFacts(for key: Key) -> Lasting {
+        if let cached = lasting[key], cached.path != nil { return cached }
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(key.pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        paths[key] = path
-        return path
+        let path = proc_pidpath(key.pid, &buffer, UInt32(buffer.count)) > 0
+            ? String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            : nil
+        let facts = Lasting(path: path, name: path.map { ($0 as NSString).lastPathComponent },
+                            responsiblePID: lasting[key]?.responsiblePID ?? Responsibility.responsiblePID(for: key.pid))
+        lasting[key] = facts
+        return facts
     }
 
     private func userName(for uid: UInt32) -> String {
