@@ -10,7 +10,9 @@ struct ProcessesView: View {
     @AppStorage("showInspector") private var showInspector = true
     @AppStorage("hiddenProcessColumns") private var hiddenColumns = HiddenProcessColumns.defaults
     @State private var search = ""
-    @State private var selection: Set<Int32> = []
+    /// By PID and start time, so a selected process that ends never hands
+    /// its inspector, or End Task, to a later process given its PID.
+    @State private var selection: Set<ProcessIdentity> = []
     /// Width the table needs for the columns that always stay, as it last measured.
     @State private var tableMinimum = ProcessColumn.defaultTableMinimum
     /// Columns that are on but hidden because the table is too narrow.
@@ -80,7 +82,7 @@ struct ProcessesView: View {
             }
             ToolbarItem {
                 Button {
-                    model.endTask(Array(selection))
+                    model.endTask(model.livePIDs(selection))
                 } label: {
                     Label("End Task", systemImage: "xmark.octagon")
                 }
@@ -99,13 +101,13 @@ struct ProcessesView: View {
     }
 
     @ViewBuilder private func inspector(group: ProcessRowGroup?) -> some View {
-        if let pid = selection.first, selection.count == 1, model.process(pid) != nil {
-            ProcessInspectorView(pid: pid, group: group)
-        } else if let pid = selection.first, selection.count == 1 {
+        if let selected = selection.first, selection.count == 1, model.process(selected) != nil {
+            ProcessInspectorView(identity: selected, group: group, onSelect: select)
+        } else if let selected = selection.first, selection.count == 1 {
             ContentUnavailableView(
                 "Process ended",
                 systemImage: "info.circle",
-                description: Text("PID \(String(pid)) is no longer running.")
+                description: Text("PID \(String(selected.pid)) is no longer running.")
             )
         } else {
             ContentUnavailableView(
@@ -177,9 +179,11 @@ struct ProcessesView: View {
     /// Found in the table's rows; while the inspector covers the table, they
     /// are built here instead, unsorted, as the table would have them.
     private func selectedRowGroup(in nodes: [ProcessNode]?, snapshot: SystemSnapshot) -> ProcessRowGroup? {
-        guard showInspector, selection.count == 1, let pid = selection.first, mode != .flat else { return nil }
+        guard showInspector, selection.count == 1, let selected = selection.first, mode != .flat else { return nil }
+        let pid = selected.pid
         let nodes = nodes ?? ProcessTreeBuilder.build(snapshot.processes, mode: mode, appPIDs: Set(model.regularApps.keys), filter: search)
-        guard let node = ProcessTreeBuilder.node(for: pid, in: nodes), !node.children.isEmpty else { return nil }
+        guard let node = ProcessTreeBuilder.node(for: pid, in: nodes), node.process?.identity == selected,
+              !node.children.isEmpty else { return nil }
         return ProcessRowGroup(
             totals: node.totals,
             mode: mode,
@@ -200,7 +204,7 @@ struct ProcessesView: View {
             return showsFullDetail ? "Details: go back to the process list" : "Details: show everything about the selected process"
         }
         return showInspector ? "Details: hide the pane beside the table"
-            : "Details: show a pane with the selected process's graphs, environment and open files"
+            : "Details: show a pane with the selected process's graphs, threads, ancestry and open files"
     }
 
     /// Double-click, Get Info and requests from other pages: the pane in a
@@ -224,16 +228,29 @@ struct ProcessesView: View {
     private func selectRequestedProcess() {
         if let pid = model.requestedProcess {
             model.requestedProcess = nil
-            guard model.process(pid) != nil else { return }
+            guard let process = model.process(pid) else { return }
             search = ""
-            selection = [pid]
+            selection = [process.identity]
+            tableLink.reveal(process.identity)
             openDetails()
             return
         }
         guard selection.isEmpty, let pid = LaunchArgument.string("openProcess").flatMap(Int32.init),
-              model.process(pid) != nil else { return }
-        selection = [pid]
+              let process = model.process(pid) else { return }
+        selection = [process.identity]
+        tableLink.reveal(process.identity)
         openDetails()
+    }
+
+    /// The inspector's ancestry and responsible process: selects that one and
+    /// opens and scrolls the table to its row, clearing a search it doesn't match.
+    private func select(_ process: ProcessIdentity) {
+        guard let sample = model.process(process) else { return }
+        if !search.isEmpty, ProcessTreeBuilder.build([sample], mode: .flat, appPIDs: [], filter: search).isEmpty {
+            search = ""
+        }
+        selection = [process]
+        tableLink.reveal(process)
     }
 
     private func configuration(for snapshot: SystemSnapshot) -> ProcessTableConfiguration {
@@ -243,8 +260,10 @@ struct ProcessesView: View {
             appPIDs: Set(model.regularApps.keys),
             filter: search
         )
+        // Rows that read the same keep their order, rather than trading places
+        // every tick over differences the CPU column doesn't show.
         return ProcessTableConfiguration(
-            nodes: ProcessTreeBuilder.sort(nodes, by: sortKey, ascending: ascending),
+            nodes: ProcessTreeBuilder.sort(nodes, by: sortKey, ascending: ascending, cpuStep: model.cpuScale.shownStep),
             headerTotals: headerTotals(snapshot),
             hiddenColumns: hiddenColumns,
             unreportedColumns: unreportedColumns,

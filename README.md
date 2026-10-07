@@ -27,7 +27,9 @@ new reading.
   Actions on system processes ask for an administrator password only when
   they're needed.
 - An inspector with per-process CPU, memory, power and GPU graphs, command
-  line, environment, working directory, and open files and network ports.
+  line, environment, working directory, and open files and network ports;
+  peak footprint, page faults and page-ins, scheduling and QoS, the chain of
+  processes that started it, and a Threads tab with each thread's CPU.
 
 **Performance**: Task Manager-style graphs that scroll smoothly between
 samples and scale their axes to round numbers.
@@ -175,7 +177,7 @@ showing how far it has got as it goes (it can be stopped at any time).
   `ports`, `net` (the processes moving the most network traffic), `drivers`
   (system extensions and third-party kexts), `apps` (the installed apps, with
   `--sizes` to measure them), `devices` (USB, Thunderbolt, Bluetooth, audio and
-  video), `inspect`, `kill` and `du` (the Storage page's
+  video), `inspect`, `threads` (one process's threads by CPU), `kill` and `du` (the Storage page's
   scan, as a table of a folder's largest items), with JSON output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core

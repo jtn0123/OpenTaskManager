@@ -150,7 +150,7 @@ final class ProcessSampler {
             executablePath: path,
             state: info.state,
             nice: info.nice,
-            startTime: info.startMicroseconds > 0 ? Date(timeIntervalSince1970: Double(info.startMicroseconds) / 1_000_000) : nil,
+            startTime: ProcessIdentity.startTime(microseconds: info.startMicroseconds),
             isTranslated: info.isTranslated,
             isRestricted: restricted,
             cpuPercent: 0,
