@@ -48,10 +48,12 @@ enum HistoryRange: Int, CaseIterable, Identifiable {
     }
 }
 
-/// The moment the History page shows. A click or drag on a graph or the rail
-/// pins it, and it stays when the pointer leaves; hovering previews another
-/// moment without moving the pin. Only the markers, the rail's handle and
-/// the side panel read it, so moving the pointer never redraws the charts.
+/// What's picked on the History page's timeline. A click or drag on a graph
+/// or the rail pins a moment, and it stays when the pointer leaves; hovering
+/// previews another moment without moving the pin; playback moves the pin
+/// from point to point. A session being marked and a saved session picked
+/// are shaded on the charts and the rail. Only the markers, the rail and the
+/// side panel read it, so neither the pointer nor playback redraws the charts.
 @Observable
 @MainActor
 final class HistoryScrubber {
@@ -59,6 +61,12 @@ final class HistoryScrubber {
     var pinned: Date?
     /// The moment under the pointer while it's over a graph or the rail.
     var hovered: Date?
+    /// A session being marked.
+    var draft: HistorySessionDraft?
+    /// The saved session picked on the rail or from the Recordings menu.
+    var session: RecordingSession?
+    /// Set while playback moves the pinned moment.
+    var isPlaying = false
 
     /// What the side panel shows: the previewed moment, else the pinned one,
     /// else (nil) the latest.
@@ -68,13 +76,46 @@ final class HistoryScrubber {
     func point(in points: [HistoryPoint]) -> HistoryPoint? {
         time.flatMap { HistoryPoint.nearest(to: $0, in: points) } ?? points.last
     }
+
+    /// The stretch the charts and the rail shade: the session being marked
+    /// (open at the end until its end is picked), else the one picked.
+    var marked: (start: Date, end: Date?)? {
+        if let draft { return (draft.start, draft.end) }
+        return session.map { ($0.start, $0.end) }
+    }
+
+    /// Forgets everything picked, for another recording.
+    func reset() {
+        pinned = nil
+        hovered = nil
+        draft = nil
+        session = nil
+    }
+}
+
+/// A session being marked: the moments picked for its ends, in either order.
+struct HistorySessionDraft: Equatable {
+    /// The moment marked first.
+    var from: Date
+    /// The moment marked second, once picked.
+    var to: Date?
+    /// Seconds each graph point averaged when it was marked.
+    let bucket: TimeInterval
+
+    /// Where the session starts: the beginning of the stretch the earlier
+    /// moment's point averages, so that point's records are in it.
+    var start: Date { min(from, to ?? from).addingTimeInterval(-bucket) }
+    /// Where it ends: the later moment, once both are picked.
+    var end: Date? { to.map { max(from, $0) } }
 }
 
 /// The flight recorder's history: what the Mac was doing over the last hour
-/// to week, with the busiest apps at any moment picked on the graphs.
+/// to week, with the busiest apps at any moment picked on the graphs. Or a
+/// recording file opened read-only, shown the same way under a banner.
 ///
 /// The page reads the recording when it opens, when the range changes and
-/// once per graph point after that. It never follows the sampling tick.
+/// once per graph point after that (a file, once). It never follows the
+/// sampling tick.
 ///
 /// Below `compactWidth` the moment panel leaves the side: a summary of it
 /// rides over the charts with the rail, its details a click away, and the
@@ -90,6 +131,8 @@ struct HistoryView: View {
     /// Spread the graphs from the first record in the range to the last.
     @AppStorage("historyFitsRecording") private var fitsRecording = false
     @State private var scrubber = HistoryScrubber()
+    @State private var player = HistoryPlayer()
+    private let store = HistoryRecordingStore.shared
     @State private var points: [HistoryPoint]?
     @State private var domain = Date.now.addingTimeInterval(-HistoryRange.hour.seconds)...Date.now
     /// Seconds each graph point averages.
@@ -108,35 +151,51 @@ struct HistoryView: View {
     private struct LoadKey: Equatable {
         let range: HistoryRange
         let fits: Bool
+        /// The recording file on show; nil for the live history.
+        let recording: OpenedRecording.ID?
     }
 
     private var compact: Bool { width > 0 && width < Self.compactWidth }
 
+    /// The recording file on show, or nil for the live history.
+    private var opened: OpenedRecording? { store.opened }
+
+    /// What the page reads: the opened file, else the live recorder.
+    private var source: FlightRecorder? { opened?.recorder ?? model.recorder }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ScrollView {
-                // The rail is a pinned header, so it stays over the charts as they scroll.
-                LazyVStack(alignment: .leading, spacing: 16, pinnedViews: .sectionHeaders) {
-                    header
-                    Section {
-                        content
-                    } header: {
-                        rail
-                    }
-                }
-                .padding(20)
+        VStack(spacing: 0) {
+            if let opened {
+                HistoryRecordingBanner(recording: opened, store: store)
             }
-            if !compact {
-                // In a scroll view of its own, so it sits under the toolbar like the charts.
+            HStack(alignment: .top, spacing: 0) {
                 ScrollView {
-                    HistoryMomentPanel(scrubber: scrubber, points: points ?? [], bucket: bucket)
-                        .padding([.top, .bottom, .trailing], 20)
+                    // The rail is a pinned header, so it stays over the charts as they scroll.
+                    LazyVStack(alignment: .leading, spacing: 16, pinnedViews: .sectionHeaders) {
+                        header
+                        Section {
+                            content
+                        } header: {
+                            rail
+                        }
+                    }
+                    .padding(20)
                 }
-                .frame(width: Self.panelWidth)
+                if !compact {
+                    // In a scroll view of its own, so it sits under the toolbar like the charts.
+                    ScrollView {
+                        HistoryMomentPanel(scrubber: scrubber, points: points ?? [], bucket: bucket, recorder: source)
+                            .padding([.top, .bottom, .trailing], 20)
+                    }
+                    .frame(width: Self.panelWidth)
+                }
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .toolbar {
+            ToolbarItem {
+                HistoryRecordingsMenu(store: store, scrubber: scrubber, recorder: model.recorder, domain: domain, show: show)
+            }
             ToolbarItem {
                 Button {
                     Task { await export() }
@@ -144,39 +203,52 @@ struct HistoryView: View {
                     Label("Export CSV…", systemImage: "square.and.arrow.up")
                 }
                 .help("Save every record in this range as a CSV file")
-                .disabled(model.recorder == nil)
+                .disabled(source == nil)
             }
         }
-        .task(id: LoadKey(range: range, fits: fitsRecording)) {
+        .task(id: LoadKey(range: range, fits: fitsRecording, recording: opened?.id)) {
+            await load()
+            // A recording file never changes; the live history gains a point every `bucket` seconds.
+            guard opened == nil else { return }
             while !Task.isCancelled {
-                await load()
                 try? await Task.sleep(for: .seconds(bucket))
+                await load()
             }
         }
+        .onChange(of: opened?.id) {
+            player.stop()
+            scrubber.reset()
+        }
+        .onDisappear { player.stop() }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // The controls move under the title, then the toggle under the
-            // range, as the window narrows.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .center, spacing: 12) {
-                    title
-                    Spacer(minLength: 0)
-                    fitToggle
-                    rangePicker
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    title
-                    HStack(spacing: 12) {
+            if opened != nil {
+                // A recording file has one span: no range to pick or fit.
+                title
+            } else {
+                // The controls move under the title, then the toggle under the
+                // range, as the window narrows.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 12) {
+                        title
+                        Spacer(minLength: 0)
+                        fitToggle
+                        rangePicker
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        title
+                        HStack(spacing: 12) {
+                            rangePicker
+                            fitToggle
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        title
                         rangePicker
                         fitToggle
                     }
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    title
-                    rangePicker
-                    fitToggle
                 }
             }
             // One line: in a narrow window the cadence and retention move to the tooltip.
@@ -234,13 +306,19 @@ struct HistoryView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if model.recorder == nil {
+        if source == nil {
             ContentUnavailableView("History isn't available", systemImage: "exclamationmark.triangle",
                                    description: Text("The recording at \(FlightRecorder.defaultURL.path) couldn't be opened."))
         } else if let points, points.isEmpty {
-            ContentUnavailableView("Collecting history", systemImage: "clock.arrow.circlepath",
-                                   description: Text("A record is written every \(Int(FlightRecorder.span)) seconds while OpenTaskManager runs."))
-                .padding(.top, 60)
+            if opened != nil {
+                ContentUnavailableView("Nothing in this recording", systemImage: "waveform.slash",
+                                       description: Text("The session it was saved from has no records."))
+                    .padding(.top, 60)
+            } else {
+                ContentUnavailableView("Collecting history", systemImage: "clock.arrow.circlepath",
+                                       description: Text("A record is written every \(Int(FlightRecorder.span)) seconds while OpenTaskManager runs."))
+                    .padding(.top, 60)
+            }
         } else if let points {
             let axis = timeAxis
             ForEach(HistoryChartSpec.all(for: points)) { spec in
@@ -253,12 +331,14 @@ struct HistoryView: View {
     /// The timeline over the charts, once there's something to pick from,
     /// and in a narrow window the moment's summary above it.
     @ViewBuilder private var rail: some View {
-        if let points, !points.isEmpty, model.recorder != nil {
+        if let points, !points.isEmpty, source != nil {
             VStack(alignment: .leading, spacing: 10) {
                 if compact {
-                    HistoryMomentSummary(scrubber: scrubber, points: points, bucket: bucket)
+                    HistoryMomentSummary(scrubber: scrubber, points: points, bucket: bucket, recorder: source)
                 }
-                HistoryRail(scrubber: scrubber, points: points, domain: domain, bucket: bucket)
+                // Sessions are marked in the live recording; a file is read-only.
+                HistoryRail(scrubber: scrubber, player: player, store: store, recorder: opened == nil ? model.recorder : nil,
+                            points: points, domain: domain, bucket: bucket)
             }
             .padding(.top, 4)
             .padding(.bottom, 8)
@@ -274,7 +354,7 @@ struct HistoryView: View {
         let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
         var step = range.tickStep
         var labels = range.timeLabels
-        if span < range.seconds - 1 {
+        if opened != nil || span < range.seconds - 1 {
             step = GraphMath.timeTickStep(for: span)
             labels = step < 60 ? .dateTime.hour().minute().second()
                 : step >= 86_400 ? .dateTime.weekday(.abbreviated).day() : .dateTime.hour().minute()
@@ -290,14 +370,22 @@ struct HistoryView: View {
     /// How much of the range is recorded: "17 min recorded since 6:51 AM".
     private var recordedLabel: String {
         guard let recordedSpan, recorded > 0 else { return "" }
+        guard opened == nil else { return "\(Format.roughDuration(recorded)) recorded" }
         guard startsLate else { return "\(Format.roughDuration(recorded)) recorded in \(range.phrase)" }
         return "\(Format.roughDuration(recorded)) recorded since \(Self.clock(recordedSpan.lowerBound))"
     }
 
     /// The rest of the line under the title, after `recordedLabel`.
     private var status: String {
-        var parts = ["every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept for 7 days"]
-        if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " on disk") }
+        var parts: [String]
+        if opened != nil {
+            let gaps = points?.last?.segment ?? 0
+            parts = [gaps == 0 ? "no gaps" : gaps == 1 ? "1 gap" : "\(gaps) gaps", "a record every \(Int(FlightRecorder.span)) s"]
+            if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " file") }
+        } else {
+            parts = ["every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept for 7 days"]
+            if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " on disk") }
+        }
         let text = parts.joined(separator: " · ")
         return recordedLabel.isEmpty ? "Recorded " + text : " · " + text
     }
@@ -305,17 +393,26 @@ struct HistoryView: View {
     /// `status` for a narrow window: just the size on disk.
     private var shortStatus: String {
         guard fileSize > 0 else { return "" }
-        let size = Format.bytes(UInt64(fileSize)) + " on disk"
+        let size = Format.bytes(UInt64(fileSize)) + (opened == nil ? " on disk" : " file")
         return recordedLabel.isEmpty ? size : " · " + size
+    }
+
+    /// Picks a saved session, switching to the shortest range that reaches back to it.
+    private func show(_ session: RecordingSession) {
+        let reach = Date.now.timeIntervalSince(session.start)
+        range = HistoryRange.allCases.first { $0.seconds >= reach } ?? .week
+        scrubber.draft = nil
+        scrubber.session = session
     }
 
     /// Saves the records in the range shown, at full resolution, as CSV.
     private func export() async {
-        guard let recorder = model.recorder else { return }
-        let records = (try? await recorder.records(from: domain.lowerBound, to: .now)) ?? []
+        guard let source else { return }
+        let records = (try? await source.records(from: domain.lowerBound, to: opened == nil ? .now : domain.upperBound)) ?? []
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.commaSeparatedText]
-        panel.nameFieldStringValue = "OpenTaskManager history \(Date.now.formatted(.iso8601.year().month().day())).csv"
+        panel.nameFieldStringValue = opened.map { "\($0.title).csv" }
+            ?? "OpenTaskManager history \(Date.now.formatted(.iso8601.year().month().day())).csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try HistoryRecord.csv(records).write(to: url, atomically: true, encoding: .utf8)
@@ -325,7 +422,40 @@ struct HistoryView: View {
     }
 
     private func load() async {
-        guard let recorder = model.recorder else { return }
+        if let opened {
+            await load(opened)
+        } else if let recorder = model.recorder {
+            await loadLive(recorder)
+        }
+    }
+
+    /// The whole of an opened recording file.
+    private func load(_ opened: OpenedRecording) async {
+        let recorder = opened.recorder
+        let session = opened.session
+        let shown = session.start...max(session.end, session.start.addingTimeInterval(60))
+        let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound))
+        let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
+        let seconds = (try? await recorder.recordedSeconds(from: shown.lowerBound, to: shown.upperBound)) ?? 0
+        let span = try? await recorder.recordedSpan(from: shown.lowerBound, to: shown.upperBound)
+        guard !Task.isCancelled else { return }
+        recorded = seconds
+        earliest = nil
+        recordedSpan = span
+        startsLate = false
+        fileSize = recorder.fileSize
+        bucket = step
+        domain = shown
+        points = loaded
+        player.points = loaded
+        if let speed = store.takeLaunchSpeed() {
+            player.speed = speed
+            player.play(scrubber)
+        }
+    }
+
+    /// The range shown of the live recording, and its saved sessions.
+    private func loadLive(_ recorder: FlightRecorder) async {
         let end = Date.now
         let start = end.addingTimeInterval(-range.seconds)
         let first = try? await recorder.earliest()
@@ -333,7 +463,11 @@ struct HistoryView: View {
         let shown = GraphMath.historyDomain(range: range.seconds, end: end, recorded: span, fit: fitsRecording, record: FlightRecorder.span)
         let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound))
         let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
-        recorded = (try? await recorder.recordedSeconds(from: start, to: end)) ?? 0
+        let seconds = (try? await recorder.recordedSeconds(from: start, to: end)) ?? 0
+        let sessions = (try? await recorder.sessions()) ?? []
+        // The range changed or a file opened meanwhile: this load is stale.
+        guard !Task.isCancelled else { return }
+        recorded = seconds
         earliest = first
         recordedSpan = span
         startsLate = span.map { GraphMath.recordingStartsLate(range: range.seconds, end: end, recorded: $0) } ?? false
@@ -341,7 +475,10 @@ struct HistoryView: View {
         bucket = step
         domain = shown
         points = loaded
+        player.points = loaded
+        store.update(sessions)
         // A pinned moment that has slid out of the range goes back to the latest.
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }
+        if let picked = scrubber.session, !sessions.contains(picked) { scrubber.session = nil }
     }
 }

@@ -9,6 +9,8 @@ struct HistoryMomentPanel: View {
     let points: [HistoryPoint]
     /// Seconds each point averages.
     let bucket: TimeInterval
+    /// Where the busiest apps are read from: the live recording or an opened file.
+    let recorder: FlightRecorder?
 
     var body: some View {
         let point = scrubber.point(in: points)
@@ -16,7 +18,7 @@ struct HistoryMomentPanel: View {
             if let point {
                 heading(point)
                 Divider()
-                HistoryMomentDetails(point: point, bucket: bucket)
+                HistoryMomentDetails(point: point, bucket: bucket, recorder: recorder)
             } else {
                 Text("Nothing recorded yet").font(.headline)
                 Text("Click or drag on a graph to pick a moment and see it here.").font(.callout).foregroundStyle(.secondaryText)
@@ -59,6 +61,8 @@ struct HistoryMomentSummary: View {
     let points: [HistoryPoint]
     /// Seconds each point averages.
     let bucket: TimeInterval
+    /// Where the busiest apps are read from: the live recording or an opened file.
+    let recorder: FlightRecorder?
     /// Wide enough for "Disk write" and "99.9 KB/s".
     private static let figureWidth = 76.0
 
@@ -100,7 +104,7 @@ struct HistoryMomentSummary: View {
                 .help("Every figure at this moment, and the apps that were busiest")
                 .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
                     if let point {
-                        HistoryMomentDetails(point: point, bucket: bucket)
+                        HistoryMomentDetails(point: point, bucket: bucket, recorder: recorder)
                             .padding(16)
                             .frame(width: 300)
                     }
@@ -168,8 +172,16 @@ struct HistoryMomentDetails: View {
     let point: HistoryPoint
     /// Seconds each point averages.
     let bucket: TimeInterval
+    /// Where the busiest apps are read from.
+    let recorder: FlightRecorder?
     @State private var topCPU: [HistoryApp] = []
     @State private var topMemory: [HistoryApp] = []
+
+    /// Reads the apps again for another moment or another recording.
+    private struct AppsKey: Equatable {
+        let time: Date
+        let recording: URL?
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -177,8 +189,8 @@ struct HistoryMomentDetails: View {
             Divider()
             apps
         }
-        .task(id: point.time) {
-            guard let recorder = model.recorder else { return }
+        .task(id: AppsKey(time: point.time, recording: recorder?.url)) {
+            guard let recorder else { return }
             let records = (try? await recorder.records(from: point.time.addingTimeInterval(-bucket), to: point.time)) ?? []
             let top = HistoryRecord.topApps(in: records, count: 5)
             topCPU = top.cpu
@@ -237,13 +249,14 @@ struct HistoryMomentDetails: View {
     }
 }
 
-/// "Latest", "Pinned" or "Preview": whether the moment shown follows the
-/// recording, a click, or the pointer.
+/// "Latest", "Pinned", "Replay" or "Preview": whether the moment shown
+/// follows the recording, a click, playback, or the pointer.
 private struct HistoryMomentBadge: View {
     let scrubber: HistoryScrubber
 
     var body: some View {
         let (state, color): (String, Color) = scrubber.hovered != nil ? ("Preview", .secondary)
+            : scrubber.isPlaying ? ("Replay", HistorySessionStyle.tint)
             : scrubber.pinned != nil ? ("Pinned", .accentColor) : ("Latest", .green)
         Text(state.uppercased())
             .font(.caption.weight(.bold))

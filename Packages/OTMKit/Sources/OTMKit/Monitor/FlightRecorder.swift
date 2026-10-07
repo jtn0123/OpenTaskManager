@@ -1,8 +1,14 @@
 import Foundation
 import SQLite3
 
-public enum FlightRecorderError: Error, Equatable {
+public enum FlightRecorderError: Error, Equatable, LocalizedError {
     case sqlite(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .sqlite(let message): "The recording's database reported an error: \(message)."
+        }
+    }
 }
 
 /// Keeps a stretch-by-stretch record of the whole system on disk, so the
@@ -11,7 +17,9 @@ public enum FlightRecorderError: Error, Equatable {
 ///
 /// Each row is one `HistoryRecord` (ten seconds by default). Graph points are
 /// averaged by SQLite itself, so reading a week costs one grouped query
-/// rather than loading tens of thousands of rows.
+/// rather than loading tens of thousands of rows. Sessions, stretches the
+/// user marked, sit beside the records and are exported as recording files;
+/// an opened file is replayed through an in-memory copy of the same tables.
 public actor FlightRecorder {
     /// Seconds each record covers.
     public static let span: TimeInterval = 10
@@ -36,6 +44,7 @@ public actor FlightRecorder {
         }
     }
 
+    /// The database file, or for a replayed recording the file it came from.
     public nonisolated let url: URL
     private let connection: Connection
     private var database: OpaquePointer { connection.handle }
@@ -48,28 +57,27 @@ public actor FlightRecorder {
         } catch {
             throw .sqlite(error.localizedDescription)
         }
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
-              let handle else {
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "can't open \(url.path)"
-            sqlite3_close(handle)
-            throw .sqlite(message)
-        }
+        let connection = try Self.open(url.path)
         // Every running copy of the app writes here; wait for each other's writes.
-        sqlite3_busy_timeout(handle, 2_000)
-        let columns = Self.columns.map { "\($0) REAL" }.joined(separator: ", ")
-        let schema = """
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            CREATE TABLE IF NOT EXISTS records (time REAL PRIMARY KEY, \(columns), top_cpu TEXT, top_memory TEXT) WITHOUT ROWID;
-            """
-        guard sqlite3_exec(handle, schema, nil, nil, nil) == SQLITE_OK else {
-            let message = String(cString: sqlite3_errmsg(handle))
-            sqlite3_close(handle)
-            throw .sqlite(message)
-        }
+        sqlite3_busy_timeout(connection.handle, 2_000)
+        try Self.execute("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;", on: connection.handle)
+        try Self.createTables(on: connection.handle)
         self.url = url
-        connection = Connection(handle)
+        self.connection = connection
+    }
+
+    /// A read-only view of a recording file: its records and session in an
+    /// in-memory database, so the History page reads it with the same
+    /// queries as the live recording. `url` is the file it was read from.
+    public init(replaying file: RecordingFile, from url: URL) throws(FlightRecorderError) {
+        let connection = try Self.open(":memory:")
+        try Self.createTables(on: connection.handle)
+        try Self.execute("BEGIN", on: connection.handle)
+        try Self.insert(file.records, into: connection.handle)
+        try Self.insert(file.session, into: connection.handle)
+        try Self.execute("COMMIT", on: connection.handle)
+        self.url = url
+        self.connection = connection
     }
 
     /// Where the app keeps its recording.
@@ -82,29 +90,21 @@ public actor FlightRecorder {
     // MARK: - Writing
 
     public func append(_ record: HistoryRecord) throws(FlightRecorderError) {
-        let placeholders = Array(repeating: "?", count: Self.columns.count + 3).joined(separator: ", ")
-        let statement = try prepare(
-            "INSERT OR REPLACE INTO records (time, \(Self.columns.joined(separator: ", ")), top_cpu, top_memory) VALUES (\(placeholders))"
-        )
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, record.time.timeIntervalSince1970)
-        for (index, value) in Self.row(record.values).enumerated() {
-            if let value { sqlite3_bind_double(statement, Int32(index + 2), value) } else { sqlite3_bind_null(statement, Int32(index + 2)) }
-        }
-        bind(Self.encode(record.topCPU), to: statement, at: Int32(Self.columns.count + 2))
-        bind(Self.encode(record.topMemory), to: statement, at: Int32(Self.columns.count + 3))
-        try step(statement)
+        try Self.insert([record], into: database)
         if record.time.timeIntervalSince(lastPrune) > 60 * 60 {
             try prune(before: record.time.addingTimeInterval(-Self.retention))
             lastPrune = record.time
         }
     }
 
+    /// Deletes the records before `date`, and the sessions that ended before it.
     public func prune(before date: Date) throws(FlightRecorderError) {
-        let statement = try prepare("DELETE FROM records WHERE time < ?")
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
-        try step(statement)
+        for sql in ["DELETE FROM records WHERE time < ?", "DELETE FROM sessions WHERE end_time < ?"] {
+            let statement = try prepare(sql)
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
+            try step(statement)
+        }
     }
 
     // MARK: - Reading
@@ -201,6 +201,57 @@ public actor FlightRecorder {
         }
     }
 
+    // MARK: - Sessions
+
+    /// Saves a stretch the user marked, with an optional note, and returns
+    /// it with its ID.
+    public func addSession(from start: Date, to end: Date, note: String = "") throws(FlightRecorderError) -> RecordingSession {
+        let session = RecordingSession(start: start, end: end, note: note)
+        try Self.insert(session, into: database)
+        return RecordingSession(id: sqlite3_last_insert_rowid(database), start: session.start, end: session.end, note: session.note)
+    }
+
+    /// Every saved session, oldest first.
+    public func sessions() throws(FlightRecorderError) -> [RecordingSession] {
+        let statement = try prepare("SELECT id, start_time, end_time, note FROM sessions ORDER BY start_time, id")
+        defer { sqlite3_finalize(statement) }
+        var sessions: [RecordingSession] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            sessions.append(RecordingSession(
+                id: sqlite3_column_int64(statement, 0),
+                start: Date(timeIntervalSince1970: sqlite3_column_double(statement, 1)),
+                end: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                note: sqlite3_column_text(statement, 3).map { String(cString: $0) } ?? ""
+            ))
+        }
+        return sessions
+    }
+
+    /// Forgets a session. Its records stay until they age out.
+    public func deleteSession(_ id: RecordingSession.ID) throws(FlightRecorderError) {
+        let statement = try prepare("DELETE FROM sessions WHERE id = ?")
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        try step(statement)
+    }
+
+    /// A recording file of `session`, made on `machine`. Its records are read
+    /// in one transaction, so another copy of the app writing meanwhile
+    /// can't tear the snapshot.
+    public func recording(of session: RecordingSession, machine: RecordingMachine, generator: String,
+                          exported: Date = .now) throws(FlightRecorderError) -> RecordingFile {
+        try Self.execute("BEGIN", on: database)
+        let records: [HistoryRecord]
+        do throws(FlightRecorderError) {
+            records = try self.records(from: session.start, to: session.end)
+            try Self.execute("COMMIT", on: database)
+        } catch {
+            sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+            throw error
+        }
+        return RecordingFile(session: session, machine: machine, generator: generator, exported: exported, records: records)
+    }
+
     // MARK: - Rows
 
     private static func row(_ values: HistoryValues) -> [Double?] {
@@ -244,19 +295,74 @@ public actor FlightRecorder {
 
     // MARK: - SQLite
 
-    private func prepare(_ sql: String) throws(FlightRecorderError) -> OpaquePointer {
+    private static func open(_ path: String) throws(FlightRecorderError) -> Connection {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
+              let handle else {
+            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "can't open \(path)"
+            sqlite3_close(handle)
+            throw .sqlite(message)
+        }
+        return Connection(handle)
+    }
+
+    private static func createTables(on handle: OpaquePointer) throws(FlightRecorderError) {
+        let columns = columns.map { "\($0) REAL" }.joined(separator: ", ")
+        try execute("""
+            CREATE TABLE IF NOT EXISTS records (time REAL PRIMARY KEY, \(columns), top_cpu TEXT, top_memory TEXT) WITHOUT ROWID;
+            CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY, start_time REAL NOT NULL, end_time REAL NOT NULL, note TEXT NOT NULL);
+            """, on: handle)
+    }
+
+    private static func insert(_ records: [HistoryRecord], into handle: OpaquePointer) throws(FlightRecorderError) {
+        let placeholders = Array(repeating: "?", count: columns.count + 3).joined(separator: ", ")
+        let statement = try prepare(
+            "INSERT OR REPLACE INTO records (time, \(columns.joined(separator: ", ")), top_cpu, top_memory) VALUES (\(placeholders))",
+            on: handle
+        )
+        defer { sqlite3_finalize(statement) }
+        for record in records {
+            sqlite3_reset(statement)
+            sqlite3_bind_double(statement, 1, record.time.timeIntervalSince1970)
+            for (index, value) in row(record.values).enumerated() {
+                if let value { sqlite3_bind_double(statement, Int32(index + 2), value) } else { sqlite3_bind_null(statement, Int32(index + 2)) }
+            }
+            bind(encode(record.topCPU), to: statement, at: Int32(columns.count + 2))
+            bind(encode(record.topMemory), to: statement, at: Int32(columns.count + 3))
+            guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+        }
+    }
+
+    private static func insert(_ session: RecordingSession, into handle: OpaquePointer) throws(FlightRecorderError) {
+        let statement = try prepare("INSERT INTO sessions (start_time, end_time, note) VALUES (?, ?, ?)", on: handle)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, session.start.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, session.end.timeIntervalSince1970)
+        bind(session.note, to: statement, at: 3)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+    }
+
+    private static func execute(_ sql: String, on handle: OpaquePointer) throws(FlightRecorderError) {
+        guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+    }
+
+    private static func prepare(_ sql: String, on handle: OpaquePointer) throws(FlightRecorderError) -> OpaquePointer {
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw .sqlite(String(cString: sqlite3_errmsg(database)))
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw .sqlite(String(cString: sqlite3_errmsg(handle)))
         }
         return statement
+    }
+
+    private func prepare(_ sql: String) throws(FlightRecorderError) -> OpaquePointer {
+        try Self.prepare(sql, on: database)
     }
 
     private func step(_ statement: OpaquePointer) throws(FlightRecorderError) {
         guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
     }
 
-    private func bind(_ text: String, to statement: OpaquePointer, at index: Int32) {
+    private static func bind(_ text: String, to statement: OpaquePointer, at index: Int32) {
         // SQLITE_TRANSIENT: SQLite copies the string before this returns.
         sqlite3_bind_text(statement, index, text, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
     }

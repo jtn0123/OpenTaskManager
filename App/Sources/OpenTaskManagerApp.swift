@@ -27,6 +27,10 @@ struct OpenTaskManagerApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Open Recording…") { HistoryRecordingStore.shared.chooseRecording() }
+                    .keyboardShortcut("o")
+            }
             CommandGroup(after: .toolbar) {
                 Button(model.isPaused ? "Resume Updates" : "Pause Updates") { model.isPaused.toggle() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])

@@ -310,9 +310,10 @@ private struct HistoryPlotOverlay: View {
 }
 
 /// The pinned moment's line, with a bead at the top under the rail's
-/// handle, and a fainter dashed line at a moment the pointer previews. It
-/// alone reads the scrubber, so it's the only part of a chart that redraws
-/// as the pointer moves.
+/// handle, a fainter dashed line at a moment the pointer previews, and the
+/// session being marked or picked shaded. It alone reads the scrubber, so
+/// it's the only part of a chart that redraws as the pointer moves or
+/// playback steps.
 private struct HistoryMarkers: View {
     let scrubber: HistoryScrubber
     let plot: CGRect
@@ -321,6 +322,9 @@ private struct HistoryMarkers: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            if let marked = scrubber.marked {
+                band(marked.start, marked.end)
+            }
             if let hovered = scrubber.hovered, hovered != scrubber.pinned, domain.contains(hovered) {
                 Path { path in
                     path.move(to: CGPoint(x: 0.5, y: 0))
@@ -346,127 +350,27 @@ private struct HistoryMarkers: View {
         .allowsHitTesting(false)
     }
 
+    /// A session's stretch, cut to the range shown, with a line at each end
+    /// inside it; one still being marked has only its start.
+    @ViewBuilder private func band(_ start: Date, _ end: Date?) -> some View {
+        let tint = HistorySessionStyle.tint
+        if start <= domain.upperBound, (end ?? start) >= domain.lowerBound {
+            let lower = x(of: max(start, domain.lowerBound))
+            let upper = x(of: min(end ?? start, domain.upperBound))
+            Rectangle()
+                .fill(tint.opacity(0.10))
+                .frame(width: max(upper - lower, 0), height: plot.height)
+                .offset(x: lower, y: plot.minY)
+            ForEach([start, end].compactMap { $0 }.filter { domain.contains($0) }, id: \.self) { edge in
+                Rectangle()
+                    .fill(tint.opacity(0.7))
+                    .frame(width: 1, height: plot.height)
+                    .offset(x: x(of: edge) - 0.5, y: plot.minY)
+            }
+        }
+    }
+
     private func x(of time: Date) -> CGFloat {
         plot.minX + HistoryMoment.x(of: time, width: plot.width, domain: domain)
-    }
-}
-
-/// The timeline over the charts. Its track shows which stretches of the
-/// range were recorded, and its handle carries the pinned moment's time
-/// (or sits at the right end, "Latest"). Clicking or dragging along it pins
-/// a moment, like the charts, and hovering previews one. The track spans
-/// the same width as the charts' plots, so the handle sits over their markers.
-struct HistoryRail: View {
-    let scrubber: HistoryScrubber
-    let points: [HistoryPoint]
-    let domain: ClosedRange<Date>
-    /// Seconds each point averages.
-    let bucket: TimeInterval
-
-    var body: some View {
-        Card {
-            GeometryReader { geometry in
-                let width = geometry.size.width
-                ZStack(alignment: .leading) {
-                    HistoryCoverage(points: points, domain: domain, bucket: bucket, width: width)
-                    HistoryRailHandle(scrubber: scrubber, domain: domain, bucket: bucket, width: width)
-                }
-                .frame(width: width, height: geometry.size.height)
-                .contentShape(Rectangle())
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let location): scrubber.hovered = moment(at: location.x, width: width)
-                    case .ended: scrubber.hovered = nil
-                    }
-                }
-                .gesture(DragGesture(minimumDistance: 0).onChanged { scrubber.pinned = moment(at: $0.location.x, width: width) })
-            }
-            .frame(height: 22)
-        }
-        .help("Click or drag along the timeline or a graph to pin a moment")
-    }
-
-    private func moment(at x: CGFloat, width: CGFloat) -> Date? {
-        HistoryMoment.at(x: x, width: width, domain: domain, points: points)
-    }
-}
-
-/// The rail's track: recorded stretches in colour, bare track where nothing
-/// was recorded (the app wasn't running, or the Mac slept).
-private struct HistoryCoverage: View {
-    let points: [HistoryPoint]
-    let domain: ClosedRange<Date>
-    let bucket: TimeInterval
-    let width: CGFloat
-
-    var body: some View {
-        ZStack(alignment: .leading) {
-            Capsule()
-                .fill(Color.primary.opacity(0.09))
-                .frame(width: width, height: 6)
-            ForEach(stretches, id: \.lowerBound) { stretch in
-                let start = HistoryMoment.x(of: stretch.lowerBound, width: width, domain: domain)
-                let end = HistoryMoment.x(of: stretch.upperBound, width: width, domain: domain)
-                Capsule()
-                    .fill(LinearGradient(colors: [Color.accentColor.opacity(0.8), Color.accentColor.opacity(0.5)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: max(end - start, 3), height: 6)
-                    .alignmentGuide(.leading) { _ in -start }
-            }
-        }
-    }
-
-    /// Each unbroken run of points, from the start of its first bucket to its last point.
-    private var stretches: [ClosedRange<Date>] {
-        var runs: [ClosedRange<Date>] = []
-        var current: (segment: Int, range: ClosedRange<Date>)?
-        for point in points {
-            if let run = current, run.segment == point.segment {
-                current = (run.segment, run.range.lowerBound...point.time)
-            } else {
-                if let run = current { runs.append(run.range) }
-                let start = min(max(point.time.addingTimeInterval(-bucket), domain.lowerBound), point.time)
-                current = (point.segment, start...point.time)
-            }
-        }
-        if let run = current { runs.append(run.range) }
-        return runs
-    }
-}
-
-/// The rail's handle, a pill with the pinned moment's time or "Latest" at
-/// the right end, and a thin line where the pointer previews a moment.
-private struct HistoryRailHandle: View {
-    let scrubber: HistoryScrubber
-    let domain: ClosedRange<Date>
-    let bucket: TimeInterval
-    let width: CGFloat
-
-    var body: some View {
-        if let hovered = scrubber.hovered, hovered != scrubber.pinned, domain.contains(hovered) {
-            let x = HistoryMoment.x(of: hovered, width: width, domain: domain)
-            Capsule()
-                .fill(Color.primary.opacity(0.5))
-                .frame(width: 2, height: 18)
-                .alignmentGuide(.leading) { _ in -(x - 1) }
-        }
-        if let pinned = scrubber.pinned, domain.contains(pinned) {
-            pill(HistoryMoment.label(pinned, bucket: bucket), at: HistoryMoment.x(of: pinned, width: width, domain: domain), pinned: true)
-        } else {
-            pill("Latest", at: width, pinned: false)
-        }
-    }
-
-    /// A pill centred on `x`, kept within the track.
-    private func pill(_ text: String, at x: CGFloat, pinned: Bool) -> some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold).monospacedDigit())
-            .foregroundStyle(pinned ? Color.white : Color.accentColor)
-            .padding(.horizontal, 8)
-            .frame(height: 20)
-            .background(Capsule().fill(pinned ? Color.accentColor : Color(nsColor: .controlBackgroundColor)))
-            .overlay(Capsule().strokeBorder(Color.accentColor.opacity(pinned ? 0 : 0.7)))
-            .fixedSize()
-            .alignmentGuide(.leading) { size in -min(max(x - size.width / 2, 0), width - size.width) }
     }
 }

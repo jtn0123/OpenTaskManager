@@ -35,7 +35,10 @@ Manager OG or any other proprietary task manager.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
   Views/Processes (NSOutlineView table in `ProcessOutlineView`), Views/Performance,
   Views/History (the flight recorder's graphs; `FlightRecorder` in OTMKit writes
-  a `HistoryRecord` every 10 s to ~/Library/Application Support/OpenTaskManager),
+  a `HistoryRecord` every 10 s to ~/Library/Application Support/OpenTaskManager,
+  and saved sessions beside them; `RecordingFile` in OTMKit is the versioned
+  `.otmrecording` format, which `HistoryRecordingStore` opens into an in-memory
+  recorder, and `-openRecording <path> -openPlayback 1|10|60` opens and plays one),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick),
