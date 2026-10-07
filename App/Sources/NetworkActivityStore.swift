@@ -16,8 +16,13 @@ import OTMKit
 final class NetworkActivityStore {
     static let refreshInterval: Duration = .seconds(3)
     static var refreshSeconds: TimeInterval { refreshInterval / .seconds(1) }
-    /// Readings across the graphs: three minutes.
-    static let graphSpan = 60
+    /// Readings across the graphs: the same minutes as the main sampler's
+    /// graphs at `interval` seconds per sample (100 readings, five minutes,
+    /// at the normal speed), so the by-app graph lines up with the
+    /// throughput graph above it.
+    static func graphSpan(interval: TimeInterval) -> Int {
+        max(Int((Double(AppModel.graphSpan) * interval / refreshSeconds).rounded()), 2)
+    }
     /// Started again after a longer gap than this, the graphs begin afresh
     /// instead of joining old readings to new ones.
     private static let staleAfter: Duration = .seconds(10)
@@ -28,9 +33,10 @@ final class NetworkActivityStore {
     }
 
     /// Traffic by app with its helpers folded in, keyed by the app's PID.
-    private(set) var apps = NetworkActivityHistory<Int32>(capacity: graphSpan + 2)
+    /// Resized with the update speed (see `fit(interval:)`).
+    private(set) var apps = NetworkActivityHistory<Int32>(capacity: graphSpan(interval: UpdateSpeed.normal.rawValue) + 2)
     /// Traffic by process, keyed by PID.
-    private(set) var processes = NetworkActivityHistory<Int32>(capacity: graphSpan + 2)
+    private(set) var processes = NetworkActivityHistory<Int32>(capacity: graphSpan(interval: UpdateSpeed.normal.rawValue) + 2)
     /// Names and icons for every PID in either history. A process that quits
     /// keeps its name until its traffic scrolls out of the graphs.
     private(set) var identities: [Int32: Identity] = [:]
@@ -63,8 +69,12 @@ final class NetworkActivityStore {
         if let lastReading, ContinuousClock.now - lastReading > Self.staleAfter { reset() }
         sampling = Task { [weak self, weak model] in
             var baseline: (traffic: [Int32: ProcessTraffic], time: ContinuousClock.Instant)?
+            // Readings keep to a steady beat, however long nettop takes, so
+            // the graph's span is as long as its time axis says.
+            var due = ContinuousClock.now
             while !Task.isCancelled {
                 guard let model else { return }
+                self?.fit(interval: model.updateSpeed.rawValue)
                 if model.isPaused {
                     // Frozen like the other pages. The first reading after
                     // resuming is a new baseline, not a rate across the pause.
@@ -83,9 +93,20 @@ final class NetworkActivityStore {
                 // The first rates come a second after the first reading, so a
                 // page that just opened isn't left waiting.
                 let quick = baseline != nil && self?.hasMeasured == false
-                try? await Task.sleep(for: quick ? .seconds(1) : Self.refreshInterval)
+                let now = ContinuousClock.now
+                due = quick ? now + .seconds(1) : max(due + Self.refreshInterval, now + .milliseconds(500))
+                try? await Task.sleep(until: due, clock: .continuous)
             }
         }
+    }
+
+    /// Sizes the histories to the main graphs' window at `interval` seconds
+    /// per sample, keeping the newest readings.
+    private func fit(interval: TimeInterval) {
+        let capacity = Self.graphSpan(interval: interval) + 2
+        guard apps.capacity != capacity else { return }
+        apps.resize(to: capacity)
+        processes.resize(to: capacity)
     }
 
     private func stop() {

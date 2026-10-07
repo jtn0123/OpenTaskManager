@@ -144,6 +144,11 @@ Manager OG or any other proprietary task manager.
   per size, only moved per sample), labelled only by its footer caption, "40 s
   collected · 5 min window", a `CATextLayer` reset only when the rounded figure
   from `GraphCoverage` changes.
+- Graphs on one page cover the same window under a `TimeAxis` ("Last 5 min …
+  now"): `AppModel.graphSpan` on Performance, by-app graphs too (each process's
+  history is as long, `Float`, appended in place, ranked by running totals,
+  `ProcessTotal` of OTMKit's `RunningSum`, never re-summed), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
+  their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.

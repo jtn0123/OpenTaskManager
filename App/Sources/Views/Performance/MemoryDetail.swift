@@ -26,7 +26,7 @@ struct MemoryDetail: View {
             }
             byApp()
             TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: model.appGroups,
-                        metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
+                        metric: { Double($0.memory) }, format: { Format.bytes($0.memory) }, column: .memory)
         }
     }
 
@@ -133,16 +133,15 @@ struct MemoryDetail: View {
     }
 
     private func byApp() -> some View {
-        let apps = model.topApps(by: { Double($0.memory) }, count: 6)
+        let apps = model.topApps(by: .memory, count: 6)
         let other = AppModel.remainder(of: model.processMemoryHistory.values, minus: apps.map(\.values))
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map { LegendItem(name: $1.name, color: Theme.series($0), value: Format.bytes($1.current), icon: $1.icon) }
             + [LegendItem(name: "Everything else", color: Theme.other, value: Format.bytes(other.last ?? 0))]
-        return ChartCard(title: "Memory by app", trailing: "", tint: Theme.memory, legend: legend,
-                         span: AppModel.processHistoryCapacity - 2) {
-            GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
-                      axis: Self.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
+        // Over the same window as the graphs above, so they line up.
+        return ChartCard(title: "Memory by app", trailing: "", tint: Theme.memory, legend: legend) {
+            GraphView(series: series, glows: true, stacked: true, axis: Self.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.memory)
         }
     }

@@ -14,13 +14,18 @@ public struct History<Element: Sendable>: Sendable {
     public var count: Int { storage.count }
     public var isEmpty: Bool { storage.isEmpty }
 
-    public mutating func append(_ value: Element) {
+    /// Adds `value` as the newest, returning the oldest when it's dropped to
+    /// make room, so running totals over the window can let it go.
+    @discardableResult
+    public mutating func append(_ value: Element) -> Element? {
         if storage.count < capacity {
             storage.append(value)
-        } else {
-            storage[head] = value
-            head = (head + 1) % capacity
+            return nil
         }
+        let dropped = storage[head]
+        storage[head] = value
+        head = (head + 1) % capacity
+        return dropped
     }
 
     /// Values from oldest to newest.
@@ -37,5 +42,32 @@ public struct History<Element: Sendable>: Sendable {
     public mutating func removeAll() {
         storage.removeAll(keepingCapacity: true)
         head = 0
+    }
+}
+
+/// The sum of a window's values, kept as they come in and leave, so it
+/// costs one addition a sample rather than a walk over the window. It's
+/// exactly zero once the window holds only zeros, which adding and taking
+/// away the same values in floating point doesn't promise by itself: an
+/// idle process never ranks above another for a rounding trace.
+public struct RunningSum: Sendable, Equatable {
+    private var total = 0.0
+    /// Values in the window that aren't zero.
+    private var nonzero = 0
+
+    public init() {}
+
+    public var value: Double { nonzero == 0 ? 0 : total }
+
+    /// Counts `value` in as it enters the window.
+    public mutating func add(_ value: Double) { change(by: value, count: 1) }
+
+    /// Takes `value` out as it leaves the window.
+    public mutating func remove(_ value: Double) { change(by: -value, count: -1) }
+
+    private mutating func change(by amount: Double, count: Int) {
+        guard amount != 0 else { return }
+        nonzero += count
+        total = nonzero == 0 ? 0 : total + amount
     }
 }

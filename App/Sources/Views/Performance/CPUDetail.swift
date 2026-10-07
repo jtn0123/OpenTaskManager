@@ -28,7 +28,7 @@ struct CPUDetail: View {
                                select: select)
                     .equatable()
                 TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: model.appGroups,
-                            metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+                            metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) }, column: .cpu)
                 CPUBenchmarkCard()
                     .equatable()
             }
@@ -81,15 +81,15 @@ struct CPUDetail: View {
     }
 
     /// The utilization graph in the chosen form, with the choice of form and
-    /// scale on its caption row.
+    /// scale on its caption row. In a card like CPU by app's below it, so
+    /// both plots run edge to edge over the same minutes.
     private func graph(_ topology: CPUTopology) -> some View {
         // Every core's graph shares one scale, so they compare at a glance.
         let cores = mode == "cores" ? model.coreHistory.map(\.values) : []
-        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: Self.coreCapacity) }.max() ?? 0)
-        let caption = mode == "cores" ? "% Utilization of each core" + coreScaleNote(coreTop)
-            : mode == "tiers" ? "% Utilization by core type" : "% Utilization over \(AppModel.graphSpan)s"
-        return VStack(alignment: .leading, spacing: 6) {
-            CPUGraphHeader(caption: caption)
+        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: AppModel.graphSpan) }.max() ?? 0)
+        let title = mode == "cores" ? "Utilization of each core" : mode == "tiers" ? "Utilization by core type" : "Utilization"
+        return Card(tint: Theme.cpu) {
+            CPUGraphHeader(title: title, note: mode == "cores" ? coreScaleNote(coreTop) : "")
             switch mode {
             case "cores": coreGrid(topology, histories: cores, top: coreTop)
             case "tiers": tierGraphs(topology)
@@ -115,7 +115,7 @@ struct CPUDetail: View {
 
     /// The core graphs have no axis, so their caption gives the shared scale.
     private func coreScaleNote(_ top: Double) -> String {
-        scale == .auto ? " · 0–\(CPUGraphScale.axisLabel(top)) scale, auto" : ""
+        scale == .auto ? "0–\(CPUGraphScale.axisLabel(top)) scale, auto" : ""
     }
 
     /// Each cluster's average clock while it ran. Clusters of one tier share a
@@ -146,21 +146,20 @@ struct CPUDetail: View {
     /// Apps' share of the whole CPU, stacked, with the rest of the system on top.
     private func byApp() -> some View {
         let cores = Double(max(model.topology.logicalCores, 1))
-        let apps = model.topApps(by: { $0.cpuPercent / 100 / cores }, count: 5)
-        let total = Array(model.cpuHistory.values.suffix(AppModel.processHistoryCapacity))
-        let other = AppModel.remainder(of: total, minus: apps.map(\.values))
+        let apps = model.topApps(by: .cpu, scale: 1 / 100 / cores, count: 5)
+        let other = AppModel.remainder(of: model.cpuHistory.values, minus: apps.map(\.values))
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
-        let capacity = AppModel.processHistoryCapacity - 2
+        // The same window as the utilization graph above, so the two line up.
+        let capacity = AppModel.graphSpan
         // The stack's top band is the whole, which the scale has to hold.
         let stackTop = GraphMath.stack(series.map { Array($0.values.suffix(capacity + 1)) }).last ?? []
-        return ChartCard(title: "CPU by app", trailing: "share of the whole CPU", tint: Theme.cpu, legend: legend, span: capacity) {
+        return ChartCard(title: "CPU by app", trailing: "share of the whole CPU", tint: Theme.cpu, legend: legend) {
             GraphView(series: series, maxValue: top("byApp", peak: AutoScaleBounds.peak(stackTop, capacity: capacity)),
-                      capacity: capacity, glows: true, stacked: true,
-                      axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8)
+                      glows: true, stacked: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.cpu)
         }
     }
@@ -186,9 +185,8 @@ struct CPUDetail: View {
         }
     }
 
-    /// Samples across each core's graph.
-    private static let coreCapacity = 120
-
+    /// Each core's graph covers the same window as the graphs around it, so a
+    /// spike sits over the app that caused it in CPU by app.
     private func coreGrid(_ topology: CPUTopology, histories: [[Double]], top: Double) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(topology.tiers, id: \.level) { tier in
@@ -200,6 +198,8 @@ struct CPUDetail: View {
                     }
                 }
             }
+            TimeAxis(samples: AppModel.graphSpan)
+                .padding(.top, -6)
         }
     }
 
@@ -207,7 +207,7 @@ struct CPUDetail: View {
     private func coreGraph(_ cpu: Int, values: [Double], top: Double, color: Color) -> some View {
         let usage = snapshot.cpu.coreUsage.indices.contains(cpu) ? snapshot.cpu.coreUsage[cpu] : 0
         return GraphView(series: [GraphSeries(values: values, color: color)],
-                         maxValue: top, capacity: Self.coreCapacity, lineWidth: 1.2, glows: true, cornerRadius: 5)
+                         maxValue: top, lineWidth: 1.2, glows: true, cornerRadius: 5)
             .frame(height: 64)
             .background(LinearGradient(colors: [color.opacity(0.06 + 0.22 * usage), color.opacity(0.02)],
                                        startPoint: .top, endPoint: .bottom),
@@ -227,20 +227,28 @@ struct CPUDetail: View {
     }
 }
 
-/// The CPU graph's caption with the graph and scale pickers. A view of its
-/// own, taking only the caption, so a sample's update passes it by.
+/// The CPU graph's title with the graph and scale pickers. A view of its
+/// own, taking only the text, so a sample's update passes it by.
 private struct CPUGraphHeader: View {
-    let caption: String
+    let title: String
+    /// Said after the title in secondary text, such as the core grid's scale.
+    let note: String
     @AppStorage("cpuGraphMode") private var mode = "overall"
 
     var body: some View {
         // Not a `ViewThatFits`: it measured both segmented controls again on
         // every layout pass, once a second, for about half a percent of a core.
         CaptionControlsRow {
-            Text(caption).font(.subheadline).foregroundStyle(.secondaryText)
+            caption
             graphPicker
             CPUScalePicker()
         }
+    }
+
+    private var caption: Text {
+        let heading = Text(title).font(.headline)
+        guard !note.isEmpty else { return heading }
+        return heading + Text("  " + note).font(.callout).foregroundStyle(.secondaryText)
     }
 
     private var graphPicker: some View {

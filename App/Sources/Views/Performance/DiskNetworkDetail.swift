@@ -55,14 +55,18 @@ struct DiskDetail: View {
             Stat(label: "Read since boot", value: Format.bytes(disk.totalRead))
             Stat(label: "Written since boot", value: Format.bytes(disk.totalWritten))
         }
-        GraphPanel(title: "Transfer rate (read solid, write dashed)", trailing: "",
-                   series: [
-                       GraphSeries(values: model.diskReadHistory[disk.id]?.values ?? [], color: Theme.disk),
-                       GraphSeries(values: model.diskWriteHistory[disk.id]?.values ?? [], color: Theme.diskSecondary, fill: false, dashed: true),
-                   ],
-                   height: DetailGraph.primary, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond, axisUnits: .binaryBytes)
+        // A card, like the network detail's throughput graph.
+        ChartCard(title: "Transfer rate", trailing: "read solid, write dashed", tint: Theme.disk) {
+            GraphView(series: [
+                          GraphSeries(values: model.diskReadHistory[disk.id]?.values ?? [], color: Theme.disk),
+                          GraphSeries(values: model.diskWriteHistory[disk.id]?.values ?? [], color: Theme.diskSecondary,
+                                      fill: false, dashed: true),
+                      ],
+                      glows: true, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond, axisUnits: .binaryBytes, cornerRadius: 8)
+                .chartFrame(height: DetailGraph.primary, tint: Theme.disk)
+        }
         TopAppsCard(title: "Disk I/O", symbol: "internaldrive", color: Theme.disk, groups: model.appGroups,
-                    metric: \.diskRate, format: { Format.bytesPerSecond($0.diskRate) })
+                    metric: \.diskRate, format: { Format.bytesPerSecond($0.diskRate) }, column: .disk)
     }
 
     /// The last speed test of the volume a test would use now, or that one is running.
@@ -165,12 +169,16 @@ struct NetworkDetail: View {
                     Stat(label: "Received", value: Format.bytes(link.totalReceived))
                     Stat(label: "Sent", value: Format.bytes(link.totalSent))
                 }
-                GraphPanel(title: "Throughput (receive solid, send dashed)", trailing: "",
-                           series: [
-                               GraphSeries(values: received, color: Theme.network),
-                               GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),
-                           ],
-                           height: DetailGraph.primary, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits)
+                // A card like Apps using the network below it, so the two
+                // plots run edge to edge over the same minutes.
+                ChartCard(title: "Throughput", trailing: "receive solid, send dashed", tint: Theme.network) {
+                    GraphView(series: [
+                                  GraphSeries(values: received, color: Theme.network),
+                                  GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),
+                              ],
+                              glows: true, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits, cornerRadius: 8)
+                        .chartFrame(height: DetailGraph.primary, tint: Theme.network)
+                }
                 NetworkAppsSection()
                 InternetQualityCard(interface: link.name, name: link.displayName, reveal: revealTest)
                     .equatable()

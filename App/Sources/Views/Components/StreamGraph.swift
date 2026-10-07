@@ -310,12 +310,13 @@ final class StreamGraphView: NSView {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             drawGrid(in: plotRect, step: step, configuration: configuration)
             drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, step: step, configuration: configuration)
+            // Each made once: a stacked band's lower edge is the band below's trace.
+            let traces = shown.map { makeTrace($0, ceiling: ceiling, height: plotRect.height) }
             for (index, values) in shown.enumerated() {
                 let line = configuration.lines[index]
                 let layers = series[index]
-                let trace = makeTrace(values, ceiling: ceiling, height: plotRect.height)
-                let below = configuration.stacked && index > 0
-                    ? makeTrace(shown[index - 1], ceiling: ceiling, height: plotRect.height) : nil
+                let trace = traces[index]
+                let below = configuration.stacked && index > 0 ? traces[index - 1] : nil
                 let firstX = plotRect.width + step - CGFloat(values.count - 1) * step
                 let paths = makePaths(trace, below: below, firstX: firstX, step: step)
 
