@@ -382,8 +382,99 @@ struct LaunchControlTests {
             == [["enable", "gui/501/com.vendor.updater"], ["bootstrap", "gui/501", "/Library/LaunchAgents/com.vendor.updater.plist"]])
     }
 
+    @Test func startsRestartsAndStopsTheJobInYourSession() {
+        let agent = item(label, path: "/Library/LaunchAgents/com.vendor.updater.plist")
+        #expect(LaunchControl.commands(.start, for: agent, uid: 501) == [["kickstart", "gui/501/com.vendor.updater"]])
+        #expect(LaunchControl.commands(.restart, for: agent, uid: 501) == [["kickstart", "-k", "gui/501/com.vendor.updater"]])
+        #expect(LaunchControl.commands(.stop, for: agent, uid: 501) == [["kill", "SIGTERM", "gui/501/com.vendor.updater"]])
+    }
+
     @Test func refusesRestrictedItemsWithoutRunningLaunchctl() {
         let daemon = item(label, path: "/Library/LaunchDaemons/com.vendor.updater.plist", scope: .daemon)
         #expect(throws: LaunchControlError.self) { try LaunchControl.perform(.disable, for: daemon) }
+    }
+}
+
+struct LaunchServiceTests {
+    @Test func readsTheTopLevelOfLaunchctlPrint() {
+        let output = """
+        gui/501/com.vendor.sync = {
+        \tactive count = 1
+        \tpath = /Library/LaunchAgents/com.vendor.sync.plist
+        \tstate = running
+
+        \tprogram = /opt/vendor/sync
+        \targuments = {
+        \t\t/opt/vendor/sync
+        \t}
+
+        \tenvironment = {
+        \t\tstate => not this one
+        \t}
+
+        \truns = 350
+        \tpid = 4353
+        \timmediate reason = ipc (socket)
+        \tlast exit code = (never exited)
+        \tlast exit reason = JETSAM_REASON_MEMORY_IDLE_EXIT
+        \tlast terminating signal = Terminated: 15
+
+        \tresource coalition = {
+        \t\tstate = active
+        \t\tpid = 1
+        \t}
+
+        \tspawn type = adaptive (6)
+        \trun interval = 300 seconds
+        \tproperties = runatload | inferred program | supports transactions
+        }
+        """
+        let info = LaunchServiceInfo.parse(output)
+        #expect(info.state == "running")
+        #expect(info.pid == 4353)
+        #expect(info.isRunning)
+        #expect(info.runs == 350)
+        #expect(info.startReason == "ipc (socket)")
+        #expect(info.lastExitReason == "JETSAM_REASON_MEMORY_IDLE_EXIT")
+        #expect(info.lastSignal == "Terminated: 15")
+        #expect(info.priority == .adaptive)
+        #expect(info.runInterval == 300)
+        #expect(info.properties == ["runatload", "inferred program", "supports transactions"])
+    }
+
+    @Test func readsAnIdleJob() {
+        let info = LaunchServiceInfo.parse("""
+        gui/501/com.vendor.weather = {
+        \tstate = not running
+        \truns = 0
+        \tspawn type = daemon (3)
+        }
+        """)
+        #expect(info.state == "not running")
+        #expect(info.pid == nil)
+        #expect(!info.isRunning)
+        #expect(info.runs == 0)
+        #expect(info.priority == .standard)
+        #expect(info.startReason == nil)
+        #expect(info.properties.isEmpty)
+    }
+
+    @Test func describesStartReasons() {
+        #expect(LaunchServiceInfo.describe(startReason: "ipc (socket)") == "A connection to its socket")
+        #expect(LaunchServiceInfo.describe(startReason: "speculative").contains("runs at load"))
+        #expect(LaunchServiceInfo.describe(startReason: "something new") == "something new")
+    }
+
+    @Test func describesExitReasons() {
+        #expect(LaunchServiceInfo.describe(exitReason: "JETSAM_REASON_MEMORY_IDLE_EXIT") == "Quit while idle, to free memory")
+        #expect(LaunchServiceInfo.describe(exitReason: "OS_REASON_CODESIGNING") == "Codesigning")
+        #expect(LaunchServiceInfo.describe(exitReason: "JETSAM_REASON_SOMETHING_NEW") == "Something new")
+    }
+
+    @Test func readsALoadedJobOnThisMac() throws {
+        // ssh-agent ships with macOS and is loaded in every login session.
+        let info = try #require(Launchctl.service("com.openssh.ssh-agent", scope: .systemAgent))
+        #expect(info.state != nil)
+        #expect(Launchctl.service("com.example.not-loaded-\(UUID().uuidString)", scope: .userAgent) == nil)
     }
 }

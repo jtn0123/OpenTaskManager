@@ -32,6 +32,7 @@ enum StartupFilter: String, CaseIterable, Identifiable {
 /// `AppModel` as it draws, so it costs nothing while it sits open.
 struct StartupView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("page") private var page: Page = .overview
     @AppStorage("startupFilter") private var filter: StartupFilter = .all
     @AppStorage("showStartupInspector") private var showInspector = true
     @State private var items: [LaunchItem]?
@@ -132,7 +133,11 @@ struct StartupView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } detail: {
                 if let item = items.first(where: { $0.id == selection }) {
-                    StartupItemDetail(item: item) { toggle(item) }
+                    StartupItemDetail(
+                        item: item, refreshID: scannedAt, toggle: { toggle(item) },
+                        control: { action in Task { await perform(action, on: item) } },
+                        showProcess: showProcess
+                    )
                 } else {
                     ContentUnavailableView("No item selected", systemImage: "info.circle",
                                            description: Text("Select an item to see what it runs and when."))
@@ -199,7 +204,14 @@ struct StartupView: View {
             }
         }.value
         switchError = result?.message
+        // A stopped job takes a moment to exit, and a started one to appear.
+        if [.start, .restart, .stop].contains(action) { try? await Task.sleep(for: .milliseconds(500)) }
         await scan()
+    }
+
+    private func showProcess(_ pid: Int32) {
+        model.requestedProcess = pid
+        page = .processes
     }
 
     private func scan() async {

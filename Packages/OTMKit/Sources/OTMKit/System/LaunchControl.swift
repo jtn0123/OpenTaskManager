@@ -5,12 +5,16 @@ public struct LaunchControlError: Error, Sendable, Equatable {
     public let message: String
 }
 
-/// Turning a startup item off and on. Only third-party agents are switched,
-/// and only in your own session, which needs no administrator: daemons run
-/// outside any session, and Apple's agents are part of macOS.
+/// Turning a startup item off and on, and starting or stopping its job.
+/// Only third-party agents are controlled, and only in your own session,
+/// which needs no administrator: daemons run outside any session, and
+/// Apple's agents are part of macOS.
 public enum LaunchControl {
     public enum Action: Sendable {
         case disable, enable
+        /// Start it now, stop it and start it again, or ask it to quit. A
+        /// job that launchd keeps alive comes straight back after a stop.
+        case start, restart, stop
     }
 
     /// Why an item can't be switched from here, or nil when it can.
@@ -30,6 +34,9 @@ public enum LaunchControl {
         return switch action {
         case .disable: [["disable", service], ["bootout", service]]
         case .enable: [["enable", service], ["bootstrap", domain, item.plistPath]]
+        case .start: [["kickstart", service]]
+        case .restart: [["kickstart", "-k", service]]
+        case .stop: [["kill", "SIGTERM", service]]
         }
     }
 

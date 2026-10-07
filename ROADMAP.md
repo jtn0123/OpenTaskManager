@@ -21,7 +21,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Startup apps | 🚧 | LaunchAgents and LaunchDaemons with status, PID, triggers and publisher are done. Login Items and the background items apps register need root to read, so they wait for the privileged helper; for now the page opens their System Settings pane |
 | Enable and disable startup items | 🚧 | Third-party agents switch in your own session with `launchctl disable`/`enable` plus `bootout`/`bootstrap`, after a confirmation, and Enable undoes it. Daemons wait for an administrator prompt; Apple's agents are left alone |
 | Users tab | 🚧 | Per-user totals, history, sessions and top processes are done; logging off other sessions is planned |
-| Services tab | ⬜ | launchd services: state, start/stop, open plist. The Startup page already reads each job's state and opens its plist |
+| Services tab | 🚧 | The Startup page's details show each job's state, run count, start reason, priority and last exit reason (`launchctl print`), and start, restart and stop third-party agents. A separate tab for on-demand services, and controls for daemons (privileged helper), remain |
 | "Details" tab extras: priority, affinity-style tier pinning | 🚧 | Priority is done; QoS and tier pinning are planned |
 | Search, efficiency mode equivalent | 🚧 | Search is done; "efficiency mode" maps to background QoS |
 

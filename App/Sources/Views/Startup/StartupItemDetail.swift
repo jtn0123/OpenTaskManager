@@ -1,12 +1,21 @@
 import OTMKit
 import SwiftUI
 
-/// The inspector for one startup item: what it runs, what starts it, and
-/// where its property list lives.
+/// The inspector for one startup item: what it runs, what starts it, how
+/// launchd is treating it now, and where its property list lives.
 struct StartupItemDetail: View {
     var item: LaunchItem
+    /// Changes when the page rescans, so launchd's view is read again.
+    var refreshID: Date?
     /// Disables or enables the item, for third-party agents.
     var toggle: () -> Void
+    /// Starts, restarts or stops the job, for third-party agents.
+    var control: (LaunchControl.Action) -> Void
+    var showProcess: (Int32) -> Void
+
+    /// launchd's view of the job, read when the item is shown and after a
+    /// rescan, never per tick. Nil while reading, or when it isn't loaded.
+    @State private var service: LaunchServiceInfo?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -20,6 +29,9 @@ struct StartupItemDetail: View {
                     labelled("Property list", item.plistPath)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if LaunchControl.restriction(for: item) == nil, let service {
+                serviceControls(service)
             }
             if LaunchControl.restriction(for: item) == nil {
                 HStack(alignment: .firstTextBaseline) {
@@ -38,6 +50,16 @@ struct StartupItemDetail: View {
             }
         }
         .padding(12)
+        .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID)) {
+            let (label, scope) = (item.label, item.scope)
+            service = await Task.detached(priority: .userInitiated) { Launchctl.service(label, scope: scope) }.value
+        }
+    }
+
+    private struct ServiceRead: Equatable {
+        var label: String
+        var scope: LaunchItemScope
+        var refreshID: Date?
     }
 
     // MARK: Sections
@@ -68,6 +90,7 @@ struct StartupItemDetail: View {
             if let disabledBy {
                 FactRow(label: "Disabled by", value: disabledBy)
             }
+            if let service { serviceRows(service) }
             FactRow(label: "Kind", value: item.scope.title)
             FactRow(label: "Publisher", value: item.publisher.title)
             FactRow(label: "Last exit", value: lastExit)
@@ -112,10 +135,76 @@ struct StartupItemDetail: View {
         }
     }
 
+    @ViewBuilder private func serviceRows(_ service: LaunchServiceInfo) -> some View {
+        if let pid = service.pid {
+            // The status row above already shows the PID.
+            GridRow {
+                Text("Process").foregroundStyle(.secondary)
+                Button("Show in Processes") { showProcess(pid) }
+                    .buttonStyle(.link)
+                    .help("Select PID \(String(pid)) on the Processes page")
+            }
+            .font(.callout)
+        }
+        if let runs = service.runs {
+            FactRow(label: "Runs", value: "\(runs) since \(item.scope == .daemon ? "startup" : "login")")
+        }
+        if service.isRunning, let reason = service.startReason {
+            GridRow {
+                Text("Started by").foregroundStyle(.secondary)
+                Text(LaunchServiceInfo.describe(startReason: reason))
+                    .help("launchd's reason: \(reason)")
+            }
+            .font(.callout)
+        }
+        if let priority = service.priority {
+            GridRow {
+                Text("Priority").foregroundStyle(.secondary)
+                Text(priority.title).help(priority.explanation)
+            }
+            .font(.callout)
+        }
+    }
+
+    /// Start, restart and stop, for a loaded job this app may control.
+    private func serviceControls(_ service: LaunchServiceInfo) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            if service.isRunning {
+                Button("Restart") { control(.restart) }
+                    .help("Stop the job and start it again")
+                Button("Stop") { control(.stop) }
+                    .help(stopHelp)
+            } else {
+                Button("Start Now") { control(.start) }
+                    .help("Run the job now, whatever usually launches it")
+            }
+            Text(service.isRunning ? afterStop : "Runs it once, now.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: Text
 
+    private var afterStop: String {
+        switch item.triggers.keepAlive {
+        case .always: "launchd restarts it after a stop."
+        case .conditional: "launchd may restart it after a stop."
+        case .never: "A stop lasts until it's next launched."
+        }
+    }
+
+    private var stopHelp: String {
+        switch item.triggers.keepAlive {
+        case .always: "Ask the job to quit. launchd keeps it alive, so it starts again straight away."
+        case .conditional: "Ask the job to quit. launchd may start it again, depending on its keep-alive conditions."
+        case .never: "Ask the job to quit. It starts again the next time something launches it."
+        }
+    }
+
     private var lastExit: String {
-        if let exit = item.job?.lastExit { return exit.description }
+        let reason = service?.lastExitReason.map(LaunchServiceInfo.describe(exitReason:))
+        if let exit = item.job?.lastExit { return [exit.description, reason].compactMap(\.self).joined(separator: " · ") }
         return item.job == nil ? "—" : "Hasn't exited"
     }
 
