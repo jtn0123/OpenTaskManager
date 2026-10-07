@@ -18,8 +18,9 @@ enum SystemTarget: Hashable {
 /// The System page's place and its jumps. It notes where each card was laid
 /// out and which group of cards is at the top as the page scrolls, for the
 /// jump bar; jumps to a group or a search's match through the page's
-/// `ScrollViewReader` and marks the match for a moment; and while Refresh
-/// reads the page again, keeps the card at the top where it was. Only the
+/// `ScrollViewReader`, the match outlined while it's the one gone to and
+/// filled for a moment; and while Refresh reads the page again, keeps the
+/// card at the top where it was. Only the
 /// group at the top, the match and the mark are observed, so scrolling
 /// redraws the jump bar only when the group changes, and nothing here runs
 /// per tick.
@@ -33,9 +34,10 @@ final class SystemNavigator {
 
     /// The group of cards at the top of the visible page.
     private(set) var category: SystemCategory?
-    /// The search match last gone to, which the jump bar counts from.
+    /// The search match last gone to, which the jump bar counts from and
+    /// the page outlines.
     private(set) var match: SystemReportSearch.Match?
-    /// The match marked for a moment after going to it.
+    /// The match filled for a moment after going to it.
     private(set) var mark: SystemReportSearch.Match?
 
     @ObservationIgnored var proxy: ScrollViewProxy?
@@ -212,31 +214,35 @@ extension View {
         .onDisappear { navigator.setFrame(nil, of: target) }
     }
 
-    /// Marks a whole card for a moment after a search goes to it.
+    /// Outlines a whole card (or the summary) while it's the match a search
+    /// has gone to, its words marked in the card's title.
     func systemCardMark(_ match: SystemReportSearch.Match, navigator: SystemNavigator) -> some View {
         modifier(SystemCardMark(match: match, navigator: navigator))
     }
 }
 
-/// A whole card's mark. Its own modifier, so only it reads the mark and the
+/// A whole card's mark. Its own modifier, so only it reads the match and the
 /// page around the card isn't drawn again.
 private struct SystemCardMark: ViewModifier {
     let match: SystemReportSearch.Match
     let navigator: SystemNavigator
 
     func body(content: Content) -> some View {
-        content.overlay {
-            if navigator.mark == match {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 2)
-                    .allowsHitTesting(false)
+        content
+            .environment(\.isCurrentSearchMatch, navigator.match == match)
+            .overlay {
+                if navigator.match == match {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 2)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
-        }
     }
 }
 
-/// The bounds of the row a search marks, for its card to draw the mark
-/// behind the whole row, label and value together.
+/// The bounds of the row a search has gone to, for its card to outline the
+/// whole row, label and value together.
 struct MarkedRowKey: PreferenceKey {
     static let defaultValue: [Anchor<CGRect>] = []
 
@@ -246,23 +252,31 @@ struct MarkedRowKey: PreferenceKey {
 }
 
 extension View {
-    /// Reports this cell's bounds while its row is marked.
-    func markedRow(_ isMarked: Bool) -> some View {
-        anchorPreference(key: MarkedRowKey.self, value: .bounds) { isMarked ? [$0] : [] }
+    /// Reports this cell's bounds while its row is the search's current
+    /// match, and underlines the finds in it.
+    func markedRow(_ isCurrent: Bool) -> some View {
+        environment(\.isCurrentSearchMatch, isCurrent)
+            .anchorPreference(key: MarkedRowKey.self, value: .bounds) { isCurrent ? [$0] : [] }
     }
 
-    /// Draws the marked row's highlight behind this card's rows, across
-    /// their full width.
-    func markedRowBackground() -> some View {
+    /// Outlines the current match's row behind this card's rows, across
+    /// their full width, filled for a moment (`flashing`) as the search
+    /// arrives at it: the outline stays while it's the match gone to, so
+    /// "2 of 9" can be told from the other finds marked around it.
+    func markedRowBackground(flashing: Bool) -> some View {
         backgroundPreferenceValue(MarkedRowKey.self) { anchors in
             GeometryReader { proxy in
                 if !anchors.isEmpty {
                     let row = anchors.map { proxy[$0] }.reduce(CGRect.null) { $0.union($1) }
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.accentColor.opacity(0.2))
-                        .frame(width: proxy.size.width + 12, height: row.height + 6)
-                        .position(x: proxy.size.width / 2, y: row.midY)
-                        .accessibilityHidden(true)
+                    ZStack {
+                        if flashing {
+                            RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.16))
+                        }
+                        RoundedRectangle(cornerRadius: 5).strokeBorder(Color.accentColor, lineWidth: 1.5)
+                    }
+                    .frame(width: proxy.size.width + 12, height: row.height + 6)
+                    .position(x: proxy.size.width / 2, y: row.midY)
+                    .accessibilityHidden(true)
                 }
             }
         }
@@ -271,12 +285,14 @@ extension View {
 
 // MARK: - Jump bar
 
-/// Over the System page's cards: a picker of the groups of cards, which
-/// follows the scrolling and jumps to the group picked, and Previous and
-/// Next (⌘↑ and ⌘↓). While searching it says how many matches there are,
-/// and Previous and Next (⇧⌘G and ⌘G, or Return in the search field) step
-/// through them. The search is named here too, with a way to clear it, since
-/// a narrow toolbar folds its field away; ⌘F goes to the field.
+/// Over the System page's cards: "Jump to" and a link to each group of
+/// cards, which scrolls the page to it, the group at the top of the page
+/// underlined as it scrolls; links within one page, not tabs, since every
+/// group stays on it. Previous and Next (⌘↑ and ⌘↓) step from group to
+/// group. While searching it says how many matches there are, and Previous
+/// and Next (⇧⌘G and ⌘G, or Return in the search field) step through them.
+/// The search is named here too, with Clear Search beside it, since a
+/// narrow toolbar folds its field away; ⌘F goes to the field.
 struct SystemJumpBar: View {
     let navigator: SystemNavigator
     /// The groups with a card on the page: during a search, with a match.
@@ -288,11 +304,18 @@ struct SystemJumpBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // A menu in place of the segments when the page is too narrow for them.
-            // Ahead of the search's count, which gives way first.
-            ViewThatFits(in: .horizontal) {
-                picker.pickerStyle(.segmented).fixedSize()
-                picker.pickerStyle(.menu).fixedSize()
+            // A menu in place of the links when the page is too narrow for
+            // them. Ahead of the search's count, which gives way first.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Jump to")
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize()
+                    .accessibilityHidden(true)
+                ViewThatFits(in: .horizontal) {
+                    links.fixedSize()
+                    menu.fixedSize()
+                }
             }
             .layoutPriority(1)
             Spacer(minLength: 0)
@@ -315,38 +338,51 @@ struct SystemJumpBar: View {
         .onChange(of: search.terms) { navigator.searchChanged(search) }
     }
 
-    private var picker: some View {
-        let selection = Binding<SystemCategory?>(get: { navigator.category }, set: { category in
-            if let category { navigator.jump(to: category) }
-        })
-        return Picker("Jump to", selection: selection) {
+    /// A link to each group, the one at the top of the page underlined.
+    private var links: some View {
+        HStack(spacing: 2) {
             ForEach(categories) { category in
-                Text(category.title).tag(Optional(category))
+                JumpLink(title: category.title, isCurrent: category == navigator.category) {
+                    navigator.jump(to: category)
+                }
             }
         }
-        .labelsHidden()
-        .help("Jump to a group of cards. ⌘↑ and ⌘↓ step from one group to the next.")
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Jump to")
     }
 
-    /// "2 of 9 for “ipv6”" and a button that clears the search.
+    /// The links as a menu, named by the group at the top of the page and
+    /// ticking it, for a page too narrow for them.
+    private var menu: some View {
+        Menu {
+            ForEach(categories) { category in
+                Toggle(category.title, isOn: Binding(get: { navigator.category == category }, set: { _ in navigator.jump(to: category) }))
+            }
+        } label: {
+            Text(navigator.category?.title ?? "Groups")
+        }
+        .help("Scroll to a group of cards. ⌘↑ and ⌘↓ step from one group to the next.")
+        .accessibilityLabel("Jump to")
+        .accessibilityValue(navigator.category?.title ?? "")
+    }
+
+    /// "2 of 9 for “ipv6”" and Clear Search.
     private var searching: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 8) {
             (Text(count).monospacedDigit() + Text(" for \u{201C}\(query.trimmingCharacters(in: .whitespaces))\u{201D}"))
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Button {
+            Button("Clear Search") {
                 query = ""
-            } label: {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondaryText)
             }
-            .buttonStyle(.plain)
-            .help("Clear the search and show every card")
-            .accessibilityLabel("Clear the search")
+            .controlSize(.small)
+            .keyboardShortcut(.cancelAction)
+            .fixedSize()
+            .help("Clear the search and show every card again (Esc)")
         }
-        .frame(maxWidth: 260, alignment: .trailing)
+        .frame(maxWidth: 360, alignment: .trailing)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -381,6 +417,47 @@ struct SystemJumpBar: View {
         }
         .disabled(none)
         .fixedSize()
+    }
+}
+
+/// A group in the jump bar: plain text that scrolls the page to the group,
+/// underlined in the accent colour while it's the group at the top of the
+/// page. It changes only as the page scrolls past a group, never per tick.
+private struct JumpLink: View {
+    var title: String
+    var isCurrent: Bool
+    var action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            // Room for the bold title whichever is current, so the links
+            // don't shift as the page scrolls.
+            Text(title)
+                .fontWeight(.semibold)
+                .hidden()
+                .overlay {
+                    Text(title)
+                        .fontWeight(isCurrent ? .semibold : .regular)
+                        .foregroundStyle(isCurrent || isHovering ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
+                }
+                .padding(.horizontal, 6)
+                .padding(.top, 3)
+                .padding(.bottom, 7)
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(isCurrent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiaryText))
+                        .frame(height: 2)
+                        .padding(.horizontal, 6)
+                        .opacity(isCurrent || isHovering ? 1 : 0)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Scroll to the \(title) cards. ⌘↑ and ⌘↓ step from one group to the next.")
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
+        .accessibilityHint("Scrolls the page to its \(title) cards")
     }
 }
 

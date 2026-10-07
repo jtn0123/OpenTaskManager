@@ -287,6 +287,10 @@ public struct HistoryIntervalStats: Sendable, Equatable {
     /// Seconds of the interval with records: whole stretches, each counted
     /// once however many copies of the app wrote it.
     public let sampledSeconds: TimeInterval
+    /// Which steps of the interval hold a record, counted from its start:
+    /// step `i` covers the record time from `i` to `i + 1` record lengths
+    /// after the start, so two intervals' steps line up by offset.
+    public let recordedSteps: IndexSet
     /// The figures the recording has in the interval; one the Mac never
     /// reported (GPU in a VM) is missing.
     public let figures: [HistoryMetric: Figure]
@@ -300,6 +304,10 @@ public struct HistoryIntervalStats: Sendable, Equatable {
     public var duration: TimeInterval { end.timeIntervalSince(start) }
     /// Seconds of the interval nothing was recorded: its gaps.
     public var unrecordedSeconds: TimeInterval { max(duration - sampledSeconds, 0) }
+    /// The share of the interval recorded, 0 to 1; 0 for an empty interval.
+    public var coverage: Double {
+        duration > 0 ? min(max(sampledSeconds / duration, 0), 1) : 0
+    }
 
     /// Sums up `records` that end within `start` (excluded) to `end`, each
     /// covering `recordSeconds` up to its time. Records two copies of the
@@ -311,9 +319,12 @@ public struct HistoryIntervalStats: Sendable, Equatable {
         self.end = max(start, end)
         let span = max(recordSeconds, 1)
         var stretches: [Int: [HistoryValues]] = [:]
+        var steps = IndexSet()
         for record in records where record.time > self.start && record.time <= self.end {
             stretches[Int((record.time.timeIntervalSince1970 / span).rounded(.down)), default: []].append(record.values)
+            steps.insert(max(Int((record.time.timeIntervalSince(self.start) / span).rounded(.up)) - 1, 0))
         }
+        recordedSteps = steps
         sampledSeconds = min(Double(stretches.count) * span, self.end.timeIntervalSince(self.start))
         // Oldest first, so the sums come out the same every time.
         let ordered = stretches.sorted { $0.key < $1.key }.map(\.value)
@@ -481,6 +492,122 @@ public struct HistoryComparison: Sendable, Equatable {
         }
     }
 
+    // MARK: Coverage
+
+    /// A, the interval looked at, or B, what it's compared with.
+    public enum Side: String, Sendable, CaseIterable {
+        case a = "A"
+        case b = "B"
+    }
+
+    /// Under this share recorded, an interval's figures rest on too little
+    /// of it to be read at face value.
+    public static let lowCoverage = 0.5
+    /// With both intervals at least half recorded, one whose share recorded
+    /// is under this much of the other's still makes an uneven pair: 60%
+    /// against 100%. (Under half the other's share always means under half
+    /// recorded, since no share passes 100%, so that adds nothing.)
+    public static let unevenCoverage = 2.0 / 3.0
+
+    /// Why the figures can't be compared at face value: too little of an
+    /// interval was recorded, or much less of one than of the other.
+    public struct Limitation: Sendable, Equatable {
+        public enum Kind: Sendable, Equatable {
+            /// An interval is under `lowCoverage` recorded.
+            case low
+            /// Both are at least half recorded, one much less than the other.
+            case uneven
+        }
+
+        public let kind: Kind
+        /// The intervals the comparison is thin on, A first: those under
+        /// `lowCoverage`, or the less recorded of an uneven pair.
+        public let sides: [Side]
+        /// "B holds only 2 of its 15 minutes."
+        public let message: String
+
+        /// "Limited comparison" or "Uneven comparison".
+        public var title: String {
+            kind == .low ? "Limited comparison" : "Uneven comparison"
+        }
+    }
+
+    public func stats(_ side: Side) -> HistoryIntervalStats {
+        side == .a ? a : b
+    }
+
+    /// What limits the comparison, or nil when both intervals are well
+    /// enough recorded, and evenly enough, for their figures to stand.
+    public var limitation: Limitation? {
+        let low = Side.allCases.filter { stats($0).coverage < Self.lowCoverage }
+        if !low.isEmpty {
+            let clauses = low.map { side in
+                let interval = stats(side)
+                return interval.sampledSeconds > 0
+                    ? "\(side.rawValue) holds only \(HistoryInterval.share(sampled: interval.sampledSeconds, span: interval.duration))"
+                    : "nothing was recorded in \(side.rawValue)"
+            }
+            return Limitation(kind: .low, sides: low, message: Self.sentence(clauses))
+        }
+        let thin: Side = a.coverage < b.coverage ? .a : .b
+        let other: Side = thin == .a ? .b : .a
+        guard stats(thin).coverage < stats(other).coverage * Self.unevenCoverage else { return nil }
+        let clauses = [thin, other].map { side in
+            "\(side.rawValue) holds \(HistoryInterval.share(sampled: stats(side).sampledSeconds, span: stats(side).duration))"
+        }
+        return Limitation(kind: .uneven, sides: [thin], message: clauses.joined(separator: "; ") + ".")
+    }
+
+    /// Clauses as one sentence: capitalised, joined by ", and ", with a full stop.
+    private static func sentence(_ clauses: [String]) -> String {
+        let text = clauses.joined(separator: ", and ")
+        return text.prefix(1).uppercased() + text.dropFirst() + "."
+    }
+
+    /// A and B narrowed to the stretch, at the same offsets from their
+    /// starts, where both hold records.
+    public struct Overlap: Sendable, Equatable {
+        public let a: ClosedRange<Date>
+        public let b: ClosedRange<Date>
+
+        public var duration: TimeInterval { a.upperBound.timeIntervalSince(a.lowerBound) }
+    }
+
+    /// The shortest overlap worth comparing on its own.
+    public static let shortestOverlap: TimeInterval = 60
+
+    /// The longest stretch where A and B both hold records at the same
+    /// offsets from their starts, so their figures cover like for like; nil
+    /// when that's under `shortestOverlap` or no narrower than both. A step
+    /// missing on one side between records, under a gap's width
+    /// (`HistoryGap.spacing`), is a record's timing, not a gap, so it
+    /// doesn't break the stretch.
+    public func recordedOverlap(recordSeconds: TimeInterval = FlightRecorder.span) -> Overlap? {
+        let span = max(recordSeconds, 1)
+        let common = Self.bridged(a.recordedSteps).intersection(Self.bridged(b.recordedSteps))
+        guard let longest = common.rangeView.max(by: { $0.count < $1.count }) else { return nil }
+        let lower = Double(longest.lowerBound) * span
+        let upper = Double(longest.upperBound) * span
+        let overlap = Overlap(a: a.start.addingTimeInterval(lower)...min(a.start.addingTimeInterval(upper), a.end),
+                              b: b.start.addingTimeInterval(lower)...min(b.start.addingTimeInterval(upper), b.end))
+        let length = min(overlap.duration, overlap.b.upperBound.timeIntervalSince(overlap.b.lowerBound))
+        guard length >= Self.shortestOverlap, length < max(a.duration, b.duration) - span / 2 else { return nil }
+        return overlap
+    }
+
+    /// `steps` with each hole between records too short to be a gap filled in.
+    static func bridged(_ steps: IndexSet) -> IndexSet {
+        var result = steps
+        var previous: Range<Int>?
+        for run in steps.rangeView {
+            if let previous, Double(run.lowerBound - previous.upperBound + 1) < HistoryGap.spacing {
+                result.insert(integersIn: previous.upperBound..<run.lowerBound)
+            }
+            previous = run
+        }
+        return result
+    }
+
     /// The interval as long as `interval` that ends where it starts: what A
     /// is compared with until another is picked.
     public static func before(_ interval: ClosedRange<Date>) -> ClosedRange<Date> {
@@ -542,6 +669,32 @@ public enum HistoryInterval {
     /// of it the recorder holds.
     public static func coverage(span: TimeInterval, sampled: TimeInterval) -> String {
         "\(Format.roughDuration(span)) span · \(Format.roughDuration(min(sampled, span))) sampled"
+    }
+
+    /// How much of an interval was recorded, for its column's heading: "73%
+    /// recorded", "under 1% recorded", "nothing recorded".
+    public static func recorded(_ coverage: Double) -> String {
+        guard coverage.isFinite, coverage > 0 else { return "nothing recorded" }
+        return coverage < 0.005 ? "under 1% recorded" : "\(Format.percent(min(coverage, 1))) recorded"
+    }
+
+    /// The recorded part of an interval in the interval's own unit: "2 of
+    /// its 15 minutes", "3 of its 6 hours", or in a smaller unit when it's
+    /// under one of those, "40 seconds of its 15 minutes". The unit is the
+    /// largest the interval holds two of, so 90 minutes stay minutes.
+    public static func share(sampled: TimeInterval, span: TimeInterval) -> String {
+        let units: [(seconds: Double, name: String)] = [(86_400, "day"), (3_600, "hour"), (60, "minute"), (1, "second")]
+        guard span.isFinite, span > 0 else { return "nothing" }
+        let index = units.firstIndex { span >= 2 * $0.seconds } ?? units.count - 1
+        let unit = units[index]
+        let whole = max(Int((span / unit.seconds).rounded()), 1)
+        let part = min(max(sampled.isFinite ? sampled : 0, 0), span)
+        let count = min(Int((part / unit.seconds).rounded()), whole)
+        let its = "of its \(whole) \(unit.name)\(whole == 1 ? "" : "s")"
+        guard count == 0, part > 0, index + 1 < units.count else { return "\(count) \(its)" }
+        let smaller = units[index + 1]
+        let fewer = max(Int((part / smaller.seconds).rounded()), 1)
+        return "\(fewer) \(smaller.name)\(fewer == 1 ? "" : "s") \(its)"
     }
 
     /// What an interval's figures leave out: "9 min of gaps left out", "no

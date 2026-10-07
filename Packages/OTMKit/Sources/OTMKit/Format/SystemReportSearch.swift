@@ -198,10 +198,11 @@ public struct SystemReportSearch: Sendable, Equatable {
         query.split(whereSeparator: \.isWhitespace).map { fold(String($0)) }.filter { !$0.isEmpty }
     }
 
-    /// Lower case without accents or hyphens, so "Wi-Fi", "wifi" and "WIFI" all meet.
+    /// Lower case without accents or hyphens, so "Wi-Fi", "wifi" and "WIFI"
+    /// all meet. The highlights (`highlights(of:in:)`) fold through the same
+    /// `FoldedText`, so they mark exactly what was matched.
     static func fold(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
-            .replacingOccurrences(of: "-", with: "")
+        String(FoldedText(text).characters)
     }
 
     /// The row's own words: its label, value and state, without the value
@@ -211,6 +212,127 @@ public struct SystemReportSearch: Sendable, Equatable {
         if !row.isSensitive || includesIdentifiers { texts.append(fold(row.value)) }
         if let state = row.state { texts.append(fold(state)) }
         return texts
+    }
+}
+
+// MARK: - Highlights
+
+extension SystemReportSearch {
+    /// Where the search's words are in `text`, for the page to mark them.
+    public func highlights(in text: String) -> [Range<String.Index>] {
+        Self.highlights(of: terms, in: text)
+    }
+
+    /// Where any of `terms` is in `text`, matched as the search matches
+    /// (ignoring case, accents and hyphens), as stretches of the text as
+    /// shown, in order and never overlapping: "wifi" marks the whole of
+    /// "Wi-Fi", hyphen and all, and "fi" just its "Fi".
+    public static func highlights(of terms: [String], in text: String) -> [Range<String.Index>] {
+        let needles = terms.map { Array(fold($0)) }.filter { !$0.isEmpty }
+        guard !needles.isEmpty, !text.isEmpty else { return [] }
+        let folded = FoldedText(text)
+        let haystack = folded.characters
+        // Each find as folded characters, start and end.
+        var finds: [(start: Int, end: Int)] = []
+        for needle in needles where needle.count <= haystack.count {
+            for start in 0...(haystack.count - needle.count) where haystack[start] == needle[0] {
+                if haystack[start..<(start + needle.count)].elementsEqual(needle) {
+                    finds.append((start, start + needle.count))
+                }
+            }
+        }
+        // Back to the text as shown: from the first character a find came
+        // from to the end of the last. Folding can make one character two
+        // ("ß" is "ss"), so finds that met there are merged too.
+        var ranges: [Range<String.Index>] = []
+        for find in finds.sorted(by: { $0.start < $1.start }) {
+            let lower = folded.origins[find.start]
+            let upper = text.index(after: folded.origins[find.end - 1])
+            if let last = ranges.last, lower <= last.upperBound {
+                ranges[ranges.count - 1] = last.lowerBound..<max(last.upperBound, upper)
+            } else {
+                ranges.append(lower..<upper)
+            }
+        }
+        return ranges
+    }
+
+    /// `highlights(of:in:)` for `text` laid out as `form`: the same text
+    /// with line breaks put in (`AddressBreaks`), so a word found across a
+    /// break is still marked, on both sides of it. Searched on `form` itself
+    /// if it isn't one.
+    public static func highlights(of terms: [String], in text: String, shownAs form: String) -> [Range<String.Index>] {
+        guard form != text else { return highlights(of: terms, in: text) }
+        // Where each of the text's characters is in the form.
+        var places: [String.Index] = []
+        var next = text.startIndex
+        var index = form.startIndex
+        while index < form.endIndex {
+            if next < text.endIndex, form[index] == text[next] {
+                places.append(index)
+                next = text.index(after: next)
+            } else if form[index] != "\n" {
+                return highlights(of: terms, in: form)
+            }
+            index = form.index(after: index)
+        }
+        guard next == text.endIndex else { return highlights(of: terms, in: form) }
+        var ranges: [Range<String.Index>] = []
+        for range in highlights(of: terms, in: text) {
+            let first = text.distance(from: text.startIndex, to: range.lowerBound)
+            let count = text.distance(from: range.lowerBound, to: range.upperBound)
+            // A stretch for each line it covers, leaving the breaks out.
+            var start = places[first]
+            for offset in first..<(first + count) {
+                let place = places[offset]
+                let end = form.index(after: place)
+                if offset + 1 == first + count || places[offset + 1] != end {
+                    ranges.append(start..<end)
+                    if offset + 1 < first + count { start = places[offset + 1] }
+                }
+            }
+        }
+        return ranges
+    }
+}
+
+/// Text folded for matching: lower case, without accents or hyphens, each
+/// folded character noting the character of the text it came from. Folded
+/// a character at a time, which comes to the same as folding the whole
+/// text, so a find can be traced back to what's shown.
+struct FoldedText {
+    private static let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive, .widthInsensitive]
+
+    /// The folded text.
+    let characters: [Character]
+    /// For each of `characters`, where the character it came from is in the text.
+    let origins: [String.Index]
+
+    init(_ text: String) {
+        var characters: [Character] = []
+        var origins: [String.Index] = []
+        characters.reserveCapacity(text.utf8.count)
+        origins.reserveCapacity(text.utf8.count)
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            if let ascii = character.asciiValue {
+                // Plain ASCII folds to itself in lower case (and is most
+                // of what the page shows), without a trip through Foundation.
+                if ascii != 0x2D {
+                    characters.append(ascii >= 0x41 && ascii <= 0x5A ? Character(Unicode.Scalar(ascii + 0x20)) : character)
+                    origins.append(index)
+                }
+            } else {
+                for folded in String(character).folding(options: Self.options, locale: nil) where folded != "-" {
+                    characters.append(folded)
+                    origins.append(index)
+                }
+            }
+            index = text.index(after: index)
+        }
+        self.characters = characters
+        self.origins = origins
     }
 }
 

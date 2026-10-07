@@ -519,6 +519,21 @@ struct ThroughputCard: View {
     /// One short row with the rates beside the graph, to sit among summary
     /// cards. The graph grows to whatever height the row gives the card.
     var compact = false
+    /// What the compact card's graph column has room for. Set from its
+    /// width, so it changes on a resize, never with the numbers.
+    @State private var graphRoom = GraphRoom.graphAndAxis
+
+    /// A graph column narrower than a readable graph shows none, and its
+    /// time axis shows only where its words fit on one line: squeezed, they
+    /// wrapped a letter at a time, made the card (and the cards in its row)
+    /// tall, and pushed it past the page's edge.
+    private enum GraphRoom {
+        case none, graph, graphAndAxis
+
+        init(width: CGFloat) {
+            self = width >= 96 ? .graphAndAxis : width >= 40 ? .graph : .none
+        }
+    }
 
     var body: some View {
         if compact {
@@ -534,10 +549,16 @@ struct ThroughputCard: View {
                     // Fixed, so the graph doesn't shift as the numbers change width.
                     .frame(width: 112, alignment: .leading)
                     VStack(spacing: 2) {
-                        graph(axis: nil)
-                            .frame(minHeight: 34, maxHeight: .infinity)
-                        TimeAxis(samples: AppModel.shortGraphSpan)
+                        if graphRoom == .none {
+                            Color.clear
+                        } else {
+                            graph(axis: nil)
+                                .frame(minHeight: 34, maxHeight: .infinity)
+                        }
+                        if graphRoom == .graphAndAxis { TimeAxis(samples: AppModel.shortGraphSpan) }
                     }
+                    .frame(minWidth: 0, maxWidth: .infinity)
+                    .onGeometryChange(for: GraphRoom.self) { GraphRoom(width: $0.size.width) } action: { graphRoom = $0 }
                 }
             }
         } else {

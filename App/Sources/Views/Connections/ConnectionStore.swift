@@ -29,6 +29,10 @@ final class ConnectionStore {
     private(set) var hasLoaded = false
     /// The first walk this session: as far back as "seen for" can reach.
     private(set) var watchingSince: Date?
+    /// How far back the closed list reaches, for what an empty one says.
+    /// Changes when the page comes back after a gap and when the window
+    /// fills, not with every walk.
+    private(set) var closedCoverage: ConnectionWatch.ClosedCoverage?
 
     @ObservationIgnored private var watch = ConnectionWatch()
     /// Each socket's process name and icon as they were while it was open,
@@ -90,6 +94,7 @@ final class ConnectionStore {
         hiddenProcesses = snapshot.hiddenProcesses
         walkDuration = snapshot.duration
         watchingSince = watch.firstWalk
+        if closedCoverage != watch.closedCoverage { closedCoverage = watch.closedCoverage }
         hasLoaded = true
     }
 

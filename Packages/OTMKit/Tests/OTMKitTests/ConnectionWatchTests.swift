@@ -230,6 +230,28 @@ struct ConnectionWatchTests {
         #expect(watch.open.count == 1)
     }
 
+    @Test func saysHowFarBackTheClosedListReaches() {
+        var watch = ConnectionWatch()
+        #expect(watch.closedCoverage == nil)
+        watch.observe([listener], at: at(0))
+        #expect(watch.closedCoverage == .since(at(0)))
+        // Walks every 3 s, as on the page: everything seen closing since the
+        // first is still kept, and the note says the same thing all along.
+        for seconds in stride(from: 3, through: ConnectionWatch.closedWindow, by: 3) {
+            watch.observe([listener], at: at(seconds))
+        }
+        #expect(watch.closedCoverage == .since(at(0)))
+        // Past the window, closings that old are let go, so it covers the window alone.
+        watch.observe([listener], at: at(ConnectionWatch.closedWindow + 3))
+        #expect(watch.closedCoverage == .window)
+        // After a gap (the page closed a while), only what's been watched since.
+        let back = ConnectionWatch.closedWindow + 600
+        watch.observe([listener], at: at(back))
+        #expect(watch.closedCoverage == .since(at(back)))
+        watch.observe([listener], at: at(back + 3))
+        #expect(watch.closedCoverage == .since(at(back)))
+    }
+
     @Test func keepsATimelineShortButItsFirstStep() throws {
         var watch = ConnectionWatch()
         watch.observe([], at: at(0))

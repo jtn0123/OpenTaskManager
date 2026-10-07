@@ -123,22 +123,28 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// launchd's view in plain words ("Loaded · Not running"), and right
-    /// below it the action that fits: Start Now while nothing runs, Restart
-    /// and Stop while it does.
+    /// What the job is doing, the label its row's Status shows ("Failed ·
+    /// exit code 1"), over whether launchd has it loaded, which is a separate
+    /// thing; then the action that fits: Start Now while nothing runs,
+    /// Restart and Stop while it does.
     private func state(restriction: String?) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                if health.needsAttention {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .imageScale(.small)
-                        .foregroundStyle(LaunchJobHealth.tint)
-                } else {
-                    Circle().fill(item.state.color).frame(width: 8, height: 8)
+        let status = LaunchItemStatus(item: item, health: health)
+        return VStack(alignment: .leading, spacing: 8) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 4) {
+                GridRow {
+                    Text("Status").foregroundStyle(.secondaryText)
+                    LaunchStateLabel(status: status)
+                        .fontWeight(.medium)
+                        .help(status.explanation)
                 }
-                Text(item.statusSummary).font(.callout.weight(.medium)).lineLimit(1)
+                GridRow {
+                    Text("launchd").foregroundStyle(.secondaryText)
+                    Text(status.registration.title)
+                        .lineLimit(1)
+                        .help(status.registration.explanation)
+                }
             }
-            .help(health.headline.map { "\(stateHelp) \($0)." } ?? stateHelp)
+            .font(.callout)
             if restriction == nil, item.job != nil {
                 controls
             }
@@ -348,15 +354,6 @@ struct StartupItemDetail: View {
     private static let restartsHelp = "New processes seen for this job since OpenTaskManager first read launchd's list. "
         + "It looks when the Startup page opens, on Refresh, and every \(Int(LaunchJobStore.readInterval.components.seconds)) "
         + "seconds while the page is on screen, so a job that restarts faster counts once between looks."
-
-    private var stateHelp: String {
-        switch item.state {
-        case let .running(pid): "launchd started it, and its process (PID \(pid)) is running now."
-        case .loaded: "launchd has loaded it and starts it whenever something launches it (see Launches). Nothing is running now."
-        case .disabled: "Disabled: launchd won't start it until it's enabled again."
-        case .notLoaded: "launchd hasn't loaded this property list, so nothing starts it."
-        }
-    }
 
     private var runsHelp: String {
         let since = item.scope == .daemon ? "the Mac started up" : "you logged in"
