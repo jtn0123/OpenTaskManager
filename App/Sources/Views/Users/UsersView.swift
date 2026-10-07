@@ -245,14 +245,17 @@ private struct UserGraph: View {
 
 /// Counts plus the readings macOS only gives for the user's own processes.
 private struct UserStats: View {
+    @Environment(AppModel.self) private var model
     var totals: UsageTotals
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Stat(label: "Processes", value: totals.processCount.formatted())
             Stat(label: "Threads", value: totals.threads.formatted())
-            Stat(label: "Power", value: totals.powerWatts.map(Format.watts) ?? "—")
-                .help(totals.powerWatts == nil ? UsersText.restrictedHelp : "Energy use of these processes right now.")
+            if model.measuresProcessEnergy != false {
+                Stat(label: "Power", value: totals.powerWatts.map(Format.watts) ?? "—")
+                    .help(totals.powerWatts == nil ? UsersText.restrictedHelp : "Energy use of these processes right now.")
+            }
             Stat(label: "GPU", value: totals.gpuFraction.map { Format.percent($0) } ?? "—")
                 .help(totals.gpuFraction == nil ? "None of these processes have used the GPU." : "GPU time of these processes.")
         }
@@ -394,7 +397,7 @@ private struct SystemAccountGrid: View {
                 Text("Processes").gridColumnAlignment(.trailing)
                 Text("CPU").gridColumnAlignment(.trailing)
                 Text("Memory").gridColumnAlignment(.trailing)
-                Text("Power").gridColumnAlignment(.trailing)
+                if model.measuresProcessEnergy != false { Text("Power").gridColumnAlignment(.trailing) }
                 Text("GPU").gridColumnAlignment(.trailing)
                 Text("Last minute")
             }
@@ -409,8 +412,10 @@ private struct SystemAccountGrid: View {
                     Text(user.totals.processCount.formatted())
                     Text(scale.format(user.totals.cpuPercent))
                     Text(Format.bytes(user.totals.memory))
-                    Text(user.totals.powerWatts.map(Format.watts) ?? "—")
-                        .tooltip(user.totals.powerWatts == nil ? UsersText.restrictedHelp : nil)
+                    if model.measuresProcessEnergy != false {
+                        Text(user.totals.powerWatts.map(Format.watts) ?? "—")
+                            .tooltip(user.totals.powerWatts == nil ? UsersText.restrictedHelp : nil)
+                    }
                     Text(user.totals.gpuFraction.map { Format.percent($0) } ?? "—")
                     Sparkline(values: (model.userHistory[user.uid]?.cpu.values ?? []).map(scale.value), color: Theme.cpu,
                               capacity: AppModel.userHistoryCapacity - 2)
@@ -471,7 +476,7 @@ private struct TopProcessList: View {
                     Text("PID").gridColumnAlignment(.trailing)
                     Text("CPU").gridColumnAlignment(.trailing)
                     Text("Memory").gridColumnAlignment(.trailing)
-                    Text("Power").gridColumnAlignment(.trailing)
+                    if model.measuresProcessEnergy != false { Text("Power").gridColumnAlignment(.trailing) }
                 }
                 .font(.metadata)
                 .foregroundStyle(.secondaryText)
@@ -487,8 +492,10 @@ private struct TopProcessList: View {
                         Text(String(process.pid)).foregroundStyle(.secondaryText)
                         Text(scale.format(process.cpuPercent))
                         Text(Format.bytes(process.memory))
-                        Text(process.powerWatts.map(Format.watts) ?? "—")
-                            .tooltip(process.powerWatts == nil && process.isRestricted ? UsersText.restrictedHelp : nil)
+                        if model.measuresProcessEnergy != false {
+                            Text(process.powerWatts.map(Format.watts) ?? "—")
+                                .tooltip(process.powerWatts == nil && process.isRestricted ? UsersText.restrictedHelp : nil)
+                        }
                     }
                     .font(.callout)
                     .monospacedDigit()
