@@ -36,16 +36,11 @@ struct ConnectionsView: View {
         let shown = store.rows.filter { filter.matches($0.connection) && $0.matches(search) }.sorted(using: sortOrder)
         let selected = selection.flatMap { id in store.rows.first { $0.id == id } }
         return VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                SummaryCards(summary: store.summary)
-                NetworkTrafficCard(title: "Network traffic", compact: true)
-                    .frame(width: 280)
-            }
-            // The five counts fit one row from about 1290 points wide and wrap
-            // below that. The row is as tall as its tallest part, and the
-            // traffic card (which fills the height it's offered) matches it.
-            .fixedSize(horizontal: false, vertical: true)
-            .padding([.horizontal, .top], 16)
+            // The five counts and the traffic card share one grid: a single row
+            // in the default window, two even rows in the narrowest.
+            SummaryCards(summary: store.summary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding([.horizontal, .top], 16)
             filterBar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -157,6 +152,8 @@ private struct SummaryCards: View {
                         tint: Theme.memory, explanation: "Distinct addresses at the other end of a connection, not counting this Mac.")
             SummaryCard(title: "Processes with sockets", value: summary.processesWithSockets, symbol: "app.connected.to.app.below.fill",
                         tint: Theme.gpu, explanation: "Processes holding at least one TCP or UDP socket.")
+            // Reads the model every tick in a view of its own, so the counts and table aren't rebuilt.
+            NetworkTrafficCard(title: "Network traffic", compact: true)
         }
     }
 }
