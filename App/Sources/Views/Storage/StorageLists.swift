@@ -10,8 +10,8 @@ struct StorageListCard: View {
     let folder: DiskItem
     let hover: StorageHover
     var open: (Int) -> Void
-    /// Opens the folder holding a path and outlines its tile, if it's still there.
-    var show: (_ path: String, _ exists: Bool) -> Void
+    /// Opens the folder holding a large file and outlines its tile.
+    var show: (DiskFile) -> Void
     /// Picks a change and outlines it in the treemap (`opening` its folder too).
     var pick: (_ change: DiskSizeChange, _ exists: Bool, _ opening: Bool) -> Void
 
@@ -26,7 +26,7 @@ struct StorageListCard: View {
             case .contents:
                 FolderContentsList(store: store, usage: usage, folder: folder, hover: hover, open: open)
             case .largest:
-                LargestFilesList(store: store, usage: usage, hover: hover) { show($0.path, true) }
+                LargestFilesList(store: store, usage: usage, hover: hover, show: show)
             case .changes:
                 ChangesList(store: store, usage: usage, folder: folder, hover: hover, pick: pick)
             }
@@ -301,14 +301,12 @@ private struct FileRow: View {
         .accessibilityAddTraits(.isButton)
     }
 
-    /// The enclosing folder, relative to the scanned folder when it's inside.
+    /// The enclosing folder, as a trail below the scanned folder when it's
+    /// inside ("Projects › webapp", as the treemap's tag writes it).
     private var location: String {
         let folder = file.folder
         if folder == usage.rootPath { return "Top level" }
-        if folder.hasPrefix(usage.rootPath) {
-            let relative = folder.dropFirst(usage.rootPath.count).drop { $0 == "/" }
-            return String(relative)
-        }
+        if folder.hasPrefix(usage.rootPath + "/") || usage.rootPath == "/" { return Format.trail(folder, under: usage.rootPath) }
         return (folder as NSString).abbreviatingWithTildeInPath
     }
 }

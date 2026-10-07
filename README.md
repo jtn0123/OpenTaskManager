@@ -73,8 +73,9 @@ Mac it came from, and plays back at 1×, 10× or 60×.
 - Details for each socket: both ends, the well-known service, what its scope
   means, and a jump to the owning process.
 - It refreshes every 3 seconds, and only while the page is open. macOS only
-  lists sockets for your own processes, so the page says how many root and
-  other users' processes it can't see.
+  lists sockets for your own processes, so the counts are labelled as your
+  account's, and a badge says how many root and other users' processes it
+  can't see and why.
 
 **Startup**: everything launchd starts by itself, read from the LaunchAgents
 and LaunchDaemons folders. Each item shows whether it's yours, every user's or
@@ -144,7 +145,8 @@ showing how far it has got as it goes (it can be stopped at any time).
   folder to open it; the breadcrumb leads back out.
 - Beside it, the folder's contents ranked by size with their share and item
   counts, or the 50 largest files anywhere in the scan. Clicking a file opens
-  its folder and outlines it in the treemap.
+  its folder and outlines it in the treemap, or, when it's too small to draw,
+  outlines the tile that holds it with a dashed line and says so.
 - The space by category: apps, developer files (`node_modules`, DerivedData,
   `.git` and the like), photos and video, music, documents, archives and disk
   images, caches and logs, and system files.

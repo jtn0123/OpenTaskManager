@@ -55,6 +55,22 @@ struct FormatTests {
         #expect(Format.cpuTime(75.5) == "01:15.50")
         #expect(Format.cpuTime(3725.01) == "1:02:05.01")
     }
+
+    @Test func trailsNameEachFolderBelowTheOneOpen() {
+        #expect(Format.trail("/demo/Projects/webapp/build", under: "/demo") == "Projects › webapp › build")
+        #expect(Format.trail("/demo/Projects/webapp/build", under: "/demo/Projects") == "webapp › build")
+        #expect(Format.trail("Projects/webapp/build") == "Projects › webapp › build", "below the scanned folder")
+        #expect(Format.trail("Projects/webapp", under: "Projects") == "webapp")
+        #expect(Format.trail("/demo/Projects/", under: "/demo/") == "Projects", "trailing slashes don't count")
+        #expect(Format.trail("/demo", under: "/demo") == "", "the folder itself")
+    }
+
+    @Test func trailsMatchWholeFolderNames() {
+        // "Projects2" isn't inside "Projects", and a path outside keeps its whole trail.
+        #expect(Format.trail("Projects2/app", under: "Projects") == "Projects2 › app")
+        #expect(Format.trail("/other/file.bin", under: "/demo") == "other › file.bin")
+        #expect(Format.trail("/demo", under: "/demo/Projects") == "demo")
+    }
 }
 
 struct HistoryTests {

@@ -314,13 +314,13 @@ private struct StorageResultsView: View {
         store.folder = id
     }
 
-    /// Opens the folder holding `path` and outlines the tile it's in: its
+    /// Opens the folder holding `file` and outlines the tile it's in: its
     /// own, or the one for the folder or smaller items holding it.
-    private func show(_ path: String, exists: Bool) {
+    private func show(_ file: DiskFile) {
         let usage = result.usage
         hover.enter(nil)
-        store.folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent).id
-        hover.mark(path, exists: exists, in: usage, file: path)
+        store.folder = usage.closestFolder(to: file.folder).id
+        hover.mark(file.path, exists: true, in: usage, figure: Format.bytes(file.allocatedSize), file: file.path)
     }
 
     /// Picks a change in the Changes list and outlines where it is in the
@@ -333,7 +333,9 @@ private struct StorageResultsView: View {
             hover.enter(nil)
             store.folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent).id
         }
-        hover.mark(path, exists: exists, in: usage, change: change.id)
+        let direction = change.direction()
+        hover.mark(path, exists: exists, in: usage, figure: StorageChangeStyle.caption(change, direction), direction: direction,
+                   change: change.id)
     }
 
     /// In Changes, keeps a change picked: the largest in the open folder,
