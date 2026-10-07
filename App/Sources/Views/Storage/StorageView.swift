@@ -28,6 +28,8 @@ struct StorageView: View {
             ToolbarItem {
                 ScopeMenu(store: store)
             }
+            // Icons only, like the other pages' Refresh, so an 820-point
+            // window keeps them out of the toolbar's overflow menu.
             ToolbarItem {
                 if store.isScanning {
                     Button {
@@ -35,7 +37,6 @@ struct StorageView: View {
                     } label: {
                         Label("Stop", systemImage: "stop.fill")
                     }
-                    .labelStyle(.titleAndIcon)
                     .help("Stop scanning")
                 } else {
                     Button {
@@ -43,8 +44,7 @@ struct StorageView: View {
                     } label: {
                         Label(store.result == nil ? "Scan" : "Rescan", systemImage: "arrow.clockwise")
                     }
-                    .labelStyle(.titleAndIcon)
-                    .help("Scan \(store.scope.title) (\(store.scope.subtitle))")
+                    .help("\(store.result == nil ? "Scan" : "Rescan") \(store.scope.title) (\(store.scope.subtitle))")
                 }
             }
         }
