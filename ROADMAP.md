@@ -20,7 +20,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | App history (resource use per app over days) | ⬜ | Needs the history database below |
 | Startup apps | 🚧 | LaunchAgents and LaunchDaemons with status, PID, triggers and publisher are done. Login Items and the background items apps register need root to read, so they wait for the privileged helper; for now the page opens their System Settings pane |
 | Enable and disable startup items | ⬜ | TODO: `launchctl enable`/`disable` with `bootstrap`/`bootout`, a confirmation step and a way to undo. Daemons need an administrator password. Left out until then because it's destructive |
-| Users tab | ⬜ | Per-user totals, log off other sessions |
+| Users tab | 🚧 | Per-user totals, history, sessions and top processes are done; logging off other sessions is planned |
 | Services tab | ⬜ | launchd services: state, start/stop, open plist. The Startup page already reads each job's state and opens its plist |
 | "Details" tab extras: priority, affinity-style tier pinning | 🚧 | Priority is done; QoS and tier pinning are planned |
 | Search, efficiency mode equivalent | 🚧 | Search is done; "efficiency mode" maps to background QoS |
@@ -41,6 +41,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | CPU cluster and GPU clock speeds | ✅ | From IOReport residencies and the device tree's clock tables |
 | Memory by app, paging and compressor rates | ✅ | Stacked over time |
 | GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
+| System information page | ✅ | Hardware, displays, storage, network, battery health, software and security state; identifiers hidden until shown; Copy Summary |
 | Privileged helper | ⬜ | Full details for root processes, including their sockets. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
 | Flight recorder | ⬜ | SQLite history with a timeline scrubber: "what was hogging the CPU at 3 a.m.?" |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
