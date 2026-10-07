@@ -110,7 +110,9 @@ struct Sparkline: View {
 
     var body: some View {
         GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue,
-                  capacity: capacity, showsGrid: false, lineWidth: 1.2, cornerRadius: 3)
+                  capacity: capacity, showsGrid: false, lineWidth: 1.2, glows: true, cornerRadius: 3)
+            .background(LinearGradient(colors: [color.opacity(0.16), color.opacity(0.03)], startPoint: .top, endPoint: .bottom),
+                        in: RoundedRectangle(cornerRadius: 3))
             .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(color.opacity(0.5), lineWidth: 0.75))
     }
 }

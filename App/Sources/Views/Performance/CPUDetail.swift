@@ -143,16 +143,32 @@ struct CPUDetail: View {
                 Text("\(tier.name) cores").font(.caption).foregroundStyle(.secondary)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(max(cpus.count, 1), 6)), spacing: 6) {
                     ForEach(cpus, id: \.self) { cpu in
-                        GraphView(series: [GraphSeries(values: model.coreHistory[cpu].values, color: Theme.tier(tier.level))],
-                                  maxValue: 1, capacity: 120, lineWidth: 1, cornerRadius: 4)
-                            .frame(height: 56)
-                            .overlay(alignment: .topLeading) {
-                                Text("\(cpu)").font(.system(size: 9)).foregroundStyle(.secondary).padding(3)
-                            }
-                            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.separator))
+                        coreGraph(cpu, color: Theme.tier(tier.level))
                     }
                 }
             }
         }
+    }
+
+    /// One logical CPU's recent load, with its number and current reading.
+    private func coreGraph(_ cpu: Int, color: Color) -> some View {
+        let usage = snapshot.cpu.coreUsage.indices.contains(cpu) ? snapshot.cpu.coreUsage[cpu] : 0
+        return GraphView(series: [GraphSeries(values: model.coreHistory[cpu].values, color: color)],
+                         maxValue: 1, capacity: 120, lineWidth: 1.2, glows: true, cornerRadius: 5)
+            .frame(height: 64)
+            .background(LinearGradient(colors: [color.opacity(0.06 + 0.22 * usage), color.opacity(0.02)],
+                                       startPoint: .top, endPoint: .bottom),
+                        in: RoundedRectangle(cornerRadius: 5))
+            .overlay(alignment: .top) {
+                HStack {
+                    Text("\(cpu)").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? color : .secondary)
+                }
+                .font(.system(size: 9.5, weight: .medium).monospacedDigit())
+                .padding(.horizontal, 5)
+                .padding(.top, 3)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color.opacity(0.18 + 0.5 * usage)))
     }
 }

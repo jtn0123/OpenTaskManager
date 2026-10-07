@@ -22,7 +22,7 @@ struct PerformanceView: View {
                     }
                 }
                 .listStyle(.sidebar)
-                .frame(minWidth: 210, idealWidth: 240, maxWidth: 320)
+                .frame(minWidth: 200, idealWidth: 230, maxWidth: 270)
 
                 ScrollView {
                     detail(for: selected, snapshot: snapshot)
