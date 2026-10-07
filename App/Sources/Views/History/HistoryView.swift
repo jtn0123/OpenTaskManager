@@ -263,6 +263,9 @@ struct HistoryView: View {
         }
         .toolbar {
             ToolbarItem {
+                HistorySpikesButton()
+            }
+            ToolbarItem {
                 HistoryRecordingsMenu(store: store, scrubber: scrubber, recorder: model.recorder, domain: domain, show: show)
             }
             ToolbarItem {
@@ -491,8 +494,8 @@ struct HistoryView: View {
 
     /// The end of the coverage line: how often records are written, and the size on disk.
     private var status: String {
-        var parts = [opened == nil ? "a record every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept 7 days"
-            : "a record every \(Int(FlightRecorder.span)) s"]
+        var parts = [opened.map { "a record every \(Format.timeSpan($0.recordSeconds))" }
+            ?? "a record every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept 7 days"]
         if !shortStatus.isEmpty { parts.append(shortStatus) }
         return parts.joined(separator: " · ")
     }
@@ -550,7 +553,7 @@ struct HistoryView: View {
         let recorder = opened.recorder
         let session = opened.session
         let shown = session.start...max(session.end, session.start.addingTimeInterval(60))
-        let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound))
+        let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound), record: recorder.recordSpan)
         let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
         let seconds = (try? await recorder.recordedSeconds(from: shown.lowerBound, to: shown.upperBound)) ?? 0
         let span = try? await recorder.recordedSpan(from: shown.lowerBound, to: shown.upperBound)

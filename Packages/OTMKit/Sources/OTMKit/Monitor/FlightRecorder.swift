@@ -58,6 +58,9 @@ public actor FlightRecorder {
 
     /// The database file, or for a replayed recording the file it came from.
     public nonisolated let url: URL
+    /// Seconds each of its records covers: `span` for the live recording,
+    /// the file's own for a replayed one (one for a spike capture).
+    public nonisolated let recordSpan: TimeInterval
     private let connection: Connection
     var database: OpaquePointer { connection.handle }
     private var lastPrune = Date.distantPast
@@ -77,12 +80,14 @@ public actor FlightRecorder {
         try Self.execute("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;", on: connection.handle)
         try Self.createTables(on: connection.handle)
         self.url = url
+        recordSpan = Self.span
         self.connection = connection
     }
 
     /// A read-only view of a recording file: its records and session in an
     /// in-memory database, so the History page reads it with the same
-    /// queries as the live recording. `url` is the file it was read from.
+    /// queries as the live recording, at its own record length. `url` is
+    /// the file it was read from.
     public init(replaying file: RecordingFile, from url: URL) throws(FlightRecorderError) {
         let connection = try Self.open(":memory:")
         try Self.createTables(on: connection.handle)
@@ -92,6 +97,7 @@ public actor FlightRecorder {
         try Self.insert(file.events, into: connection.handle)
         try Self.execute("COMMIT", on: connection.handle)
         self.url = url
+        recordSpan = max(file.recordSeconds, 0.1)
         self.connection = connection
     }
 
@@ -131,10 +137,10 @@ public actor FlightRecorder {
     // MARK: - Reading
 
     /// Graph points between two dates, each the average of the records in a
-    /// bucket of `bucket` seconds (CPU peak is the highest). Empty buckets
-    /// are left out, and `HistoryPoint.segment` marks the gaps.
+    /// bucket of `bucket` seconds, at least a record long (CPU peak is the
+    /// highest). Empty buckets are left out, and `HistoryPoint.segment` marks the gaps.
     public func points(from start: Date, to end: Date, bucket: TimeInterval) throws(FlightRecorderError) -> [HistoryPoint] {
-        let bucket = max(bucket, Self.span)
+        let bucket = max(bucket, recordSpan)
         let averages = Self.columns.map { $0 == "cpu_peak" ? "MAX(cpu_peak)" : "AVG(\($0))" }.joined(separator: ", ")
         let statement = try prepare("""
             SELECT MAX(time), \(averages) FROM records WHERE time > ? AND time <= ?
@@ -178,26 +184,27 @@ public actor FlightRecorder {
         return records
     }
 
-    /// Seconds recorded between two dates. Each record covers `span`
+    /// Seconds recorded between two dates. Each record covers `recordSpan`
     /// seconds; copies of the app running side by side write records for the
     /// same stretch, so each stretch counts once.
     public func recordedSeconds(from start: Date, to end: Date) throws(FlightRecorderError) -> TimeInterval {
         let statement = try prepare("SELECT COUNT(DISTINCT CAST(time / ? AS INTEGER)) FROM records WHERE time > ? AND time <= ?")
         defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, Self.span)
+        sqlite3_bind_double(statement, 1, recordSpan)
         sqlite3_bind_double(statement, 2, start.timeIntervalSince1970)
         sqlite3_bind_double(statement, 3, end.timeIntervalSince1970)
         guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
-        return Double(sqlite3_column_int64(statement, 0)) * Self.span
+        return Double(sqlite3_column_int64(statement, 0)) * recordSpan
     }
 
     /// Seconds per graph point for a graph `span` seconds wide: about
-    /// `points` across, in whole records, so every point averages the same
-    /// number of them.
-    public static func bucket(for span: TimeInterval, points: Int = 360) -> TimeInterval {
-        guard span.isFinite, span > 0, points > 0 else { return Self.span }
-        let records = (span / Double(points) / Self.span - 1e-9).rounded(.up)
-        return max(records, 1) * Self.span
+    /// `points` across, in whole records of `record` seconds, so every point
+    /// averages the same number of them.
+    public static func bucket(for span: TimeInterval, points: Int = 360, record: TimeInterval = FlightRecorder.span) -> TimeInterval {
+        let record = record.isFinite && record > 0 ? record : Self.span
+        guard span.isFinite, span > 0, points > 0 else { return record }
+        let records = (span / Double(points) / record - 1e-9).rounded(.up)
+        return max(records, 1) * record
     }
 
     /// The times of the first and last records between two dates, or nil
@@ -229,7 +236,7 @@ public actor FlightRecorder {
             seen.formUnion(HardwareBlob.read(statement, Int32(Self.columns.count + 1), series: series, into: &values))
             records.append(HistoryRecord(time: Date(timeIntervalSince1970: sqlite3_column_double(statement, 0)), values: values))
         }
-        return HistoryIntervalStats(records: records, from: start, to: end, hardware: seen.sorted())
+        return HistoryIntervalStats(records: records, from: start, to: end, recordSeconds: recordSpan, hardware: seen.sorted())
     }
 
     /// The hardware series between two dates as graph points' figures, each
@@ -253,7 +260,7 @@ public actor FlightRecorder {
         let first = try prepare("SELECT time FROM records WHERE hardware IS NOT NULL ORDER BY time LIMIT 1")
         defer { sqlite3_finalize(first) }
         let earliest = sqlite3_step(first) == SQLITE_ROW ? Date(timeIntervalSince1970: sqlite3_column_double(first, 0)) : nil
-        return HistoryHardwareTrack(records: records, series: Array(series.values), bucket: bucket, earliest: earliest)
+        return HistoryHardwareTrack(records: records, series: Array(series.values), bucket: bucket, earliest: earliest, record: recordSpan)
     }
 
     /// The apps that used the most CPU between two dates, averaged over the

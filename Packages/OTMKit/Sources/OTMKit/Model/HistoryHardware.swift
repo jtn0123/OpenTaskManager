@@ -219,10 +219,12 @@ public struct HistoryHardwareTrack: Sendable, Equatable {
     public var isEmpty: Bool { series.isEmpty && coreCount == 0 }
 
     /// Averages `records`' hardware figures into buckets of `bucket`
-    /// seconds. Gaps stay gaps: a bucket without a record has no entry, and
-    /// a series missing from every record in one is missing from it.
-    public init(records: [HistoryRecord], series: [HistoryHardwareSeries], bucket: TimeInterval, earliest: Date?) {
-        self.bucket = max(bucket, FlightRecorder.span)
+    /// seconds, at least a `record` long. Gaps stay gaps: a bucket without a
+    /// record has no entry, and a series missing from every record in one is
+    /// missing from it.
+    public init(records: [HistoryRecord], series: [HistoryHardwareSeries], bucket: TimeInterval, earliest: Date?,
+                record: TimeInterval = FlightRecorder.span) {
+        self.bucket = max(bucket, record > 0 ? record : FlightRecorder.span)
         self.earliest = earliest
         var sums: [Int: (values: [String: (sum: Double, count: Int)], cores: [(sum: Double, count: Int)])] = [:]
         for record in records {

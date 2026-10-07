@@ -12,10 +12,11 @@ enum HistoryEventStyle {
         case .networkChanged: "network"
         case .sleep: "moon.zzz.fill"
         case .wake: "sun.max.fill"
+        case .spike: "bolt.fill"
         }
     }
 
-    /// "Xcode launched", "5 × clang started", "Network: Wi-Fi (en0)".
+    /// "Xcode launched", "5 × clang started", "Network: Wi-Fi (en0)", "CPU spike captured".
     static func title(_ event: HistoryEvent) -> String {
         let name = event.count > 1 ? "\(event.count) × \(event.name)" : event.name
         return switch event.kind {
@@ -26,14 +27,16 @@ enum HistoryEventStyle {
         case .networkChanged: event.name.isEmpty ? "Network disconnected" : "Network: \(event.name)"
         case .sleep: "Mac went to sleep"
         case .wake: "Mac woke"
+        case .spike: "\(name) spike captured"
         }
     }
 
-    /// What there is to say beyond the title: a network's new address, and
-    /// for a background process, that it was busy.
+    /// What there is to say beyond the title: a network's new address, for
+    /// a background process, that it was busy, and for a spike, what crossed.
     static func detail(_ event: HistoryEvent) -> String? {
         switch event.kind {
         case .networkChanged: event.detail.isEmpty ? nil : event.detail
+        case .spike: event.detail.isEmpty ? "Listed under Spikes in the toolbar" : "\(event.detail). Listed under Spikes in the toolbar"
         case .processStarted: "A background process that used at least \(Int(ProcessEventTracker.busyPercent))% of a core"
         case .processExited: "A background process that had been busy"
         case .appLaunched, .appQuit, .sleep, .wake: nil
@@ -70,6 +73,7 @@ enum HistoryEventStyle {
             case .networkChanged: count == 1 ? "network change" : "network changes"
             case .sleep: count == 1 ? "sleep" : "sleeps"
             case .wake: count == 1 ? "wake" : "wakes"
+            case .spike: count == 1 ? "spike captured" : "spikes captured"
             }
             return "\(count) \(noun)"
         }

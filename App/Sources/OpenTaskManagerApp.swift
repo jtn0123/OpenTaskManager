@@ -477,6 +477,7 @@ struct SettingsView: View {
                     Text("100% per core, like Activity Monitor").tag(false)
                 }
             }
+            SpikeCaptureSettings()
             Section("Access") {
                 Toggle("Show in menu bar", isOn: $showMenuBarExtra)
                 Toggle("Open with ⌃⇧⎋ from anywhere", isOn: $globalHotKeyEnabled)

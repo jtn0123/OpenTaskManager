@@ -180,7 +180,11 @@ struct OpenedRecording: Identifiable, Sendable {
     let generator: String
     let exported: Date
     let records: Int
+    /// Seconds each record covers: ten, or one for a spike capture.
+    let recordSeconds: TimeInterval
     let reported: [RecordingFigure: Bool]
+    /// What a spike capture is about; nil for other recordings.
+    let incident: SpikeIncident?
     let recorder: FlightRecorder
 
     /// The session's note, else the file's name.
@@ -200,8 +204,8 @@ struct OpenedRecording: Identifiable, Sendable {
     static func read(_ url: URL) throws -> OpenedRecording {
         let file = try RecordingFile.decode(Data(contentsOf: url))
         return OpenedRecording(url: url, session: file.session, machine: file.machine, generator: file.generator,
-                               exported: file.exported, records: file.records.count, reported: file.reported,
-                               recorder: try FlightRecorder(replaying: file, from: url))
+                               exported: file.exported, records: file.records.count, recordSeconds: file.recordSeconds,
+                               reported: file.reported, incident: file.incident, recorder: try FlightRecorder(replaying: file, from: url))
     }
 }
 
@@ -213,13 +217,14 @@ struct HistoryRecordingBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "record.circle")
+            Image(systemName: recording.incident == nil ? "record.circle" : "bolt.circle")
                 .font(.title2)
                 .foregroundStyle(HistorySessionStyle.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Recording: \(recording.title)")
+                Text(recording.incident == nil ? "Recording: \(recording.title)" : "Spike: \(recording.title)")
                     .font(.headline)
                     .lineLimit(1)
+                if let incident = recording.incident { HistorySpikeIncidentLine(incident: incident) }
                 Text(details)
                     .font(.callout)
                     .foregroundStyle(.secondaryText)
@@ -242,11 +247,13 @@ struct HistoryRecordingBanner: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// "Wed, Oct 7 10:02 – 10:17 AM · 15 min · 91 records · read-only".
+    /// "Wed, Oct 7 10:02 – 10:17 AM · 15 min · 91 records · read-only",
+    /// "… · 180 records of 1 s · …" when they aren't the usual ten seconds.
     private var details: String {
         let session = recording.session
+        let length = recording.recordSeconds == FlightRecorder.span ? "" : " of \(Format.timeSpan(recording.recordSeconds))"
         return [HistorySessionStyle.span(session.start, session.end, dated: true), Format.roughDuration(session.duration),
-                "\(recording.records) records", "read-only"].joined(separator: " · ")
+                "\(recording.records) records\(length)", "read-only"].joined(separator: " · ")
     }
 
     /// "Recorded on MacBook Pro · Apple M3 Pro · 36 GB · macOS 27.2 · GPU not reported".

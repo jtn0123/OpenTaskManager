@@ -85,6 +85,8 @@ USAGE:
                                  numbered newest first; compare shows each
                                  figure's change between runs A and B of one
                                  test, and refuses runs that don't compare
+  otm captures [--json]          The spike captures the app kept: what crossed,
+                                 when, for how long, and the busiest processes
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -830,6 +832,9 @@ case "gpubench":
 
 case "bench":
     benchCommand(options)
+
+case "captures":
+    capturesCommand(options)
 
 case "threads":
     try await threadsCommand(options)

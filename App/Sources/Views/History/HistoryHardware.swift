@@ -190,7 +190,8 @@ struct HistoryHardwareSection: View {
         let charts = HistoryHardwareChart.available(track)
         if charts.isEmpty {
             Text(isFile
-                 ? "This recording has no hardware figures: it was saved by an earlier OpenTaskManager, or on a Mac without them."
+                 ? "This recording has no hardware figures: it was saved by an earlier OpenTaskManager or on a Mac without "
+                    + "them, or it's a spike capture, which keeps the figures above second by second but not these."
                  : "No hardware figures in this range yet. They're recorded every \(Int(FlightRecorder.span)) seconds from now on; "
                     + "earlier records don't have them.")
                 .font(.explanation)
@@ -295,7 +296,7 @@ private struct HistoryCoreMapCard: View {
         .font(.callout)
         .fixedSize()
         .help("Each row is one logical CPU, CPU 0 at the top; each cell its load averaged over "
-            + "each \(HistoryInterval.adjective(max(bucket, FlightRecorder.span))) point. Gaps are left empty.")
+            + "each \(HistoryInterval.adjective(bucket)) point. Gaps are left empty.")
     }
 
     private var chart: some View {
