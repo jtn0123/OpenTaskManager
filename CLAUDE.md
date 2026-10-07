@@ -192,11 +192,21 @@ Manager OG or any other proprietary task manager.
   lasts the session, so time away from the page shows as an unwatched gap.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s or more, not `ps %cpu`, and only once the graphs'
-  5-minute windows have filled (about 5.5 minutes after launch): per-tick work
-  grows with the history drawn and summed, so a reading at launch comes out two
-  to three times low. Most of a full page's cost is SwiftUI re-evaluating and
-  laying out what reads the tick, Core Animation commits and the menu bar item,
-  so keep what changes every tick in small views that read the model themselves.
+  5-minute windows have filled (about 5.5 minutes after launch): work that
+  grows with the history drawn and summed once made a reading at launch two to
+  three times low. Readings swing with the Mac's load, so compare two builds
+  side by side, read at the same moments. Most of a full page's cost is SwiftUI
+  re-evaluating and laying out what reads the tick, Core Animation commits and
+  the menu bar item, so keep what changes every tick in small views that read
+  the model themselves.
+- Code that runs for every point of every graph each tick (`GraphMath`'s
+  tangents, stacks and sums, `History.addValues`, `StreamGraph`'s traces and
+  curves) is while loops over buffer pointers: in a debug build a range's
+  iterator, an array's subscript, `enumerated()`, lazy filters and generic
+  `max()` each cost a call per point. Don't read `NSRunningApplication`
+  properties per tick either: even `processIdentifier` can wait on a
+  LaunchServices round trip; `AppModel` rebuilds its app list when NSWorkspace
+  reports a launch or quit.
 
 ## Screenshots and UI checks
 
