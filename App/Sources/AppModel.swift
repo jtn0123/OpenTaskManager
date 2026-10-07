@@ -561,7 +561,7 @@ final class AppModel {
         processMemoryHistory.append(totalMemory)
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
-        record(snapshot)
+        record(snapshot, sensorsRead: fixture(or: sensors)?.isEmpty == false)
     }
 
     /// Adds each process's sample to its history and running total. A process
@@ -652,7 +652,9 @@ final class AppModel {
     }
 
     /// Feeds the flight recorder, which writes a record every few seconds.
-    private func record(_ snapshot: SystemSnapshot) {
+    /// `sensorsRead` is false when this tick didn't read the temperature
+    /// sensors and fans, so their last readings aren't recorded again.
+    private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool) {
         guard let recorder else { return }
         // The apps NSWorkspace reports launching and quitting; background agents are left to the tracker.
         historyEvents?.update(snapshot.processes, apps: Set(regularApps.keys), at: snapshot.timestamp)
@@ -660,7 +662,10 @@ final class AppModel {
             group.process.map { AppUsage(name: displayName(for: $0), cpuPercent: group.totals.cpuPercent, memory: Double(group.totals.memory)) }
         }
         let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))
-        guard let record = recording.add(values, apps: apps, interval: snapshot.interval, at: snapshot.timestamp) else { return }
+        // Core loads, clocks, fans, temperatures and power rails, picked from the Thermals table's rows.
+        let hardware = HistoryHardwareSample(readings: sensorReadings, cpu: snapshot.cpu, topology: topology, sensorsRead: sensorsRead)
+        guard let record = recording.add(values, hardware: hardware, apps: apps, interval: snapshot.interval,
+                                         at: snapshot.timestamp) else { return }
         Task.detached(priority: .utility) {
             try? await recorder.append(record)
         }

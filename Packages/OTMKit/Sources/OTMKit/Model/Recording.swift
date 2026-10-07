@@ -113,12 +113,23 @@ public enum RecordingFileError: Error, Equatable, LocalizedError {
 /// written before it simply lacks (it has no events), and that a build from
 /// before it ignores, as JSON readers ignore keys they don't know. An event
 /// of a kind this build doesn't know is left out.
+///
+/// The hardware series came the same way: an optional top-level `hardware`
+/// block, versioned on its own (`hardwareVersion`), that names each series
+/// once (ID, kind, unit, label, source), and in each record a `hardware`
+/// object of figures by series ID, `null` where the Mac didn't read one, and
+/// `coreLoad`, each logical CPU's load. A build from before them reads the
+/// rest of the file as it always did; this one skips a block of a newer
+/// version, and a series of a kind or unit it doesn't know, rather than
+/// misread them.
 public struct RecordingFile: Sendable, Equatable {
     /// Marks the JSON as a recording, whatever the file's name.
     public static let format = "io.github.jtn0123.OpenTaskManager.recording"
     public static let fileExtension = "otmrecording"
     /// The version this build writes, and the newest it reads.
     public static let version = 1
+    /// The version of the `hardware` block this build writes, and the newest it reads.
+    public static let hardwareVersion = 1
 
     public var session: RecordingSession
     public var machine: RecordingMachine
@@ -134,6 +145,11 @@ public struct RecordingFile: Sendable, Equatable {
     /// What happened during the session, oldest first; none in a file from
     /// before events were kept.
     public var events: [HistoryEvent]
+    /// The hardware series any record holds, in chart order; none in a file
+    /// from before they were kept.
+    public var hardwareSeries: [HistoryHardwareSeries] {
+        Set(records.flatMap(\.hardwareSeries)).sorted()
+    }
 
     public init(session: RecordingSession, machine: RecordingMachine, generator: String, exported: Date,
                 recordSeconds: TimeInterval = FlightRecorder.span, records: [HistoryRecord], events: [HistoryEvent] = []) {
@@ -164,6 +180,10 @@ public struct RecordingFile: Sendable, Equatable {
         "chipCelsius": "degrees Celsius, the hottest die sensor",
         "topCPU": "the busiest apps by CPU, in percent of one core (100 = one core)",
         "topMemory": "the apps using the most memory, in bytes",
+        "hardware": "hardware figures by the ID of a series in the top-level hardware block, in that series' unit "
+            + "(fraction 0 to 1, megahertz, rpm, celsius or watts), averaged over the updates in the stretch that read "
+            + "it; null when none did",
+        "coreLoad": "each logical CPU's load, 0 to 1, by CPU number, averaged over the stretch; null for a CPU with no reading",
         "events": "what happened during the session (kind appLaunched, appQuit, processStarted, processExited, "
             + "networkChanged, sleep or wake), each at a time in seconds since 1970-01-01 00:00 UTC; approximate "
             + "when found by comparing one update's process list with the next",
@@ -210,7 +230,7 @@ public struct RecordingFile: Sendable, Equatable {
             generator: wire.generator,
             exported: Date(timeIntervalSince1970: wire.exported),
             recordSeconds: wire.sampling.recordSeconds,
-            records: wire.records.map(\.record),
+            records: wire.records.map { $0.record(series: wire.hardware?.readable ?? [:]) },
             events: (wire.events ?? []).compactMap(\.event)
         )
         // The file's own flags win: they say what the Mac reported, which a
@@ -283,6 +303,8 @@ private struct Wire: Codable {
     let records: [WireRecord]
     /// Missing from files written before events were kept.
     let events: [WireEvent]?
+    /// Missing from files without hardware series.
+    let hardware: WireHardware?
 
     init(_ file: RecordingFile) {
         format = RecordingFile.format
@@ -297,8 +319,49 @@ private struct Wire: Codable {
         sampling = Sampling(recordSeconds: file.recordSeconds)
         units = RecordingFile.units
         reported = Dictionary(uniqueKeysWithValues: file.reported.map { ($0.key.rawValue, $0.value) })
-        records = file.records.map(WireRecord.init)
+        let series = file.hardwareSeries
+        let ids = series.map(\.id)
+        records = file.records.map { WireRecord($0, hardware: series.isEmpty ? nil : ids) }
         events = file.events.map(WireEvent.init)
+        hardware = series.isEmpty ? nil : WireHardware(version: RecordingFile.hardwareVersion, series: series.map(WireSeries.init))
+    }
+}
+
+/// The `hardware` block: the series the records' figures belong to.
+private struct WireHardware: Codable {
+    let version: Int
+    let series: [WireSeries]
+
+    /// The series by ID that this build can read: none from a newer
+    /// version of the block, and none of a kind or unit it doesn't know.
+    var readable: [String: HistoryHardwareSeries] {
+        guard version >= 1, version <= RecordingFile.hardwareVersion else { return [:] }
+        return Dictionary(series.compactMap(\.series).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+}
+
+private struct WireSeries: Codable {
+    let id: String
+    /// A `HistoryHardwareSeries.Kind`: load, clock, temperature, fan or power.
+    let kind: String
+    /// A `SensorUnit`: fraction, megahertz, rpm, celsius or watts.
+    let unit: String
+    let label: String
+    let source: String
+    let rank: Int
+
+    init(_ series: HistoryHardwareSeries) {
+        id = series.id
+        kind = series.kind.rawValue
+        unit = series.unit.rawValue
+        label = series.label
+        source = series.source
+        rank = series.rank
+    }
+
+    var series: HistoryHardwareSeries? {
+        guard let kind = HistoryHardwareSeries.Kind(rawValue: kind), let unit = SensorUnit(rawValue: unit) else { return nil }
+        return HistoryHardwareSeries(id: id, kind: kind, unit: unit, label: label, source: source, rank: rank)
     }
 }
 
@@ -335,7 +398,7 @@ private struct WireApp: Codable {
 private struct WireRecord: Codable {
     enum CodingKeys: String, CodingKey {
         case time, cpu, cpuPeak, memory, memoryPressure, swapUsed, gpu, systemWatts, cpuWatts, gpuWatts
-        case diskRead, diskWrite, networkIn, networkOut, chipCelsius, topCPU, topMemory
+        case diskRead, diskWrite, networkIn, networkOut, chipCelsius, topCPU, topMemory, hardware, coreLoad
     }
 
     let time: Double
@@ -355,8 +418,16 @@ private struct WireRecord: Codable {
     let chipCelsius: Double?
     let topCPU: [WireApp]
     let topMemory: [WireApp]
+    /// Figures by series ID, null where the Mac didn't read one; missing
+    /// from a file without hardware series.
+    let hardware: [String: Double?]?
+    let coreLoad: [Double?]?
 
-    init(_ record: HistoryRecord) {
+    /// `hardware` lists the file's series IDs, each written (null where it
+    /// wasn't read) for every record with a hardware figure, or is nil for a
+    /// file without hardware series. A record without any, from before they
+    /// were recorded, leaves both keys out, as in the database.
+    init(_ record: HistoryRecord, hardware ids: [String]?) {
         // JSON has no NaN or infinity: a figure that isn't a number reads as not reported.
         func finite(_ value: Double?) -> Double? { value.flatMap { $0.isFinite ? $0 : nil } }
         let values = record.values
@@ -377,6 +448,11 @@ private struct WireRecord: Codable {
         chipCelsius = finite(values.chipCelsius)
         topCPU = record.topCPU.map { WireApp(name: $0.name, value: finite($0.value) ?? 0) }
         topMemory = record.topMemory.map { WireApp(name: $0.name, value: finite($0.value) ?? 0) }
+        let figures = ids.map { ids in Dictionary(uniqueKeysWithValues: ids.map { ($0, finite(values.hardware[$0])) }) }
+        let loads = ids == nil || values.coreLoads.isEmpty ? nil : values.coreLoads.map(finite)
+        let read = figures?.values.contains { $0 != nil } == true || loads?.contains { $0 != nil } == true
+        hardware = read ? figures : nil
+        coreLoad = read ? loads : nil
     }
 
     /// Written by hand so a figure the Mac didn't report is an explicit
@@ -400,9 +476,13 @@ private struct WireRecord: Codable {
         try container.encode(chipCelsius, forKey: .chipCelsius)
         try container.encode(topCPU, forKey: .topCPU)
         try container.encode(topMemory, forKey: .topMemory)
+        try container.encodeIfPresent(hardware, forKey: .hardware)
+        try container.encodeIfPresent(coreLoad, forKey: .coreLoad)
     }
 
-    var record: HistoryRecord {
+    /// The record, its hardware figures named from `series` (the file's
+    /// readable series by ID); a figure of any other series is left out.
+    func record(series: [String: HistoryHardwareSeries]) -> HistoryRecord {
         var values = HistoryValues()
         values.cpu = cpu
         values.cpuPeak = cpuPeak
@@ -418,8 +498,16 @@ private struct WireRecord: Codable {
         values.networkIn = networkIn
         values.networkOut = networkOut
         values.chipCelsius = chipCelsius
+        var held: [HistoryHardwareSeries] = []
+        for (id, value) in hardware ?? [:] {
+            guard let value, value.isFinite, let named = series[id] else { continue }
+            values.hardware[id] = value
+            held.append(named)
+        }
+        if !series.isEmpty { values.coreLoads = coreLoad ?? [] }
         return HistoryRecord(time: Date(timeIntervalSince1970: time), values: values,
                              topCPU: topCPU.map { HistoryApp(name: $0.name, value: $0.value) },
-                             topMemory: topMemory.map { HistoryApp(name: $0.name, value: $0.value) })
+                             topMemory: topMemory.map { HistoryApp(name: $0.name, value: $0.value) },
+                             hardwareSeries: held.sorted())
     }
 }

@@ -72,7 +72,12 @@ Manager OG or any other proprietary task manager.
   events, `HistoryEvent` (app launches and quits from NSWorkspace, busy background
   processes from `ProcessEventTracker`, network changes, sleep and wake), go in the
   same database, its schema migrated by `PRAGMA user_version`, and in a file's
-  optional `events` key; Compare's figures, `HistoryIntervalStats` and
+  optional `events` key; hardware series (`HistoryHardwareSample`: core-type and
+  per-CPU loads, cluster clocks, the hottest dies, fans and power rails picked from
+  `SensorTable`'s rows, null where unread) go in each record's `hardware` blob
+  (schema 2, series named once in `hardware_series`) and a file's optional,
+  separately versioned `hardware` block, charted under History's folded Hardware
+  section; Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
   opens Compare with them picked, counted back from the range's end, with B the

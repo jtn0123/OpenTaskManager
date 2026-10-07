@@ -422,6 +422,8 @@ struct HistoryView: View {
                 HistoryChartCard(spec: spec, points: points, bucket: bucket, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
             }
+            HistoryHardwareSection(recorder: source, points: points, bucket: bucket, domain: domain, earliest: earliest,
+                                   isFile: opened != nil, gaps: gapMarks, ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
         }
     }
 
