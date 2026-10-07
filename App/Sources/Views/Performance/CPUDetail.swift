@@ -4,6 +4,9 @@ import SwiftUI
 struct CPUDetail: View {
     @Environment(AppModel.self) private var model
     @AppStorage("cpuGraphMode") private var mode = "overall"
+    @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
+    /// The auto-scaled graphs' bounds, held between samples.
+    @State private var bounds = AutoScaleBounds()
     var snapshot: SystemSnapshot
 
     var body: some View {
@@ -42,45 +45,42 @@ struct CPUDetail: View {
         }
     }
 
-    /// The utilization graph in the chosen form, with the choice on its caption row.
+    /// The utilization graph in the chosen form, with the choice of form and
+    /// scale on its caption row.
     private func graph(_ topology: CPUTopology) -> some View {
-        let caption = Text(mode == "cores" ? "% Utilization of each core" : mode == "tiers" ? "% Utilization by core type"
-                           : "% Utilization over \(AppModel.graphSpan)s")
-            .font(.subheadline)
-            .foregroundStyle(.secondaryText)
+        // Every core's graph shares one scale, so they compare at a glance.
+        let cores = mode == "cores" ? model.coreHistory.map(\.values) : []
+        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: Self.coreCapacity) }.max() ?? 0)
+        let caption = mode == "cores" ? "% Utilization of each core" + coreScaleNote(coreTop)
+            : mode == "tiers" ? "% Utilization by core type" : "% Utilization over \(AppModel.graphSpan)s"
         return VStack(alignment: .leading, spacing: 6) {
-            // The caption moves above the picker when the pane is too narrow for both.
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    caption.fixedSize()
-                    Spacer()
-                    graphPicker
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    caption
-                    graphPicker
-                }
-            }
+            CPUGraphHeader(caption: caption)
             switch mode {
-            case "cores": coreGrid(topology)
+            case "cores": coreGrid(topology, histories: cores, top: coreTop)
             case "tiers": tierGraphs(topology)
             default:
-                GraphPanel(title: "", trailing: "",
-                           series: [GraphSeries(values: model.cpuHistory.values, color: Theme.cpu)], maxValue: 1,
-                           height: DetailGraph.primary, axis: { Format.percent($0) })
+                let values = model.cpuHistory.values
+                GraphPanel(title: "", trailing: "", series: [GraphSeries(values: values, color: Theme.cpu)],
+                           maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: AppModel.graphSpan)),
+                           height: DetailGraph.primary, axis: CPUGraphScale.axisLabel, axisNote: axisNote)
             }
         }
     }
 
-    private var graphPicker: some View {
-        Picker("Graph", selection: $mode) {
-            Text("Overall").tag("overall")
-            Text("By core type").tag("tiers")
-            Text("Every core").tag("cores")
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
+    /// The top of a CPU graph: its auto bound, held in `bounds` under
+    /// `graph`, for data on screen peaking at `peak`; or the whole CPU.
+    private func top(_ graph: String, peak: @autoclosure () -> Double) -> Double {
+        scale == .auto ? bounds.bound(graph, peak: peak()) : 1
+    }
+
+    /// Said after an auto-scaled graph's top label.
+    private var axisNote: String? {
+        scale == .auto ? CPUGraphScale.autoNote : nil
+    }
+
+    /// The core graphs have no axis, so their caption gives the shared scale.
+    private func coreScaleNote(_ top: Double) -> String {
+        scale == .auto ? " · 0–\(CPUGraphScale.axisLabel(top)) scale, auto" : ""
     }
 
     private func facts(_ topology: CPUTopology) -> some View {
@@ -136,10 +136,13 @@ struct CPUDetail: View {
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
-        return ChartCard(title: "CPU by app", trailing: "share of the whole CPU", tint: Theme.cpu, legend: legend,
-                         span: AppModel.processHistoryCapacity - 2) {
-            GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
-                      minimumCeiling: 0.1, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
+        let capacity = AppModel.processHistoryCapacity - 2
+        // The stack's top band is the whole, which the scale has to hold.
+        let stackTop = GraphMath.stack(series.map { Array($0.values.suffix(capacity + 1)) }).last ?? []
+        return ChartCard(title: "CPU by app", trailing: "share of the whole CPU", tint: Theme.cpu, legend: legend, span: capacity) {
+            GraphView(series: series, maxValue: top("byApp", peak: AutoScaleBounds.peak(stackTop, capacity: capacity)),
+                      capacity: capacity, glows: true, stacked: true,
+                      axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.cpu)
         }
     }
@@ -151,24 +154,31 @@ struct CPUDetail: View {
         return usages.isEmpty ? 0 : usages.reduce(0, +) / Double(usages.count)
     }
 
+    /// One graph per core type, on a shared scale.
     private func tierGraphs(_ topology: CPUTopology) -> some View {
-        VStack(spacing: 10) {
-            ForEach(topology.tiers, id: \.level) { tier in
+        let histories = topology.tiers.map { model.tierHistory(level: $0.level) }
+        let top = top("tiers", peak: histories.map { AutoScaleBounds.peak($0, capacity: AppModel.graphSpan) }.max() ?? 0)
+        return VStack(spacing: 10) {
+            ForEach(topology.tiers.indices, id: \.self) { index in
+                let tier = topology.tiers[index]
                 GraphPanel(title: "\(tier.name) cores (\(tier.logicalCPUs))", trailing: Format.percent(tierUsage(tier.level)),
-                           series: [GraphSeries(values: model.tierHistory(level: tier.level), color: Theme.tier(tier.level))],
-                           maxValue: 1, height: DetailGraph.compact, axis: { Format.percent($0) })
+                           series: [GraphSeries(values: histories[index], color: Theme.tier(tier.level))],
+                           maxValue: top, height: DetailGraph.compact, axis: CPUGraphScale.axisLabel, axisNote: axisNote)
             }
         }
     }
 
-    private func coreGrid(_ topology: CPUTopology) -> some View {
+    /// Samples across each core's graph.
+    private static let coreCapacity = 120
+
+    private func coreGrid(_ topology: CPUTopology, histories: [[Double]], top: Double) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(topology.tiers, id: \.level) { tier in
-                let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level }
+                let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level && histories.indices.contains($0) }
                 Text("\(tier.name) cores").font(.subheadline).foregroundStyle(.secondaryText)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(max(cpus.count, 1), 6)), spacing: 6) {
                     ForEach(cpus, id: \.self) { cpu in
-                        coreGraph(cpu, color: Theme.tier(tier.level))
+                        coreGraph(cpu, values: histories[cpu], top: top, color: Theme.tier(tier.level))
                     }
                 }
             }
@@ -176,10 +186,10 @@ struct CPUDetail: View {
     }
 
     /// One logical CPU's recent load, with its number and current reading.
-    private func coreGraph(_ cpu: Int, color: Color) -> some View {
+    private func coreGraph(_ cpu: Int, values: [Double], top: Double, color: Color) -> some View {
         let usage = snapshot.cpu.coreUsage.indices.contains(cpu) ? snapshot.cpu.coreUsage[cpu] : 0
-        return GraphView(series: [GraphSeries(values: model.coreHistory[cpu].values, color: color)],
-                         maxValue: 1, capacity: 120, lineWidth: 1.2, glows: true, cornerRadius: 5)
+        return GraphView(series: [GraphSeries(values: values, color: color)],
+                         maxValue: top, capacity: Self.coreCapacity, lineWidth: 1.2, glows: true, cornerRadius: 5)
             .frame(height: 64)
             .background(LinearGradient(colors: [color.opacity(0.06 + 0.22 * usage), color.opacity(0.02)],
                                        startPoint: .top, endPoint: .bottom),
@@ -195,5 +205,95 @@ struct CPUDetail: View {
                 .padding(.top, 3)
             }
             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color.opacity(0.18 + 0.5 * usage)))
+    }
+}
+
+/// The CPU graph's caption with the graph and scale pickers. A view of its
+/// own, taking only the caption, so a sample's update passes it by.
+private struct CPUGraphHeader: View {
+    let caption: String
+    @AppStorage("cpuGraphMode") private var mode = "overall"
+
+    var body: some View {
+        // Not a `ViewThatFits`: it measured both segmented controls again on
+        // every layout pass, once a second, for about half a percent of a core.
+        CaptionControlsRow {
+            Text(caption).font(.subheadline).foregroundStyle(.secondaryText)
+            graphPicker
+            CPUScalePicker()
+        }
+    }
+
+    private var graphPicker: some View {
+        Picker("Graph", selection: $mode) {
+            Text("Overall").tag("overall")
+            Text("By core type").tag("tiers")
+            Text("Every core").tag("cores")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+    }
+}
+
+/// A caption and two controls: on one line, the controls at the trailing
+/// end, while they fit; then the caption over the controls, one at each end;
+/// then all three stacked. The caption wraps rather than truncates.
+private struct CaptionControlsRow: Layout {
+    private let spacing: CGFloat = 10
+    private let rowGap: CGFloat = 6
+
+    private enum Arrangement { case oneLine, twoLines, stacked }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 3 else { return .zero }
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let width = proposal.width ?? oneLineWidth(sizes)
+        let caption = captionHeight(subviews, sizes, width: width)
+        switch arrangement(sizes, width: width) {
+        case .oneLine: return CGSize(width: width, height: sizes.map(\.height).max() ?? 0)
+        case .twoLines: return CGSize(width: width, height: caption + rowGap + max(sizes[1].height, sizes[2].height))
+        case .stacked: return CGSize(width: width, height: caption + 2 * rowGap + sizes[1].height + sizes[2].height)
+        }
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let caption = captionHeight(subviews, sizes, width: bounds.width)
+        switch arrangement(sizes, width: bounds.width) {
+        case .oneLine:
+            subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: ProposedViewSize(sizes[0]))
+            subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: ProposedViewSize(sizes[2]))
+            subviews[1].place(at: CGPoint(x: bounds.maxX - sizes[2].width - spacing, y: bounds.midY), anchor: .trailing,
+                              proposal: ProposedViewSize(sizes[1]))
+        case .twoLines:
+            subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: caption))
+            let middle = bounds.minY + caption + rowGap + max(sizes[1].height, sizes[2].height) / 2
+            subviews[1].place(at: CGPoint(x: bounds.minX, y: middle), anchor: .leading, proposal: ProposedViewSize(sizes[1]))
+            subviews[2].place(at: CGPoint(x: bounds.maxX, y: middle), anchor: .trailing, proposal: ProposedViewSize(sizes[2]))
+        case .stacked:
+            subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: caption))
+            var y = bounds.minY + caption + rowGap
+            for index in 1...2 {
+                subviews[index].place(at: CGPoint(x: bounds.minX, y: y),
+                                      proposal: ProposedViewSize(width: min(sizes[index].width, bounds.width), height: sizes[index].height))
+                y += sizes[index].height + rowGap
+            }
+        }
+    }
+
+    private func oneLineWidth(_ sizes: [CGSize]) -> CGFloat {
+        sizes.map(\.width).reduce(0, +) + 2 * spacing
+    }
+
+    private func arrangement(_ sizes: [CGSize], width: CGFloat) -> Arrangement {
+        if oneLineWidth(sizes) <= width { return .oneLine }
+        return sizes[1].width + spacing + sizes[2].width <= width ? .twoLines : .stacked
+    }
+
+    /// The caption's height on a line of its own, wrapped to `width`.
+    private func captionHeight(_ subviews: Subviews, _ sizes: [CGSize], width: CGFloat) -> CGFloat {
+        sizes[0].width <= width ? sizes[0].height : subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
     }
 }

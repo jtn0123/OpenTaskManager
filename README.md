@@ -32,7 +32,8 @@ new reading.
 **Performance**: Task Manager-style graphs that scroll smoothly between
 samples and scale their axes to round numbers.
 - CPU: overall, by core type or every core, the clock speed of each cluster,
-  and a stacked chart of CPU by app.
+  and a stacked chart of CPU by app. Auto scaling fits light load to the graph
+  height; 100% keeps the full range (History's CPU chart follows the same choice).
 - Memory: what's in memory over time (wired, app, compressed, cached), pressure,
   swap, paging and compressor activity, and memory by app.
 - GPU: shading and geometry load, GPU time by app, clock speed and GPU memory.

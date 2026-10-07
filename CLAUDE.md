@@ -76,10 +76,11 @@ Manager OG or any other proprietary task manager.
   is the exception: its graphs are static Swift Charts, reloaded once per graph
   point, and its scrubber line is an overlay that alone reads the pointer, so
   hovering never redraws the charts. Until a live graph's window fills, the
-  stretch before its first sample is a dimmed, hatched layer in the scroller
-  (paths built once per size, only moved per sample), and its "45 s collected"
-  caption is a `CATextLayer` reset only when the rounded figure from
-  `GraphCoverage` changes.
+  stretch before its first sample is a neutral wash with a faint hatch in the
+  scroller (paths built once per size, only moved per sample), its "Not
+  recorded yet" label a `CATextLayer` that glides in the render server, and its
+  "45 s collected" caption a `CATextLayer` reset only when the rounded figure
+  from `GraphCoverage` changes.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.
@@ -152,8 +153,18 @@ locked or the window is on another Space.
 - Performance and History fit the narrowest window (820 points with the
   sidebar shown) without clipping or scrolling sideways. Performance's resource
   list is an `HStack` column sized from the page width, not an `HSplitView`,
-  whose minimum widths pushed the page past both window edges. Below 760 points
-  History moves its moment panel into a summary over the charts.
+  whose minimum widths pushed the page past both window edges; where the detail
+  would get under 560 points beside it, the list gives way to a row of resource
+  chips over the detail. Below 760 points History moves its moment panel into
+  a summary over the charts.
+- The CPU graphs (Performance's, per core type, per core, by app, and History's
+  CPU chart) share one Auto / 100% setting, `CPUGraphScale` (`cpuGraphScale`).
+  Auto bounds are `AutoScale` in OTMKit's Graphing/: round steps from 10%, grown
+  at once, shrunk only after the data stays low; `AutoScaleBounds` keeps each
+  live graph's between samples, and the top label says "auto scale". Keep
+  segmented pickers on a live page out of `ViewThatFits`: it measured them
+  again every tick (about half a percent of a core for the CPU graph's two),
+  so that caption row is a small `Layout` instead.
 - Secondary text (labels, captions, units, footnotes) takes
   `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt), and table
   and list rows `.font(.tableText)` (12 pt), all from `Graphs.swift`. The

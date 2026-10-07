@@ -32,6 +32,9 @@ struct HistoryChartSpec: Identifiable {
     /// An auto-scaled axis never zooms in further than this.
     var floor = 0.0
     var units = GraphMath.AxisUnits.plain
+    /// Takes the CPU graphs' Auto / 100% choice (`CPUGraphScale`): on
+    /// Auto it fits its data, in place of `ceiling`.
+    var followsCPUScale = false
 
     /// The charts worth drawing for these points: GPU, power and temperature
     /// only when the Mac reported them.
@@ -42,7 +45,7 @@ struct HistoryChartSpec: Identifiable {
                 HistoryLine(name: "Average", color: Theme.cpu, value: { $0.cpu }),
                 HistoryLine(name: "Busiest moment", color: Theme.cpu.opacity(0.7), value: { $0.cpuPeak },
                             fill: false, dashed: true, summary: .maximum),
-            ], format: { Format.percent($0) }, ceiling: 1),
+            ], format: { Format.percent($0) }, ceiling: 1, followsCPUScale: true),
             HistoryChartSpec(title: "Memory", symbol: "memorychip", tint: Theme.memory, lines: [
                 HistoryLine(name: "Used", color: Theme.memory, value: { $0.memory }),
                 HistoryLine(name: "Pressure", color: Theme.wired, value: { $0.memoryPressure }, fill: false),
@@ -76,13 +79,24 @@ struct HistoryChartSpec: Identifiable {
         return specs
     }
 
-    /// Top of the scale for these points.
-    func top(for points: [HistoryPoint]) -> Double {
+    /// Top of the scale for these points. A chart that follows the CPU
+    /// scale, on Auto, takes the round bound that fits them (`AutoScale`):
+    /// it only changes when a new peak arrives or the old one leaves the range.
+    func top(for points: [HistoryPoint], cpuScale: CPUGraphScale = .full) -> Double {
+        if autoScales(cpuScale) { return AutoScale.bound(for: peak(in: points)) }
         if let ceiling { return ceiling }
-        let peak = points.reduce(0.0) { result, point in
+        return GraphMath.ceiling(peak: peak(in: points), floor: floor, units: units)
+    }
+
+    /// Whether the scale is fitted by `AutoScale`, and labelled so.
+    func autoScales(_ cpuScale: CPUGraphScale) -> Bool {
+        followsCPUScale && cpuScale == .auto
+    }
+
+    private func peak(in points: [HistoryPoint]) -> Double {
+        points.reduce(0.0) { result, point in
             lines.reduce(result) { max($0, $1.value(point.values) ?? 0) }
         }
-        return GraphMath.ceiling(peak: peak, floor: floor, units: units)
     }
 
     func summary(of line: HistoryLine, in points: [HistoryPoint]) -> String {
@@ -108,6 +122,7 @@ struct HistoryChartCard: View {
     let timeLabels: Date.FormatStyle
     let scrubber: HistoryScrubber
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(CPUGraphScale.key) private var cpuScale = CPUGraphScale.auto
 
     private var title: some View {
         Label(spec.title, systemImage: spec.symbol)
@@ -128,8 +143,14 @@ struct HistoryChartCard: View {
         }
     }
 
+    /// The top and middle axis labels; an auto scale says so after the top.
+    private func axisLabels(top: Double) -> [String] {
+        guard spec.autoScales(cpuScale) else { return [spec.format(top), spec.format(top / 2)] }
+        return [CPUGraphScale.axisLabel(top) + " · " + CPUGraphScale.autoNote, CPUGraphScale.axisLabel(top / 2)]
+    }
+
     var body: some View {
-        let top = spec.top(for: points)
+        let top = spec.top(for: points, cpuScale: cpuScale)
         Card(tint: spec.tint) {
             // The legend sits beside the title while it fits, then under it,
             // then one line per series in a narrow window: never squeezed.
@@ -154,7 +175,7 @@ struct HistoryChartCard: View {
                     GeometryReader { geometry in
                         if let anchor = proxy.plotFrame {
                             HistoryPlotOverlay(plot: geometry[anchor], domain: domain, points: points, scrubber: scrubber,
-                                               labels: [spec.format(top), spec.format(top / 2)], tint: spec.tint)
+                                               labels: axisLabels(top: top), tint: spec.tint)
                         }
                     }
                 }
