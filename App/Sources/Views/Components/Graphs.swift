@@ -173,10 +173,12 @@ struct GraphPanel: View {
 struct TimeAxis: View {
     @Environment(AppModel.self) private var model
     var samples: Int
+    /// Seconds per sample for a graph on its own cadence; nil follows the update speed.
+    var interval: TimeInterval?
 
     var body: some View {
         HStack {
-            Text("\(Format.timeSpan(Double(samples) * model.updateSpeed.rawValue)) ago")
+            Text("\(Format.timeSpan(Double(samples) * (interval ?? model.updateSpeed.rawValue))) ago")
             Spacer()
             Text("now")
         }

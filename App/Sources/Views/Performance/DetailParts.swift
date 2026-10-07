@@ -107,6 +107,7 @@ enum Unavailable {
     static let gpuUtilization = "Utilization not reported"
     static let gpuUtilizationDetail = "This GPU's driver doesn't report how busy it is."
     static let energy = "This Mac doesn't report energy use per app."
+    static let processNetwork = "Traffic per app isn't available: nettop couldn't run."
 }
 
 /// One entry in a chart legend: swatch, name and the current value.
