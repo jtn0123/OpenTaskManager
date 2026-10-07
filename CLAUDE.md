@@ -188,6 +188,9 @@ build, `-sensorFixture <file>` loads a recording from
   idle GPU still reports (0%); a VM's paravirtual GPU does too. ANE memory is
   `rusage_info_v6`'s neural footprint (macOS 15+, read in the same rusage
   call): memory held for the Neural Engine, never shown as how busy it is.
+- The Connections table hides columns to fit the same way (`ConnectionColumn`,
+  Scope first, then PID, then Protocol; Process, Local, Remote and State
+  always stay), and endpoints cut the address in the middle, never the port.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its
