@@ -335,6 +335,14 @@ build, `-sensorFixture <file>` loads a recording from
   the line and its figure mean in the tooltip. During a replay the toolbar says
   "Collecting · 1 s" for this Mac and "Replay · 10×" for the file; the
   recording's name is the page banner's.
+- Graph colours come from the palette picked in Settings (`GraphColors`; the
+  presets, Standard, Color-blind friendly and High contrast, are data in
+  OTMKit's `GraphPalette`; `-graphPalette colorBlind|highContrast` picks one
+  for a run). Read them through `Theme` in a view's body, so a change redraws
+  the view; AppKit views that keep colours compare `GraphColors.shared.revision`
+  (see `SensorReadingTable`). "By app" graphs colour apps with
+  `Theme.appColors(for:in:)` (`SeriesSlots`), so an app keeps its colour as the
+  ranking changes.
 - Secondary text (labels, captions, units, footnotes) takes
   `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt);
   explanations meant to be read (what a reading means, why it's missing, what

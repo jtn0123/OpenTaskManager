@@ -19,13 +19,16 @@ struct SensorReadingTable: NSViewRepresentable {
     /// How the lowest and highest are kept, on hover.
     var sinceHelp: String
     var reset: @MainActor () -> Void
+    /// Read where the table is made, so the page redraws it when the graph
+    /// colours change.
+    private let colors = GraphColors.shared.revision
 
     func makeNSView(context: Context) -> SensorTableView {
         SensorTableView()
     }
 
     func updateNSView(_ view: SensorTableView, context: Context) {
-        view.update(rows: rows, extremes: extremes, thermalState: thermalState)
+        view.update(rows: rows, extremes: extremes, thermalState: thermalState, colors: colors)
         view.showSince(since, help: sinceHelp, reset: reset)
     }
 
@@ -174,6 +177,8 @@ final class SensorTableView: NSView {
     private var rowViews: [String: SensorRowView] = [:]
     /// Each group's sources as its heading shows them, to notice a change.
     private var groupSources: [SensorGroup: String] = [:]
+    /// The graph colours' revision the rows were coloured for.
+    private var colorRevision: Int?
     /// The page's clip view, whose scrolling moves the heading.
     private weak var clipView: NSClipView?
 
@@ -193,8 +198,18 @@ final class SensorTableView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(rows: [SensorReading], extremes: SensorExtremes, thermalState: ThermalState?) {
+    /// `colors` is the graph colours' revision: when it changes, the rows are
+    /// coloured again and the headings made again.
+    func update(rows: [SensorReading], extremes: SensorExtremes, thermalState: ThermalState?, colors: Int) {
         let lines = Self.lines(rows: rows, pressure: thermalState != nil)
+        if colors != colorRevision {
+            colorRevision = colors
+            groupViews.values.forEach { $0.removeFromSuperview() }
+            groupViews = [:]
+            groupSources = [:]
+            header.recolor()
+            self.lines = []
+        }
         if lines != self.lines {
             rebuild(lines, rows: rows)
         }
@@ -414,6 +429,12 @@ private final class SensorHeaderView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// After a change of graph colours: the key's bar and the pinned fill.
+    func recolor() {
+        key.recolor()
+        needsDisplay = true
+    }
+
     func showSince(_ text: String, help: String) {
         if since.stringValue != text {
             since.stringValue = text
@@ -477,7 +498,7 @@ private final class SensorRangeKey: NSView {
 
     init() {
         super.init(frame: .zero)
-        bar.color = NSColor(Theme.thermal)
+        recolor()
         bar.set(scale: 0...1, lowest: 0.2, highest: 0.75, now: 0.55)
         text.stringValue = "band: lowest to highest · tick: now"
         for view in [self, bar, text] as [NSView] { view.toolTip = SensorHeaderView.rangeHelp }
@@ -492,6 +513,10 @@ private final class SensorRangeKey: NSView {
 
     var fittingWidth: CGFloat {
         Self.barWidth + Self.gap + ceil(text.fittingSize.width)
+    }
+
+    func recolor() {
+        bar.color = NSColor(Theme.thermal)
     }
 
     override func layout() {

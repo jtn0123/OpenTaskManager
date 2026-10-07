@@ -446,6 +446,7 @@ struct SettingsView: View {
                 }
                 Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
+            GraphColorSettings()
             Section("Processes") {
                 Toggle("Include system and other users' processes", isOn: $model.includeSystemProcesses)
                 Toggle("Meter bars behind busy values", isOn: $heatmap)

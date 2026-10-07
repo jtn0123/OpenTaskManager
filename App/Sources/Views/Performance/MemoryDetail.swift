@@ -7,8 +7,8 @@ struct MemoryDetail: View {
 
     static let bytesAxis: (Double) -> String = { Format.bytes(max($0, 0)) }
     static let rateAxis: (Double) -> String = { Format.bytesPerSecond(max($0, 0)) }
-    private static let pageIn = Theme.data(0.32, 0.70, 0.86)
-    private static let pageOut = Theme.data(0.64, 0.42, 0.96)
+    private static var pageIn: Color { Theme.pageIn }
+    private static var pageOut: Color { Theme.pageOut }
 
     var body: some View {
         let memory = snapshot.memory
@@ -136,9 +136,10 @@ struct MemoryDetail: View {
     private func byApp() -> some View {
         let apps = model.topApps(by: .memory, count: 6)
         let other = AppModel.remainder(of: model.processMemoryHistory.values, minus: apps.map(\.values))
-        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
+        let colors = Theme.appColors(for: apps.map(\.id), in: "memory")
+        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
-        let legend = apps.enumerated().map { LegendItem(name: $1.name, color: Theme.series($0), value: Format.bytes($1.current), icon: $1.icon) }
+        let legend = apps.enumerated().map { LegendItem(name: $1.name, color: colors[$0], value: Format.bytes($1.current), icon: $1.icon) }
             + [LegendItem(name: "Everything else", color: Theme.other, value: Format.bytes(other.last ?? 0))]
         // Over the same window as the graphs above, so they line up.
         return ChartCard(title: "Memory by app", trailing: "", tint: Theme.memory, legend: legend) {

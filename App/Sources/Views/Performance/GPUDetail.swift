@@ -6,9 +6,9 @@ struct GPUDetail: View {
     var gpu: GPUSample
     var snapshot: SystemSnapshot
 
-    private static let renderer = Theme.data(0.58, 0.92, 0.96)
-    private static let tiler = Theme.data(0.36, 0.62, 1.00)
-    private static let clock = Theme.data(0.45, 0.95, 0.75)
+    private static var renderer: Color { Theme.gpuRenderer }
+    private static var tiler: Color { Theme.gpuTiler }
+    private static var clock: Color { Theme.gpuClock }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -59,10 +59,11 @@ struct GPUDetail: View {
     private func byApp() -> some View {
         let apps = model.topApps(by: .gpu, count: 5)
         let other = AppModel.remainder(of: model.processGPUHistory.values, minus: apps.map(\.values))
-        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
+        let colors = Theme.appColors(for: apps.map(\.id), in: "gpu")
+        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
-            LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
+            LegendItem(name: $1.name, color: colors[$0], value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
         // Over the same window as the graphs around it, so they line up. The
         // first graph where utilization isn't reported, so it holds the toggle.
