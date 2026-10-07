@@ -208,6 +208,12 @@ public struct AppRemovalPlan: Sendable {
     public var preselected: Set<LeftoverItem.ID> {
         Set(items.filter(\.startsSelected).map(\.id))
     }
+
+    /// Nothing turned up with the app: no launch agents, nothing in either
+    /// Library, no helpers or extensions. Only the bundle (or a link to it).
+    public var foundOnlyTheApp: Bool {
+        items.allSatisfy { $0.location == .app } && protected.allSatisfy { $0.evidence == .theApp || $0.evidence == .linkToApp }
+    }
 }
 
 /// A process running from inside an app bundle.

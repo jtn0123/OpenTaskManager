@@ -12,6 +12,12 @@ struct AppRemovalSheet: View {
     /// Called as the sheet closes if the bundle went to the Trash.
     private let onRemoved: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// How tall the list is, so the sheet takes its height rather than a
+    /// fixed one that left a lone row above a blank body.
+    @State private var listHeight: CGFloat = 0
+
+    /// The list's tallest before it scrolls, which keeps the sheet inside the narrowest window.
+    private static let listCap: CGFloat = 440
 
     init(app: InstalledApp, otherApps: [InstalledApp], onRemoved: @escaping () -> Void) {
         _model = State(initialValue: AppRemovalModel(app: app))
@@ -25,13 +31,13 @@ struct AppRemovalSheet: View {
                 .padding(16)
             Divider()
             content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
             Divider()
             footer
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
         }
-        .frame(minWidth: 560, idealWidth: 660, maxWidth: 820, minHeight: 420, idealHeight: 660)
+        .frame(minWidth: 560, idealWidth: 660, maxWidth: 820)
         .task {
             await model.load(otherApps: otherApps)
             await model.measureSizes()
@@ -78,12 +84,13 @@ struct AppRemovalSheet: View {
         switch model.phase {
         case .finding:
             ProgressView("Looking for what \(model.app.name) keeps in your Library…")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
+                .frame(height: 120)
         case .finished:
-            ScrollView { RemovalResults(model: model).padding(16) }
+            fitted { RemovalResults(model: model).padding(16) }
         case .reviewing, .removing:
             if let plan = model.plan {
-                ScrollView {
+                fitted {
                     VStack(alignment: .leading, spacing: 16) {
                         if let blocker = plan.blocker {
                             RemovalBanner(
@@ -107,11 +114,37 @@ struct AppRemovalSheet: View {
                                 }
                             }
                         }
+                        // Said outright, so a short list doesn't look like an unfinished search.
+                        if plan.foundOnlyTheApp {
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("No related files found").font(.callout.weight(.semibold))
+                                    Text(nothingElseDetail).font(.metadata).foregroundStyle(.secondaryText)
+                                }
+                            } icon: {
+                                Image(systemName: "checkmark.circle").foregroundStyle(.secondaryText)
+                            }
+                        }
                     }
                     .padding(16)
                 }
             }
         }
+    }
+
+    private var nothingElseDetail: String {
+        let name = model.app.bundleIdentifier ?? model.app.name
+        return "Nothing in your Library or /Library is named after \(name), and no launch agent or daemon runs from it, "
+            + "so only the app goes to the Trash."
+    }
+
+    /// The list at its own height up to `listCap`, then scrolling.
+    private func fitted<List: View>(@ViewBuilder _ list: () -> List) -> some View {
+        ScrollView {
+            list()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
+        }
+        .frame(height: min(max(listHeight, 80), Self.listCap))
     }
 
     private func groups(_ items: [LeftoverItem]) -> [(location: LeftoverLocation, items: [LeftoverItem])] {

@@ -293,7 +293,7 @@ private struct StorageResultsView: View {
             GeometryReader { proxy in
                 HStack(spacing: 12) {
                     TreemapCard(store: store, result: result, folder: folder, hover: hover, changes: changes, open: open)
-                    StorageListCard(store: store, usage: usage, folder: folder, hover: hover, open: open, show: show)
+                    StorageListCard(store: store, usage: usage, folder: folder, hover: hover, open: open, show: show, pick: pick)
                         .frame(width: min(max(proxy.size.width * 0.36, 250), 340))
                 }
             }
@@ -301,30 +301,64 @@ private struct StorageResultsView: View {
             StorageFooter(store: store, usage: usage)
         }
         .padding(16)
+        // A new scan's items are numbered afresh.
+        .onChange(of: usage.finishedAt) { hover.clearMarks() }
+        .onChange(of: ChangesFocus(showsChanges: store.list == .changes, since: comparison?.earlier.scannedAt, folder: folder.id),
+                  initial: true) {
+            focusChanges(comparison, in: folder)
+        }
     }
 
     private func open(_ id: Int) {
         hover.enter(nil)
-        hover.marked = nil
-        hover.markedFile = nil
         store.folder = id
     }
 
-    /// Opens the folder holding `path` and, if it's in this scan, outlines
-    /// the tile it's in: its own, or the one for the folder or smaller items
-    /// holding it.
+    /// Opens the folder holding `path` and outlines the tile it's in: its
+    /// own, or the one for the folder or smaller items holding it.
     private func show(_ path: String, exists: Bool) {
         let usage = result.usage
-        let folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent)
-        let base = usage.path(of: folder.id)
-        let next = path.dropFirst(base.count).split(separator: "/").first.map(String.init)
-        let children = usage.children(of: folder)
-        let target = exists ? children.first { $0.name == next } ?? children.first { $0.kind == .smallerItems } : nil
         hover.enter(nil)
-        store.folder = folder.id
-        hover.marked = target.map { (folder: folder.id, item: $0.id) }
-        hover.markedFile = path
+        store.folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent).id
+        hover.mark(path, exists: exists, in: usage, file: path)
     }
+
+    /// Picks a change in the Changes list and outlines where it is in the
+    /// treemap, without leaving the open folder (whose changes the list
+    /// shows); `opening` also opens the folder holding it.
+    private func pick(_ change: DiskSizeChange, exists: Bool, opening: Bool) {
+        let usage = result.usage
+        let path = (usage.rootPath as NSString).appendingPathComponent(change.path)
+        if opening {
+            hover.enter(nil)
+            store.folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent).id
+        }
+        hover.mark(path, exists: exists, in: usage, change: change.id)
+    }
+
+    /// In Changes, keeps a change picked: the largest in the open folder,
+    /// unless the one picked is still listed there. Leaving Changes drops it.
+    private func focusChanges(_ comparison: DiskScanComparison?, in folder: DiskItem) {
+        guard store.list == .changes, let comparison else {
+            if hover.markedChange != nil { hover.clearMarks() }
+            return
+        }
+        let report = comparison.report(for: folder, in: result.usage)
+        if let picked = hover.markedChange, report.lists(picked) { return }
+        guard let largest = report.largest else {
+            hover.clearMarks()
+            return
+        }
+        pick(largest, exists: largest.isListed || largest.after.low > 0, opening: false)
+    }
+}
+
+/// What decides the picked change: Changes on or off, the scan compared
+/// with, and the open folder.
+private struct ChangesFocus: Equatable {
+    let showsChanges: Bool
+    let since: Date?
+    let folder: Int
 }
 
 /// The scan's total, with the counts behind it and what changed since the
@@ -434,6 +468,8 @@ private struct TreemapCard: View {
     let changes: TreemapChanges?
     var open: (Int) -> Void
     @State private var copied = false
+    /// In Changes, fade what didn't change.
+    @AppStorage("storageChangesOnly") private var changesOnly = true
 
     var body: some View {
         let usage = result.usage
@@ -466,7 +502,7 @@ private struct TreemapCard: View {
             }
             Group {
                 if usage.children(of: folder).contains(where: { $0.allocatedSize > 0 }) {
-                    StorageTreemap(usage: usage, folder: folder, hover: hover, changes: changes) { item in
+                    StorageTreemap(usage: usage, folder: folder, hover: hover, changes: changes, quietsUnchanged: changesOnly) { item in
                         open(item.id)
                     } menu: { item in
                         StorageItemMenu(path: usage.path(of: item.id), isFolder: item.isFolder, store: store)
@@ -477,21 +513,25 @@ private struct TreemapCard: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             HStack(spacing: 8) {
-                TreemapCaption(usage: usage, folder: folder, hover: hover, changes: changes)
+                TreemapCaption(usage: usage, folder: folder, hover: hover, changes: changes, quietsUnchanged: changesOnly)
                 Spacer(minLength: 8)
-                Text(caption)
-                    .font(.metadata)
-                    .foregroundStyle(.secondaryText)
-                    .monospacedDigit()
-                    .fixedSize()
+                if let changes {
+                    // The list beside says which scan the colours compare with.
+                    Toggle("Changes only", isOn: $changesOnly)
+                        .toggleStyle(.checkbox)
+                        .font(.metadata)
+                        .fixedSize()
+                        .help("Fade what hasn't changed since \(StorageChangeStyle.when(changes.since)), so what grew and shrank "
+                            + "stands out. Faded folders still open.")
+                } else {
+                    Text("\(Format.bytes(folder.allocatedSize)) · \(folder.itemCount.formatted()) items")
+                        .font(.metadata)
+                        .foregroundStyle(.secondaryText)
+                        .monospacedDigit()
+                        .fixedSize()
+                }
             }
         }
-    }
-
-    /// The open folder's size, or in Changes mode which scan the colours compare with.
-    private var caption: String {
-        if let changes { return "Since \(StorageChangeStyle.when(changes.since))" }
-        return "\(Format.bytes(folder.allocatedSize)) · \(folder.itemCount.formatted()) items"
     }
 }
 

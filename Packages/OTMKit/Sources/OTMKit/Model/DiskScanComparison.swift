@@ -135,6 +135,18 @@ public struct DiskScanReport: Sendable {
     public var isEmpty: Bool {
         grew.isEmpty && shrank.isEmpty && filesAdded.isEmpty && filesRemoved.isEmpty && becameUnreadable.isEmpty && becameReadable.isEmpty
     }
+
+    /// The change to show first: the most space certainly gained or lost,
+    /// the list's order breaking ties (so a folder beats the file that
+    /// explains it). Nil when nothing grew or shrank.
+    public var largest: DiskSizeChange? {
+        (grew + shrank + filesAdded + filesRemoved).max { max($0.growth, $0.shrinkage) < max($1.growth, $1.shrinkage) }
+    }
+
+    /// Whether `id` (a `DiskSizeChange.id`) is one of the changes listed.
+    public func lists(_ id: String) -> Bool {
+        [grew, shrank, filesAdded, filesRemoved, becameUnreadable, becameReadable].contains { $0.contains { $0.id == id } }
+    }
 }
 
 /// Two saved scans of the same scope, compared.

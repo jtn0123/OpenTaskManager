@@ -248,6 +248,22 @@ struct AppRemovalPlanTests {
         #expect(plan.items.count == 1 + exact.count + 2)
         #expect(plan.preselected == Set([bundle] + exact))
         #expect(plan.protected.isEmpty)
+        #expect(!plan.foundOnlyTheApp)
+    }
+
+    @Test func anAppWithNothingElseFindsOnlyItself() throws {
+        let mac = try FakeMac()
+        let bundle = try mac.bundle("Lonely", identifier: "com.example.lonely")
+        try mac.homeItem("Caches/com.other.app/")
+        let plan = AppRemoval.plan(for: installed(bundle, id: "com.example.lonely"), otherApps: [], launchItems: [],
+                                   home: mac.home, systemLibrary: mac.library)
+        #expect(plan.items.map(\.path) == [bundle])
+        #expect(plan.foundOnlyTheApp)
+        // Something in /Library counts, though it's only listed.
+        try mac.item(mac.library + "/Preferences/com.example.lonely.plist")
+        let shared = AppRemoval.plan(for: installed(bundle, id: "com.example.lonely"), otherApps: [], launchItems: [],
+                                     home: mac.home, systemLibrary: mac.library)
+        #expect(!shared.foundOnlyTheApp)
     }
 
     @Test func anotherCopyMakesExactMatchesUncertain() throws {
@@ -325,6 +341,7 @@ struct AppRemovalPlanTests {
         #expect(plan.items.isEmpty)
         #expect(plan.protected.map(\.path) == [bundle, caches])
         #expect(plan.protected.first?.evidence == .theApp)
+        #expect(!plan.foundOnlyTheApp)
     }
 
     @Test func aLinkToTheAppGoesToo() throws {
@@ -337,6 +354,7 @@ struct AppRemovalPlanTests {
         #expect(plan.items.map(\.path) == [bundle, link])
         #expect(plan.items.map(\.evidence) == [.theApp, .linkToApp])
         #expect(plan.items.allSatisfy { $0.confidence == .required })
+        #expect(plan.foundOnlyTheApp)
     }
 
     @Test func trashOrderUnloadsFirstThenTheBundle() throws {

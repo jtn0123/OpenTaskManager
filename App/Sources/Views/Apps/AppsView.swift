@@ -280,6 +280,43 @@ private struct AppsCard<Content: View>: View {
 // MARK: - Table
 
 private struct AppsTable: View {
+    typealias Column = TableColumnContent<AppRow, KeyPathComparator<AppRow>>
+
+    /// Narrowest each column gets. The columns after Name hold short values,
+    /// so they also stop soon after their ideal width and Name takes the rest.
+    private enum Minimum {
+        static let name: CGFloat = 130
+        static let version: CGFloat = 45
+        static let kind: CGFloat = 75
+        static let architecture: CGFloat = 85
+        static let size: CGFloat = 55
+        static let lastOpened: CGFloat = 70
+    }
+
+    /// The gaps between `count` columns, plus the table's side insets and a
+    /// vertical scroller for when scroll bars always show. Without those the
+    /// table scrolled sideways at 1100 points.
+    private static func chrome(columns count: Int) -> CGFloat {
+        CGFloat(count) * 17 + 2 * 10 + 16
+    }
+
+    /// Narrowest the table goes without scrolling sideways: Name, Version,
+    /// Size and Last opened, the columns a narrow table keeps.
+    static let minimumWidth = Minimum.name + Minimum.version + Minimum.size + Minimum.lastOpened + chrome(columns: 4)
+
+    /// Name's width when there's room.
+    private static let nameIdeal: CGFloat = 190
+
+    /// Below this, where Name would go under its ideal width (as in the
+    /// narrowest window with the sidebar shown), Kind and Architecture make
+    /// way: their values repeat down the table and the details give both.
+    /// Name then tags the apps whose architecture is worth a look.
+    static let fullWidth = nameIdeal + Minimum.version + Minimum.kind + Minimum.architecture + Minimum.size
+        + Minimum.lastOpened + chrome(columns: 6)
+
+    private static let kindID = "kind"
+    private static let architectureID = "architecture"
+
     var rows: [AppRow]
     var isMeasuring: Bool
     @Binding var selection: InstalledApp.ID?
@@ -288,13 +325,13 @@ private struct AppsTable: View {
     var showInStartup: (InstalledApp) -> Void
     var moveToTrash: (InstalledApp) -> Void
     var open: () -> Void
-
-    /// The columns' minimum widths and the gaps between them, plus the
-    /// table's side insets and a vertical scroller for when scroll bars
-    /// always show. Without those the table scrolled sideways at 1100 points.
-    static let minimumWidth: CGFloat = 130 + 45 + 75 + 85 + 55 + 70 + 6 * 17 + 2 * 10 + 16
+    /// Hides Kind and Architecture in place, rather than swapping tables (a
+    /// conditional column needs macOS 14.4), so the scroll position survives.
+    @State private var columns = TableColumnCustomization<AppRow>()
+    @State private var isCompact = false
 
     var body: some View {
+        let fullWidth = Self.fullWidth
         ScrollViewReader { proxy in
             table
                 .onChange(of: scrollTarget, initial: true) { _, target in
@@ -304,42 +341,26 @@ private struct AppsTable: View {
                     scrollTarget = nil
                 }
         }
+        // Only crossing the breakpoint changes anything, not every resize.
+        .onGeometryChange(for: Bool.self) { $0.size.width < fullWidth } action: { isCompact = $0 }
+        .onChange(of: isCompact, initial: true, showColumns)
+    }
+
+    private func showColumns() {
+        let visibility: Visibility = isCompact ? .hidden : .visible
+        for id in [Self.kindID, Self.architectureID] where columns[visibility: id] != visibility {
+            columns[visibility: id] = visibility
+        }
     }
 
     private var table: some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name) { row in
-                AppNameCell(row: row)
-            }
-            .width(min: 130, ideal: 190)
-            TableColumn("Version", value: \.version) { row in
-                Text(row.app.version ?? row.app.build ?? "—")
-                    .lineLimit(1)
-                    .help(row.app.versionText)
-            }
-            .width(min: 45, ideal: 55)
-            TableColumn("Kind", value: \.kind) { row in
-                Text(row.app.kind.title)
-                    .foregroundStyle(row.app.kind == .apple ? .secondary : .primary)
-            }
-            .width(min: 75, ideal: 80)
-            TableColumn("Architecture", value: \.architecture) { row in
-                ArchitectureLabel(app: row.app)
-            }
-            .width(min: 85, ideal: 95)
-            TableColumn("Size", value: \.sizeOrder) { row in
-                Text(row.size.map(Format.bytes) ?? (isMeasuring ? "…" : "—"))
-                    .monospacedDigit()
-                    .foregroundStyle(row.size == nil ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            .width(min: 55, ideal: 65)
-            TableColumn("Last opened", value: \.lastOpenedOrder) { row in
-                Text(AppText.lastOpened(row.app.lastOpened))
-                    .foregroundStyle(row.app.lastOpened == nil ? .secondary : .primary)
-                    .help(row.app.lastOpened.map { $0.formatted(date: .complete, time: .shortened) } ?? "Spotlight has no record of it being opened")
-            }
-            .width(min: 70, ideal: 75)
+        Table(rows, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columns) {
+            nameColumn
+            versionColumn
+            kindColumn
+            architectureColumn
+            sizeColumn
+            lastOpenedColumn
         }
         .contextMenu(forSelectionType: InstalledApp.ID.self) { ids in
             if let id = ids.first, let app = rows.first(where: { $0.id == id })?.app {
@@ -360,11 +381,69 @@ private struct AppsTable: View {
             open()
         }
     }
+
+    private var nameColumn: some Column {
+        TableColumn("Name", value: \.name) { row in
+            AppNameCell(row: row, tagsArchitecture: isCompact)
+        }
+        .width(min: Minimum.name, ideal: Self.nameIdeal)
+    }
+
+    private var versionColumn: some Column {
+        TableColumn("Version", value: \.version) { row in
+            Text(row.app.version ?? row.app.build ?? "—")
+                .lineLimit(1)
+                .help(row.app.versionText)
+        }
+        .width(min: Minimum.version, ideal: 55, max: 100)
+    }
+
+    private var kindColumn: some Column {
+        TableColumn("Kind", value: \.kind) { row in
+            Text(row.app.kind.title)
+                .foregroundStyle(row.app.kind == .apple ? .secondary : .primary)
+        }
+        .width(min: Minimum.kind, ideal: 80, max: 110)
+        .customizationID(Self.kindID)
+        // Shown and hidden with the table's width, not from the header's menu.
+        .disabledCustomizationBehavior(.visibility)
+    }
+
+    private var architectureColumn: some Column {
+        TableColumn("Architecture", value: \.architecture) { row in
+            ArchitectureLabel(app: row.app)
+        }
+        .width(min: Minimum.architecture, ideal: 95, max: 130)
+        .customizationID(Self.architectureID)
+        .disabledCustomizationBehavior(.visibility)
+    }
+
+    private var sizeColumn: some Column {
+        TableColumn("Size", value: \.sizeOrder) { row in
+            Text(row.size.map(Format.bytes) ?? (isMeasuring ? "…" : "—"))
+                .monospacedDigit()
+                .foregroundStyle(row.size == nil ? .secondary : .primary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .width(min: Minimum.size, ideal: 65, max: 90)
+    }
+
+    private var lastOpenedColumn: some Column {
+        TableColumn("Last opened", value: \.lastOpenedOrder) { row in
+            Text(AppText.lastOpened(row.app.lastOpened))
+                .foregroundStyle(row.app.lastOpened == nil ? .secondary : .primary)
+                .help(row.app.lastOpened.map { $0.formatted(date: .complete, time: .shortened) } ?? "Spotlight has no record of it being opened")
+        }
+        .width(min: Minimum.lastOpened, ideal: 75, max: 110)
+    }
 }
 
-/// The icon and name, a dot while it runs, and a sunrise when it starts by itself.
+/// The icon and name, a dot while it runs, and a sunrise when it starts by
+/// itself. While Architecture is hidden, a tag on the apps that need Rosetta,
+/// can't run, or couldn't be read.
 private struct AppNameCell: View {
     var row: AppRow
+    var tagsArchitecture = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -384,8 +463,47 @@ private struct AppNameCell: View {
                     .help("Has a launch agent or daemon that starts by itself")
                     .accessibilityLabel("Starts by itself")
             }
+            if tagsArchitecture, let tag = ArchitectureTag(row.app.architecture) {
+                tag
+            }
         }
         .help(row.app.path)
+    }
+}
+
+/// A small tag for an architecture worth a look: Intel only (Rosetta),
+/// 32-bit or PowerPC (can't run) and unknown. Nothing for native apps.
+private struct ArchitectureTag: View {
+    @Environment(\.backgroundProminence) private var prominence
+    let title: String
+    let color: Color
+    let help: String
+
+    init?(_ architecture: AppArchitecture) {
+        switch architecture {
+        case .intel:
+            (title, color, help) = ("Intel only", Theme.network, "Built only for Intel processors: runs under Rosetta")
+        case .unsupported:
+            (title, color, help) = ("Can't run", .red, "Built only for 32-bit or PowerPC processors, which current macOS can't run")
+        case .unknown:
+            (title, color, help) = ("Architecture unknown", Theme.smallerItems,
+                                    "Its executable is missing or isn't a Mach-O program (a script, say), so it may need Rosetta")
+        case .appleSilicon, .universal:
+            return nil
+        }
+    }
+
+    var body: some View {
+        // On a selected row the accent colour is behind it, so it turns white like the row's text.
+        let selected = prominence == .increased
+        Text(title)
+            .font(.metadata.weight(.medium))
+            .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(color))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(selected ? AnyShapeStyle(.white.opacity(0.22)) : AnyShapeStyle(color.fillShade.opacity(0.18)), in: Capsule())
+            .fixedSize()
+            .help(help)
     }
 }
 
