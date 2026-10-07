@@ -642,6 +642,12 @@ final class AppModel {
         processIdentityByPID[pid].flatMap { processHistory[$0]?.last }
     }
 
+    /// The app group `root` heads, as the group stood each tick (see
+    /// `groupHistory`), for the process inspector's Group tab.
+    func appGroupHistory(_ root: ProcessIdentity) -> History<ProcessPoint>? {
+        groupHistory[root]
+    }
+
     func displayName(for process: ProcessSample) -> String {
         regularApps[process.pid]?.localizedName ?? process.name
     }

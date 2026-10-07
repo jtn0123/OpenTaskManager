@@ -334,6 +334,24 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   tab reads the threads off the main actor once per tick, only while shown
   (`ThreadActivityTracker`), as does `otm threads`. `-openProcessTab
   threads|files` opens a tab with `-openProcess`.
+- The inspector's Group tab (`-openProcessTab group`) is offered only for a
+  row with others nested under it, and the note's "See all N together" link
+  opens it.
+  It shows the whole group, whatever the search: `ProcessGroup` in OTMKit lists
+  the members by identity, each with its `ProcessGroupReason` (macOS holds the
+  root, or a member, responsible for it; in Tree, it was started by one), and
+  `ProcessGroupFigures` adds them up (memory as summed footprints, which can
+  count shared memory more than once; disk, GPU and power only where read).
+  Its CPU graph is `AppModel.appGroupHistory` in Grouped; Tree keeps no group
+  history, so it adds up the current members' own. A member's name selects it
+  in the table, expanding the rows above it. End All and Force Quit All first
+  list every target by name and PID, fixed when clicked, end the furthest from
+  the root first, check each one's identity again just before
+  (`ProcessGroupEnding`), and leave others', the system's and this app's
+  processes alone; a group whose root isn't yours (launchd's in Tree) can't be
+  ended. `ProcessTreeBuilder` follows a responsible PID only to a process that
+  started before the one naming it, so a reused PID never collects an ended
+  app's helpers.
 - Pages with a table and details (Processes, Startup, Apps, Drivers,
   Connections) use `InspectorSplit`: the pane appears beside the table once
   something is selected, its width is draggable and remembered, and in a
