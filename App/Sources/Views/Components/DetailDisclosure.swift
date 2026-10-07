@@ -34,7 +34,7 @@ struct DetailDisclosure<Content: View>: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .font(.subheadline)
+                .font(.callout)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

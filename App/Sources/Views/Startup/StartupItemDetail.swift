@@ -82,7 +82,7 @@ struct StartupItemDetail: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.headline).lineLimit(2)
                 Text(item.label)
-                    .font(.subheadline.monospaced()).foregroundStyle(.secondaryText)
+                    .font(.callout.monospaced()).foregroundStyle(.secondaryText)
                     .lineLimit(1).truncationMode(.middle)
                     .textSelection(.enabled)
                     .help(item.label)
@@ -184,7 +184,7 @@ struct StartupItemDetail: View {
                              preview: arguments.joined(separator: " "), isExpanded: $showsArguments) {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(arguments.enumerated()), id: \.offset) { _, argument in
-                        CopyableText(value: argument).font(.subheadline)
+                        CopyableText(value: argument).font(.callout)
                     }
                 }
             }
@@ -193,7 +193,7 @@ struct StartupItemDetail: View {
 
     private var launches: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Launches").font(.subheadline).foregroundStyle(.secondaryText)
+            Text("Launches").font(.callout).foregroundStyle(.secondaryText)
             if item.isUnreadable {
                 Text("Unknown: the property list can't be read").font(.callout)
             } else {
@@ -327,8 +327,8 @@ struct StartupItemDetail: View {
     /// a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String, isCode: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
-            CopyableText(value: value, monospaced: isCode, truncatesMiddle: isCode).font(.subheadline)
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            CopyableText(value: value, monospaced: isCode, truncatesMiddle: isCode).font(.callout)
         }
     }
 }

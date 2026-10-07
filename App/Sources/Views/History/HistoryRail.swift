@@ -173,7 +173,7 @@ private struct HistoryRailLabels: View {
                             .fill(Color.primary.opacity(0.25))
                             .frame(width: 1, height: 3)
                         Text(domain.lowerBound.addingTimeInterval(span * fraction).formatted(style))
-                            .font(.system(size: 10.5).monospacedDigit())
+                            .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(.secondaryText)
                             .fixedSize()
                     }
@@ -226,7 +226,7 @@ private struct HistorySessionLane: View {
             scrubber.session = picked ? nil : session
         } label: {
             Text(length >= 40 ? HistorySessionStyle.title(session) : "")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(picked ? Color.primary : Color.primary.opacity(0.75))
                 .lineLimit(1)
                 .padding(.horizontal, 5)
@@ -246,7 +246,7 @@ private struct HistorySessionLane: View {
         if let end = draft.end {
             let (start, length) = place(draft.start, end, width: width)
             Text(length >= 80 ? "New session" : "")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .lineLimit(1)
                 .padding(.horizontal, 5)
                 .frame(width: length, height: 16, alignment: .leading)
@@ -257,7 +257,7 @@ private struct HistorySessionLane: View {
             let x = HistoryMoment.x(of: draft.start, width: width, domain: domain)
             HStack(spacing: 3) {
                 Rectangle().fill(tint).frame(width: 2, height: 16)
-                Text("Start").font(.system(size: 10, weight: .semibold)).fixedSize()
+                Text("Start").font(.system(size: 11, weight: .semibold)).fixedSize()
             }
             .alignmentGuide(.leading) { _ in -min(x - 1, width - 34) }
         }

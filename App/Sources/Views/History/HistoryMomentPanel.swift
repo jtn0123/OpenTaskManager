@@ -43,13 +43,13 @@ struct HistoryMomentPanel: View {
                 .monospacedDigit()
             Text(bucket <= FlightRecorder.span ? "Average of \(Int(FlightRecorder.span)) seconds"
                  : "Average of the \(Format.timeSpan(bucket)) up to this time")
-                .font(.subheadline)
+                .font(.callout)
                 .foregroundStyle(.secondaryText)
             if let playback = scrubber.playback(bucket: bucket) {
-                playback.font(.subheadline)
+                playback.font(.callout)
             }
             if let hint = scrubber.hint {
-                Text(hint).font(.subheadline).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
+                Text(hint).font(.explanation).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -241,7 +241,7 @@ struct HistoryMomentDetails: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(value).fontWeight(.medium).monospacedDigit()
                 if !detail.isEmpty {
-                    Text(detail).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
+                    Text(detail).font(.callout).foregroundStyle(.secondaryText).monospacedDigit()
                 }
             }
         }
@@ -272,7 +272,7 @@ private struct HistoryMomentBadge: View {
         case .end: (scrubber.endName, .green)
         }
         Text(state.uppercased())
-            .font(.caption.weight(.bold))
+            .font(.metadata.weight(.bold))
             .foregroundStyle(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -349,9 +349,9 @@ private struct AppBars: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline).foregroundStyle(.secondaryText)
+            Text(title).font(.callout).foregroundStyle(.secondaryText)
             if apps.isEmpty {
-                Text("—").font(.callout).foregroundStyle(.tertiary)
+                Text("—").font(.callout).foregroundStyle(.secondaryText)
             }
             let top = apps.first?.value ?? 1
             ForEach(apps, id: \.name) { app in

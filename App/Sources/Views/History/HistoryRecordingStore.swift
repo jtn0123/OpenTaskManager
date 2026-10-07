@@ -205,12 +205,12 @@ struct HistoryRecordingBanner: View {
                     .font(.headline)
                     .lineLimit(1)
                 Text(details)
-                    .font(.metadata)
+                    .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                 // Two lines in a narrow window, so what wasn't reported still shows.
                 Text(machine)
-                    .font(.metadata)
+                    .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(2)
             }
@@ -335,7 +335,7 @@ struct HistoryReplayBadge: View {
                 .fontWeight(.semibold)
                 .monospacedDigit()
         }
-        .font(.subheadline)
+        .font(.callout)
         .lineLimit(1)
         .padding(.horizontal, 9)
         .padding(.vertical, 4)

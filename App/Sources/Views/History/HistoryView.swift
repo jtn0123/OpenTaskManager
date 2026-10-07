@@ -155,7 +155,7 @@ struct HistoryView: View {
     static let compactWidth: CGFloat = 760
     private static let panelWidth: CGFloat = 310
     /// The time axis labels' font, for measuring them.
-    private static let axisFont = NSFont.systemFont(ofSize: 10.5)
+    private static let axisFont = NSFont.systemFont(ofSize: 11)
 
     @Environment(AppModel.self) private var model
     @AppStorage("historyRange") private var range: HistoryRange = .hour

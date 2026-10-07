@@ -75,7 +75,7 @@ struct UsersView: View {
                 Text("Only your own processes are included. Turn on “Include system and other users' processes” in Settings to see everyone.")
             }
         }
-        .font(.callout)
+        .font(.explanation)
         .foregroundStyle(.secondaryText)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -232,7 +232,7 @@ private struct UserGraph: View {
             HStack(alignment: .bottom) {
                 Stat(label: label, number: number, color: color, format: format)
                 Spacer(minLength: 8)
-                Text(caption).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
+                Text(caption).font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
             }
             GraphView(series: [GraphSeries(values: values, color: color)], capacity: Self.span, glows: true,
                       minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits,
@@ -268,7 +268,7 @@ private struct SessionList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Sessions").font(.metadata).foregroundStyle(.secondaryText)
+            Text("Sessions").font(.callout).foregroundStyle(.secondaryText)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 270), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 6) {
                 ForEach(sessions) { session in
                     HStack(spacing: 6) {
@@ -436,7 +436,7 @@ private struct SystemAccountGrid: View {
         HStack(spacing: 8) {
             Image(systemName: "chevron.right")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiaryText)
+                .foregroundStyle(.secondaryText)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 .frame(width: 10)
             UserAvatar(name: user.name, color: UsersText.systemTint, size: 22)

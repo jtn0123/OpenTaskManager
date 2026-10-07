@@ -60,7 +60,7 @@ struct AppRemovalSheet: View {
                     .font(.title3.weight(.semibold))
                     .lineLimit(2)
                 Text(subtitle)
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -119,7 +119,7 @@ struct AppRemovalSheet: View {
                             Label {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("No related files found").font(.callout.weight(.semibold))
-                                    Text(nothingElseDetail).font(.metadata).foregroundStyle(.secondaryText)
+                                    Text(nothingElseDetail).font(.explanation).foregroundStyle(.secondaryText)
                                 }
                             } icon: {
                                 Image(systemName: "checkmark.circle").foregroundStyle(.secondaryText)
@@ -215,7 +215,7 @@ private struct RemovalSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.metadata.weight(.semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.secondaryText)
             VStack(alignment: .leading, spacing: 0) { content }
                 .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
@@ -263,17 +263,17 @@ private struct LeftoverRow: View {
                             : "macOS asks before one app reads another app's container, so its size isn't measured")
                 }
                 Text(RemovalText.shortPath(item.path))
-                    .font(.metadata.monospaced())
+                    .font(.callout.monospaced())
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(item.path)
                 Text(evidence)
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                 if let caveat = item.caveat {
                     Label(caveat, systemImage: "exclamationmark.triangle.fill")
-                        .font(.metadata)
+                        .font(.explanation)
                         .foregroundStyle(Theme.network)
                 }
             }
@@ -323,13 +323,13 @@ private struct ProtectedRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(RemovalText.shortPath(item.path))
-                    .font(.metadata.monospaced())
+                    .font(.callout.monospaced())
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .help(item.path)
                 Text(item.reason + ". " + item.evidence.description(bundlePath: model.app.resolvedPath))
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
         }
@@ -357,7 +357,7 @@ private struct RemovalIcon: View {
 private struct UncertainTag: View {
     var body: some View {
         Text("Uncertain")
-            .font(.caption2.weight(.semibold))
+            .font(.metadata.weight(.semibold))
             .foregroundStyle(Theme.network)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
@@ -389,7 +389,7 @@ private struct RunningBanner: View {
             }
             if !running.stopWithAgent.isEmpty {
                 Label("\(list(running.stopWithAgent)) stops when its launch agent is unloaded.", systemImage: "info.circle")
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
         }
@@ -418,7 +418,7 @@ private struct RemovalBanner<Accessory: View>: View {
             Image(systemName: symbol).foregroundStyle(color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.callout.weight(.semibold))
-                Text(detail).font(.metadata).foregroundStyle(.secondaryText)
+                Text(detail).font(.explanation).foregroundStyle(.secondaryText)
             }
             Spacer(minLength: 8)
             accessory
@@ -455,13 +455,13 @@ private struct RemovalResults: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Text(RemovalText.shortPath(outcome.path))
-                            .font(.metadata.monospaced())
+                            .font(.callout.monospaced())
                             .foregroundStyle(.secondaryText)
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .help(outcome.path)
                         Text(message(outcome.result))
-                            .font(.metadata)
+                            .font(.explanation)
                             .foregroundStyle(outcome.result.succeeded ? AnyShapeStyle(Theme.secondaryText) : AnyShapeStyle(Color.red))
                     }
                 }

@@ -223,6 +223,13 @@ build, `-sensorFixture <file>` loads a recording from
   or mount list changes), with disk images under a folding "Disk images"
   heading or chip. Below 760 points History moves its moment panel into
   a summary over the charts.
+- In a window under 900 points the sidebar hides itself and comes back when
+  the window widens; a hide in a wide window is remembered (`sidebarHidden`)
+  and a show in a narrow one lasts until the window crosses 900
+  (`SidebarVisibility` in OTMKit). The View menu lists the pages (⌘1 to ⌘9).
+  The toolbar's live badge speaks for the sampled metrics alone; Startup, Apps
+  and Drivers say when their lists were read beside their Refresh
+  (`InventoryRefresh`).
 - The CPU graphs (Performance's, per core type, per core, by app, and History's
   CPU chart) share one Auto / 100% setting, `CPUGraphScale` (`cpuGraphScale`).
   Auto bounds are `AutoScale` in OTMKit's Graphing/: round steps from 10%, grown
