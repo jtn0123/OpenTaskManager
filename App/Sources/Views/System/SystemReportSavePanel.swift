@@ -99,7 +99,8 @@ private final class SaveOptions: NSObject {
             + "routers, DNS servers, search domains and proxy hosts. Leave it off for a report you'll share."
         identifiers.setAccessibilityLabel("Include identifiers (serial numbers, UUIDs, addresses)")
         let note = NSTextField(labelWithString: "Serial numbers, UUIDs, addresses")
-        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        // 12 pt like the app's other explanations; the 11 pt small size is for metadata.
+        note.font = .systemFont(ofSize: 12)
         note.textColor = .secondaryLabelColor
         note.setAccessibilityElement(false)
         // Lines the note up with the checkbox's title.

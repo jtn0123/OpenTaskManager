@@ -121,8 +121,9 @@ Manager OG or any other proprietary task manager.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.
-  `evensHeights: false` keeps each card's own height (the System page's
-  attached-device cards, whose length depends on what's plugged in).
+  Cards whose lengths differ a lot (the System page's, which depend on the
+  Mac and what's plugged in) go through `ColumnGrid` instead: columns that
+  each run their own length (`GridMath.packColumns`), one in a narrow window.
 - The Connections page's socket walk (`ConnectionSampler`, every process's
   descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
   runs it off the main actor every 3 s, only while the page is on screen.

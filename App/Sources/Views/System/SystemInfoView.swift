@@ -73,34 +73,21 @@ struct SystemInfoView: View {
                 // Only the uptime moves, so a minute is often enough.
                 TimelineView(.everyMinute) { context in
                     let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, now: context.date)
-                    let before = sections.prefix { !$0.kind.isNetwork && !$0.kind.isAttachedDevice }
-                    let network = sections.filter(\.kind.isNetwork)
-                    let attached = sections.filter(\.kind.isAttachedDevice)
                     let links = networkLinks(info)
-                    VStack(spacing: 16) {
-                        cards(before)
-                        // Their own rows, each card as long as its list: an empty
-                        // Bluetooth card doesn't stretch to match a full USB one,
-                        // nor a long list of ports the configuration beside it.
-                        FillGrid(minimum: 340, evensHeights: false) {
-                            ForEach(network) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers, links: links) }
+                    // Columns that each run their own length, so a short card
+                    // (Displays, an empty Bluetooth) beside a long one (Storage,
+                    // a full USB list) leaves no hole, inside it or below it.
+                    // One column in a narrow window.
+                    ColumnGrid(minimum: 340) {
+                        ForEach(sections) { section in
+                            InfoCard(section: section, showsIdentifiers: showsIdentifiers, links: section.kind.isNetwork ? links : nil)
                         }
-                        FillGrid(minimum: 300, evensHeights: false) {
-                            ForEach(attached) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers) }
-                        }
-                        cards(sections.dropFirst(before.count + network.count + attached.count))
                     }
                 }
             }
             .padding(20)
         }
         .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
-    }
-
-    private func cards(_ sections: ArraySlice<InfoSection>) -> some View {
-        FillGrid(minimum: 300) {
-            ForEach(sections) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers) }
-        }
     }
 
     /// The ports Performance graphs (Wi-Fi, Ethernet and cellular with an
@@ -372,7 +359,7 @@ private struct InfoCard: View {
                     }
                     if let state = row.state {
                         Text(state)
-                            .font(.metadata.weight(.medium))
+                            .font(.explanation.weight(.medium))
                             .foregroundStyle(SystemStyle(section.kind).tint)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)
@@ -384,13 +371,13 @@ private struct InfoCard: View {
                     Spacer(minLength: 8)
                     Button("Show traffic") { links.showTraffic(interface) }
                         .buttonStyle(.link)
-                        .font(.metadata)
+                        .font(.explanation)
                         .help("Open \(interface)'s traffic graph on the Performance page")
                 }
             }
             if let interface = row.interface, let result = links?.lastTests[interface] {
                 Text(NetworkLinks.summary(result))
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -466,7 +453,8 @@ private struct InfoValue: View {
                 Text(Self.mask).foregroundStyle(.tertiaryText).accessibilityLabel("Hidden")
                     .help("Hidden. Use Show at the top of the page to reveal it.")
             } else if row.isCode {
-                CopyableText(value: row.value)
+                // An IPv6 address breaks between its groups, so its prefix never sits alone on a line.
+                CopyableText(value: row.value, forms: row.isAddress ? AddressBreaks.forms(row.value) : [])
             } else {
                 Text(row.value)
                     .textSelection(.enabled)

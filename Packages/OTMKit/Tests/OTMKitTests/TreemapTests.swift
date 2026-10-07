@@ -171,6 +171,31 @@ struct TreemapLabelTests {
         #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds) == CGPoint(x: 6, y: 6))
     }
 
+    @Test func tagKeepsClearOfTheHoldingFoldersName() {
+        // A folder tile at the bottom, its name strip on top, with the
+        // outlined item inside it just under the strip.
+        let heading = CGRect(x: 0, y: 160, width: 200, height: 20)
+        let inner = CGRect(x: 3, y: 180, width: 100, height: 117)
+        // Above the item would cover the folder's name, so it goes over the name instead.
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: inner, bounds: Self.bounds, heading: heading) == CGPoint(x: 3, y: 114))
+        // An item further down the folder leaves room for the tag between it and the name.
+        let lower = CGRect(x: 3, y: 240, width: 100, height: 57)
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: lower, bounds: Self.bounds, heading: heading) == CGPoint(x: 3, y: 194))
+        // Without the name to avoid, it sits right above the item, as before.
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: inner, bounds: Self.bounds) == CGPoint(x: 3, y: 134))
+    }
+
+    @Test func tagInsideAFolderGoesUnderItsName() {
+        // A folder as tall as the treemap: no room above or below, so the
+        // tag goes inside, under the name strip rather than over it.
+        let tile = CGRect(x: 0, y: 0, width: 200, height: 300)
+        let heading = CGRect(x: 0, y: 0, width: 200, height: 20)
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds, heading: heading) == CGPoint(x: 6, y: 26))
+        // An item inside it at the top: over the name there's no room either.
+        let inner = CGRect(x: 3, y: 20, width: 194, height: 277)
+        #expect(TreemapLabel.tagOrigin(size: Self.tag, tile: inner, bounds: Self.bounds, heading: heading) == CGPoint(x: 9, y: 26))
+    }
+
     @Test func tagNeverPokesOutSideways() {
         let tile = CGRect(x: 360, y: 10, width: 40, height: 40)
         let origin = TreemapLabel.tagOrigin(size: Self.tag, tile: tile, bounds: Self.bounds)

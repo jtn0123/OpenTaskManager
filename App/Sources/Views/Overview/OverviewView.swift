@@ -3,70 +3,110 @@ import SwiftUI
 
 /// At-a-glance dashboard: a gauge per resource, a live map of every core,
 /// throughput, and which apps are using what.
+///
+/// In a narrow window (820 points, with or without the sidebar) the gauges
+/// shrink, the top-app lists come straight after them, Disk and Network take
+/// a short row each, and the core map folds to a line that opens on a click,
+/// so the lists are on screen without scrolling.
 struct OverviewView: View {
+    /// Below this width of the page, the narrow layout.
+    private static let narrowWidth: CGFloat = 900
+
     @Environment(AppModel.self) private var model
+    @State private var isNarrow = false
 
     var body: some View {
-        if let snapshot = model.snapshot {
-            let groups = model.appGroups
-            // Unknown until the first samples say; until then the card stays.
-            let measuresEnergy = model.measuresProcessEnergy != false
-            let networkRanks = TopNetworkCard.hasRanking(model.networkActivity)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    FillGrid(minimum: 210) {
-                        cpuGauge(snapshot)
-                        memoryGauge(snapshot)
-                        if let gpu = snapshot.gpus.first, let busy = gpu.deviceUtilization { gpuGauge(gpu, busy: busy) }
-                        if let watts = snapshot.power.systemWatts { powerGauge(watts, snapshot.power) }
-                    }
-                    // A GPU that doesn't say how busy it is (a virtual
-                    // machine's) would only fill a gauge with an empty ring,
-                    // so it takes a line and the cards below move up.
-                    if let gpu = snapshot.gpus.first, gpu.deviceUtilization == nil { gpuStrip(gpu) }
-                    CoreMap(snapshot: snapshot)
-                    FillGrid(minimum: 280) {
-                        diskCard(snapshot)
-                        NetworkTrafficCard()
-                        if let components = snapshot.power.components { powerCard(components) }
-                    }
-                    FillGrid(minimum: 280) {
-                        TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
-                                metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
-                        TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
-                                metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
-                        if measuresEnergy {
-                            TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
-                                    metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
+        let narrowWidth = Self.narrowWidth
+        Group {
+            if let snapshot = model.snapshot {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        gauges(snapshot)
+                        // A GPU that doesn't say how busy it is (a virtual
+                        // machine's) would only fill a gauge with an empty ring,
+                        // so it takes a line and the cards below move up.
+                        if let gpu = snapshot.gpus.first, gpu.deviceUtilization == nil { gpuStrip(gpu) }
+                        if isNarrow {
+                            topApps
+                            throughput(snapshot)
+                            CoreMap(snapshot: snapshot, folds: true)
+                        } else {
+                            CoreMap(snapshot: snapshot)
+                            throughput(snapshot)
+                            topApps
                         }
-                        if networkRanks { TopNetworkCard() }
+                        StorageCard(volumes: snapshot.volumes)
                     }
-                    // A whole card would only say there's nothing to rank, so
-                    // each takes a line and the cards above share its width.
-                    if !measuresEnergy || !networkRanks {
-                        FillGrid(minimum: 360, spacing: 12) {
-                            if !measuresEnergy {
-                                NoticeStrip(title: "Top Energy", symbol: "bolt.fill", color: Theme.power, text: Unavailable.energy)
-                            }
-                            if !networkRanks { TopNetworkStrip() }
-                        }
-                    }
-                    StorageCard(volumes: snapshot.volumes)
+                    .padding(20)
                 }
-                .padding(20)
+                .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
+                .followsEnd(Self.startsAtEnd)
+                // Keeps nettop running whether Top Network is a card or a strip,
+                // so switching between them doesn't drop a reading.
+                .task { await model.networkActivity.track(model: model) }
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
-            .followsEnd(Self.startsAtEnd)
-            // Keeps nettop running whether Top Network is a card or a strip,
-            // so switching between them doesn't drop a reading.
-            .task { await model.networkActivity.track(model: model) }
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // Only crossing the breakpoint changes anything, not every resize.
+        // Read while the first sample is taken, so the cards start in their
+        // layout rather than swapping over (which lost -openScroll bottom).
+        .onGeometryChange(for: Bool.self) { $0.size.width < narrowWidth } action: { isNarrow = $0 }
     }
 
     /// `-openScroll bottom` starts the page scrolled to the end, for screenshots.
     private static let startsAtEnd = LaunchArgument.string("openScroll") == "bottom"
+
+    // MARK: Sections
+
+    private func gauges(_ snapshot: SystemSnapshot) -> some View {
+        FillGrid(minimum: isNarrow ? 200 : 210) {
+            cpuGauge(snapshot)
+            memoryGauge(snapshot)
+            if let gpu = snapshot.gpus.first, let busy = gpu.deviceUtilization { gpuGauge(gpu, busy: busy) }
+            if let watts = snapshot.power.systemWatts { powerGauge(watts, snapshot.power) }
+        }
+    }
+
+    /// Disk and Network, and where the power goes when this Mac says. Narrow,
+    /// Disk and Network are a short row each, rates beside a small graph.
+    private func throughput(_ snapshot: SystemSnapshot) -> some View {
+        FillGrid(minimum: isNarrow ? 260 : 280) {
+            diskCard(snapshot)
+            NetworkTrafficCard(compact: isNarrow)
+            if let components = snapshot.power.components { powerCard(components) }
+        }
+    }
+
+    /// Which apps use the most CPU, memory, energy and network.
+    @ViewBuilder private var topApps: some View {
+        let groups = model.appGroups
+        // Unknown until the first samples say; until then the card stays.
+        let measuresEnergy = model.measuresProcessEnergy != false
+        let networkRanks = TopNetworkCard.hasRanking(model.networkActivity)
+        FillGrid(minimum: isNarrow ? 260 : 280) {
+            TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
+                        metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+            TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
+                        metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
+            if measuresEnergy {
+                TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
+                            metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
+            }
+            if networkRanks { TopNetworkCard() }
+        }
+        // A whole card would only say there's nothing to rank, so
+        // each takes a line and the cards above share its width. Two share
+        // a row only where neither explanation is cut short.
+        if !measuresEnergy || !networkRanks {
+            FillGrid(minimum: 420, spacing: 12) {
+                if !measuresEnergy {
+                    NoticeStrip(title: "Top Energy", symbol: "bolt.fill", color: Theme.power, text: Unavailable.energy)
+                }
+                if !networkRanks { TopNetworkStrip() }
+            }
+        }
+    }
 
     // MARK: Gauges
 
@@ -76,7 +116,7 @@ struct OverviewView: View {
             title: "CPU", value: snapshot.cpu.usage * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: snapshot.cpu.usage, color: Theme.cpu,
             details: ["\(topology.logicalCores) cores", "Load \(Format.fixed(snapshot.cpu.loadAverage.first ?? 0, 2))"],
-            history: model.cpuHistory.values, historyMax: 1
+            history: model.cpuHistory.values, historyMax: 1, compact: isNarrow
         )
     }
 
@@ -91,7 +131,7 @@ struct OverviewView: View {
             title: "Memory", value: memory.usedFraction * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: memory.usedFraction, color: color,
             details: ["\(Format.bytes(memory.used)) of \(Format.bytes(memory.physical))", "\(memory.pressure.rawValue.capitalized) pressure"],
-            history: model.memoryHistory.values, historyMax: 1
+            history: model.memoryHistory.values, historyMax: 1, compact: isNarrow
         )
     }
 
@@ -100,7 +140,7 @@ struct OverviewView: View {
             title: "GPU", value: busy * 100, format: { Format.fixed($0, 0) }, unit: "%",
             fraction: busy, color: Theme.gpu,
             details: [gpu.name] + (gpu.coreCount.map { ["\($0) cores"] } ?? []),
-            history: model.gpuHistory[gpu.id]?.values ?? [], historyMax: 1
+            history: model.gpuHistory[gpu.id]?.values ?? [], historyMax: 1, compact: isNarrow
         )
     }
 
@@ -127,7 +167,7 @@ struct OverviewView: View {
             title: "Power", value: watts, format: { Format.fixed($0, $0 < 10 ? 1 : 0) }, unit: "W",
             fraction: watts / ceiling, color: Theme.power,
             details: [source, "Thermal \(power.thermalState.rawValue)" + (model.sensors?.hottest(.chip).map { " · \(Format.celsius($0))" } ?? "")],
-            history: history, historyMax: nil
+            history: history, historyMax: nil, compact: isNarrow
         )
     }
 
@@ -141,7 +181,7 @@ struct OverviewView: View {
             rates: (snapshot.disks.reduce(0) { $0 + $1.readBytesPerSecond }, snapshot.disks.reduce(0) { $0 + $1.writeBytesPerSecond }),
             histories: (AppModel.tailSum(ids.map { model.diskReadHistory[$0]?.values ?? [] }),
                         AppModel.tailSum(ids.map { model.diskWriteHistory[$0]?.values ?? [] })),
-            format: Format.bytesPerSecond, minimumScale: 1_048_576, units: .binaryBytes
+            format: Format.bytesPerSecond, minimumScale: 1_048_576, units: .binaryBytes, compact: isNarrow
         )
     }
 
@@ -178,6 +218,7 @@ struct OverviewView: View {
 
 private struct GaugeCard: View {
     private static let valueFont = NSFont.numeric(size: 26, weight: .semibold, rounded: true)
+    private static let compactValueFont = NSFont.numeric(size: 19, weight: .semibold, rounded: true)
 
     var title: String
     var value: Double
@@ -189,38 +230,45 @@ private struct GaugeCard: View {
     var details: [String]
     var history: [Double]
     var historyMax: Double?
+    /// A smaller ring and no graph, for a narrow window: the reading and its
+    /// facts in a card two thirds the height.
+    var compact = false
 
     var body: some View {
+        let size: CGFloat = compact ? 66 : 96
         Card(tint: color, glow: fraction) {
-            HStack(spacing: 14) {
+            HStack(spacing: compact ? 12 : 14) {
                 ZStack {
-                    RingGauge(fraction: fraction, color: color, lineWidth: 10)
+                    RingGauge(fraction: fraction, color: color, lineWidth: compact ? 8 : 10)
                     VStack(spacing: -2) {
-                        AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
+                        AnimatedNumber(value: value, format: format, font: compact ? Self.compactValueFont : Self.valueFont,
+                                       alignment: .center)
                         Text(unit).font(.metadata.weight(.medium)).foregroundStyle(.secondaryText)
                     }
                 }
-                .frame(width: 96, height: 96)
+                .frame(width: size, height: size)
 
                 VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title).font(.title3.weight(.semibold))
                         ForEach(details.indices, id: \.self) { index in
                             Text(details[index])
-                                .font(.metadata)
+                                .font(.explanation)
                                 .foregroundStyle(.secondaryText)
                                 .monospacedDigit()
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
                     }
-                    Spacer(minLength: 4)
-                    GraphView(series: [GraphSeries(values: history, color: color)], maxValue: historyMax,
-                              capacity: 60, showsGrid: false, lineWidth: 1.4, glows: true)
-                        .frame(height: 30)
+                    if !compact {
+                        Spacer(minLength: 4)
+                        GraphView(series: [GraphSeries(values: history, color: color)], maxValue: historyMax,
+                                  capacity: 60, showsGrid: false, lineWidth: 1.4, glows: true)
+                            .frame(height: 30)
+                    }
                 }
             }
-            .frame(height: 96)
+            .frame(height: size)
         }
     }
 }
@@ -322,27 +370,82 @@ private struct TopNetworkStrip: View {
 private struct CoreMap: View {
     @Environment(AppModel.self) private var model
     var snapshot: SystemSnapshot
+    /// Folded to its heading and each core type's load until opened, for a
+    /// narrow window; opening it is remembered.
+    var folds = false
+    @AppStorage("overviewShowsCores") private var showsCores = false
 
     var body: some View {
         let topology = model.topology
+        let isOpen = !folds || showsCores
         Card {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Cores").font(.headline)
-                Spacer()
-                Text("\(topology.brand) · load by core type").font(.explanation).foregroundStyle(.secondaryText)
+            if folds {
+                Button {
+                    showsCores.toggle()
+                } label: {
+                    heading(topology, isOpen: isOpen).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isOpen ? "Hide the map of cores" : "Show each core's load and the graph by core type")
+                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
+            } else {
+                heading(topology, isOpen: true)
             }
-            HStack(alignment: .top, spacing: 24) {
-                VStack(alignment: .leading, spacing: 12) {
+            if isOpen {
+                HStack(alignment: .top, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(topology.tiers, id: \.level) { tier in
+                            tierRow(tier, topology: topology)
+                        }
+                    }
+                    .layoutPriority(1)
+                    tierGraph(topology)
+                        .frame(minWidth: 160, maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// "Cores" and the chip; folded, each core type's load instead.
+    private func heading(_ topology: CPUTopology, isOpen: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if folds {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondaryText)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .accessibilityHidden(true)
+            }
+            Text("Cores").font(.headline)
+            Spacer(minLength: 8)
+            if isOpen {
+                Text("\(topology.brand) · load by core type").font(.explanation).foregroundStyle(.secondaryText).lineLimit(1)
+            } else {
+                HStack(spacing: 12) {
                     ForEach(topology.tiers, id: \.level) { tier in
-                        tierRow(tier, topology: topology)
+                        HStack(spacing: 5) {
+                            Circle().fill(Theme.tier(tier.level)).frame(width: 8, height: 8)
+                            Text("\(tier.name) \(Format.percent(Self.average(load(tier, topology: topology).usages)))")
+                        }
                     }
                 }
-                .layoutPriority(1)
-                tierGraph(topology)
-                    .frame(minWidth: 160, maxWidth: .infinity, maxHeight: .infinity)
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .monospacedDigit()
+                .lineLimit(1)
             }
-            .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// A core type's logical CPUs and their loads.
+    private func load(_ tier: CPUTopology.Tier, topology: CPUTopology) -> (cpus: [Int], usages: [Double]) {
+        let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level }
+        return (cpus, cpus.map { snapshot.cpu.coreUsage.indices.contains($0) ? snapshot.cpu.coreUsage[$0] : 0 })
+    }
+
+    private static func average(_ usages: [Double]) -> Double {
+        usages.isEmpty ? 0 : usages.reduce(0, +) / Double(usages.count)
     }
 
     private func tierGraph(_ topology: CPUTopology) -> some View {
@@ -354,9 +457,8 @@ private struct CoreMap: View {
     }
 
     private func tierRow(_ tier: CPUTopology.Tier, topology: CPUTopology) -> some View {
-        let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level }
-        let usages = cpus.map { snapshot.cpu.coreUsage.indices.contains($0) ? snapshot.cpu.coreUsage[$0] : 0 }
-        let average = usages.isEmpty ? 0 : usages.reduce(0, +) / Double(usages.count)
+        let (cpus, usages) = load(tier, topology: topology)
+        let average = Self.average(usages)
         return HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
@@ -364,7 +466,7 @@ private struct CoreMap: View {
                     Text(tier.name).font(.callout.weight(.medium))
                 }
                 Text("\(cpus.count) cores · \(Format.percent(average))")
-                    .font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
+                    .font(.explanation).foregroundStyle(.secondaryText).monospacedDigit()
             }
             .frame(width: 130, alignment: .leading)
             VStack(alignment: .leading, spacing: CoreTileRow.spacing) {
@@ -424,7 +526,7 @@ struct ThroughputCard: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         Label(title, systemImage: symbol)
-                            .font(.metadata.weight(.medium))
+                            .font(.explanation.weight(.medium))
                             .foregroundStyle(.secondaryText)
                         rate(rates.0, symbol: "arrow.down", color: color).help(labels.0)
                         rate(rates.1, symbol: "arrow.up", color: secondaryColor).help(labels.1)
@@ -481,11 +583,11 @@ private struct StorageCard: View {
                             Text(volume.name).font(.callout.weight(.medium)).lineLimit(1)
                             Spacer()
                             Text("\(Format.bytes(volume.availableBytes)) free")
-                                .font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
+                                .font(.explanation).foregroundStyle(.secondaryText).monospacedDigit()
                         }
                         StackedBar(segments: [.init(label: "Used", value: used, color: Theme.pressure(used))], total: 1, height: 8)
                         Text("\(Format.bytes(volume.usedBytes)) of \(Format.bytes(volume.totalBytes)) used")
-                            .font(.metadata).foregroundStyle(.secondaryText).monospacedDigit()
+                            .font(.explanation).foregroundStyle(.secondaryText).monospacedDigit()
                     }
                 }
             }

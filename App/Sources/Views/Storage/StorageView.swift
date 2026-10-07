@@ -13,15 +13,38 @@ import SwiftUI
 struct StorageView: View {
     private let store = StorageStore.shared
     @State private var hover = StorageHover()
+    /// The stage whose main control has keyboard focus, when one does.
+    @FocusState private var focus: StorageStage?
+    /// Focus is on its way to a stage's control: a quick scan can end
+    /// before Stop has taken it.
+    @State private var passesFocus = false
 
     var body: some View {
         Group {
             if let scope = store.scanning {
-                StorageProgressView(store: store, scope: scope)
+                StorageProgressView(store: store, scope: scope, focus: $focus)
             } else if let result = store.result {
-                StorageResultsView(store: store, result: result, hover: hover)
+                StorageResultsView(store: store, result: result, hover: hover, focus: $focus)
             } else {
-                StorageStartView(store: store)
+                StorageStartView(store: store, focus: $focus)
+            }
+        }
+        // Each stage replaces the last, and the control that had focus goes
+        // with it; focus would then fall back to the toolbar's first button,
+        // the sidebar toggle, ringed (with Full Keyboard Access on). It goes
+        // to the new stage's main control instead, once that's in the
+        // window. Focus elsewhere (the sidebar, the toolbar) stays put.
+        .onChange(of: stage) { old, new in
+            guard focus == old || passesFocus else { return }
+            passesFocus = true
+            Task { focus = new }
+        }
+        .onChange(of: focus) {
+            if focus != nil {
+                passesFocus = false
+            } else if passesFocus {
+                // The old stage's control left after the hand-over was asked for.
+                Task { focus = stage }
             }
         }
         .toolbar {
@@ -53,6 +76,16 @@ struct StorageView: View {
             store.handleLaunchArguments()
         }
     }
+
+    private var stage: StorageStage {
+        store.scanning != nil ? .scanning : store.result != nil ? .results : .start
+    }
+}
+
+/// The page's stages, each naming the control that takes focus when it
+/// opens: the first place to scan, Stop, and the list's picker.
+enum StorageStage: Hashable {
+    case start, scanning, results
 }
 
 /// Picks what to scan; picking starts the scan.
@@ -103,6 +136,7 @@ struct StorageItemMenu: View {
 /// A card per place to scan, since nothing is scanned until asked.
 private struct StorageStartView: View {
     let store: StorageStore
+    var focus: FocusState<StorageStage?>.Binding
 
     var body: some View {
         GeometryReader { proxy in
@@ -132,16 +166,18 @@ private struct StorageStartView: View {
                               detail: Self.detail(scope), volume: scope.volume) {
                         store.scan(scope)
                     }
+                    .focused(focus, equals: .start)
                 }
                 ScopeCard(symbol: "folder.badge.plus", title: "Choose Folder…", subtitle: "Any folder, on any disk",
                           detail: "Scan just the folder you pick.", volume: nil) {
                     store.chooseFolder()
                 }
+                .focused(focus, equals: .start)
             }
             .frame(maxWidth: 820)
             Text("Folders macOS keeps private (Mail, Messages, other apps' data) are counted as unreadable "
                 + "unless OpenTaskManager has Full Disk Access.")
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
@@ -180,16 +216,16 @@ private struct ScopeCard: View {
                     Image(systemName: symbol).font(.title2).foregroundStyle(Theme.disk).frame(width: 30)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title).font(.headline)
-                        Text(subtitle).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
+                        Text(subtitle).font(.explanation).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
                     }
                 }
-                Text(detail).font(.metadata).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
+                Text(detail).font(.explanation).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
                 if let volume, volume.totalBytes > 0 {
                     let used = Double(volume.usedBytes) / Double(volume.totalBytes)
                     VStack(alignment: .leading, spacing: 4) {
                         ShareBar(segments: [(Theme.disk, used), (Color.secondary.opacity(0.25), 1 - used)]).frame(height: 6)
                         Text("\(Format.bytes(volume.usedBytes)) used of \(Format.bytes(volume.totalBytes))")
-                            .font(.metadata)
+                            .font(.explanation)
                             .foregroundStyle(.secondaryText)
                             .monospacedDigit()
                     }
@@ -214,6 +250,7 @@ private struct ScopeCard: View {
 private struct StorageProgressView: View {
     let store: StorageStore
     let scope: StorageScope
+    var focus: FocusState<StorageStage?>.Binding
 
     var body: some View {
         let progress = store.progress
@@ -223,11 +260,12 @@ private struct StorageProgressView: View {
                     Image(systemName: scope.symbol).font(.system(size: 30, weight: .light)).foregroundStyle(Theme.disk).frame(width: 40)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Scanning \(scope.title)…").font(.title3.weight(.semibold))
-                        Text(scope.subtitle).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
+                        Text(scope.subtitle).font(.explanation).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
                     }
                     Spacer(minLength: 0)
                     Button("Stop", role: .cancel) { store.stop() }
                         .keyboardShortcut(.cancelAction)
+                        .focused(focus, equals: .scanning)
                 }
                 if let expected = scope.expectedBytes, expected > 0 {
                     ProgressView(value: min(Double(progress?.allocatedSize ?? 0) / Double(expected), 1))
@@ -244,7 +282,7 @@ private struct StorageProgressView: View {
                     }
                 }
                 Text(progress.map { ($0.currentFolder as NSString).abbreviatingWithTildeInPath } ?? "Starting…")
-                    .font(.metadata.monospaced())
+                    .font(.explanation.monospaced())
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -253,7 +291,7 @@ private struct StorageProgressView: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: 560)
             Text("You can switch pages; the scan carries on and its results stay until you quit.")
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .padding(.top, 10)
         }
@@ -263,7 +301,7 @@ private struct StorageProgressView: View {
 
     private func figure(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.metadata).foregroundStyle(.secondaryText)
+            Text(label).font(.explanation).foregroundStyle(.secondaryText)
             Text(value).font(.title3.weight(.medium)).monospacedDigit()
         }
     }
@@ -275,6 +313,7 @@ private struct StorageResultsView: View {
     let store: StorageStore
     let result: StorageResult
     let hover: StorageHover
+    var focus: FocusState<StorageStage?>.Binding
 
     var body: some View {
         let usage = result.usage
@@ -293,7 +332,8 @@ private struct StorageResultsView: View {
             GeometryReader { proxy in
                 HStack(spacing: 12) {
                     TreemapCard(store: store, result: result, folder: folder, hover: hover, changes: changes, open: open)
-                    StorageListCard(store: store, usage: usage, folder: folder, hover: hover, open: open, show: show, pick: pick)
+                    StorageListCard(store: store, usage: usage, folder: folder, hover: hover, focus: focus, open: open, show: show,
+                                    pick: pick)
                         .frame(width: min(max(proxy.size.width * 0.36, 250), 340))
                 }
             }
@@ -375,7 +415,7 @@ private struct SummaryCard: View {
         Card(tint: Theme.disk, glow: 0.15) {
             VStack(alignment: .leading, spacing: 1) {
                 Label(result.scope.title, systemImage: result.scope.symbol).font(.headline).foregroundStyle(Theme.disk)
-                Text(result.scope.subtitle).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
+                Text(result.scope.subtitle).font(.explanation).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(Format.bytes(usage.root.allocatedSize)).font(.system(size: 28, weight: .semibold)).monospacedDigit()
@@ -389,7 +429,7 @@ private struct SummaryCard: View {
                 Text("Scanned at \(usage.finishedAt.formatted(date: .omitted, time: .shortened)), took \(Self.duration(usage.duration))")
                 if let comparison { change(comparison) }
             }
-            .font(.metadata)
+            .font(.explanation)
             .foregroundStyle(.secondaryText)
             .monospacedDigit()
         }
@@ -421,19 +461,24 @@ private struct SummaryCard: View {
     }
 }
 
-/// The space by category, as one bar and a legend with each one's share.
+/// The space by category, as one bar and a legend with each one's share,
+/// always in the same order so scans compare at a glance.
 private struct CategoriesCard: View {
-    private static let columns = [GridItem(.adaptive(minimum: 190), spacing: 18, alignment: .leading)]
+    // Wide enough for "Archives & Disk Images" and its figures whole at 12 points.
+    private static let columns = [GridItem(.adaptive(minimum: 250), spacing: 18, alignment: .leading)]
 
     let usage: DiskUsage
 
     var body: some View {
-        let shown = usage.categories.filter { $0.allocatedSize > 0 }
+        // Largest first in the model; here in a fixed order, so two categories
+        // of about the same size don't swap places between scans.
+        let largest = usage.categories.first { $0.allocatedSize > 0 }
+        let shown = DiskCategory.inDisplayOrder(usage.categories.filter { $0.allocatedSize > 0 })
         let total = Double(max(shown.reduce(0) { $0 + $1.allocatedSize }, 1))
-        Card(tint: shown.first.map { Theme.category($0.category) } ?? Theme.disk) {
+        Card(tint: largest.map { Theme.category($0.category) } ?? Theme.disk) {
             Text("By Category").font(.headline)
             if shown.isEmpty {
-                Text("Nothing here takes up space.").font(.metadata).foregroundStyle(.secondaryText)
+                Text("Nothing here takes up space.").font(.explanation).foregroundStyle(.secondaryText)
             }
             ShareBar(segments: shown.map { (Theme.category($0.category), Double($0.allocatedSize)) })
                 .frame(height: 12)
@@ -450,7 +495,7 @@ private struct CategoriesCard: View {
                             .monospacedDigit()
                             .frame(minWidth: 36, alignment: .trailing)
                     }
-                    .font(.metadata)
+                    .font(.explanation)
                     .fixedSize(horizontal: false, vertical: true)
                     .help("\(entry.category.title): \(Format.bytes(entry.allocatedSize)) on disk, "
                         + "\(Format.percent(share, digits: 1)) of the total")
@@ -521,13 +566,13 @@ private struct TreemapCard: View {
                     // The list beside says which scan the colours compare with.
                     Toggle("Changes only", isOn: $changesOnly)
                         .toggleStyle(.checkbox)
-                        .font(.metadata)
+                        .font(.explanation)
                         .fixedSize()
                         .help("Fade what hasn't changed since \(StorageChangeStyle.when(changes.since)), so what grew and shrank "
                             + "stands out. Faded folders still open.")
                 } else {
                     Text("\(Format.bytes(folder.allocatedSize)) · \(folder.itemCount.formatted()) items")
-                        .font(.metadata)
+                        .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .monospacedDigit()
                         .fixedSize()
@@ -579,24 +624,28 @@ private struct StorageFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if usage.unreadableFolders > 0 {
-                HStack(spacing: 8) {
+                // The sentence wraps in a narrow window rather than being cut.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(usage.unreadableFolders == 1
-                        ? "1 folder couldn't be read."
-                        : "\(usage.unreadableFolders.formatted()) folders couldn't be read.")
+                    (Text(usage.unreadableFolders == 1
+                        ? "1 folder couldn't be read. "
+                        : "\(usage.unreadableFolders.formatted()) folders couldn't be read. ")
                         .fontWeight(.medium)
-                    Text("Give OpenTaskManager Full Disk Access to count them.").foregroundStyle(.secondaryText)
+                        + Text("Give OpenTaskManager Full Disk Access to count them.").foregroundStyle(.secondaryText))
+                        .fixedSize(horizontal: false, vertical: true)
                     Button("Open Full Disk Access Settings") { store.openFullDiskAccessSettings() }
                         .buttonStyle(.link)
+                        .fixedSize()
                 }
-                .lineLimit(1)
                 .help(usage.unreadablePaths.prefix(5).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
             }
+            // Two lines at 820 points; the limit only bounds what a squeezed
+            // window would ask of the treemap above.
             Text(Self.explanation)
                 .foregroundStyle(.secondaryText)
-                .lineLimit(2)
+                .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.metadata)
+        .font(.explanation)
     }
 }

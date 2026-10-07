@@ -30,6 +30,32 @@ struct GridMathTests {
         #expect(GridMath.rows(count: 0, width: 800, minimum: 210, spacing: 16).isEmpty)
     }
 
+    @Test func columnsFitTheWidthUpToTheCardCount() {
+        #expect(GridMath.columnCount(count: 9, width: 952, minimum: 340, spacing: 16) == 2)
+        #expect(GridMath.columnCount(count: 9, width: 592, minimum: 340, spacing: 16) == 1)
+        #expect(GridMath.columnCount(count: 1, width: 952, minimum: 300, spacing: 16) == 1)
+        #expect(GridMath.columnCount(count: 0, width: 952, minimum: 300, spacing: 16) == 1)
+    }
+
+    @Test func packedCardsGoUnderTheShortestColumn() {
+        // A short Displays card beside a long Storage one: the next card goes
+        // under Displays rather than below both.
+        let packing = GridMath.packColumns(heights: [150, 260, 300, 120], columns: 2, spacing: 16)
+        #expect(packing.columns == [0, 1, 0, 1])
+        #expect(packing.tops == [0, 0, 166, 276])
+        #expect(packing.height == 466)
+        // Equal columns take the leftmost.
+        #expect(GridMath.packColumns(heights: [100, 100, 50], columns: 2, spacing: 10).columns == [0, 1, 0])
+    }
+
+    @Test func oneColumnStacksInOrder() {
+        let packing = GridMath.packColumns(heights: [40, 60, 20], columns: 1, spacing: 16)
+        #expect(packing.columns == [0, 0, 0])
+        #expect(packing.tops == [0, 56, 132])
+        #expect(packing.height == 152)
+        #expect(GridMath.packColumns(heights: [], columns: 2, spacing: 16).height == 0)
+    }
+
     @Test func itemsShareTheRowAfterSpacing() {
         #expect(GridMath.itemWidth(items: 3, width: 632, spacing: 16) == 200)
         #expect(GridMath.itemWidth(items: 1, width: 300, spacing: 16) == 300)

@@ -49,11 +49,11 @@ struct TreemapLayout: Equatable {
 
     /// The labels' fonts, which `TileLabel` draws them in too. Names are
     /// bold, so they lead over the size or change under them.
-    @MainActor static let nameFont = NSFont.systemFont(ofSize: 11, weight: .bold)
-    @MainActor static let sizeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+    @MainActor static let nameFont = NSFont.systemFont(ofSize: 12, weight: .bold)
+    @MainActor static let sizeFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
     /// A point smaller inside a folder's tile, so grandchildren read as inside it.
-    @MainActor static let innerNameFont = NSFont.systemFont(ofSize: 10, weight: .bold)
-    @MainActor static let innerSizeFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    @MainActor static let innerNameFont = NSFont.systemFont(ofSize: 11, weight: .bold)
+    @MainActor static let innerSizeFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
     /// Space between a label and its tile's edges.
     static let labelInset = CGSize(width: 6, height: 4)
     static let innerInset = CGSize(width: 4, height: 2)
@@ -445,7 +445,7 @@ private struct TreemapPointer: View {
             .overlay {
                 // Only for hovers here: the list beside it shows its own row.
                 if let hovered, hover.source == .treemap {
-                    TagPlacement(tile: inner?.rect ?? hovered.rect) {
+                    TagPlacement(tile: inner?.rect ?? hovered.rect, heading: hovered.header) {
                         if let inner, let item = inner.item {
                             HoverTag(item: item, look: inner.look, total: hovered.item.allocatedSize, within: hovered.item.name, since: layout.since)
                         } else {
@@ -454,8 +454,9 @@ private struct TreemapPointer: View {
                     }
                     .allowsHitTesting(false)
                 } else if let marked, let pick = hover.pick {
-                    // Names what the outline stands for, until the pointer explores the map.
-                    TagPlacement(tile: markedInner?.rect ?? marked.rect) {
+                    // Names what the outline stands for, until the pointer explores the map,
+                    // clear of the name of the folder holding it.
+                    TagPlacement(tile: markedInner?.rect ?? marked.rect, heading: marked.header) {
                         PickTag(pick: pick, isExact: isExact, trail: Format.trail(pick.path, under: folderPath))
                     }
                     .allowsHitTesting(false)
@@ -576,7 +577,7 @@ private struct PickTag: View {
             }
             if !trail.isEmpty, trail != pick.name {
                 Text(trail)
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -630,13 +631,13 @@ private struct HoverTag: View {
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(detail)
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .lineLimit(1)
                 if let since, let change = look.change, let direction = look.direction {
                     Text(StorageChangeStyle.summary(change, direction, since: since))
-                        .font(.metadata)
+                        .font(.explanation)
                         .foregroundStyle(StorageChangeStyle.textStyle(direction))
                         .monospacedDigit()
                         .lineLimit(3)
@@ -659,6 +660,8 @@ private struct TagPlacement: Layout {
     static let maximumWidth: CGFloat = 260
 
     let tile: CGRect
+    /// The name strip of the folder tile holding `tile`, kept in view.
+    var heading: CGRect?
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -667,7 +670,7 @@ private struct TagPlacement: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let tag = subviews.first else { return }
         let size = tag.sizeThatFits(ProposedViewSize(width: min(Self.maximumWidth, bounds.width), height: nil))
-        let origin = TreemapLabel.tagOrigin(size: size, tile: tile, bounds: bounds.size)
+        let origin = TreemapLabel.tagOrigin(size: size, tile: tile, bounds: bounds.size, heading: heading)
         tag.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: ProposedViewSize(size))
     }
 }
@@ -700,12 +703,12 @@ struct TreemapCaption: View {
                 .monospacedDigit()
                 .fixedSize()
             }
-            .font(.metadata)
+            .font(.explanation)
         } else if changes != nil {
             ChangeLegend(quietsUnchanged: quietsUnchanged)
         } else {
             Text(items.contains(where: \.isFolder) ? "Click a folder to open it" : "")
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
         }
     }
@@ -722,7 +725,7 @@ private struct ChangeLegend: View {
             entries([.grew, .shrank, .same])
             entries([.grew, .shrank])
         }
-        .font(.metadata)
+        .font(.explanation)
         .foregroundStyle(.secondaryText)
     }
 

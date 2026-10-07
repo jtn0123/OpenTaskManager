@@ -9,11 +9,36 @@ public enum GridMath {
     /// missing card never leaves a hole.
     public static func rows(count: Int, width: Double, minimum: Double, spacing: Double) -> [Range<Int>] {
         guard count > 0 else { return [] }
-        let fitting = width.isFinite ? Int((width + spacing) / max(minimum + spacing, 1)) : count
-        let columns = min(max(fitting, 1), count)
+        let columns = columnCount(count: count, width: width, minimum: minimum, spacing: spacing)
         let rowCount = (count + columns - 1) / columns
         let perRow = (count + rowCount - 1) / rowCount
         return stride(from: 0, to: count, by: perRow).map { $0..<min($0 + perRow, count) }
+    }
+
+    /// How many columns of at least `minimum` fit in `width`, from one up to
+    /// `count`, so a few cards still span the width.
+    public static func columnCount(count: Int, width: Double, minimum: Double, spacing: Double) -> Int {
+        let fitting = width.isFinite ? Int((width + spacing) / max(minimum + spacing, 1)) : count
+        return min(max(fitting, 1), max(count, 1))
+    }
+
+    /// Where cards of the given heights go in `columns` columns that each
+    /// run their own length: in order, each under whichever column is
+    /// shortest so far (the leftmost of equals). A short card beside a long
+    /// one then leaves no hole, as a row of even heights would inside it or
+    /// a row of own heights would below it.
+    public static func packColumns(heights: [Double], columns: Int, spacing: Double) -> ColumnPacking {
+        // Each column's bottom, as if a spacing sat above its first card.
+        var bottoms = [Double](repeating: -spacing, count: max(columns, 1))
+        var packing = ColumnPacking(columns: [], tops: [], height: 0)
+        for height in heights {
+            let column = bottoms.indices.min { bottoms[$0] < bottoms[$1] } ?? 0
+            packing.columns.append(column)
+            packing.tops.append(bottoms[column] + spacing)
+            bottoms[column] += spacing + height
+        }
+        packing.height = max(bottoms.max() ?? 0, 0)
+        return packing
     }
 
     /// Width of each of `items` cards sharing a row `width` wide.
@@ -50,6 +75,16 @@ public enum GridMath {
         let spare = width - widths.reduce(0, +) - spacing * Double(widths.count - 1)
         let extra = max(spare, 0) / Double(widths.count)
         return widths.map { $0 + extra }
+    }
+
+    /// Cards packed into columns by `packColumns`.
+    public struct ColumnPacking: Equatable, Sendable {
+        /// Each card's column, in order.
+        public var columns: [Int]
+        /// Each card's top, from the top of the grid.
+        public var tops: [Double]
+        /// The longest column's length.
+        public var height: Double
     }
 
     /// As many items on each row as fit within `limit`, in order.

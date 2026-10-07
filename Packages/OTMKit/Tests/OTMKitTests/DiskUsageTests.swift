@@ -92,6 +92,20 @@ struct DiskCategoryTests {
         #expect(DiskCategoryRules.region(insidePackage: .apps, in: .fixed(.developer)) == .fixed(.developer))
         #expect(DiskCategoryRules.region(insidePackage: .other, in: .fallback(.system)) == .fallback(.system))
     }
+
+    @Test func displayOrderHoldsAsSizesCross() {
+        #expect(DiskCategory.displayOrder.count == DiskCategory.allCases.count)
+        #expect(Set(DiskCategory.displayOrder) == Set(DiskCategory.allCases))
+        // Two scans where Archives and Developer swap places by size (a
+        // scan's totals come largest first) show them in the same order.
+        let first = [DiskCategoryTotal(category: .media, allocatedSize: 1450), DiskCategoryTotal(category: .developer, allocatedSize: 802),
+                     DiskCategoryTotal(category: .archives, allocatedSize: 735), DiskCategoryTotal(category: .other, allocatedSize: 0)]
+        let second = [DiskCategoryTotal(category: .media, allocatedSize: 1450), DiskCategoryTotal(category: .archives, allocatedSize: 885),
+                      DiskCategoryTotal(category: .developer, allocatedSize: 802), DiskCategoryTotal(category: .other, allocatedSize: 0)]
+        let order: [DiskCategory] = [.media, .archives, .developer, .other]
+        #expect(DiskCategory.inDisplayOrder(first).map(\.category) == order)
+        #expect(DiskCategory.inDisplayOrder(second).map(\.category) == order)
+    }
 }
 
 /// A folder of files with known sizes, removed when the test ends.

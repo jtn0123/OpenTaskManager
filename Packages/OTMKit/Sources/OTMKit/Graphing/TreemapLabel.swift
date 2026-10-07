@@ -49,14 +49,26 @@ public enum TreemapLabel {
     /// Where a tag of `size` goes for `tile` in a treemap of `bounds`: under
     /// the tile if it fits there, else above it, so the tile itself stays in
     /// view; for a tile as tall as the treemap, inside its top-left corner.
-    /// It never pokes out of the treemap.
-    public static func tagOrigin(size: CGSize, tile: CGRect, bounds: CGSize, gap: CGFloat = 6) -> CGPoint {
+    /// It never pokes out of the treemap, and it keeps clear of `heading`,
+    /// the name strip of the folder tile holding `tile` (or of `tile`
+    /// itself): rather than above a tile at the top of its folder it goes
+    /// above the folder's name, and inside, under it.
+    public static func tagOrigin(size: CGSize, tile: CGRect, bounds: CGSize, heading: CGRect? = nil, gap: CGFloat = 6) -> CGPoint {
         func clampX(_ x: CGFloat) -> CGFloat { min(max(x, 0), max(bounds.width - size.width, 0)) }
+        let x = clampX(tile.minX)
+        func clear(_ y: CGFloat) -> Bool {
+            heading.map { !CGRect(x: x, y: y, width: size.width, height: size.height).intersects($0) } ?? true
+        }
         let below = tile.maxY + gap
-        if below + size.height <= bounds.height { return CGPoint(x: clampX(tile.minX), y: below) }
+        if below + size.height <= bounds.height, clear(below) { return CGPoint(x: x, y: below) }
         let above = tile.minY - gap - size.height
-        if above >= 0 { return CGPoint(x: clampX(tile.minX), y: above) }
-        let inside = min(max(tile.minY + gap, 0), max(bounds.height - size.height, 0))
+        if above >= 0, clear(above) { return CGPoint(x: x, y: above) }
+        if let heading {
+            let overHeading = heading.minY - gap - size.height
+            if overHeading >= 0 { return CGPoint(x: x, y: overHeading) }
+        }
+        let top = max(tile.minY, heading.map { $0.maxY } ?? tile.minY) + gap
+        let inside = min(max(top, 0), max(bounds.height - size.height, 0))
         return CGPoint(x: clampX(tile.minX + gap), y: inside)
     }
 }
