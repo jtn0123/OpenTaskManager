@@ -160,6 +160,13 @@ Manager OG or any other proprietary task manager.
   runs it off the main actor every 3 s, only while the page is on screen.
   Anything on that page that changes every tick (the traffic card) reads the
   model in its own view, so the table isn't rebuilt each second.
+  `ConnectionWatch` (OTMKit, pure) diffs the walks into observed lifetimes:
+  sockets keyed by `ProcessIdentity`, descriptor, protocol and kernel handle,
+  with endpoints that must carry on, so a reused descriptor or PID is a new
+  socket. It feeds the "Seen for" column (time this page has seen a socket,
+  never its age), New on listeners seen opening (5 min), the details'
+  timeline, and Closed recently (15 min, at most 200). `ConnectionStore.shared`
+  lasts the session, so time away from the page shows as an unwatched gap.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s or more, not `ps %cpu`, and only once the graphs'
   5-minute windows have filled (about 5.5 minutes after launch): per-tick work
@@ -182,7 +189,8 @@ screencapture -x -o -l <windowID> out.png
 `-openResource cpu|memory|gpu|disk|network|power|sensors|benchmarks` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`
-selects the first matching socket on the Connections page so its details show,
+selects the first matching socket on the Connections page so its details show
+(`-openConnectionList closed` starts it on Closed recently),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
 `-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
 (add `-openAppRemoval YES` to open its Move to Trash review),
@@ -225,7 +233,7 @@ build, `-sensorFixture <file>` loads a recording from
   `rusage_info_v6`'s neural footprint (macOS 15+, read in the same rusage
   call): memory held for the Neural Engine, never shown as how busy it is.
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
-  Scope first, then PID, then Protocol; Process, Local, Remote and State
+  Protocol first, then PID, then Seen for, then Scope; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
   Its six summary cards fold into a strip of chips (rows from
   `GridMath.stripRows`) when they don't fit one row or the details are open,
