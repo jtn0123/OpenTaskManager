@@ -223,6 +223,9 @@ public struct ConnectionWatch: Sendable {
     public private(set) var closed: [ObservedConnection] = []
     public private(set) var firstWalk: Date?
     public private(set) var lastWalk: Date?
+    /// The first walk since the latest gap: what this page has watched
+    /// without a break.
+    private var stretchStart: Date?
     private var nextID: ObservedConnection.ID = 1
 
     /// `maximumSpacing` should leave room for a slow walk at the page's
@@ -263,6 +266,7 @@ public struct ConnectionWatch: Sendable {
         let previous = lastWalk
         let isAfterGap = previous.map { date.timeIntervalSince($0) > maximumSpacing } ?? false
         if firstWalk == nil { firstWalk = date }
+        if stretchStart == nil || isAfterGap { stretchStart = date }
 
         var waiting: [Key: ObservedConnection] = [:]
         waiting.reserveCapacity(open.count)
@@ -298,6 +302,26 @@ public struct ConnectionWatch: Sendable {
         open = found
         lastWalk = date
         prune(at: date)
+    }
+
+    /// How far back an empty closed list can say it was watched: since the
+    /// first walk after the latest gap, while that's within `closedWindow` of
+    /// the latest walk; after that, the window itself, as older closings are
+    /// let go. Either way only walks see a socket close. It changes once
+    /// after each gap and once when the window fills, never with every walk.
+    /// Nil before the first walk.
+    public var closedCoverage: ClosedCoverage? {
+        guard let stretchStart, let lastWalk else { return nil }
+        return lastWalk.timeIntervalSince(stretchStart) <= Self.closedWindow ? .since(stretchStart) : .window
+    }
+
+    /// See `closedCoverage`.
+    public enum ClosedCoverage: Hashable, Sendable {
+        /// Walks have run without a break since this one, and every closing
+        /// they saw is kept.
+        case since(Date)
+        /// Those seen in the last `closedWindow` are.
+        case window
     }
 
     private mutating func prune(at date: Date) {
