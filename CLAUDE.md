@@ -69,7 +69,11 @@ Manager OG or any other proprietary task manager.
   Don't swap either for SwiftUI `Path` or `Text` animations. The History page
   is the exception: its graphs are static Swift Charts, reloaded once per graph
   point, and its scrubber line is an overlay that alone reads the pointer, so
-  hovering never redraws the charts.
+  hovering never redraws the charts. Until a live graph's window fills, the
+  stretch before its first sample is a dimmed, hatched layer in the scroller
+  (paths built once per size, only moved per sample), and its "45 s collected"
+  caption is a `CATextLayer` reset only when the rounded figure from
+  `GraphCoverage` changes.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.
