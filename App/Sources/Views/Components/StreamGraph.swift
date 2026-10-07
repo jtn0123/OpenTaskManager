@@ -383,13 +383,24 @@ final class StreamGraphView: NSView {
         let padding = Double(verticalPadding)
         let usable = Double(max(height - 2 * verticalPadding, 1))
         let top = max(ceiling, .leastNonzeroMagnitude)
-        // A plain loop, as this runs for every point of every graph each
-        // sample: closures and generic min/max cost a call per point in a
-        // debug build. Unreadable values sit on the baseline.
-        var ys = [Double](repeating: padding, count: values.count)
-        for index in values.indices where values[index].isFinite {
-            let fraction = values[index] / top
-            ys[index] = padding + usable * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)
+        // A while loop over pointers, as this runs for every point of every
+        // graph each sample: closures, generic min/max, a range's iterator and
+        // an array's subscript each cost a call per point in a debug build.
+        // Unreadable values sit on the baseline.
+        let count = values.count
+        var ys = [Double](repeating: padding, count: count)
+        values.withUnsafeBufferPointer { valueBuffer in
+            ys.withUnsafeMutableBufferPointer { yBuffer in
+                guard let value = valueBuffer.baseAddress, let y = yBuffer.baseAddress else { return }
+                var index = 0
+                while index < count {
+                    if value[index].isFinite {
+                        let fraction = value[index] / top
+                        y[index] = padding + usable * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)
+                    }
+                    index += 1
+                }
+            }
         }
         return Trace(ys: ys, tangents: GraphMath.monotoneTangents(ys))
     }
@@ -418,22 +429,28 @@ final class StreamGraphView: NSView {
 
     /// Cubic Bézier segments equivalent to the monotone Hermite curve.
     private func appendCurve(_ trace: Trace, to path: CGMutablePath, firstX: CGFloat, step: CGFloat, reversed: Bool) {
-        let ys = trace.ys
-        let tangents = trace.tangents
-        guard ys.count > 1 else { return }
+        let count = trace.ys.count
+        guard count > 1, trace.tangents.count == count else { return }
         let third = step / 3
         let direction: Double = reversed ? -1 : 1
-        // Counted off a range rather than an array of indices made per path.
-        for offset in 0..<ys.count - 1 {
-            let index = reversed ? ys.count - 1 - offset : offset
-            let next = reversed ? index - 1 : index + 1
-            let x = firstX + CGFloat(index) * step
-            let nextX = firstX + CGFloat(next) * step
-            path.addCurve(
-                to: CGPoint(x: nextX, y: CGFloat(ys[next])),
-                control1: CGPoint(x: x + CGFloat(direction) * third, y: CGFloat(ys[index] + direction * tangents[index] / 3)),
-                control2: CGPoint(x: nextX - CGFloat(direction) * third, y: CGFloat(ys[next] - direction * tangents[next] / 3))
-            )
+        // A while loop over pointers, as in `makeTrace`.
+        trace.ys.withUnsafeBufferPointer { yBuffer in
+            trace.tangents.withUnsafeBufferPointer { tangentBuffer in
+                guard let ys = yBuffer.baseAddress, let tangents = tangentBuffer.baseAddress else { return }
+                var offset = 0
+                while offset < count - 1 {
+                    let index = reversed ? count - 1 - offset : offset
+                    let next = reversed ? index - 1 : index + 1
+                    let x = firstX + CGFloat(index) * step
+                    let nextX = firstX + CGFloat(next) * step
+                    path.addCurve(
+                        to: CGPoint(x: nextX, y: CGFloat(ys[next])),
+                        control1: CGPoint(x: x + CGFloat(direction) * third, y: CGFloat(ys[index] + direction * tangents[index] / 3)),
+                        control2: CGPoint(x: nextX - CGFloat(direction) * third, y: CGFloat(ys[next] - direction * tangents[next] / 3))
+                    )
+                    offset += 1
+                }
+            }
         }
     }
 

@@ -55,29 +55,41 @@ public enum GraphMath {
     public static func monotoneTangents(_ values: [Double]) -> [Double] {
         let count = values.count
         guard count > 1 else { return Array(repeating: 0, count: count) }
-        // Loops, not `map`: every graph runs this for each point each sample.
-        var deltas = [Double](repeating: 0, count: count - 1)
-        for index in 0..<count - 1 { deltas[index] = values[index + 1] - values[index] }
         var tangents = [Double](repeating: 0, count: count)
-        tangents[0] = deltas[0]
-        tangents[count - 1] = deltas[count - 2]
-        for index in 1..<count - 1 where deltas[index - 1] * deltas[index] > 0 {
-            tangents[index] = (deltas[index - 1] + deltas[index]) / 2
-        }
-        for index in 0..<count - 1 {
-            let delta = deltas[index]
-            if delta == 0 {
-                tangents[index] = 0
-                tangents[index + 1] = 0
-                continue
-            }
-            let alpha = tangents[index] / delta
-            let beta = tangents[index + 1] / delta
-            let length = alpha * alpha + beta * beta
-            if length > 9 {
-                let scale = 3 / length.squareRoot()
-                tangents[index] = scale * alpha * delta
-                tangents[index + 1] = scale * beta * delta
+        // While loops over pointers: every graph runs this for each point each
+        // sample, and in a debug build a range's iterator and an array's
+        // subscript are each a call per point, where a pointer's isn't. Each
+        // slope is worked out where it's needed, the same subtraction each time.
+        values.withUnsafeBufferPointer { valueBuffer in
+            tangents.withUnsafeMutableBufferPointer { tangentBuffer in
+                guard let value = valueBuffer.baseAddress, let tangent = tangentBuffer.baseAddress else { return }
+                tangent[0] = value[1] - value[0]
+                tangent[count - 1] = value[count - 1] - value[count - 2]
+                var index = 1
+                while index < count - 1 {
+                    let before = value[index] - value[index - 1]
+                    let after = value[index + 1] - value[index]
+                    if before * after > 0 { tangent[index] = (before + after) / 2 }
+                    index += 1
+                }
+                index = 0
+                while index < count - 1 {
+                    let delta = value[index + 1] - value[index]
+                    if delta == 0 {
+                        tangent[index] = 0
+                        tangent[index + 1] = 0
+                    } else {
+                        let alpha = tangent[index] / delta
+                        let beta = tangent[index + 1] / delta
+                        let length = alpha * alpha + beta * beta
+                        if length > 9 {
+                            let scale = 3 / length.squareRoot()
+                            tangent[index] = scale * alpha * delta
+                            tangent[index + 1] = scale * beta * delta
+                        }
+                    }
+                    index += 1
+                }
             }
         }
         return tangents

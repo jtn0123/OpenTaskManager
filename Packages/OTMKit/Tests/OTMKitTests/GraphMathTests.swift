@@ -64,6 +64,49 @@ struct GraphMathTests {
         #expect(GraphMath.hermite(from: 3, to: 7, startTangent: 1, endTangent: -2, at: 1) == 7)
     }
 
+    @Test func tangentsMatchTheTextbookFritschCarlson() {
+        // The method as usually written, slopes first, against the pointer
+        // loops: plateaus, spikes, steep runs and gentle ones, bit for bit.
+        func reference(_ values: [Double]) -> [Double] {
+            let count = values.count
+            let deltas = (0..<count - 1).map { values[$0 + 1] - values[$0] }
+            var tangents = [Double](repeating: 0, count: count)
+            tangents[0] = deltas[0]
+            tangents[count - 1] = deltas[count - 2]
+            for index in 1..<count - 1 where deltas[index - 1] * deltas[index] > 0 {
+                tangents[index] = (deltas[index - 1] + deltas[index]) / 2
+            }
+            for index in 0..<count - 1 {
+                guard deltas[index] != 0 else {
+                    tangents[index] = 0
+                    tangents[index + 1] = 0
+                    continue
+                }
+                let alpha = tangents[index] / deltas[index]
+                let beta = tangents[index + 1] / deltas[index]
+                let length = alpha * alpha + beta * beta
+                if length > 9 {
+                    tangents[index] = 3 / length.squareRoot() * alpha * deltas[index]
+                    tangents[index + 1] = 3 / length.squareRoot() * beta * deltas[index]
+                }
+            }
+            return tangents
+        }
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        let values = (0..<300).map { index -> Double in
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let noise = Double(seed >> 11) / Double(1 << 53)
+            switch index % 50 {
+            case 0..<8: return 2
+            case 8..<10: return noise * 100
+            case 10..<20: return Double(index % 50) * 7.5
+            default: return 40 + noise
+            }
+        }
+        #expect(GraphMath.monotoneTangents(values) == reference(values))
+        #expect(GraphMath.monotoneTangents([3, 0, 9, 9, 1]) == reference([3, 0, 9, 9, 1]))
+    }
+
     @Test func tangentsForShortInputs() {
         #expect(GraphMath.monotoneTangents([]).isEmpty)
         #expect(GraphMath.monotoneTangents([4]) == [0])
