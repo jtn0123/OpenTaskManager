@@ -244,28 +244,32 @@ final class StreamGraphView: NSView {
         plot.frame = plotRect
         scroller.frame = CGRect(x: 0, y: 0, width: plotRect.width + 2 * step + 16, height: plotRect.height)
         scroller.rasterizationScale = window?.backingScaleFactor ?? 2
-        drawGrid(in: plotRect, step: step, configuration: configuration)
         syncSeriesLayers(count: shown.count)
 
         var rescaleAnimations: [(CAShapeLayer, CGPath)] = []
-        for (index, values) in shown.enumerated() {
-            let line = configuration.lines[index]
-            let layers = series[index]
-            let trace = makeTrace(values, ceiling: ceiling, height: plotRect.height)
-            let below = configuration.stacked && index > 0
-                ? makeTrace(shown[index - 1], ceiling: ceiling, height: plotRect.height) : nil
-            let firstX = plotRect.width + step - CGFloat(values.count - 1) * step
-            let paths = makePaths(trace, below: below, firstX: firstX, step: step)
+        // Colours resolve for this view's appearance: the data colours are
+        // deeper in light mode, and re-render when it changes.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            drawGrid(in: plotRect, step: step, configuration: configuration)
+            for (index, values) in shown.enumerated() {
+                let line = configuration.lines[index]
+                let layers = series[index]
+                let trace = makeTrace(values, ceiling: ceiling, height: plotRect.height)
+                let below = configuration.stacked && index > 0
+                    ? makeTrace(shown[index - 1], ceiling: ceiling, height: plotRect.height) : nil
+                let firstX = plotRect.width + step - CGFloat(values.count - 1) * step
+                let paths = makePaths(trace, below: below, firstX: firstX, step: step)
 
-            if rescales {
-                let oldTrace = makeTrace(values, ceiling: previousCeiling, height: plotRect.height)
-                let oldBelow = below == nil ? nil : makeTrace(shown[index - 1], ceiling: previousCeiling, height: plotRect.height)
-                let old = makePaths(oldTrace, below: oldBelow, firstX: firstX, step: step)
-                rescaleAnimations.append((layers.line, old.line))
-                rescaleAnimations.append((layers.fillMask, old.area))
+                if rescales {
+                    let oldTrace = makeTrace(values, ceiling: previousCeiling, height: plotRect.height)
+                    let oldBelow = below == nil ? nil : makeTrace(shown[index - 1], ceiling: previousCeiling, height: plotRect.height)
+                    let old = makePaths(oldTrace, below: oldBelow, firstX: firstX, step: step)
+                    rescaleAnimations.append((layers.line, old.line))
+                    rescaleAnimations.append((layers.fillMask, old.area))
+                }
+                style(layers, line: line, configuration: configuration, paths: paths)
+                placeHead(layers, line: line, trace: trace, edge: plotRect.maxX, animated: scrolls)
             }
-            style(layers, line: line, configuration: configuration, paths: paths)
-            placeHead(layers, line: line, trace: trace, edge: plotRect.maxX, animated: scrolls)
         }
         scroller.position = CGPoint(x: -step, y: 0)
         CATransaction.commit()
@@ -358,13 +362,16 @@ final class StreamGraphView: NSView {
         }
     }
 
+    /// The line takes the colour's shade for this appearance (deeper in light
+    /// mode); its glow and the area under it keep the bright fill shade.
     private func style(_ layers: SeriesLayers, line: Line, configuration: Configuration, paths: (line: CGPath, area: CGPath)) {
         let color = line.color
+        let bright = color.fillShade
         layers.line.path = paths.line
         layers.line.strokeColor = color.cgColor
         layers.line.lineWidth = configuration.lineWidth
         layers.line.lineDashPattern = line.dashed ? [4, 3] : nil
-        layers.line.shadowColor = color.cgColor
+        layers.line.shadowColor = bright.cgColor
         layers.line.shadowRadius = configuration.glows ? 5 : 0
         layers.line.shadowOpacity = configuration.glows ? 0.95 : 0
 
@@ -375,7 +382,7 @@ final class StreamGraphView: NSView {
         layers.fillMask.path = paths.area
         let top: CGFloat = configuration.stacked ? 0.70 : (configuration.glows ? 0.45 : 0.35)
         let bottom: CGFloat = configuration.stacked ? 0.30 : 0
-        layers.fill.colors = [color.withAlphaComponent(top).cgColor, color.withAlphaComponent(bottom).cgColor]
+        layers.fill.colors = [bright.withAlphaComponent(top).cgColor, bright.withAlphaComponent(bottom).cgColor]
         layers.fill.startPoint = CGPoint(x: 0.5, y: 1)
         layers.fill.endPoint = CGPoint(x: 0.5, y: 0)
     }
@@ -387,9 +394,10 @@ final class StreamGraphView: NSView {
         let visible = configuration?.glows == true && !line.dashed && isTop && !trace.ys.isEmpty
         layers.head.isHidden = !visible
         guard visible, let last = trace.ys.last else { return }
-        layers.halo.backgroundColor = line.color.withAlphaComponent(0.28).cgColor
+        let bright = line.color.fillShade
+        layers.halo.backgroundColor = bright.withAlphaComponent(0.28).cgColor
         layers.dot.backgroundColor = line.color.cgColor
-        layers.dot.shadowColor = line.color.cgColor
+        layers.dot.shadowColor = bright.cgColor
         layers.head.position = CGPoint(x: edge, y: last)
         layers.head.removeAnimation(forKey: "glide")
 
@@ -410,15 +418,14 @@ final class StreamGraphView: NSView {
         layers.head.add(glide, forKey: "glide")
     }
 
+    /// Runs inside `render`'s appearance block, so the colours resolve for this view.
     private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration) {
         grid.isHidden = !configuration.showsGrid
         columns.isHidden = !configuration.showsGrid
-        var lineColor = NSColor.labelColor.cgColor
-        var labelColor = NSColor.secondaryLabelColor.cgColor
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            lineColor = NSColor.labelColor.withAlphaComponent(0.09).cgColor
-            labelColor = NSColor.secondaryLabelColor.cgColor
-        }
+        // Light mode needs a firmer grid to hold up on a pale plot.
+        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let lineColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.09 : 0.15).cgColor
+        let labelColor = NSColor.secondaryLabelColor.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
         if configuration.showsGrid {

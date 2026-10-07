@@ -115,7 +115,8 @@ struct ProcessesView: View {
             .cpu: Format.percent(snapshot.cpu.usage),
             .memory: Format.percent(snapshot.memory.usedFraction),
         ]
-        if let gpu = snapshot.gpus.first { totals[.gpu] = Format.percent(gpu.deviceUtilization) }
+        // Unreported figures (a VM's GPU load, power without sensors) get no total rather than a 0.
+        if let busy = snapshot.gpus.first?.deviceUtilization { totals[.gpu] = Format.percent(busy) }
         if let watts = snapshot.power.systemWatts { totals[.power] = Format.watts(watts) }
         let disk = snapshot.disks.reduce(0) { $0 + $1.readBytesPerSecond + $1.writeBytesPerSecond }
         totals[.disk] = Format.bytesPerSecond(disk)
@@ -131,8 +132,8 @@ private struct StatusBar: View {
             Text("\(snapshot.processes.count) processes")
             Text("CPU \(Format.percent(snapshot.cpu.usage))")
             Text("Memory \(Format.percent(snapshot.memory.usedFraction))")
-            if let gpu = snapshot.gpus.first {
-                Text("GPU \(Format.percent(gpu.deviceUtilization))")
+            if let busy = snapshot.gpus.first?.deviceUtilization {
+                Text("GPU \(Format.percent(busy))")
             }
             if let watts = snapshot.power.systemWatts {
                 Text("Power \(Format.watts(watts))")

@@ -93,4 +93,28 @@ struct ProcessTreeTests {
         let byName = ProcessTreeBuilder.sort(nodes, by: .name, ascending: true)
         #expect(byName[0].children.map(\.id) == [200, 100])
     }
+
+    @Test func groupTotalsKnowWhetherPowerWasMeasured() {
+        var measured = sample
+        measured[1].powerWatts = 1.5
+        measured[2].powerWatts = 0
+        let nodes = ProcessTreeBuilder.build(measured, mode: .grouped, appPIDs: [100, 200], currentUID: Self.me)
+        let apps = nodes[0].children
+        #expect(apps[0].totals.isPowerMeasured, "Safari and its helpers have readings")
+        #expect(apps[0].totals.powerWatts == 1.5)
+        #expect(!apps[1].totals.isPowerMeasured, "Mail has none: its 0 W is missing data")
+        #expect(nodes[0].totals.isPowerMeasured)
+        #expect(!nodes[2].totals.isPowerMeasured, "nothing in the system section was measured")
+        #expect(ProcessTotals(measured[2]).isPowerMeasured, "a measured 0 W is still a measurement")
+    }
+
+    @Test func tellsWhetherThisMacCountsEnergyPerProcess() {
+        var measured = sample
+        measured[1].powerWatts = 0.2
+        #expect(ProcessSample.measuresEnergy(measured, interval: 1) == true)
+        // A virtual machine's kernel counts no energy, so no process has a reading.
+        #expect(ProcessSample.measuresEnergy(sample, interval: 1) == false)
+        #expect(ProcessSample.measuresEnergy(sample, interval: 0) == nil, "the first sample has no rates yet")
+        #expect(ProcessSample.measuresEnergy([], interval: 1) == nil)
+    }
 }

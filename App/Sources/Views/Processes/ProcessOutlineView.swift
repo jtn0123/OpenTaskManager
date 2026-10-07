@@ -61,9 +61,10 @@ enum ProcessColumn: String, CaseIterable {
         }
     }
 
+    /// The meters sit behind the numbers, so they keep the pastel fill shade.
     @MainActor private static let colors = (
-        cpu: NSColor(Theme.cpu), memory: NSColor(Theme.memory), power: NSColor(Theme.power),
-        gpu: NSColor(Theme.gpu), disk: NSColor(Theme.disk), wakeups: NSColor(Theme.network)
+        cpu: NSColor(Theme.cpu).fillShade, memory: NSColor(Theme.memory).fillShade, power: NSColor(Theme.power).fillShade,
+        gpu: NSColor(Theme.gpu).fillShade, disk: NSColor(Theme.disk).fillShade, wakeups: NSColor(Theme.network).fillShade
     )
 }
 
@@ -488,7 +489,8 @@ struct ProcessOutlineView: NSViewRepresentable {
             case .memory:
                 return (Format.bytes(totals.memory), Double(totals.memory) / max(peaks.memory, 1_073_741_824))
             case .power:
-                guard process.powerWatts != nil || grouped else { return ("—", 0) }
+                // A group with no readings at all is unknown, not 0 W.
+                guard totals.isPowerMeasured else { return ("—", 0) }
                 return (Format.watts(totals.powerWatts), totals.powerWatts / max(peaks.power, 2))
             case .gpu:
                 guard process.gpuFraction != nil || (grouped && totals.gpuFraction > 0) else { return ("—", 0) }

@@ -32,7 +32,7 @@ public struct HistoryValues: Sendable, Equatable {
         self.memory = memory.usedFraction
         memoryPressure = memory.availablePercent.map { 1 - Double($0) / 100 } ?? memory.usedFraction
         swapUsed = Double(memory.swapUsed)
-        gpu = snapshot.gpus.map(\.deviceUtilization).max()
+        gpu = snapshot.gpus.compactMap(\.deviceUtilization).max()
         systemWatts = snapshot.power.systemWatts
         cpuWatts = parts?.watts(.cpu)
         gpuWatts = parts?.watts(.gpu)

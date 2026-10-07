@@ -7,8 +7,8 @@ struct MemoryDetail: View {
 
     static let bytesAxis: (Double) -> String = { Format.bytes(max($0, 0)) }
     static let rateAxis: (Double) -> String = { Format.bytesPerSecond(max($0, 0)) }
-    private static let pageIn = Color(red: 0.32, green: 0.70, blue: 0.86)
-    private static let pageOut = Color(red: 0.64, green: 0.42, blue: 0.96)
+    private static let pageIn = Theme.data(0.32, 0.70, 0.86)
+    private static let pageOut = Theme.data(0.64, 0.42, 0.96)
 
     var body: some View {
         let memory = snapshot.memory

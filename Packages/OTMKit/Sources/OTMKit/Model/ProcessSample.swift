@@ -60,4 +60,13 @@ public struct ProcessSample: Sendable, Codable, Identifiable, Hashable {
     public var isSystemProcess: Bool {
         uid == 0 || uid < 500 && uid != UInt32(getuid())
     }
+
+    /// Whether processes sampled over `interval` show that this Mac counts
+    /// energy per process: one power reading is enough, since our own
+    /// processes always have one where the kernel counts energy. nil when the
+    /// sample can't tell: no interval yet, or no process list.
+    public static func measuresEnergy(_ processes: [ProcessSample], interval: TimeInterval) -> Bool? {
+        guard interval > 0, !processes.isEmpty else { return nil }
+        return processes.contains { $0.powerWatts != nil }
+    }
 }

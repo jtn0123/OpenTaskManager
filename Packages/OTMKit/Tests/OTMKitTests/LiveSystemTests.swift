@@ -98,6 +98,21 @@ struct LiveSystemTests {
         }
     }
 
+    /// A virtual machine's GPU doesn't report its load and its kernel counts
+    /// no energy per process; real Apple silicon does both, and must keep
+    /// showing them as measured.
+    @Test func appleSiliconReportsGPULoadAndProcessEnergy() async throws {
+        let monitor = SystemMonitor()
+        let snapshot = try await monitor.measuredSample(over: .milliseconds(300))
+        #expect(snapshot.measuresProcessEnergy != nil, "a second sample can always tell")
+        for gpu in snapshot.gpus {
+            #expect(gpu.deviceUtilization.map { (0...1).contains($0) } ?? true)
+        }
+        guard monitor.topology.isAppleSilicon, Sysctl.int("kern.hv_vmm_present") != 1 else { return }
+        #expect(snapshot.gpus.contains { $0.deviceUtilization != nil })
+        #expect(snapshot.measuresProcessEnergy == true)
+    }
+
     @Test func processListIncludesSelfAndSystemProcesses() async throws {
         let monitor = SystemMonitor()
         let snapshot = try await monitor.measuredSample(over: .milliseconds(300))

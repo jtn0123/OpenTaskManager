@@ -150,7 +150,7 @@ private struct ResourceRow: View {
             return [chip, fans.isEmpty ? nil : "Fans " + fans.joined(separator: ", ")].compactMap { $0 }.joined(separator: "\n")
         case let .gpu(id):
             guard let gpu = snapshot.gpus.first(where: { $0.id == id }) else { return "" }
-            return "\(gpu.name)\n\(Format.percent(gpu.deviceUtilization))"
+            return "\(gpu.name)\n\(gpu.deviceUtilization.map { Format.percent($0) } ?? Unavailable.gpuUtilization)"
         case let .disk(id):
             guard let disk = snapshot.disks.first(where: { $0.id == id }) else { return "" }
             return "\(disk.model ?? (disk.isSolidState == true ? "SSD" : "Disk"))\n\(Format.percent(disk.activeFraction)) active"

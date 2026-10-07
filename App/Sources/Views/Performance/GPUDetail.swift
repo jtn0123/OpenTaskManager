@@ -6,15 +6,24 @@ struct GPUDetail: View {
     var gpu: GPUSample
     var snapshot: SystemSnapshot
 
-    private static let renderer = Color(red: 0.58, green: 0.92, blue: 0.96)
-    private static let tiler = Color(red: 0.36, green: 0.62, blue: 1.00)
-    private static let clock = Color(red: 0.45, green: 0.95, blue: 0.75)
+    private static let renderer = Theme.data(0.58, 0.92, 0.96)
+    private static let tiler = Theme.data(0.36, 0.62, 1.00)
+    private static let clock = Theme.data(0.45, 0.95, 0.75)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            DetailHeader(title: "GPU", subtitle: gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name)
+            DetailHeader(title: "GPU", subtitle: subtitle)
             stats()
-            utilization()
+            if let busy = gpu.deviceUtilization {
+                utilization(busy)
+            } else {
+                // A paravirtual GPU only reports memory: say so rather than graph a flat 0%.
+                ChartCard(title: "Utilization", trailing: Unavailable.gpuUtilization, tint: Theme.gpu, span: nil) {
+                    UnavailableNote(text: Unavailable.gpuUtilizationDetail)
+                        .frame(maxWidth: .infinity)
+                        .chartFrame(height: 90, tint: Theme.gpu)
+                }
+            }
             byApp()
             FillGrid(minimum: 280) {
                 if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }
@@ -25,16 +34,21 @@ struct GPUDetail: View {
         }
     }
 
-    private func utilization() -> some View {
+    private var subtitle: String {
+        let name = gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name
+        return gpu.deviceUtilization == nil ? "\(name) · utilization not reported" : name
+    }
+
+    private func utilization(_ busy: Double) -> some View {
         let detail = model.gpuDetail[gpu.id] ?? GPUHistory()
-        var legend = [LegendItem(name: "Device", color: Theme.gpu, value: Format.percent(gpu.deviceUtilization))]
+        var legend = [LegendItem(name: "Device", color: Theme.gpu, value: Format.percent(busy))]
         if let renderer = gpu.rendererUtilization {
             legend.append(LegendItem(name: "Renderer (shading)", color: Self.renderer, value: Format.percent(renderer)))
         }
         if let tiler = gpu.tilerUtilization {
             legend.append(LegendItem(name: "Tiler (geometry)", color: Self.tiler, value: Format.percent(tiler)))
         }
-        return ChartCard(title: "Utilization", trailing: Format.percent(gpu.deviceUtilization), tint: Theme.gpu, legend: legend) {
+        return ChartCard(title: "Utilization", trailing: Format.percent(busy), tint: Theme.gpu, legend: legend) {
             GraphView(
                 series: [
                     GraphSeries(values: model.gpuHistory[gpu.id]?.values ?? [], color: Theme.gpu),
@@ -90,7 +104,11 @@ struct GPUDetail: View {
 
     private func stats() -> some View {
         MetricStrip(tint: Theme.gpu) {
-            Stat(label: "Utilization", number: gpu.deviceUtilization, color: Theme.gpu) { Format.percent($0) }
+            if let busy = gpu.deviceUtilization {
+                Stat(label: "Utilization", number: busy, color: Theme.gpu) { Format.percent($0) }
+            } else {
+                Stat(label: "Utilization", value: "—", color: Theme.gpu).help(Unavailable.gpuUtilizationDetail)
+            }
             if let renderer = gpu.rendererUtilization {
                 Stat(label: "Renderer", number: renderer, color: Self.renderer) { Format.percent($0) }
             }

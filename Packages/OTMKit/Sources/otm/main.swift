@@ -129,7 +129,9 @@ func systemSummary(_ snapshot: SystemSnapshot, topology: CPUTopology) -> String 
     for gpu in snapshot.gpus {
         let cores = gpu.coreCount.map { " (\($0) cores)" } ?? ""
         let clock = gpu.frequencyMHz.map { "  \(Format.frequency(megahertz: $0))" } ?? ""
-        lines.append("GPU     \(Format.percent(gpu.deviceUtilization)) \(gpu.name)\(cores)\(clock)")
+        // "n/a" when the driver doesn't report utilization (a VM's paravirtual GPU).
+        let busy = gpu.deviceUtilization.map { Format.percent($0) } ?? "n/a"
+        lines.append("GPU     \(busy) \(gpu.name)\(cores)\(clock)")
     }
     for disk in snapshot.disks {
         lines.append("Disk    \(disk.bsdName) \(disk.model ?? "")"

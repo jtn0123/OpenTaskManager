@@ -18,16 +18,13 @@ final class GPUSampler {
             IORegistryEntryGetRegistryEntryID(accelerator, &registryID)
 
             let stats = properties.dictionary("PerformanceStatistics") ?? [:]
-            func fraction(_ key: String) -> Double? {
-                stats.double(key).map { min(max($0 / 100, 0), 1) }
-            }
             gpus.append(GPUSample(
                 registryID: registryID,
                 name: properties.string("model") ?? Self.parentModel(of: accelerator) ?? "GPU",
                 coreCount: properties.int("gpu-core-count"),
-                deviceUtilization: fraction("Device Utilization %") ?? fraction("GPU Activity(%)") ?? 0,
-                rendererUtilization: fraction("Renderer Utilization %"),
-                tilerUtilization: fraction("Tiler Utilization %"),
+                deviceUtilization: Self.deviceUtilization(stats),
+                rendererUtilization: Self.fraction("Renderer Utilization %", in: stats),
+                tilerUtilization: Self.fraction("Tiler Utilization %", in: stats),
                 memoryInUse: stats.uint64("In use system memory") ?? stats.uint64("vramUsedBytes"),
                 memoryAllocated: stats.uint64("Alloc system memory") ?? stats.uint64("vramFreeBytes")
             ))
@@ -45,6 +42,19 @@ final class GPUSampler {
         }
 
         return Result(gpus: gpus, processGPUTime: processTime)
+    }
+
+    /// How busy the whole GPU was, from its `PerformanceStatistics`. Apple
+    /// silicon publishes "Device Utilization %", Intel and AMD drivers "GPU
+    /// Activity(%)". nil when the driver publishes neither, as a virtual
+    /// machine's paravirtual GPU doesn't: that's unknown, not idle.
+    static func deviceUtilization(_ stats: [String: Any]) -> Double? {
+        fraction("Device Utilization %", in: stats) ?? fraction("GPU Activity(%)", in: stats)
+    }
+
+    /// A percentage statistic as a fraction, clamped to 0...1.
+    static func fraction(_ key: String, in stats: [String: Any]) -> Double? {
+        stats.double(key).map { min(max($0 / 100, 0), 1) }
     }
 
     /// Parses "pid 619, WindowServer".
