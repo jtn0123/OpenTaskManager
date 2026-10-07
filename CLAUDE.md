@@ -161,7 +161,12 @@ Manager OG or any other proprietary task manager.
   Anything on that page that changes every tick (the traffic card) reads the
   model in its own view, so the table isn't rebuilt each second.
 - Budget: each page should use under about 10% of one core in a debug build.
-  Measure CPU time over 20 s, not `ps %cpu`.
+  Measure CPU time over 20 s or more, not `ps %cpu`, and only once the graphs'
+  5-minute windows have filled (about 5.5 minutes after launch): per-tick work
+  grows with the history drawn and summed, so a reading at launch comes out two
+  to three times low. Most of a full page's cost is SwiftUI re-evaluating and
+  laying out what reads the tick, Core Animation commits and the menu bar item,
+  so keep what changes every tick in small views that read the model themselves.
 
 ## Screenshots and UI checks
 
