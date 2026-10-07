@@ -11,6 +11,10 @@ struct ConnectionsView: View {
     @State private var search = ""
     @State private var selection: Connection.ID?
     @State private var openedRequest = false
+    /// The window is too narrow for the table and the details side by side.
+    @State private var isNarrow = false
+    /// In a narrow window, the details cover the table.
+    @State private var showsFullDetail = false
     @State private var sortOrder = [KeyPathComparator(\ConnectionRow.processName)]
 
     var body: some View {
@@ -47,23 +51,38 @@ struct ConnectionsView: View {
                 .padding(.vertical, 10)
             // Like the Processes inspector, details only take room once
             // there's something to show, so the table gets the full width.
-            HStack(spacing: 0) {
+            InspectorSplit(
+                listMinimum: ConnectionTable.minimumWidth,
+                wantsInspector: selected != nil,
+                coversList: $showsFullDetail,
+                isNarrow: $isNarrow,
+                widthKey: "connectionInspectorWidth",
+                backTitle: "Connections"
+            ) {
                 ConnectionTable(rows: shown, selection: $selection, sortOrder: $sortOrder)
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } detail: {
                 if let selected {
-                    Divider()
                     ScrollView {
                         ConnectionDetail(row: selected, showProcess: { showProcess(selected.pid) },
                                          close: { selection = nil })
                             .padding(12)
                     }
-                    .frame(width: 290)
                 }
             }
             Divider()
             statusBar(shown: shown.count)
         }
         .onAppear(perform: selectRequestedConnection)
+        // The details come with a selection here, so in a narrow window
+        // picking a socket opens them, and Back returns to the table.
+        .onChange(of: selection) {
+            if isNarrow { showsFullDetail = selection != nil }
+        }
+        // Back clears the selection, so picking the same socket opens it again.
+        .onChange(of: showsFullDetail) {
+            if isNarrow, !showsFullDetail { selection = nil }
+        }
     }
 
     /// `--args -openConnection 443` selects the first socket matching that

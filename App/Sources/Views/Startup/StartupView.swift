@@ -42,6 +42,11 @@ struct StartupView: View {
     /// The item waiting on the Disable confirmation.
     @State private var disabling: LaunchItem?
     @State private var switchError: String?
+    /// The window is too narrow for the table and the details side by side.
+    @State private var isNarrow = false
+    /// In a narrow window, the details cover the table.
+    @State private var showsFullDetail = false
+    @State private var openedRequest = false
 
     var body: some View {
         Group {
@@ -63,12 +68,11 @@ struct StartupView: View {
                 .help("Read the launchd folders and ask launchd again")
             }
             ToolbarItem {
-                Button {
-                    showInspector.toggle()
-                } label: {
+                Button(action: toggleDetails) {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
-                .help("Show details for the selected item")
+                .help(isNarrow ? (showsFullDetail ? "Back to the list" : "Show the selected item's details")
+                    : "Show details for the selected item")
             }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Label, program or path")
@@ -107,27 +111,42 @@ struct StartupView: View {
             .padding(.top, 14)
             .padding(.bottom, 10)
 
-            // A pane beside the table, like the Connections details, rather than
-            // an inspector column: with the toolbar's search field, an inspector
-            // pushed the window's content past both of its edges.
-            HStack(spacing: 0) {
-                StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder, toggle: toggle)
-                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                if showInspector {
-                    Divider()
-                    Group {
-                        if let item = items.first(where: { $0.id == selection }) {
-                            StartupItemDetail(item: item) { toggle(item) }
-                        } else {
-                            ContentUnavailableView("No item selected", systemImage: "info.circle",
-                                                   description: Text("Select an item to see what it runs and when."))
-                        }
-                    }
-                    .frame(width: 300)
+            InspectorSplit(
+                listMinimum: StartupTable.minimumWidth,
+                // Like the Processes inspector, the details take room only once
+                // something is selected.
+                wantsInspector: showInspector && selection != nil,
+                coversList: $showsFullDetail,
+                isNarrow: $isNarrow,
+                widthKey: "startupInspectorWidth",
+                backTitle: "Startup"
+            ) {
+                StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder, toggle: toggle, open: openDetails)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } detail: {
+                if let item = items.first(where: { $0.id == selection }) {
+                    StartupItemDetail(item: item) { toggle(item) }
+                } else {
+                    ContentUnavailableView("No item selected", systemImage: "info.circle",
+                                           description: Text("Select an item to see what it runs and when."))
                 }
             }
             Divider()
             StartupStatusBar(shown: rows.count, total: items.count, scannedAt: scannedAt, isScanning: isScanning)
+        }
+    }
+
+    /// Double-click: the pane in a wide window, the full-width details in a narrow one.
+    private func openDetails() {
+        showInspector = true
+        if isNarrow { showsFullDetail = true }
+    }
+
+    private func toggleDetails() {
+        if isNarrow {
+            if showsFullDetail { showsFullDetail = false } else { openDetails() }
+        } else {
+            showInspector.toggle()
         }
     }
 
@@ -182,13 +201,14 @@ struct StartupView: View {
         items = scanned
         scannedAt = .now
         isScanning = false
-        if selection == nil || !scanned.contains(where: { $0.id == selection }) {
-            // `--args -openStartupItem <text>` picks the first item whose label or name contains it, for screenshots.
-            let rows = visibleRows(scanned)
-            let requested = LaunchArgument.string("openStartupItem").flatMap { query in
-                rows.first { $0.label.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query) }
-            }
-            selection = (requested ?? rows.first)?.id
+        if let selection, !scanned.contains(where: { $0.id == selection }) { self.selection = nil }
+        // `--args -openStartupItem <text>` picks the first item whose label or name contains it, once, for screenshots.
+        if !openedRequest, let query = LaunchArgument.string("openStartupItem") {
+            openedRequest = true
+            selection = visibleRows(scanned).first {
+                $0.label.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query)
+            }?.id
+            openDetails()
         }
     }
 }
@@ -210,10 +230,13 @@ private struct SummaryCard: View {
 // MARK: - Table
 
 private struct StartupTable: View {
+    /// The columns' minimum widths and the gaps between them.
+    static let minimumWidth: CGFloat = 130 + 80 + 110 + 80 + 70 + 5 * 17
     var rows: [LaunchItem]
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<LaunchItem>]
     var toggle: (LaunchItem) -> Void
+    var open: () -> Void
 
     var body: some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
@@ -256,6 +279,8 @@ private struct StartupTable: View {
                 Divider()
                 Button("Copy Label") { StartupActions.copyLabel(item) }
             }
+        } primaryAction: { _ in
+            open()
         }
     }
 }

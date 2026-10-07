@@ -8,6 +8,9 @@ struct ConnectionTable: View {
     @Binding var selection: Connection.ID?
     @Binding var sortOrder: [KeyPathComparator<ConnectionRow>]
 
+    /// The columns' minimum widths and the gaps between them.
+    static let minimumWidth: CGFloat = 90 + 38 + 56 + 80 + 80 + 60 + 80 + 7 * 17
+
     // Ideal widths are the least each column needs for typical content (an
     // IPv4 address and port, "All interfaces"). They add up to what's left
     // beside the details pane in a 1290-point window; with more room the

@@ -34,6 +34,11 @@ struct DriversView: View {
     @State private var isScanning = false
     @State private var search = ""
     @State private var selection: ExtensionItem.ID?
+    @State private var openedRequest = false
+    /// The window is too narrow for the table and the details side by side.
+    @State private var isNarrow = false
+    /// In a narrow window, the details cover the table.
+    @State private var showsFullDetail = false
     @State private var sortOrder = [
         KeyPathComparator(\ExtensionItem.publisher), KeyPathComparator(\ExtensionItem.category), KeyPathComparator(\ExtensionItem.name),
     ]
@@ -58,12 +63,11 @@ struct DriversView: View {
                 .help("Ask the kernel and systemextensionsctl again")
             }
             ToolbarItem {
-                Button {
-                    showInspector.toggle()
-                } label: {
+                Button(action: toggleDetails) {
                     Label("Inspector", systemImage: "sidebar.trailing")
                 }
-                .help("Show details for the selected extension")
+                .help(isNarrow ? (showsFullDetail ? "Back to the list" : "Show the selected extension's details")
+                    : "Show details for the selected extension")
             }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Name, bundle ID or team")
@@ -71,10 +75,9 @@ struct DriversView: View {
             if scan == nil { await rescan() }
         }
         .onChange(of: filter) {
-            // Keep something selected when the filter hides the selection.
+            // Drop a selection the filter hides, so its details go with it.
             guard let scan else { return }
-            let rows = visibleRows(scan.items)
-            if !rows.contains(where: { $0.id == selection }) { selection = rows.first?.id }
+            if !visibleRows(scan.items).contains(where: { $0.id == selection }) { selection = nil }
         }
     }
 
@@ -111,21 +114,39 @@ struct DriversView: View {
 
     private func content(_ rows: [ExtensionItem], scan: ExtensionScan) -> some View {
         let selected = rows.first { $0.id == selection }
-        return HStack(spacing: 0) {
-            DriverTable(rows: rows, selection: $selection, sortOrder: $sortOrder)
-                .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-            if showInspector {
-                Divider()
-                Group {
-                    if let selected {
-                        DriverDetail(item: selected, scan: scan)
-                    } else {
-                        ContentUnavailableView("No extension selected", systemImage: "info.circle",
-                                               description: Text("Select an extension to see what it does and where it came from."))
-                    }
-                }
-                .frame(width: 300)
+        return InspectorSplit(
+            listMinimum: DriverTable.minimumWidth,
+            // Like the Processes inspector, the details take room only once
+            // something is selected.
+            wantsInspector: showInspector && selected != nil,
+            coversList: $showsFullDetail,
+            isNarrow: $isNarrow,
+            widthKey: "driversInspectorWidth",
+            backTitle: "Drivers"
+        ) {
+            DriverTable(rows: rows, selection: $selection, sortOrder: $sortOrder, open: openDetails)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } detail: {
+            if let selected {
+                DriverDetail(item: selected, scan: scan)
+            } else {
+                ContentUnavailableView("No extension selected", systemImage: "info.circle",
+                                       description: Text("Select an extension to see what it does and where it came from."))
             }
+        }
+    }
+
+    /// Double-click: the pane in a wide window, the full-width details in a narrow one.
+    private func openDetails() {
+        showInspector = true
+        if isNarrow { showsFullDetail = true }
+    }
+
+    private func toggleDetails() {
+        if isNarrow {
+            if showsFullDetail { showsFullDetail = false } else { openDetails() }
+        } else {
+            showInspector.toggle()
         }
     }
 
@@ -160,16 +181,17 @@ struct DriversView: View {
         scan = scanned
         scannedAt = .now
         isScanning = false
-        guard selection == nil || !scanned.items.contains(where: { $0.id == selection }) else { return }
-        // `--args -openDriver <text>` picks the first extension whose name or
-        // bundle ID contains it, switching the filter if it hides it, for screenshots.
-        if let query = LaunchArgument.string("openDriver"), let requested = scanned.items.sorted(using: sortOrder).first(where: {
+        if let selection, !scanned.items.contains(where: { $0.id == selection }) { self.selection = nil }
+        // `--args -openDriver <text>` picks the first extension whose name or bundle ID
+        // contains it, once, switching the filter if it hides it, for screenshots.
+        guard !openedRequest, let query = LaunchArgument.string("openDriver") else { return }
+        openedRequest = true
+        if let requested = scanned.items.sorted(using: sortOrder).first(where: {
             $0.name.localizedCaseInsensitiveContains(query) || $0.bundleID.localizedCaseInsensitiveContains(query)
         }) {
             if !filter.includes(requested) { filter = requested.publisher == .apple ? .apple : .thirdParty }
             selection = requested.id
-        } else {
-            selection = visibleRows(scanned.items).first?.id
+            openDetails()
         }
     }
 }
@@ -291,6 +313,10 @@ private struct DriverTable: View {
     var rows: [ExtensionItem]
     @Binding var selection: ExtensionItem.ID?
     @Binding var sortOrder: [KeyPathComparator<ExtensionItem>]
+    var open: () -> Void
+
+    /// The columns' minimum widths and the gaps between them.
+    static let minimumWidth: CGFloat = 150 + 100 + 100 + 70 + 55 + 5 * 17
 
     var body: some View {
         // Brings a row picked before the table appeared (`-openDriver`) into view.
@@ -342,6 +368,8 @@ private struct DriverTable: View {
                 Divider()
                 Button("Copy Bundle ID") { DriverActions.copy(item.bundleID) }
             }
+        } primaryAction: { _ in
+            open()
         }
     }
 }
