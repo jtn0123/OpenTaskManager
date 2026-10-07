@@ -16,33 +16,46 @@ struct ConnectionDetail: View {
     /// the Back button does that.
     var close: (() -> Void)?
 
+    /// The pane's height, and the header's and actions' as laid out.
+    @State private var height: CGFloat?
+    @State private var headerHeight: CGFloat = 0
+    @State private var actionsHeight: CGFloat = 0
+
     /// A pane's minimum height becomes the page's, so in one too short for
     /// the pinned top and a few lines of facts, the top scrolls with them
-    /// and only the actions stay put (as in `StartupItemDetail`).
+    /// and only the actions stay put (as `StartupItemDetail` does).
+    ///
+    /// Chosen from the measured heights rather than with `ViewThatFits`,
+    /// which measured both layouts again on every tick of the traffic card
+    /// (about two percent of a core).
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            VStack(spacing: 0) {
-                header
+        let pinsHeader = height.map { $0 >= headerHeight + 24 + Self.detailsMinimum + actionsHeight + 2 } ?? true
+        VStack(spacing: 0) {
+            if pinsHeader {
+                measuredHeader
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
                 ScrollView { details.padding(12) }
-                    .frame(minHeight: Self.detailsMinimum, idealHeight: Self.detailsMinimum, maxHeight: .infinity)
-                Divider()
-                actions.padding(12)
-            }
-            VStack(spacing: 0) {
+            } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        header
+                        measuredHeader
                         details
                     }
                     .padding(12)
                 }
-                Divider()
-                actions.padding(12)
             }
+            Divider()
+            actions
+                .padding(12)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { actionsHeight = $0 }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+    }
+
+    private var measuredHeader: some View {
+        header.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
     }
 
     // MARK: Sections

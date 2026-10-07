@@ -1,3 +1,4 @@
+import AppKit
 import OTMKit
 import SwiftUI
 
@@ -44,7 +45,13 @@ struct ConnectionTable: View {
         // Measured in a view of its own, so resizing the window re-runs that,
         // not the rows, and the columns change only when one has to give way.
         .background(ColumnFitter(userHidden: userHidden, hiddenToFit: $hiddenToFit))
+        .background(ColumnSqueeze(shown: shownCount))
         .onChange(of: userHidden.union(hiddenToFit), initial: true, showColumns)
+    }
+
+    /// How many columns the table has been told to show.
+    private var shownCount: Int {
+        ConnectionColumn.allCases.filter { columns[visibility: $0.rawValue] != .hidden }.count
     }
 
     private func showColumns() {
@@ -125,7 +132,7 @@ struct ConnectionTable: View {
 
     private var stateColumn: some Column {
         TableColumn("State", value: \.stateOrder) { row in
-            Text(row.connection.stateLabel).lineLimit(1).foregroundStyle(row.connection.kind.tint)
+            StateLabel(connection: row.connection)
         }
         .sized(.state)
     }
@@ -174,6 +181,108 @@ private struct ColumnFitter: View {
     }
 }
 
+/// Brings the shown columns back inside the table's edge once some have
+/// hidden to fit. A table already running past its edge, as it does for a
+/// moment when the details pane opens beside it, gives a hidden column's
+/// width to the others instead of narrowing, and would go on scrolling
+/// sideways. Runs when the columns shown or the table's size change, never
+/// on the store's refresh, and leaves a table that fits alone.
+private struct ColumnSqueeze: NSViewRepresentable {
+    var shown: Int
+
+    func makeNSView(context: Context) -> ColumnSqueezeView {
+        ColumnSqueezeView()
+    }
+
+    func updateNSView(_ view: ColumnSqueezeView, context: Context) {
+        view.shown = shown
+    }
+}
+
+private final class ColumnSqueezeView: NSView {
+    /// Setting it fits the columns again, once the table shows that many.
+    var shown = 0 {
+        didSet { if shown != oldValue { scheduleFit() } }
+    }
+
+    private weak var table: NSTableView?
+    private var isScheduled = false
+    /// Tries left to find the table showing `shown` columns: SwiftUI makes
+    /// it, and hides its columns, an update or two after this view's.
+    private var triesLeft = 0
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scheduleFit()
+    }
+
+    @objc private func scrollViewResized(_ notification: Notification) {
+        scheduleFit()
+    }
+
+    private func scheduleFit() {
+        triesLeft = 10
+        guard !isScheduled else { return }
+        isScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.fit() }
+    }
+
+    private func fit() {
+        isScheduled = false
+        guard window != nil else { return }
+        guard let table = table ?? nearestTable(),
+              let scrollView = table.enclosingScrollView,
+              table.tableColumns.filter({ !$0.isHidden }).count == shown
+        else {
+            retry()
+            return
+        }
+        if self.table !== table {
+            self.table = table
+            // The clip view, which narrows when the window or the details
+            // pane does, and when a scroller comes in.
+            scrollView.contentView.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(scrollViewResized),
+                                                   name: NSView.frameDidChangeNotification, object: scrollView.contentView)
+        }
+        let excess = table.frame.width - scrollView.contentView.bounds.width
+        guard excess > 0.5 else { return }
+        let columns = table.tableColumns.filter { !$0.isHidden }
+        let widths = ColumnFit.narrowed(widths: columns.map { Double($0.width) },
+                                        minimums: columns.map { Double($0.minWidth) },
+                                        by: Double(excess))
+        for (column, width) in zip(columns, widths) {
+            column.width = CGFloat(width)
+        }
+    }
+
+    private func retry() {
+        guard triesLeft > 0, !isScheduled else { return }
+        triesLeft -= 1
+        isScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.fit() }
+    }
+
+    /// The socket table: the first table with its seven columns in the
+    /// closest enclosing view that has one.
+    private func nearestTable() -> NSTableView? {
+        var ancestor = superview
+        while let view = ancestor {
+            if let table = Self.socketTable(in: view) { return table }
+            ancestor = view.superview
+        }
+        return nil
+    }
+
+    private static func socketTable(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView, table.tableColumns.count == ConnectionColumn.allCases.count { return table }
+        for subview in view.subviews {
+            if let table = socketTable(in: subview) { return table }
+        }
+        return nil
+    }
+}
+
 /// An address and its port on one line. Short of room, the address is cut
 /// in the middle and the port stays whole, so two sockets on one host still
 /// read apart; the whole endpoint is in the tooltip.
@@ -215,8 +324,23 @@ private struct ProtocolLabel: View {
     }
 }
 
-/// Scope with its icon; exposed sockets get a warning tint.
+/// The state in its colour, which turns white with the row's text on a
+/// selected row, where green or blue over the accent colour is hard to read.
+private struct StateLabel: View {
+    @Environment(\.backgroundProminence) private var prominence
+    var connection: Connection
+
+    var body: some View {
+        Text(connection.stateLabel)
+            .lineLimit(1)
+            .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(connection.kind.tint))
+    }
+}
+
+/// Scope with its icon; exposed sockets get a warning tint, white like the
+/// row's text on a selected row.
 struct ScopeLabel: View {
+    @Environment(\.backgroundProminence) private var prominence
     var connection: Connection
 
     var body: some View {
@@ -224,8 +348,12 @@ struct ScopeLabel: View {
             Text(connection.scope.label).lineLimit(1)
         } icon: {
             Image(systemName: connection.scope.symbol)
-                .foregroundStyle(connection.isExposed ? ConnectionTint.orange : connection.scope.tint)
+                .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(tint))
         }
+    }
+
+    private var tint: Color {
+        connection.isExposed ? ConnectionTint.orange : connection.scope.tint
     }
 }
 
