@@ -61,6 +61,9 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         case worse
         /// The two runs' ranges of repeats overlap: what moved could be noise.
         case withinSpread
+        /// Past both runs' spread but under `negligibleChange`: tight repeats,
+        /// yet too small a move to matter.
+        case negligible
         /// Measured once in a run, so there's no spread to tell noise from change.
         case measuredOnce
         case unchanged
@@ -113,14 +116,21 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         return (compared - baseline) / baseline
     }
 
+    /// The smallest move that counts as better or worse, as a share of the
+    /// earlier figure. Repeats can agree to a tenth of a percent, but a 0.1%
+    /// change in a benchmark is nothing a user would notice.
+    public static let negligibleChange = 0.01
+
     /// A change counts only when the two runs' ranges of repeats (slowest to
-    /// fastest) don't overlap; otherwise one run's noise could explain it.
+    /// fastest) don't overlap, so one run's noise can't explain it, and it
+    /// moved at least `negligibleChange`.
     public static func verdict(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement) -> Verdict {
         if compared.value == baseline.value { return .unchanged }
         guard let baseLow = baseline.low, let baseHigh = baseline.high, let low = compared.low, let high = compared.high else {
             return .measuredOnce
         }
         if baseLow <= high, low <= baseHigh { return .withinSpread }
+        if let change = change(from: baseline.value, to: compared.value), abs(change) < negligibleChange { return .negligible }
         return (compared.value > baseline.value) == baseline.unit.higherIsBetter ? .better : .worse
     }
 }
@@ -182,7 +192,7 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
 
     /// How many figures got each verdict, the moves first: "1 better · 5 within spread".
     public var verdictSummary: String {
-        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .measuredOnce, .unchanged]
+        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .negligible, .measuredOnce, .unchanged]
         return order.compactMap { verdict in
             let count = changes.count { $0.verdict == verdict }
             return count == 0 ? nil : "\(count) \(verdict.title.lowercased())"

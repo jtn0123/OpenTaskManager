@@ -234,6 +234,13 @@ struct BenchmarkRunTests {
         #expect(lower == .better)
     }
 
+    @Test func aTinyMovePastTightRangesIsNegligible() {
+        // 8.012 ranging 8.011–8.013, then 8.009 ranging 8.008–8.010: no overlap, but a 0.04% move.
+        #expect(BenchmarkChange.verdict(baseline: measurement(8.012, 8.011, 8.013), compared: measurement(8.009, 8.008, 8.010)) == .negligible)
+        // A 1% move past both ranges counts.
+        #expect(BenchmarkChange.verdict(baseline: measurement(100, 99.9, 100.1), compared: measurement(99, 98.9, 99.1)) == .worse)
+    }
+
     @Test func aFigureMeasuredOnceHasNoVerdict() {
         #expect(BenchmarkChange.verdict(baseline: measurement(100), compared: measurement(150)) == .measuredOnce)
         #expect(BenchmarkChange.verdict(baseline: measurement(100), compared: measurement(100)) == .unchanged)

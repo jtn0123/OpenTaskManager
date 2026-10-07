@@ -327,6 +327,7 @@ private struct ChangeTable: View {
         case .better: "checkmark.circle.fill"
         case .worse: "exclamationmark.circle.fill"
         case .withinSpread: "equal.circle"
+        case .negligible: "equal.circle"
         case .measuredOnce: "questionmark.circle"
         case .unchanged: "equal.circle"
         }
@@ -336,7 +337,7 @@ private struct ChangeTable: View {
         switch verdict {
         case .better: AnyShapeStyle(BenchmarkLook.better)
         case .worse: AnyShapeStyle(BenchmarkLook.worse)
-        case .withinSpread, .measuredOnce, .unchanged: AnyShapeStyle(.secondaryText)
+        case .withinSpread, .negligible, .measuredOnce, .unchanged: AnyShapeStyle(.secondaryText)
         }
     }
 }

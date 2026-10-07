@@ -262,6 +262,7 @@ public extension BenchmarkChange.Verdict {
         case .better: "Better"
         case .worse: "Worse"
         case .withinSpread: "Within spread"
+        case .negligible: "Negligible"
         case .measuredOnce: "Measured once"
         case .unchanged: "Unchanged"
         }
@@ -273,6 +274,7 @@ public extension BenchmarkChange.Verdict {
         case .better: "It moved the good way, past both runs' spread from slowest to fastest repeat."
         case .worse: "It moved the bad way, past both runs' spread from slowest to fastest repeat."
         case .withinSpread: "The two runs' ranges of repeats overlap, so the difference could be noise."
+        case .negligible: "It moved past both runs' spread, but by less than 1%: too little to matter."
         case .measuredOnce: "This test measures each figure once, so there's no spread to tell noise from change."
         case .unchanged: "The same figure in both runs."
         }
