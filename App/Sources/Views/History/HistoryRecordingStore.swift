@@ -24,6 +24,8 @@ final class HistoryRecordingStore {
     private(set) var replay: HistoryReplayStatus?
 
     @ObservationIgnored private var launchSpeed: Double?
+    @ObservationIgnored private var launchComparison: HistoryCompareRequest?
+    @ObservationIgnored private var launchComparisonIsForFile = false
     @ObservationIgnored private var handledLaunchArguments = false
 
     /// The sessions as the page last read them; only a change redraws what shows them.
@@ -112,13 +114,18 @@ final class HistoryRecordingStore {
 
     /// `-openRecording <path>` opens a recording file at launch, and
     /// `-openPlayback 1|10|60` plays it back at that speed once it shows.
+    /// `-openHistoryCompare 15,15[,45,15]` opens Compare with A (and B)
+    /// picked, in minutes before the end of the live history or the file
+    /// (`HistoryCompareRequest`).
     func handleLaunchArguments() {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
         if let speed = LaunchArgument.string("openPlayback").flatMap(Double.init), HistoryPlayback.speeds.contains(speed) {
             launchSpeed = speed
         }
+        launchComparison = LaunchArgument.string("openHistoryCompare").flatMap(HistoryCompareRequest.init)
         if let path = LaunchArgument.string("openRecording") {
+            launchComparisonIsForFile = true
             open(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
         }
     }
@@ -127,6 +134,15 @@ final class HistoryRecordingStore {
     func takeLaunchSpeed() -> Double? {
         defer { launchSpeed = nil }
         return launchSpeed
+    }
+
+    /// The comparison asked for at launch, once: for the file opened at
+    /// launch when there is one, so the live history shown meanwhile
+    /// doesn't take it.
+    func takeLaunchComparison(showingFile: Bool) -> HistoryCompareRequest? {
+        guard showingFile == launchComparisonIsForFile else { return nil }
+        defer { launchComparison = nil }
+        return launchComparison
     }
 
     // MARK: - Helpers

@@ -346,6 +346,48 @@ struct HistoryComparisonTests {
         #expect(HistoryComparison.busier(a: a, b: [], count: 1).map(\.name) == ["Xcode"])
     }
 
+    @Test func leadsWithCPUMemoryDiskAndNetwork() throws {
+        /// `disk` is read and write, `network` received and sent.
+        func sample(_ cpu: Double, _ peak: Double, disk: (Double, Double), network: (Double, Double)) -> HistoryValues {
+            var result = values(cpu: cpu, peak: peak, memory: cpu + 0.3, diskRead: disk.0, networkIn: network.0)
+            result.diskWrite = disk.1
+            result.networkOut = network.1
+            return result
+        }
+        let a = stats([record(at: 110, sample(0.2, 0.6, disk: (1_000, 9_000), network: (100, 0))),
+                       record(at: 120, sample(0.4, 0.5, disk: (5_000, 1_000), network: (300, 200)))], 100, 120)
+        let b = stats([record(at: 90, sample(0.1, 0.2, disk: (2_000, 2_000), network: (0, 0)))], 80, 100)
+        let comparison = HistoryComparison(a: a, b: b)
+        #expect(comparison.headlines.map(\.headline) == [.cpu, .memory, .disk, .network])
+        let cpu = try #require(comparison.headlines.first)
+        #expect(abs((cpu.a?.average ?? 0) - 0.3) < 1e-9)
+        #expect(cpu.a?.peak == 0.6)
+        #expect(cpu.changeText(.average) == "+20 pts")
+        #expect(cpu.changeText(.peak) == "+40 pts")
+        #expect(cpu.text(cpu.b, .peak) == "20%")
+        // Disk adds read and write in each stretch: 10 KB/s then 6 KB/s, so its
+        // peak is the busier stretch's sum, not the two peaks (5 + 9 KB/s) added.
+        let disk = try #require(comparison.headlines.first { $0.headline == .disk })
+        #expect(disk.a?.average == 8_000)
+        #expect(disk.a?.peak == 10_000)
+        #expect(disk.b?.average == 4_000)
+        #expect(disk.changeText(.average) == "+100%")
+        #expect(disk.text(disk.a, .peak) == Format.bytesPerSecond(10_000))
+        let network = try #require(comparison.headlines.first { $0.headline == .network })
+        #expect(network.a?.peak == 500)
+        #expect(network.changeText(.average) == "from none")
+        #expect(network.text(network.a, .average) == Format.bitsPerSecond(300))
+        // An interval with nothing recorded has no figures to set against.
+        let empty = HistoryComparison(a: a, b: stats([], 0, 10))
+        #expect(empty.headlines.first?.b == nil)
+        #expect(empty.headlines.first?.changeText(.average) == "—")
+        #expect(empty.headlines.first.map { $0.text($0.b, .average) } == "—")
+        #expect(HistoryHeadline.disk.parts == "read and write")
+        #expect(HistoryHeadline.cpu.parts == nil)
+        #expect(HistoryHeadline.memory.isFraction)
+        #expect(!HistoryHeadline.network.isFraction)
+    }
+
     @Test func countsEventsByKind() {
         let a = [HistoryEvent(time: date(1), kind: .appLaunched, name: "X"),
                  HistoryEvent(time: date(2), kind: .processStarted, name: "clang", count: 4)]
@@ -374,6 +416,37 @@ struct HistoryIntervalTests {
     @Test func saysHowMuchOfASpanWasSampled() {
         #expect(HistoryInterval.coverage(span: 1_200, sampled: 660) == "20 min span · 11 min sampled")
         #expect(HistoryInterval.coverage(span: 600, sampled: 900) == "10 min span · 10 min sampled")
+    }
+
+    @Test func saysWhatAnIntervalLeavesOut() {
+        #expect(HistoryInterval.leftOut(span: 1_200, sampled: 660) == "9 min of gaps left out")
+        #expect(HistoryInterval.leftOut(span: 1_200, sampled: 20) == "20 min of gaps left out")
+        // A record's timing isn't a gap: the graphs don't break under 2.5 records either.
+        #expect(HistoryInterval.leftOut(span: 900, sampled: 880) == "no gaps")
+        #expect(HistoryInterval.leftOut(span: 900, sampled: 870) == "30 s of gaps left out")
+        #expect(HistoryInterval.leftOut(span: 600, sampled: 900) == "no gaps")
+        #expect(HistoryInterval.leftOut(span: 600, sampled: 0) == "nothing recorded")
+    }
+}
+
+struct HistoryCompareRequestTests {
+    @Test func readsAAndOptionallyB() throws {
+        let end = date(10_000)
+        let request = try #require(HistoryCompareRequest("15,15"))
+        #expect(request.a.range(before: end) == date(9_100)...end)
+        #expect(request.b == nil)
+        let both = try #require(HistoryCompareRequest(" 30, 10 ,60,20"))
+        #expect(both.a.range(before: end) == date(8_200)...date(8_800))
+        #expect(both.b?.range(before: end) == date(6_400)...date(7_600))
+        // A length past the end is cut off there.
+        #expect(HistoryCompareRequest("5,20")?.a.range(before: end) == date(9_700)...end)
+        #expect(HistoryCompareRequest("0.5,0.5")?.a.range(before: end) == date(9_970)...end)
+    }
+
+    @Test func refusesAnythingElse() {
+        for text in ["", "15", "15,15,30", "15,0", "-5,5", "a,b", "15,15,45,x", "15,15,45,15,1", "nan,5"] {
+            #expect(HistoryCompareRequest(text) == nil, "\(text)")
+        }
     }
 }
 

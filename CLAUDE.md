@@ -68,7 +68,10 @@ Manager OG or any other proprietary task manager.
   processes from `ProcessEventTracker`, network changes, sleep and wake), go in the
   same database, its schema migrated by `PRAGMA user_version`, and in a file's
   optional `events` key; Compare's figures, `HistoryIntervalStats` and
-  `HistoryComparison`, leave gaps out),
+  `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
+  and B brackets over the rail; `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
+  opens Compare with them picked, counted back from the range's end, with B the
+  same length before A when left out),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick; while it's on screen

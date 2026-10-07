@@ -89,11 +89,36 @@ enum HistoryEventStyle {
     }
 }
 
-/// The events within the range as markers over the rail's track: one
-/// symbol per kind, those too close to draw apart as one marker with a
-/// count. Hovering one previews its moment and lists what happened in the
-/// tooltip; clicking moves playback there. Takes no room while the range
-/// has none.
+/// An event's marker: its kind's symbol (a stack for several kinds) in a
+/// dark capsule, with a count when it stands for more than one.
+struct HistoryEventMarker: View {
+    let symbol: String
+    let count: Int
+    let picked: Bool
+
+    static let size: CGFloat = 14
+
+    var body: some View {
+        HStack(spacing: 1) {
+            Image(systemName: symbol)
+                .font(.system(size: 8.5, weight: .bold))
+            if count > 1 {
+                Text("\(count)").font(.system(size: 11, weight: .semibold).monospacedDigit())
+            }
+        }
+        .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+        .padding(.horizontal, count > 1 ? 4 : 0)
+        .frame(minWidth: Self.size, minHeight: Self.size)
+        .background(Capsule().fill(picked ? Color.accentColor : Color(nsColor: .labelColor).opacity(0.62)))
+        .fixedSize()
+    }
+}
+
+/// The events within the range as markers in a thin lane of their own over
+/// the rail's track: one symbol per kind, those too close to draw apart as
+/// one marker with a count. Hovering one previews its moment and lists what
+/// happened in the tooltip; clicking moves playback there. Takes no room
+/// while the range has none.
 struct HistoryEventLane: View {
     let scrubber: HistoryScrubber
     let player: HistoryPlayer
@@ -102,7 +127,7 @@ struct HistoryEventLane: View {
     let domain: ClosedRange<Date>
     let bucket: TimeInterval
 
-    private static let size: CGFloat = 15
+    private static let size = HistoryEventMarker.size
 
     var body: some View {
         GeometryReader { geometry in
@@ -111,15 +136,17 @@ struct HistoryEventLane: View {
             let clusters = HistoryEvent.clusters(events.filter { domain.contains($0.time) },
                                                  spacing: Double(Self.size + 3) * span / Double(max(width, 1)))
             ZStack(alignment: .leading) {
-                // Holds the lane's left edge, which the markers are placed from.
-                Color.clear.frame(width: width, height: 1)
+                // The lane's own strip, which also holds its left edge for the markers.
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.primary.opacity(0.05))
+                    .frame(width: width, height: 8)
                 ForEach(clusters, id: \.first?.id) { cluster in
                     marker(cluster, width: width)
                 }
             }
             .frame(width: width, height: geometry.size.height, alignment: .leading)
         }
-        .frame(height: Self.size + 1)
+        .frame(height: Self.size)
     }
 
     private func marker(_ cluster: [HistoryEvent], width: CGFloat) -> some View {
@@ -131,19 +158,9 @@ struct HistoryEventLane: View {
         return Button {
             HistoryEventStyle.select(first, scrubber: scrubber, player: player, points: points, bucket: bucket)
         } label: {
-            HStack(spacing: 1) {
-                Image(systemName: kinds.count == 1 ? HistoryEventStyle.symbol(first.kind) : "square.stack.fill")
-                    .font(.system(size: 9, weight: .bold))
-                if count > 1 {
-                    Text("\(count)").font(.system(size: 11, weight: .semibold).monospacedDigit())
-                }
-            }
-            .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-            .padding(.horizontal, count > 1 ? 4 : 0)
-            .frame(minWidth: Self.size, minHeight: Self.size)
-            .background(Capsule().fill(picked ? Color.accentColor : Color(nsColor: .labelColor).opacity(0.62)))
-            .fixedSize()
-            .contentShape(Capsule())
+            HistoryEventMarker(symbol: kinds.count == 1 ? HistoryEventStyle.symbol(first.kind) : "square.stack.fill", count: count,
+                               picked: picked)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .onHover { inside in
