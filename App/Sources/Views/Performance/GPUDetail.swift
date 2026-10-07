@@ -24,6 +24,8 @@ struct GPUDetail: View {
             }
             TopAppsCard(title: "GPU", symbol: "cpu.fill", color: Theme.gpu, groups: model.appGroups,
                         metric: \.gpuFraction, format: { Format.percent($0.gpuFraction, digits: 1) }, minimum: 0.0005)
+            GPUBenchmarkCard()
+                .equatable()
         }
     }
 

@@ -37,6 +37,8 @@ samples and scale their axes to round numbers.
 - Memory: what's in memory over time (wired, app, compressed, cached), pressure,
   swap, paging and compressor activity, and memory by app.
 - GPU: shading and geometry load, GPU time by app, clock speed and GPU memory.
+  A benchmark times FP32 compute, memory bandwidth and fill rate in Metal on
+  the GPU's own clock (also `otm gpubench`).
 - Power: where the power goes (CPU, GPU, Neural Engine, DRAM and the rest of
   the system), energy since launch, adapter and battery flow, and power by app.
 - Each disk and network interface.

@@ -61,6 +61,8 @@ USAGE:
                                  Integer, floating-point and memory speed on one
                                  worker and on every core, about 20 s; layout
                                  shows the chip's core types, clusters and caches
+  otm gpubench [--json]          FP32 compute, memory bandwidth and fill rate on
+                                 the GPU (Metal), timed by the GPU, about 10 s
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -871,6 +873,9 @@ case "diskspeed":
 
 case "cpubench":
     cpuBenchCommand(options)
+
+case "gpubench":
+    gpuBenchCommand(options)
 
 case "kill":
     guard let pid = options.positional.first.flatMap(Int32.init) else { fail("kill needs a PID") }

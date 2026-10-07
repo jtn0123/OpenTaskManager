@@ -39,6 +39,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Overview dashboard with live core map | ✅ | |
 | Power by part of the chip | ✅ | CPU, GPU, Neural Engine, DRAM and the rest, from IOReport and the SMC |
 | CPU cluster and GPU clock speeds | ✅ | From IOReport residencies and the device tree's clock tables |
+| GPU benchmark | ✅ | FP32 compute, memory bandwidth and fill rate in Metal, timed by the GPU and checked against answers worked out beforehand, with the last 10 runs per Mac. On the GPU detail and as `otm gpubench` |
 | Memory by app, paging and compressor rates | ✅ | Stacked over time |
 | GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
 | System information page | ✅ | Hardware, displays, storage, network, attached devices (USB with hubs, Thunderbolt/USB4 ports and chains, Bluetooth with battery levels, audio and cameras), battery health, software and security state; identifiers hidden until shown; Refresh; Copy Summary; Save Report… as Markdown or versioned JSON (identifiers opt-in). Also `otm devices` and `otm system report [--json] [--all]` |
