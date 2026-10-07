@@ -121,8 +121,14 @@ struct ContentView: View {
     /// In a window under 900 points the sidebar steps aside, so the page gets
     /// the fifth of the width it took, and comes back when the window
     /// widens; the user's own show or hide wins (`SidebarVisibility` in OTMKit).
-    @State private var sidebar = SidebarVisibility(hiddenByUser: UserDefaults.standard.bool(forKey: Self.sidebarHiddenKey))
-    @FocusState private var sidebarFocused: Bool
+    /// It starts from the width the window opens at (its saved frame), so a
+    /// window that opens narrow never shows it. Hidden only once the window
+    /// was measured, it flashed by, and its list, focused by then, passed
+    /// the focus on to the toolbar's sidebar button.
+    @State private var sidebar = SidebarVisibility(
+        hiddenByUser: UserDefaults.standard.bool(forKey: Self.sidebarHiddenKey),
+        windowWidth: SidebarVisibility.openingWidth(savedFrame: UserDefaults.standard.string(forKey: "NSWindow Frame main"))
+    )
 
     var body: some View {
         NavigationSplitView(columnVisibility: Binding(
@@ -133,35 +139,47 @@ struct ContentView: View {
             List(Page.allCases, selection: Binding(get: { page }, set: { if let new = $0 { page = new } })) { page in
                 Label(page.rawValue, systemImage: page.symbol).tag(page)
             }
-            .focused($sidebarFocused)
             // As narrow as the longest name ("Connections") allows, and no
             // narrower: an icon-only sidebar had no room for the system's
             // toggle, which then went to the toolbar's overflow menu. A
             // narrow window hides the whole column instead.
             .navigationSplitViewColumnWidth(min: 150, ideal: 160, max: 240)
         } detail: {
-            switch page {
-            case .overview: OverviewView()
-            case .processes: ProcessesView()
-            case .performance: PerformanceView()
-            case .history: HistoryView()
-            case .connections: ConnectionsView()
-            case .startup: StartupView()
-            case .apps: AppsView()
-            case .users: UsersView()
-            case .system: SystemInfoView()
-            case .drivers: DriversView()
-            case .storage: StorageView()
+            Group {
+                switch page {
+                case .overview: OverviewView()
+                case .processes: ProcessesView()
+                case .performance: PerformanceView()
+                case .history: HistoryView()
+                case .connections: ConnectionsView()
+                case .startup: StartupView()
+                case .apps: AppsView()
+                case .users: UsersView()
+                case .system: SystemInfoView()
+                case .drivers: DriversView()
+                case .storage: StorageView()
+                }
             }
+            // The page takes the window's height, whatever it would ask
+            // for. Left to itself, a page's height ruled the split view's:
+            // Storage's scanning stage asked for 912 points in a 760-point
+            // window, so the split view, centred below the toolbar, began
+            // 50 points above the window (Connections, 4). AppKit then gave
+            // the detail column a toolbar backdrop of its own, laid out for
+            // that position, which stayed 50 points down the page once the
+            // scan ended and the split view moved back: a white band over
+            // Storage's top cards. A page too tall for the window now
+            // overflows inside the column instead (the window's minimum
+            // height never followed the pages either).
+            .frame(minHeight: 0, maxHeight: .infinity)
         }
         // Only crossing the breakpoint matters, not every step of a resize.
         .onGeometryChange(for: Bool.self) { SidebarVisibility.isNarrow(width: $0.size.width) } action: { narrow in
             sidebar.window(isNarrow: narrow)
-            // The list lets the keyboard focus go as it leaves, rather than
-            // pass it to the toolbar's first button, which then showed a
-            // focus ring with keyboard navigation on.
-            if !sidebar.isShown { sidebarFocused = false }
         }
+        // With the sidebar hidden, the focus goes to the page's main table
+        // or nowhere, not to the toolbar's sidebar button.
+        .background(PageFocus(page: page, sidebarShown: sidebar.isShown))
         .onChange(of: sidebar.hiddenByUser) { UserDefaults.standard.set(sidebar.hiddenByUser, forKey: Self.sidebarHiddenKey) }
         // With the sidebar hidden, the title still names the page, and the
         // View menu (⌘1 to ⌘9, `PageCommands`) changes it.

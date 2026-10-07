@@ -24,6 +24,36 @@ struct SidebarVisibilityTests {
         #expect(!sidebar.isShown)
     }
 
+    @Test func aWindowKnownToOpenNarrowNeverShowsIt() {
+        var sidebar = SidebarVisibility(windowWidth: 820)
+        #expect(!sidebar.isShown)
+        // The first measurement agrees, so nothing changes.
+        let before = sidebar
+        sidebar.windowWidth(820)
+        #expect(sidebar == before)
+        #expect(SidebarVisibility(windowWidth: 1180).isShown)
+        #expect(!SidebarVisibility(hiddenByUser: true, windowWidth: 1180).isShown)
+    }
+
+    @Test func aWrongOpeningWidthIsPutRightByTheFirstMeasurement() {
+        var sidebar = SidebarVisibility(windowWidth: 820)
+        sidebar.windowWidth(1180)
+        #expect(sidebar.isShown)
+        var wide = SidebarVisibility(windowWidth: 1180)
+        wide.windowWidth(820)
+        #expect(!wide.isShown)
+    }
+
+    @Test func readsTheWidthFromASavedWindowFrame() {
+        #expect(SidebarVisibility.openingWidth(savedFrame: "210 148 820 760 0 0 1600 970 ") == 820)
+        #expect(SidebarVisibility.openingWidth(savedFrame: "-40.5 12 1180.5 760 0 0 1600 970") == 1180.5)
+        #expect(SidebarVisibility.openingWidth(savedFrame: nil) == nil)
+        #expect(SidebarVisibility.openingWidth(savedFrame: "") == nil)
+        #expect(SidebarVisibility.openingWidth(savedFrame: "210 148 wide 760") == nil)
+        #expect(SidebarVisibility.openingWidth(savedFrame: "210 148 820") == nil)
+        #expect(SidebarVisibility.openingWidth(savedFrame: "210 148 0 760 0 0 1600 970") == nil)
+    }
+
     @Test func showingItInANarrowWindowLastsUntilTheWindowCrossesTheBreakpoint() {
         var sidebar = SidebarVisibility()
         sidebar.windowWidth(820)
