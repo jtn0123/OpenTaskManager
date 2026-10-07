@@ -3,8 +3,9 @@ import Foundation
 /// Everything the System page shows, as of one moment: what its Save Report
 /// writes and `otm system report` prints, as Markdown or as versioned JSON.
 /// Serial numbers, the hardware UUID, MAC, Bluetooth and IP addresses,
-/// routers, DNS servers, search domains and proxy hosts stay out unless
-/// `includeIdentifiers` is set, since a report gets shared.
+/// routers, DNS servers, search domains, proxy hosts, file servers, shares,
+/// accounts and smart-card tokens stay out unless `includeIdentifiers` is
+/// set, since a report gets shared.
 public struct SystemReportDocument: Sendable {
     /// Marks the JSON as a system report, whatever the file's name.
     public static let format = "io.github.jtn0123.OpenTaskManager.system-report"
@@ -20,17 +21,27 @@ public struct SystemReportDocument: Sendable {
     public var devicesCollectedAt: Date?
     /// nil while it's still being checked.
     public var security: SecurityStatus?
+    /// nil while it's still being read.
+    public var firewall: FirewallStatus?
+    /// Memory details, storage controllers and readers; nil until read.
+    public var hardware: HardwareInventory?
+    /// When `hardware` was read: the page keeps it for the session, until Refresh.
+    public var hardwareCollectedAt: Date?
     public var collectedAt: Date
     /// What wrote it: "OpenTaskManager 0.1.0", "otm 0.1.0".
     public var generator: String
 
     public init(info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, devicesCollectedAt: Date?,
-                security: SecurityStatus?, collectedAt: Date = Date(), generator: String) {
+                security: SecurityStatus?, firewall: FirewallStatus? = nil, hardware: HardwareInventory? = nil,
+                hardwareCollectedAt: Date? = nil, collectedAt: Date = Date(), generator: String) {
         self.info = info
         self.displays = displays
         self.devices = devices
         self.devicesCollectedAt = devicesCollectedAt
         self.security = security
+        self.firewall = firewall
+        self.hardware = hardware
+        self.hardwareCollectedAt = hardwareCollectedAt
         self.collectedAt = collectedAt
         self.generator = generator
     }
@@ -62,9 +73,10 @@ public struct SystemReportDocument: Sendable {
             lines += SystemReport.identifiers(hardware).map { "- \(Self.escaped($0.label)): " + Self.value($0) }
         } else {
             lines.append("- Left out: serial numbers, the hardware UUID, MAC, Bluetooth and IP addresses, routers, DNS servers, "
-                + "search domains and proxy hosts")
+                + "search domains, proxy hosts, file servers, shares, accounts and smart-card tokens")
         }
-        let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, now: collectedAt)
+        let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, firewall: firewall,
+                                             hardware: self.hardware, now: collectedAt)
         for section in sections {
             let rows = section.rows.filter { includeIdentifiers || !($0.isSensitive || $0.isAddress) }
             guard !rows.isEmpty else { continue }
@@ -83,6 +95,7 @@ public struct SystemReportDocument: Sendable {
                     lines.append((nested ? indent : "") + "- " + Self.escaped(row.label) + ": " + Self.value(row))
                 }
             }
+            if let note = section.note { lines += ["", Self.escaped(note)] }
         }
         return lines.joined(separator: "\n") + "\n"
     }

@@ -272,6 +272,9 @@ final class AppModel {
     /// A network interface ("en0") another page asked Performance to open
     /// ("Show traffic" on the System page). Cleared once shown.
     var requestedNetworkInterface: String?
+    /// A filter another page asked the Connections page to show ("Show
+    /// exposed sockets" on the System page's Firewall card). Cleared once applied.
+    var requestedConnectionFilter: ConnectionFilter?
     /// Highest whole-system draw seen on this Mac, kept across launches.
     private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
     /// `SystemSnapshot.measuresProcessEnergy`, read off the tick's walk over

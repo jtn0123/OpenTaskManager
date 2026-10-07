@@ -25,8 +25,10 @@ public enum SystemInfoReader {
             serialNumber: platform.serial,
             hardwareUUID: platform.uuid
         )
-        let disks = DiskSampler().sample(interval: 0).map {
-            DiskInfo(bsdName: $0.bsdName, model: $0.model, isInternal: $0.isInternal, isSolidState: $0.isSolidState, size: $0.size)
+        let disks = DiskSampler().sample(interval: 0).map { disk in
+            let link = readInterconnect(disk.bsdName)
+            return DiskInfo(bsdName: disk.bsdName, model: disk.model, isInternal: disk.isInternal, isSolidState: disk.isSolidState,
+                            size: disk.size, interconnect: link.interconnect, interconnectLocation: link.location)
         }
         return SystemInfo(
             hardware: hardware,
@@ -61,6 +63,23 @@ public enum SystemInfoReader {
             uuid = uuid ?? (IORegistry.property("IOPlatformUUID", of: device) as? String)
         }
         return (serial.flatMap { $0.isEmpty ? nil : $0 }, uuid.flatMap { $0.isEmpty ? nil : $0 })
+    }
+
+    /// The "Physical Interconnect" and its location from the "Protocol
+    /// Characteristics" the drive's storage driver publishes, on the
+    /// nearest ancestor of the disk's media that has them.
+    static func readInterconnect(_ bsdName: String) -> (interconnect: String?, location: String?) {
+        let media = IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
+        guard media != 0 else { return (nil, nil) }
+        defer { IOObjectRelease(media) }
+        let options = IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
+        let value = IORegistryEntrySearchCFProperty(media, kIOServicePlane, "Protocol Characteristics" as CFString, kCFAllocatorDefault,
+                                                    options)
+        guard let characteristics = value as? [String: Any] else { return (nil, nil) }
+        func text(_ key: String) -> String? {
+            characteristics.string(key).flatMap { $0.isEmpty ? nil : $0 }
+        }
+        return (text("Physical Interconnect"), text("Physical Interconnect Location"))
     }
 
     // MARK: - Software

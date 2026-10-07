@@ -62,8 +62,8 @@ public enum InfoBlock: Sendable, Hashable {
 
 public struct InfoSection: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable {
-        case processor, memory, graphics, displays, storage, network, networkConfiguration, usb, thunderbolt, bluetooth, audio, battery,
-             software, security
+        case processor, memory, graphics, displays, storage, controllers, network, networkConfiguration, networkVolumes, firewall, usb,
+             thunderbolt, bluetooth, audio, battery, software, security
 
         /// USB, Thunderbolt, Bluetooth, and audio and video: the cards
         /// listing what's attached, which keep their own heights on the page.
@@ -84,6 +84,8 @@ public struct InfoSection: Sendable, Hashable, Identifiable {
     public let kind: Kind
     public let title: String
     public let rows: [InfoRow]
+    /// A sentence under the rows on what the card can and can't tell.
+    public var note: String?
 
     /// Whether some rows wait behind a device's disclosure.
     public var hasDetails: Bool { rows.contains(where: \.isDetail) }
@@ -110,18 +112,21 @@ public struct InfoSection: Sendable, Hashable, Identifiable {
 /// Turns a `SystemInfo` into titled label/value sections, shared by the
 /// System page's cards and the plain-text summary it copies.
 public enum SystemReport {
-    /// `devices` is nil while the device report is still being read.
+    /// `devices`, `firewall` and `hardware` are nil while they're still being read.
     public static func sections(
-        _ info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, security: SecurityStatus?, now: Date = Date()
+        _ info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, security: SecurityStatus?,
+        firewall: FirewallStatus? = nil, hardware: HardwareInventory? = nil, now: Date = Date()
     ) -> [InfoSection] {
         var sections = [
             InfoSection(kind: .processor, title: "Processor", rows: processor(info)),
-            InfoSection(kind: .memory, title: "Memory", rows: memory(info)),
+            InfoSection(kind: .memory, title: "Memory", rows: memory(info, hardware: hardware)),
             InfoSection(kind: .graphics, title: "Graphics", rows: graphics(info)),
             InfoSection(kind: .displays, title: "Displays", rows: self.displays(displays)),
-            InfoSection(kind: .storage, title: "Storage", rows: storage(info)),
+            InfoSection(kind: .storage, title: "Storage", rows: storage(info, hardware: hardware)),
+            InfoSection(kind: .controllers, title: "Controllers and Readers", rows: controllers(hardware)),
         ]
         sections += networkSections(info.network, info.networkConfiguration)
+        sections.append(firewallSection(firewall))
         sections += deviceSections(devices)
         if let battery = info.battery {
             sections.append(InfoSection(kind: .battery, title: "Battery", rows: self.battery(battery)))
@@ -134,15 +139,16 @@ public enum SystemReport {
     /// The whole page as plain text. Serial number, hardware UUID and MAC
     /// addresses are left out unless `includeIdentifiers` is set.
     public static func text(
-        _ info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, security: SecurityStatus?, includeIdentifiers: Bool,
-        now: Date = Date()
+        _ info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, security: SecurityStatus?,
+        firewall: FirewallStatus? = nil, hardware inventory: HardwareInventory? = nil, includeIdentifiers: Bool, now: Date = Date()
     ) -> String {
         let hardware = info.hardware
         var lines = [hardware.displayName, summaryLine(info)]
         if includeIdentifiers {
             lines += identifiers(hardware).map { "\($0.label): \($0.value)" }
         }
-        lines += textLines(sections(info, displays: displays, devices: devices, security: security, now: now),
+        lines += textLines(sections(info, displays: displays, devices: devices, security: security, firewall: firewall,
+                                    hardware: inventory, now: now),
                            includeIdentifiers: includeIdentifiers)
         return lines.joined(separator: "\n") + "\n"
     }
@@ -160,9 +166,21 @@ public enum SystemReport {
     }
 
     /// Just the network cards, as `otm netconfig` prints them: addresses as
-    /// the page shows and copies them, MAC addresses only with `includeIdentifiers`.
-    public static func networkText(_ ports: [NetworkPortInfo], configuration: NetworkConfiguration?, includeIdentifiers: Bool) -> String {
-        textLines(networkSections(ports, configuration), includeIdentifiers: includeIdentifiers).dropFirst().joined(separator: "\n") + "\n"
+    /// the page shows and copies them, MAC addresses and share accounts only
+    /// with `includeIdentifiers`. The firewall's card follows when it was read.
+    public static func networkText(_ ports: [NetworkPortInfo], configuration: NetworkConfiguration?, firewall: FirewallStatus? = nil,
+                                   includeIdentifiers: Bool) -> String {
+        let sections = networkSections(ports, configuration) + (firewall.map { [firewallSection($0)] } ?? [])
+        return textLines(sections, includeIdentifiers: includeIdentifiers).dropFirst().joined(separator: "\n") + "\n"
+    }
+
+    /// Just the memory, storage controller and reader details, as `otm hardware` prints them.
+    public static func hardwareText(_ hardware: HardwareInventory, includeIdentifiers: Bool) -> String {
+        let sections = [
+            InfoSection(kind: .memory, title: "Memory", rows: memoryDetails(hardware)),
+            InfoSection(kind: .controllers, title: "Controllers and Readers", rows: controllers(hardware)),
+        ]
+        return textLines(sections, includeIdentifiers: includeIdentifiers).dropFirst().joined(separator: "\n") + "\n"
     }
 
     /// Each section as a blank line, its title and indented rows.
@@ -185,6 +203,7 @@ public enum SystemReport {
                     lines.append(indent + row.label + ": " + row.value.replacingOccurrences(of: "\n", with: continuation))
                 }
             }
+            if let note = section.note { lines.append("  " + note) }
         }
         return lines
     }
@@ -224,11 +243,12 @@ public enum SystemReport {
         return rows
     }
 
-    private static func memory(_ info: SystemInfo) -> [InfoRow] {
+    private static func memory(_ info: SystemInfo, hardware: HardwareInventory?) -> [InfoRow] {
         var rows = [InfoRow("Installed", SystemFacts.memorySize(info.hardware.physicalMemory))]
         if info.topology.isAppleSilicon {
             rows.append(InfoRow("Kind", "Unified memory, shared by the CPU, GPU and Neural Engine"))
         }
+        rows += memoryDetails(hardware)
         if let page = info.hardware.pageSize {
             rows.append(InfoRow("Page size", Format.bytes(UInt64(page))))
         }
@@ -264,9 +284,9 @@ public enum SystemReport {
         return rows
     }
 
-    /// Each drive with the volumes stored on it, then volumes with no drive
-    /// of their own here (disk images, network shares).
-    private static func storage(_ info: SystemInfo) -> [InfoRow] {
+    /// Each drive with how it's attached and the volumes stored on it, then
+    /// volumes with no drive of their own here (disk images, network shares).
+    private static func storage(_ info: SystemInfo, hardware: HardwareInventory?) -> [InfoRow] {
         func volumeRow(_ volume: VolumeInfo) -> InfoRow {
             let format = volume.fileSystem.map { " · \($0)" } ?? ""
             return InfoRow(volume.name, "\(SystemFacts.decimalBytes(volume.availableBytes)) free of "
@@ -279,7 +299,9 @@ public enum SystemReport {
             let medium = disk.isSolidState.map { $0 ? "SSD" : "hard disk" }
             rows.append(InfoRow(disk.model ?? disk.bsdName, [place, medium].compactMap { $0 }.joined(separator: " "), isHeading: true))
             if let size = disk.size { rows.append(InfoRow("Capacity", SystemFacts.decimalBytes(size))) }
+            if let connection = connection(disk) { rows.append(InfoRow("Connection", connection)) }
             rows.append(InfoRow("Device", disk.bsdName, isCode: true))
+            rows += driveDetails(disk.bsdName, hardware: hardware)
             rows += volumes.filter { $0.physicalDisk == disk.bsdName }.map(volumeRow)
         }
         let known = Set(info.disks.map(\.bsdName))

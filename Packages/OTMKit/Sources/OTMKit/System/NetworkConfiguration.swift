@@ -3,8 +3,9 @@ import Foundation
 
 /// How this Mac's network is set up, read once for the System page: each
 /// interface's addresses, MTU, flags and media; the services in System
-/// Settings, in order; and what's in effect now: the primary interface, the
-/// kernel's default routes, DNS, proxies and tunnels. What's configured (in
+/// Settings, in order, and its locations; what's in effect now: the primary
+/// interface, the kernel's default routes, DNS, proxies and tunnels; and the
+/// file shares mounted from servers. What's configured (in
 /// System Settings) is kept apart from what's operating now (on the
 /// interfaces and in the routing table), since a diagnosis often turns on
 /// the difference. `NetworkConfigurationReader` reads it; everything here is
@@ -24,9 +25,15 @@ public struct NetworkConfiguration: Sendable, Hashable {
     public var defaultRoutes: [DefaultRoute]
     public var dns: DNSStatus
     public var proxies: ProxyStatus
+    /// Configured: System Settings' locations, the one in use first. Empty
+    /// where they couldn't be read.
+    public var locations: [NetworkLocation]
+    /// SMB, NFS, AFP, WebDAV and FTP shares mounted now, from the mount table.
+    public var volumes: [NetworkVolume]
 
     public init(interfaces: [NetworkInterfaceDetails], services: [NetworkServiceInfo], primaryIPv4: NetworkPrimary?,
-                primaryIPv6: NetworkPrimary?, defaultRoutes: [DefaultRoute], dns: DNSStatus, proxies: ProxyStatus) {
+                primaryIPv6: NetworkPrimary?, defaultRoutes: [DefaultRoute], dns: DNSStatus, proxies: ProxyStatus,
+                locations: [NetworkLocation] = [], volumes: [NetworkVolume] = []) {
         self.interfaces = interfaces
         self.services = services
         self.primaryIPv4 = primaryIPv4
@@ -34,6 +41,8 @@ public struct NetworkConfiguration: Sendable, Hashable {
         self.defaultRoutes = defaultRoutes
         self.dns = dns
         self.proxies = proxies
+        self.locations = locations
+        self.volumes = volumes
     }
 
     public func interface(_ name: String) -> NetworkInterfaceDetails? {
@@ -531,8 +540,10 @@ extension NetworkConfiguration {
     /// Builds the configuration from SCDynamicStore's keys and values
     /// (`store`, "Setup:/Network/…" for what's configured and
     /// "State:/Network/…" for what's in effect, as `scutil` lists them), the
-    /// proxies in effect, the interfaces and the kernel's default routes.
-    public init(store: [String: Any], proxies: [String: Any], interfaces: [NetworkInterfaceDetails], routes: [DefaultRoute]) {
+    /// proxies in effect, the interfaces and the kernel's default routes, and
+    /// the locations and mounted shares as read.
+    public init(store: [String: Any], proxies: [String: Any], interfaces: [NetworkInterfaceDetails], routes: [DefaultRoute],
+                locations: [NetworkLocation] = [], volumes: [NetworkVolume] = []) {
         let services = Self.parseServices(store)
         let primaryIPv4 = Self.primary(store["State:/Network/Global/IPv4"])
         let primaryIPv6 = Self.primary(store["State:/Network/Global/IPv6"])
@@ -544,7 +555,9 @@ extension NetworkConfiguration {
             primaryIPv6: primaryIPv6,
             defaultRoutes: routes,
             dns: Self.parseDNS(store, services: services, primaryService: primaryService),
-            proxies: ProxyStatus(proxies)
+            proxies: ProxyStatus(proxies),
+            locations: locations,
+            volumes: volumes
         )
     }
 

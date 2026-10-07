@@ -5,7 +5,8 @@ import Foundation
 /// times ISO 8601, and attached devices nest under the hub or device
 /// they're plugged into. With identifiers left out, serial numbers, the
 /// hardware UUID, MAC, Bluetooth and IP addresses, routers, DNS servers,
-/// search domains and proxy hosts are `null`, and `includesIdentifiers` is false.
+/// search domains, proxy hosts, file servers, shares, accounts and
+/// smart-card tokens are `null`, and `includesIdentifiers` is false.
 struct SystemReportJSON: Encodable {
     let format = SystemReportDocument.format
     let schemaVersion = SystemReportDocument.schemaVersion
@@ -18,8 +19,12 @@ struct SystemReportJSON: Encodable {
     let displays: [Display]
     let storage: Storage
     let network: [NetworkPort]
-    /// Routes, DNS, proxies and services; null where it wasn't read.
+    /// Routes, DNS, proxies, locations, services and mounted shares; null where it wasn't read.
     @Nullable var networkConfiguration: NetworkSetup?
+    /// The application firewall's settings; null while they're still being read.
+    @Nullable var firewall: Firewall?
+    /// Memory details, storage controllers and readers; null until read.
+    @Nullable var hardwareDetails: HardwareDetails?
     /// null while the device report is still being read.
     @Nullable var devices: Devices?
     /// null on a Mac without one.
@@ -42,6 +47,8 @@ struct SystemReportJSON: Encodable {
         let configuration = info.networkConfiguration
         network = info.network.filter(\.isWorthListing).map { NetworkPort($0, configuration: configuration, keep: keep) }
         networkConfiguration = configuration.map { NetworkSetup($0, keep: keep) }
+        firewall = report.firewall.map(Firewall.init)
+        hardwareDetails = report.hardware.map { HardwareDetails($0, collectedAt: report.hardwareCollectedAt ?? report.collectedAt, keep: keep) }
         devices = report.devices.map { Devices($0, collectedAt: report.devicesCollectedAt ?? report.collectedAt, keep: keep) }
         battery = info.battery.map(Battery.init)
         software = Software(info.software, at: report.collectedAt)
@@ -193,6 +200,10 @@ struct SystemReportJSON: Encodable {
         @Nullable var isInternal: Bool?
         @Nullable var isSolidState: Bool?
         @Nullable var sizeBytes: UInt64?
+        /// How it's attached, as the I/O Registry says: "Apple Fabric", "USB".
+        @Nullable var interconnect: String?
+        /// "Internal" or "External".
+        @Nullable var interconnectLocation: String?
         let volumes: [Volume]
 
         init(_ disk: DiskInfo, volumes: [Volume]) {
@@ -201,6 +212,8 @@ struct SystemReportJSON: Encodable {
             isInternal = disk.isInternal
             isSolidState = disk.isSolidState
             sizeBytes = disk.size
+            interconnect = disk.interconnect
+            interconnectLocation = disk.interconnectLocation
             self.volumes = volumes
         }
     }

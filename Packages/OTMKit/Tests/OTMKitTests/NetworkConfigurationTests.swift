@@ -93,7 +93,30 @@ enum NetworkFixture {
         DefaultRoute(family: .ipv6, interface: "utun0", gateway: nil, destination: "::", prefixLength: 0, isScoped: true),
     ]
 
-    static let configuration = NetworkConfiguration(store: store, proxies: proxies, interfaces: interfaces, routes: routes)
+    /// Automatic in use, and an Office location that turns Wi-Fi off.
+    static let locations = [
+        NetworkLocation(id: "A1", name: "Automatic", isCurrent: true, services: [
+            .init(name: "Wi-Fi", interface: "en0", isEnabled: true),
+            .init(name: "USB 10/100/1000 LAN", interface: "en7", isEnabled: true),
+            .init(name: "Thunderbolt Bridge", interface: "bridge0", isEnabled: false),
+        ]),
+        NetworkLocation(id: "B2", name: "Office", isCurrent: false, services: [
+            .init(name: "USB 10/100/1000 LAN", interface: "en7", isEnabled: true),
+            .init(name: "Wi-Fi", interface: "en0", isEnabled: false),
+        ]),
+    ]
+
+    /// An SMB share mounted with an account, and an NFS export the
+    /// automounter put in a home folder, read-only, with no sizes.
+    static let volumes = [
+        NetworkVolume(kind: .smb, server: "nas.home.arpa", share: "Media", account: "jamie", mountPoint: "/Volumes/Media",
+                      totalBytes: 4_000_000_000_000, availableBytes: 1_250_000_000_000),
+        NetworkVolume(kind: .nfs, server: "10.0.0.20", share: "/export/builds", account: nil, mountPoint: "/Users/jamie/builds",
+                      totalBytes: nil, availableBytes: nil, isReadOnly: true, isAutomounted: true, isHidden: true),
+    ]
+
+    static let configuration = NetworkConfiguration(store: store, proxies: proxies, interfaces: interfaces, routes: routes,
+                                                    locations: locations, volumes: volumes)
 
     /// The ports as `SystemInfoReader.readNetwork` lists them.
     static let ports = [

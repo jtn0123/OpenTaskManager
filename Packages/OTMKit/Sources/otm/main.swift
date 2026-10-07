@@ -37,12 +37,20 @@ USAGE:
                                  signer, last opened; --sizes adds disk space
   otm devices [--all] [--json]   USB, Thunderbolt, Bluetooth, audio and video
                                  devices; --all adds serial numbers and addresses
+  otm hardware [--all] [--json]  Memory type and maker (slots where there are
+                                 any), storage controllers and their drives'
+                                 health, SD card readers and smart cards;
+                                 --all adds serial numbers and card tokens
   otm netconfig [--all] [--json] Each network port's addresses, router, link,
                                  MTU and flags, then DNS, proxies, default
-                                 routes, tunnels and service order; --all adds
-                                 MAC addresses, and to --json (which leaves
-                                 them out, like a saved report) addresses,
-                                 routers, DNS servers and proxy hosts
+                                 routes, tunnels, locations and service order,
+                                 mounted network shares, and the firewall's
+                                 settings (as far as they can be read without
+                                 administrator rights); --all adds MAC
+                                 addresses and share accounts, and to --json
+                                 (which leaves them out, like a saved report)
+                                 addresses, routers, DNS servers, proxy hosts,
+                                 file servers and shares
   otm inspect PID [--json]       Arguments, environment and open files
   otm du [PATH] [--depth N] [-n COUNT] [--changes] [--json]
                                  What's using the space under PATH (default: the
@@ -630,9 +638,12 @@ case "top":
 case "system" where options.positional.first == "report":
     // What the System page reads, the same way; the tool name stands in for the app's.
     async let security = SecurityReader.read()
+    async let firewall = FirewallReader.read()
     let devices = PeripheralReader.read()
+    let hardware = HardwareInventoryReader.read()
     let report = SystemReportDocument(info: SystemInfoReader.read(topology: monitor.topology), displays: DisplayReader.read(),
                                       devices: devices, devicesCollectedAt: Date(), security: await security,
+                                      firewall: await firewall, hardware: hardware, hardwareCollectedAt: Date(),
                                       generator: "otm \(version)")
     if options.json {
         guard let data = try? report.json(includeIdentifiers: options.all) else { fail("could not encode JSON") }
@@ -695,17 +706,10 @@ case "apps":
     }
 
 case "netconfig":
-    // The System page's two network cards, read the same way.
-    let ports = SystemInfoReader.readNetwork()
-    let configuration = NetworkConfigurationReader.read()
-    if options.json {
-        guard let data = try? SystemReportDocument.networkJSON(ports, configuration: configuration, includeIdentifiers: options.all) else {
-            fail("could not encode JSON")
-        }
-        FileHandle.standardOutput.write(data + Data("\n".utf8))
-    } else {
-        print(SystemReport.networkText(ports, configuration: configuration, includeIdentifiers: options.all), terminator: "")
-    }
+    await netconfigCommand(options)
+
+case "hardware":
+    hardwareCommand(options)
 
 case "devices":
     let devices = PeripheralReader.read()
