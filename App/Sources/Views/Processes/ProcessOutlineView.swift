@@ -2,88 +2,29 @@ import AppKit
 import OTMKit
 import SwiftUI
 
-/// Columns of the process table. The raw value doubles as the column
-/// identifier and, where sortable, the `ProcessSortKey`.
-enum ProcessColumn: String, CaseIterable {
-    case name, pid, cpu, memory, power, gpu, disk, threads, topTier, wakeups, user, kind
-
-    var title: String {
-        switch self {
-        case .name: "Name"
-        case .pid: "PID"
-        case .cpu: "CPU"
-        case .memory: "Memory"
-        case .power: "Power"
-        case .gpu: "GPU"
-        case .disk: "Disk"
-        case .threads: "Threads"
-        case .topTier: "Fast cores"
-        case .wakeups: "Wakeups/s"
-        case .user: "User"
-        case .kind: "Kind"
-        }
-    }
-
-    var width: CGFloat {
-        switch self {
-        case .name: 280
-        case .user: 110
-        case .pid, .threads, .kind: 64
-        default: 80
-        }
-    }
-
-    var hiddenByDefault: Bool {
-        self == .wakeups || self == .kind || self == .topTier
-    }
-
-    var sortKey: ProcessSortKey? {
-        switch self {
-        case .kind: nil
-        default: ProcessSortKey(rawValue: rawValue)
-        }
-    }
-
-    var isNumeric: Bool {
-        self != .name && self != .user && self != .kind
-    }
-
-    /// Colour of the meter bar behind busy values, matching the Performance page.
-    @MainActor var meterColor: NSColor? {
-        switch self {
-        case .cpu: Self.colors.cpu
-        case .memory: Self.colors.memory
-        case .power: Self.colors.power
-        case .gpu: Self.colors.gpu
-        case .disk: Self.colors.disk
-        case .wakeups: Self.colors.wakeups
-        default: nil
-        }
-    }
-
-    @MainActor private static let colors = (
-        cpu: NSColor(Theme.cpu), memory: NSColor(Theme.memory), power: NSColor(Theme.power),
-        gpu: NSColor(Theme.gpu), disk: NSColor(Theme.disk), wakeups: NSColor(Theme.network)
-    )
-}
-
 /// Everything the table needs from SwiftUI on each refresh.
 struct ProcessTableConfiguration {
     var nodes: [ProcessNode]
     /// Whole-system figures shown in the column headers, Windows-style.
     var headerTotals: [ProcessColumn: String]
+    var hiddenColumns: HiddenProcessColumns
     var cpuScale: CPUScale
     var heatmap: Bool
     var fastTierName: String
 }
 
 struct ProcessOutlineView: NSViewRepresentable {
-    var configuration: ProcessTableConfiguration
+    /// Nil while the inspector covers the table: it's hidden and not updated.
+    var configuration: ProcessTableConfiguration?
     @Binding var selection: Set<Int32>
     @Binding var sortKey: ProcessSortKey
     @Binding var ascending: Bool
     var model: AppModel
     var onShowInspector: () -> Void
+    var onToggleColumn: (ProcessColumn) -> Void
+    /// Called when the width the visible columns need (Name at its
+    /// narrowest) changes, so the page knows when the inspector fits beside.
+    var onMinimumWidthChange: (CGFloat) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -95,7 +36,10 @@ struct ProcessOutlineView: NSViewRepresentable {
         outline.allowsMultipleSelection = true
         outline.allowsColumnReordering = true
         outline.allowsColumnResizing = true
+        // Name takes up the slack instead: see `ProcessOutline.fitNameColumn`.
         outline.columnAutoresizingStyle = .noColumnAutoresizing
+        outline.intercellSpacing = NSSize(width: ProcessColumn.spacing, height: 0)
+        outline.headerView = NSTableHeaderView(frame: NSRect(x: 0, y: 0, width: 0, height: ProcessHeaderCell.headerHeight))
         outline.rowHeight = 22
         outline.style = .fullWidth
         outline.indentationPerLevel = 14
@@ -103,10 +47,13 @@ struct ProcessOutlineView: NSViewRepresentable {
 
         for column in ProcessColumn.allCases {
             let tableColumn = NSTableColumn(identifier: .init(column.rawValue))
-            tableColumn.title = column.title
+            let header = ProcessHeaderCell(textCell: column.title)
+            header.alignment = column.isNumeric ? .right : .left
+            tableColumn.headerCell = header
             tableColumn.width = column.width
-            tableColumn.minWidth = column == .name ? 140 : 44
-            tableColumn.headerCell.alignment = column.isNumeric ? .right : .left
+            tableColumn.minWidth = column.minWidth
+            // Name fills whatever the others leave, so it isn't dragged.
+            tableColumn.resizingMask = column == .name ? [] : .userResizingMask
             if let key = column.sortKey {
                 // Numbers default to descending: biggest consumers first.
                 tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: key.rawValue, ascending: !column.isNumeric)
@@ -115,7 +62,9 @@ struct ProcessOutlineView: NSViewRepresentable {
             outline.addTableColumn(tableColumn)
             if column == .name { outline.outlineTableColumn = tableColumn }
         }
-        outline.autosaveName = "ProcessOutline"
+        // Renamed from "ProcessOutline" when the columns got their minimum
+        // widths, so saved layouts from before start from the new defaults.
+        outline.autosaveName = "ProcessTable"
         outline.autosaveTableColumns = true
 
         let coordinator = context.coordinator
@@ -143,6 +92,15 @@ struct ProcessOutlineView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
+        guard let configuration else {
+            scrollView.isHidden = true
+            return
+        }
+        if scrollView.isHidden {
+            scrollView.isHidden = false
+            // Back from the full-width inspector: arrow keys work on the table again.
+            if let outline = context.coordinator.outline { scrollView.window?.makeFirstResponder(outline) }
+        }
         context.coordinator.apply(configuration)
     }
 
@@ -168,6 +126,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         private static let rootKey = Int64.min
         /// Largest value in each relative-scaled column this refresh.
         private var peaks = Peaks()
+        private var reportedMinimumWidth: CGFloat = 0
 
         struct Peaks {
             var memory: Double = 0
@@ -196,17 +155,12 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
 
         func apply(_ configuration: ProcessTableConfiguration) {
-            guard let outline else { return }
+            guard let outline = outline as? ProcessOutline else { return }
             // Reloading mid-click would swallow the click; the next tick catches up.
             guard NSEvent.pressedMouseButtons == 0 else { return }
             self.configuration = configuration
             syncSortDescriptor(outline)
-            for tableColumn in outline.tableColumns {
-                guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue) else { continue }
-                let base = column == .topTier ? "\(configuration.fastTierName) %" : column.title
-                let title = configuration.headerTotals[column].map { "\(base)  \($0)" } ?? base
-                if tableColumn.title != title { tableColumn.title = title }
-            }
+            updateColumns(outline, configuration: configuration)
 
             var live: [Int64: Item] = [:]
             func materialize(_ node: ProcessNode) -> Item {
@@ -246,6 +200,34 @@ struct ProcessOutlineView: NSViewRepresentable {
             refreshVisibleCells(in: outline)
             restoreSelection(in: outline, keeping: tableSelection)
             isRestoring = false
+        }
+
+        private func updateColumns(_ outline: ProcessOutline, configuration: ProcessTableConfiguration) {
+            var shownOrHidden = false
+            for (index, tableColumn) in outline.tableColumns.enumerated() {
+                guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue) else { continue }
+                let hidden = column != .name && configuration.hiddenColumns.contains(column)
+                if tableColumn.isHidden != hidden {
+                    tableColumn.isHidden = hidden
+                    shownOrHidden = true
+                }
+                let title = column == .topTier ? "\(configuration.fastTierName) %" : column.title
+                if tableColumn.title != title { tableColumn.title = title }
+                let total = configuration.headerTotals[column] ?? ""
+                if let header = tableColumn.headerCell as? ProcessHeaderCell, header.total != total {
+                    header.total = total
+                    if !hidden, let headerView = outline.headerView {
+                        headerView.setNeedsDisplay(headerView.headerRect(ofColumn: index))
+                    }
+                }
+            }
+            if shownOrHidden { outline.fitNameColumn() }
+            let minimum = outline.minimumWidth
+            guard minimum != reportedMinimumWidth else { return }
+            reportedMinimumWidth = minimum
+            let report = parent.onMinimumWidthChange
+            // Not during SwiftUI's update.
+            DispatchQueue.main.async { report(minimum) }
         }
 
         /// Row operations that turn the outline's current rows into the new layout.
@@ -411,6 +393,11 @@ struct ProcessOutlineView: NSViewRepresentable {
             (item as? Item)?.node.section == nil
         }
 
+        /// Name stays first: it holds the disclosure triangles and takes up the slack.
+        func outlineView(_ outlineView: NSOutlineView, shouldReorderColumn columnIndex: Int, toColumn newColumnIndex: Int) -> Bool {
+            columnIndex != 0 && newColumnIndex != 0
+        }
+
         func outlineViewItemDidExpand(_ notification: Notification) {
             track(notification, expanded: true)
         }
@@ -427,6 +414,13 @@ struct ProcessOutlineView: NSViewRepresentable {
             } else {
                 if isExpanded { expanded.insert(item.id) } else { expanded.remove(item.id) }
             }
+        }
+
+        func outlineViewColumnDidResize(_ notification: Notification) {
+            // A column the user dragged wider or narrower takes its room from Name.
+            guard let column = notification.userInfo?["NSTableColumn"] as? NSTableColumn,
+                  column.identifier.rawValue != ProcessColumn.name.rawValue else { return }
+            (outline as? ProcessOutline)?.fitNameColumn()
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -536,115 +530,121 @@ struct ProcessOutlineView: NSViewRepresentable {
             guard !pids.isEmpty else { return }
             parent.model.endTask(pids)
         }
+    }
+}
 
-        /// The rows a context menu acts on: the selection if the click landed
-        /// inside it, otherwise just the clicked row.
-        private func targetPIDs() -> [Int32] {
-            guard let outline else { return [] }
-            let clicked = outline.clickedRow
-            if clicked >= 0, !outline.selectedRowIndexes.contains(clicked) {
-                return [(outline.item(atRow: clicked) as? Item)?.pid].compactMap { $0 }
+// MARK: - Context menus
+
+extension ProcessOutlineView.Coordinator {
+    /// The rows a context menu acts on: the selection if the click landed
+    /// inside it, otherwise just the clicked row.
+    private func targetPIDs() -> [Int32] {
+        guard let outline else { return [] }
+        let clicked = outline.clickedRow
+        if clicked >= 0, !outline.selectedRowIndexes.contains(clicked) {
+            return [(outline.item(atRow: clicked) as? Item)?.pid].compactMap { $0 }
+        }
+        return Array(parent.selection)
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        if let outline, menu === outline.headerView?.menu {
+            buildColumnMenu(menu, outline: outline)
+            return
+        }
+        let pids = targetPIDs()
+        guard !pids.isEmpty else { return }
+        let model = parent.model
+        let single = pids.count == 1 ? model.process(pids[0]) : nil
+
+        menu.addItem(ActionItem("End Task") { model.endTask(pids) })
+        menu.addItem(ActionItem("Force Quit") { [weak self] in
+            self?.confirm("Force quit \(pids.count == 1 ? (single?.name ?? "this process") : "\(pids.count) processes")?",
+                          detail: "Unsaved data will be lost.") { model.forceQuit(pids) }
+        })
+        menu.addItem(ActionItem("End Process Tree") { [weak self] in
+            self?.confirm("End the selected process tree?", detail: "Every process it started will be asked to quit.") {
+                model.endProcessTree(pids, force: false)
             }
-            return Array(parent.selection)
+        })
+        menu.addItem(.separator())
+        if single?.state == .stopped {
+            menu.addItem(ActionItem("Resume") { model.send(.continue, to: pids) })
+        } else {
+            menu.addItem(ActionItem("Suspend") { model.send(.stop, to: pids) })
         }
 
-        func menuNeedsUpdate(_ menu: NSMenu) {
-            menu.removeAllItems()
-            if let outline, menu === outline.headerView?.menu {
-                buildColumnMenu(menu, outline: outline)
-                return
-            }
-            let pids = targetPIDs()
-            guard !pids.isEmpty else { return }
-            let model = parent.model
-            let single = pids.count == 1 ? model.process(pids[0]) : nil
+        let signals = NSMenu()
+        for signal in ProcessSignal.allCases {
+            signals.addItem(ActionItem(signal.name) { model.send(signal, to: pids) })
+        }
+        menu.addItem(submenu("Send Signal", signals))
 
-            menu.addItem(ActionItem("End Task") { model.endTask(pids) })
-            menu.addItem(ActionItem("Force Quit") { [weak self] in
-                self?.confirm("Force quit \(pids.count == 1 ? (single?.name ?? "this process") : "\(pids.count) processes")?",
-                              detail: "Unsaved data will be lost.") { model.forceQuit(pids) }
+        if let single {
+            let priorities = NSMenu()
+            let levels: [(String, Int32)] = [
+                ("Highest (−20)", -20), ("High (−10)", -10), ("Normal (0)", 0), ("Low (10)", 10), ("Lowest (20)", 20),
+            ]
+            for (title, nice) in levels {
+                let item = ActionItem(title) { model.setNice(nice, for: single.pid) }
+                item.state = single.nice == nice ? .on : .off
+                priorities.addItem(item)
+            }
+            menu.addItem(submenu("Set Priority", priorities))
+        }
+
+        menu.addItem(.separator())
+        if let single {
+            menu.addItem(ActionItem("Get Info") { [weak self] in
+                self?.parent.selection = [single.pid]
+                self?.parent.onShowInspector()
             })
-            menu.addItem(ActionItem("End Process Tree") { [weak self] in
-                self?.confirm("End the selected process tree?", detail: "Every process it started will be asked to quit.") {
-                    model.endProcessTree(pids, force: false)
-                }
+            menu.addItem(ActionItem("Sample Process") { model.sampleProcess(single.pid) })
+            menu.addItem(ActionItem("Reveal in Finder") { model.revealInFinder(single.pid) })
+            menu.addItem(ActionItem("Search Online") { model.searchOnline(single.pid) })
+
+            let copy = NSMenu()
+            copy.addItem(ActionItem("Name") { Self.copy(single.name) })
+            copy.addItem(ActionItem("PID") { Self.copy(String(single.pid)) })
+            if let path = single.executablePath {
+                copy.addItem(ActionItem("Path") { Self.copy(path) })
+            }
+            copy.addItem(ActionItem("Command Line") {
+                Self.copy(ProcessInspector.arguments(of: single.pid)?.commandLine ?? single.executablePath ?? single.name)
             })
-            menu.addItem(.separator())
-            if single?.state == .stopped {
-                menu.addItem(ActionItem("Resume") { model.send(.continue, to: pids) })
-            } else {
-                menu.addItem(ActionItem("Suspend") { model.send(.stop, to: pids) })
-            }
-
-            let signals = NSMenu()
-            for signal in ProcessSignal.allCases {
-                signals.addItem(ActionItem(signal.name) { model.send(signal, to: pids) })
-            }
-            menu.addItem(submenu("Send Signal", signals))
-
-            if let single {
-                let priorities = NSMenu()
-                let levels: [(String, Int32)] = [
-                    ("Highest (−20)", -20), ("High (−10)", -10), ("Normal (0)", 0), ("Low (10)", 10), ("Lowest (20)", 20),
-                ]
-                for (title, nice) in levels {
-                    let item = ActionItem(title) { model.setNice(nice, for: single.pid) }
-                    item.state = single.nice == nice ? .on : .off
-                    priorities.addItem(item)
-                }
-                menu.addItem(submenu("Set Priority", priorities))
-            }
-
-            menu.addItem(.separator())
-            if let single {
-                menu.addItem(ActionItem("Get Info") { [weak self] in
-                    self?.parent.selection = [single.pid]
-                    self?.parent.onShowInspector()
-                })
-                menu.addItem(ActionItem("Sample Process") { model.sampleProcess(single.pid) })
-                menu.addItem(ActionItem("Reveal in Finder") { model.revealInFinder(single.pid) })
-                menu.addItem(ActionItem("Search Online") { model.searchOnline(single.pid) })
-
-                let copy = NSMenu()
-                copy.addItem(ActionItem("Name") { Self.copy(single.name) })
-                copy.addItem(ActionItem("PID") { Self.copy(String(single.pid)) })
-                if let path = single.executablePath {
-                    copy.addItem(ActionItem("Path") { Self.copy(path) })
-                }
-                copy.addItem(ActionItem("Command Line") {
-                    Self.copy(ProcessInspector.arguments(of: single.pid)?.commandLine ?? single.executablePath ?? single.name)
-                })
-                menu.addItem(submenu("Copy", copy))
-            }
+            menu.addItem(submenu("Copy", copy))
         }
+    }
 
-        private func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.submenu = menu
-            return item
-        }
+    private func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.submenu = menu
+        return item
+    }
 
-        private func confirm(_ message: String, detail: String, action: @escaping () -> Void) {
-            let alert = NSAlert()
-            alert.messageText = message
-            alert.informativeText = detail
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Continue")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn { action() }
-        }
+    private func confirm(_ message: String, detail: String, action: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = detail
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { action() }
+    }
 
-        private static func copy(_ text: String) {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-        }
+    private static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
-        private func buildColumnMenu(_ menu: NSMenu, outline: NSOutlineView) {
-            for column in outline.tableColumns where column.identifier.rawValue != ProcessColumn.name.rawValue {
-                let item = ActionItem(column.title) { column.isHidden.toggle() }
-                item.state = column.isHidden ? .off : .on
-                menu.addItem(item)
-            }
+    private func buildColumnMenu(_ menu: NSMenu, outline: NSOutlineView) {
+        let toggle = parent.onToggleColumn
+        for tableColumn in outline.tableColumns {
+            guard let column = ProcessColumn(rawValue: tableColumn.identifier.rawValue), column != .name else { continue }
+            let item = ActionItem(column.title) { toggle(column) }
+            item.state = tableColumn.isHidden ? .off : .on
+            menu.addItem(item)
         }
     }
 }
@@ -654,6 +654,46 @@ struct ProcessOutlineView: NSViewRepresentable {
 /// Adds Delete-to-end-task to the outline view.
 final class ProcessOutline: NSOutlineView {
     var onDelete: (() -> Void)?
+
+    /// Width the visible columns need with Name at its narrowest, plus a
+    /// scroller that takes room of its own.
+    var minimumWidth: CGFloat {
+        guard let name = outlineTableColumn else { return 0 }
+        var width = otherColumnsWidth + name.minWidth
+        if let scrollView = enclosingScrollView, scrollView.scrollerStyle == .legacy,
+           let scroller = scrollView.verticalScroller {
+            width += scroller.frame.width
+        }
+        return width.rounded(.up)
+    }
+
+    /// Everything but Name: the end of the last visible column less Name's width.
+    private var otherColumnsWidth: CGFloat {
+        guard let name = outlineTableColumn, let last = tableColumns.lastIndex(where: { !$0.isHidden }) else { return 0 }
+        return rect(ofColumn: last).maxX - name.width
+    }
+
+    /// Gives Name whatever width the other columns leave, down to its
+    /// minimum, so the table fills the view and only scrolls sideways when
+    /// it has to. Done by hand because AppKit's first-column autoresizing
+    /// missed resizes that came from SwiftUI.
+    func fitNameColumn() {
+        guard let name = outlineTableColumn, let clip = enclosingScrollView?.contentView else { return }
+        let width = max(name.minWidth, (clip.bounds.width - otherColumnsWidth).rounded(.down))
+        if name.width != width { name.width = width }
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        NotificationCenter.default.removeObserver(self, name: NSView.frameDidChangeNotification, object: nil)
+        guard let clip = superview as? NSClipView else { return }
+        clip.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(clipViewResized), name: NSView.frameDidChangeNotification, object: clip)
+    }
+
+    @objc private func clipViewResized(_ notification: Notification) {
+        fitNameColumn()
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
