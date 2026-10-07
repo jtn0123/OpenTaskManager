@@ -91,6 +91,25 @@ enum Theme {
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? base : light
         })
     }
+
+    /// Colour for each kind of disk space on the Storage page. Mid-tones, so
+    /// white labels read on every one of them in light and dark mode.
+    static func category(_ category: DiskCategory) -> Color {
+        switch category {
+        case .apps: Color(red: 0.25, green: 0.53, blue: 0.98)
+        case .developer: Color(red: 0.58, green: 0.40, blue: 0.94)
+        case .media: Color(red: 0.91, green: 0.33, blue: 0.56)
+        case .audio: Color(red: 0.95, green: 0.52, blue: 0.18)
+        case .documents: Color(red: 0.13, green: 0.66, blue: 0.50)
+        case .archives: Color(red: 0.80, green: 0.62, blue: 0.10)
+        case .caches: Color(red: 0.18, green: 0.65, blue: 0.82)
+        case .system: Color(red: 0.47, green: 0.51, blue: 0.64)
+        case .other: Color(red: 0.55, green: 0.52, blue: 0.49)
+        }
+    }
+
+    /// The "smaller items" rest of a folder on the Storage page.
+    static let smallerItems = Color(white: 0.48)
 }
 
 extension NSColor {

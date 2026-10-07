@@ -89,13 +89,35 @@ versions, uptime, and whether SIP, FileVault and Gatekeeper are on. The serial
 number, hardware UUID and MAC addresses stay hidden until you ask, and Copy
 Summary puts the page on the clipboard as plain text.
 
+**Storage**: what's using your disk space. Pick Home, the startup disk, another
+local volume or any folder, and a scan on its own thread adds everything up,
+showing how far it has got as it goes (it can be stopped at any time).
+- A treemap of the open folder: a tile per item sized by its space on disk and
+  coloured by category, with each large folder's contents drawn inside. Click a
+  folder to open it; the breadcrumb leads back out.
+- Beside it, the folder's contents ranked by size with their share and item
+  counts, or the 50 largest files anywhere in the scan. Clicking a file opens
+  its folder and outlines it in the treemap.
+- The space by category: apps, developer files (`node_modules`, DerivedData,
+  `.git` and the like), photos and video, music, documents, archives and disk
+  images, caches and logs, and system files.
+- Reveal in Finder, Copy Path and Scan This Folder for any item. Nothing on the
+  page deletes anything.
+- Sizes are space on disk, counting each hard-linked file once, with the
+  files' logical size alongside. Symbolic links aren't followed and other
+  volumes aren't entered. Folders macOS keeps private count as unreadable,
+  with a button to the Full Disk Access settings.
+- Nothing is read until you ask, and the last scan stays for the session, so
+  the page costs nothing while it sits open.
+
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
 - The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
-  `ports`, `net` (the processes moving the most network traffic), `inspect`
-  and `kill`, with JSON output.
+  `ports`, `net` (the processes moving the most network traffic), `inspect`,
+  `kill` and `du` (the Storage page's scan, as a table of a folder's largest
+  items), with JSON output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
 Animation's render server, and the process table moves rows in place instead
@@ -130,7 +152,10 @@ same arithmetic as Activity Monitor), IOKit for the GPU, disks and battery
 telemetry, routing sockets for network counters, and each process's descriptor
 table (`proc_pidfdinfo`) for its sockets. Startup items come from
 the launchd property lists themselves, plus `launchctl list` and
-`launchctl print` for what's loaded, running or disabled.
+`launchctl print` for what's loaded, running or disabled. The Storage scan
+walks folders with `FileManager`'s enumerator, asking for each file's
+allocated size, link count and type in the same call, and keeps only each
+folder's 200 largest items, so memory stays bounded on a full disk.
 
 Power by part of the chip and clock speeds come from IOReport,
 whole-system power and fan speeds from read-only SMC keys, and temperatures
