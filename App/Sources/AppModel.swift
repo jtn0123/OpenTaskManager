@@ -269,6 +269,9 @@ final class AppModel {
     /// A search the Apps page asked the Startup page to run ("Show in
     /// Startup" for an app's launch items). Cleared once applied.
     var requestedStartupSearch: String?
+    /// A network interface ("en0") another page asked Performance to open
+    /// ("Show traffic" on the System page). Cleared once shown.
+    var requestedNetworkInterface: String?
     /// Highest whole-system draw seen on this Mac, kept across launches.
     private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
     /// `SystemSnapshot.measuresProcessEnergy`, read off the tick's walk over

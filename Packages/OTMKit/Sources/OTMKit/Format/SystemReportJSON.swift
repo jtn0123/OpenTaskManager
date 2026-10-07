@@ -4,8 +4,8 @@ import Foundation
 /// changing those never changes the format by accident. Sizes are bytes,
 /// times ISO 8601, and attached devices nest under the hub or device
 /// they're plugged into. With identifiers left out, serial numbers, the
-/// hardware UUID, and MAC, Bluetooth and IP addresses are `null`, and
-/// `includesIdentifiers` is false.
+/// hardware UUID, MAC, Bluetooth and IP addresses, routers, DNS servers,
+/// search domains and proxy hosts are `null`, and `includesIdentifiers` is false.
 struct SystemReportJSON: Encodable {
     let format = SystemReportDocument.format
     let schemaVersion = SystemReportDocument.schemaVersion
@@ -18,6 +18,8 @@ struct SystemReportJSON: Encodable {
     let displays: [Display]
     let storage: Storage
     let network: [NetworkPort]
+    /// Routes, DNS, proxies and services; null where it wasn't read.
+    @Nullable var networkConfiguration: NetworkSetup?
     /// null while the device report is still being read.
     @Nullable var devices: Devices?
     /// null on a Mac without one.
@@ -37,7 +39,9 @@ struct SystemReportJSON: Encodable {
         displays = report.displays.map(Display.init)
         storage = Storage(disks: info.disks, volumes: info.volumes)
         // The ports the page lists: not idle ones or link-local tunnels.
-        network = info.network.filter(\.isWorthListing).map { NetworkPort($0, keep: keep) }
+        let configuration = info.networkConfiguration
+        network = info.network.filter(\.isWorthListing).map { NetworkPort($0, configuration: configuration, keep: keep) }
+        networkConfiguration = configuration.map { NetworkSetup($0, keep: keep) }
         devices = report.devices.map { Devices($0, collectedAt: report.devicesCollectedAt ?? report.collectedAt, keep: keep) }
         battery = info.battery.map(Battery.init)
         software = Software(info.software, at: report.collectedAt)
@@ -61,7 +65,7 @@ struct SystemReportJSON: Encodable {
     }
 
     /// JSON has no NaN or infinity.
-    private static func finite(_ value: Double?) -> Double? {
+    static func finite(_ value: Double?) -> Double? {
         value.flatMap { $0.isFinite ? $0 : nil }
     }
 
@@ -220,28 +224,6 @@ struct SystemReportJSON: Encodable {
             isInternal = volume.isInternal
             isRemovable = volume.isRemovable
             isRoot = volume.isRoot
-        }
-    }
-
-    struct NetworkPort: Encodable {
-        /// BSD name, such as "en0".
-        let name: String
-        let displayName: String
-        let kind: NetworkInterfaceKind
-        let isUp: Bool
-        /// IPv4 first, then IPv6.
-        @Nullable var addresses: [String]?
-        @Nullable var hardwareAddress: String?
-        @Nullable var linkSpeedBitsPerSecond: UInt64?
-
-        init(_ port: NetworkPortInfo, keep: Bool) {
-            name = port.name
-            displayName = port.displayName
-            kind = port.kind
-            isUp = port.isUp
-            addresses = keep ? port.addresses : nil
-            hardwareAddress = keep ? port.hardwareAddress : nil
-            linkSpeedBitsPerSecond = port.linkSpeed
         }
     }
 

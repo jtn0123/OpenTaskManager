@@ -11,7 +11,7 @@ let package = Package(
     targets: [
         .target(
             name: "OTMKit",
-            linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("SystemConfiguration")]
+            linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("SystemConfiguration"), .linkedFramework("CoreWLAN")]
         ),
         .executableTarget(
             name: "otm",

@@ -3,11 +3,13 @@ import OTMKit
 import SwiftUI
 
 /// What this Mac is: model, chip and memory up top, then a card each for the
-/// processor, memory, graphics, displays, storage, network, attached devices,
-/// battery, software and security. Read once when the page opens (displays
-/// again when they change, devices on Refresh), never per sample.
+/// processor, memory, graphics, displays, storage, network and its
+/// configuration, attached devices, battery, software and security. Read
+/// once when the page opens and again on Refresh (displays also when they
+/// change), never per sample.
 struct SystemInfoView: View {
     @Environment(AppModel.self) private var model
+    @AppStorage("page") private var page: Page = .overview
     @State private var info: SystemInfo?
     @State private var displays: [DisplayInfo] = []
     @State private var devices: PeripheralInventory?
@@ -31,12 +33,13 @@ struct SystemInfoView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await readDevices() }
+                    Task { await refresh() }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(readingDevices)
-                .help("Read the attached USB, Thunderbolt, Bluetooth, audio and video devices again")
+                .help("Read this page again: free space, network settings, and the attached USB, Thunderbolt, Bluetooth, "
+                    + "audio and video devices")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: copySummary) {
@@ -70,16 +73,22 @@ struct SystemInfoView: View {
                 // Only the uptime moves, so a minute is often enough.
                 TimelineView(.everyMinute) { context in
                     let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, now: context.date)
-                    let before = sections.prefix { !$0.kind.isAttachedDevice }
+                    let before = sections.prefix { !$0.kind.isNetwork && !$0.kind.isAttachedDevice }
+                    let network = sections.filter(\.kind.isNetwork)
                     let attached = sections.filter(\.kind.isAttachedDevice)
+                    let links = networkLinks(info)
                     VStack(spacing: 16) {
                         cards(before)
                         // Their own rows, each card as long as its list: an empty
-                        // Bluetooth card doesn't stretch to match a full USB one.
+                        // Bluetooth card doesn't stretch to match a full USB one,
+                        // nor a long list of ports the configuration beside it.
+                        FillGrid(minimum: 340, evensHeights: false) {
+                            ForEach(network) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers, links: links) }
+                        }
                         FillGrid(minimum: 300, evensHeights: false) {
                             ForEach(attached) { InfoCard(section: $0, showsIdentifiers: showsIdentifiers) }
                         }
-                        cards(sections.dropFirst(before.count + attached.count))
+                        cards(sections.dropFirst(before.count + network.count + attached.count))
                     }
                 }
             }
@@ -94,6 +103,24 @@ struct SystemInfoView: View {
         }
     }
 
+    /// The ports Performance graphs (Wi-Fi, Ethernet and cellular with an
+    /// address), and each port's last Internet quality test. The history
+    /// changes only when a test finishes, not per tick.
+    private func networkLinks(_ info: SystemInfo) -> NetworkLinks {
+        let graphed: Set<NetworkInterfaceKind> = [.wifi, .ethernet, .cellular]
+        var tests: [String: NetworkQualityResult] = [:]
+        for result in NetworkQualityStore.shared.history where tests[result.historyKey] == nil {
+            tests[result.historyKey] = result
+        }
+        return NetworkLinks(
+            interfaces: Set(info.network.filter { $0.isUp && !$0.addresses.isEmpty && graphed.contains($0.kind) }.map(\.name)),
+            lastTests: tests
+        ) { interface in
+            model.requestedNetworkInterface = interface
+            page = .performance
+        }
+    }
+
     private func load() async {
         displays = DisplayReader.read()
         // The device report takes longest, so it starts first and runs alongside.
@@ -105,6 +132,17 @@ struct SystemInfoView: View {
         if security == nil {
             security = await SecurityReader.read()
         }
+        // Each port's last Internet quality test, loaded once a session.
+        await NetworkQualityStore.shared.load()
+        await deviceRead
+    }
+
+    /// Reads the hardware, network configuration and devices again.
+    private func refresh() async {
+        async let deviceRead: Void = readDevices()
+        let topology = model.topology
+        info = await Task.detached(priority: .userInitiated) { SystemInfoReader.read(topology: topology) }.value
+        displays = DisplayReader.read()
         await deviceRead
     }
 
@@ -265,12 +303,32 @@ private struct Chip: View {
 
 // MARK: - Cards
 
+/// What a network port's heading links to: its traffic on the Performance
+/// page, where that page graphs it, and its last Internet quality test.
+private struct NetworkLinks {
+    var interfaces: Set<String>
+    var lastTests: [String: NetworkQualityResult]
+    var showTraffic: (String) -> Void
+
+    /// "Last Internet test, 3 Oct: 412 Mbps down, 48 Mbps up, good responsiveness".
+    static func summary(_ result: NetworkQualityResult) -> String {
+        let rates = [(result.downloadBitsPerSecond, "down"), (result.uploadBitsPerSecond, "up")].compactMap { rate, direction in
+            rate.map { Format.bitsPerSecond($0 / 8) + " " + direction }
+        }
+        let rating = result.rating.map { ["\($0.title.lowercased()) responsiveness"] } ?? []
+        return "Last Internet test, \(result.date.formatted(date: .abbreviated, time: .omitted)): "
+            + (rates + rating).joined(separator: ", ")
+    }
+}
+
 /// One section as label/value rows. Headings (a display, a drive, a network
 /// port) start a group and indent the rows under them. On an attached-device
 /// card each device is one compact row instead, opening onto its details.
 private struct InfoCard: View {
     var section: InfoSection
     var showsIdentifiers: Bool
+    /// On the Network card: each port's link to its traffic.
+    var links: NetworkLinks?
     /// Devices opened to show their details, by position and name.
     @State private var opened: Set<String> = []
 
@@ -305,13 +363,38 @@ private struct InfoCard: View {
     }
 
     private func heading(_ row: InfoRow, isFirst: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(row.label).fontWeight(.semibold).lineLimit(1)
-            if !row.value.isEmpty {
-                Text(row.value).foregroundStyle(.secondaryText).lineLimit(1)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Group {
+                    Text(row.label).fontWeight(.semibold).lineLimit(1)
+                    if !row.value.isEmpty {
+                        Text(row.value).foregroundStyle(.secondaryText).lineLimit(1)
+                    }
+                    if let state = row.state {
+                        Text(state)
+                            .font(.metadata.weight(.medium))
+                            .foregroundStyle(SystemStyle(section.kind).tint)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .overlay(Capsule().strokeBorder(SystemStyle(section.kind).tint.opacity(0.45), lineWidth: 0.75))
+                    }
+                }
+                .textSelection(.enabled)
+                if let links, let interface = row.interface, links.interfaces.contains(interface) {
+                    Spacer(minLength: 8)
+                    Button("Show traffic") { links.showTraffic(interface) }
+                        .buttonStyle(.link)
+                        .font(.metadata)
+                        .help("Open \(interface)'s traffic graph on the Performance page")
+                }
+            }
+            if let interface = row.interface, let result = links?.lastTests[interface] {
+                Text(NetworkLinks.summary(result))
+                    .font(.metadata)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .textSelection(.enabled)
         .padding(.top, isFirst ? 0 : 6)
     }
 
@@ -512,6 +595,7 @@ private struct SystemStyle {
         case .displays: (Self.displays, "display")
         case .storage: (Theme.disk, "internaldrive")
         case .network: (Theme.network, "network")
+        case .networkConfiguration: (Theme.network, "point.3.connected.trianglepath.dotted")
         case .usb: (Self.usb, "cable.connector")
         case .thunderbolt: (Self.thunderbolt, "bolt.horizontal")
         case .bluetooth: (Self.bluetooth, "antenna.radiowaves.left.and.right")

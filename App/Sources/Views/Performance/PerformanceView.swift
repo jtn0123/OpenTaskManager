@@ -66,10 +66,17 @@ struct PerformanceView: View {
         width > 0 && width - listWidth - 1 < Self.minimumDetailWidth
     }
 
-    /// `--args -openResource memory` (cpu, memory, gpu, disk, network, power, sensors)
-    /// picks the first matching resource once, for screenshots. With
-    /// `-openScroll bottom` the detail starts scrolled to the end.
+    /// Opens the interface another page asked for ("Show traffic" on the
+    /// System page). Otherwise `--args -openResource memory` (cpu, memory,
+    /// gpu, disk, network, power, sensors) picks the first matching resource
+    /// once, for screenshots. With `-openScroll bottom` the detail starts
+    /// scrolled to the end.
     private func openRequestedResource(_ snapshot: SystemSnapshot) {
+        if let interface = model.requestedNetworkInterface {
+            model.requestedNetworkInterface = nil
+            if resources(snapshot).contains(.network(interface)) { selected = .network(interface) }
+            return
+        }
         guard !opened, let name = LaunchArgument.string("openResource") else { return }
         opened = true
         let match = resources(snapshot).first { resource in
