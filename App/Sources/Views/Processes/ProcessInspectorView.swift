@@ -80,12 +80,16 @@ struct ProcessInspectorView: View {
         case overview = "Overview"
         case threads = "Threads"
         case files = "Files & Ports"
+        /// The row's process and those nested under it, as a whole
+        /// (`ProcessGroupView`); offered only when there are some.
+        case group = "Group"
 
-        /// `-openProcessTab threads|files`, with `-openProcess`, for screenshots.
+        /// `-openProcessTab threads|files|group`, with `-openProcess`, for screenshots.
         static var requestedAtLaunch: Tab {
             switch LaunchArgument.string("openProcessTab") {
             case "threads": .threads
             case "files": .files
+            case "group": .group
             default: .overview
             }
         }
@@ -93,17 +97,24 @@ struct ProcessInspectorView: View {
 
     private var pid: Int32 { identity.pid }
 
+    /// The tab on screen: Group falls back to the Overview for a row with
+    /// nothing nested under it, and comes back for the next one that has.
+    private var shownTab: Tab {
+        tab == .group && group == nil ? .overview : tab
+    }
+
     var body: some View {
         if let process = model.process(identity) {
             VStack(alignment: .leading, spacing: 12) {
                 header(process)
-                if let group {
+                if let group, shownTab != .group {
                     RowGroupNote(text: group.summary(name: model.displayName(for: process),
                                                      cpu: model.cpuScale.format(group.totals.cpuPercent)),
-                                 showTitle: group.isExpanded ? nil : group.showTitle, show: group.show)
+                                 showTitle: group.isExpanded ? nil : group.showTitle, show: group.show,
+                                 count: group.totals.processCount, openGroup: { tab = .group })
                 }
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                Picker("", selection: Binding(get: { shownTab }, set: { tab = $0 })) {
+                    ForEach(Tab.allCases.filter { $0 != .group || group != nil }, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -113,20 +124,25 @@ struct ProcessInspectorView: View {
                 // tab's Priority column).
                 ScrollView {
                     Group {
-                        switch tab {
+                        switch shownTab {
                         case .overview: overview(process)
                         case .threads: ProcessThreadsView(process: process)
                         case .files: files
+                        case .group: ProcessGroupView(root: identity, mode: group?.mode ?? .grouped, onSelect: onSelect)
                         }
                     }
                     .padding(.horizontal, 12)
                 }
                 .padding(.horizontal, -12)
-                actions(process)
+                if shownTab == .group, let group {
+                    ProcessGroupActions(root: identity, mode: group.mode, canEnd: !process.isRestricted)
+                } else {
+                    actions(process)
+                }
             }
             .padding(12)
-            .task(id: tab == .overview ? identity : nil) { await loadDetails() }
-            .task(id: tab == .files ? identity : nil) { await loadOpenFiles() }
+            .task(id: shownTab == .overview ? identity : nil) { await loadDetails() }
+            .task(id: shownTab == .files ? identity : nil) { await loadOpenFiles() }
         }
     }
 
@@ -381,7 +397,7 @@ struct ProcessInspectorView: View {
     /// Arguments and working directory, every few seconds while the Overview
     /// shows; state changes only when they do.
     private func loadDetails() async {
-        guard tab == .overview else { return }
+        guard shownTab == .overview else { return }
         let identity = identity
         while !Task.isCancelled {
             let loaded = await Task.detached(priority: .utility) {
@@ -395,7 +411,7 @@ struct ProcessInspectorView: View {
 
     /// Open files and sockets, every few seconds while Files & Ports shows.
     private func loadOpenFiles() async {
-        guard tab == .files else { return }
+        guard shownTab == .files else { return }
         let identity = identity
         while !Task.isCancelled {
             let loaded = await Task.detached(priority: .utility) {
@@ -446,13 +462,17 @@ struct ProcessInspectorView: View {
 
 /// Under the inspector's header when the selected row has processes nested
 /// under it: the figures below are this process's alone, what the table's
-/// row adds, and a button that expands the row to show them one by one.
+/// row adds, and a button that expands the row to show them one by one,
+/// and a link to the Group tab, which takes them together.
 private struct RowGroupNote: View {
     /// `ProcessRowGroup.summary`.
     var text: String
     /// The button's title; nil once the row is expanded.
     var showTitle: String?
     var show: () -> Void
+    /// The row's processes, this one included.
+    var count: Int
+    var openGroup: () -> Void
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 8)
@@ -468,6 +488,10 @@ private struct RowGroupNote: View {
                 }
             }
             Text(text).font(.explanation).foregroundStyle(.secondaryText)
+            Button(count == 2 ? "See both together" : "See all \(count) together", action: openGroup)
+                .buttonStyle(.link)
+                .font(.explanation)
+                .help("Open the Group tab: their CPU over time, their figures added up, and each of them with why it's in the group")
         }
         .font(.callout)
         .padding(.horizontal, 10)
