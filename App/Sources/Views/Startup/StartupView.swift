@@ -35,11 +35,20 @@ enum StartupFilter: String, CaseIterable, Identifiable {
 struct StartupRow: Identifiable, Equatable {
     let item: LaunchItem
     let health: LaunchJobHealth
+    /// What the job is doing, as the Status column and the details' header
+    /// both say it, apart from whether launchd has it loaded.
+    let status: LaunchItemStatus
     /// The latest sample's figures, filled in only while the table sorts by
     /// them, so the rows aren't rebuilt every tick otherwise. -1 when the
     /// job isn't running or isn't in the sample.
     var cpu = -1.0
     var memory: UInt64 = 0
+
+    init(item: LaunchItem, health: LaunchJobHealth) {
+        self.item = item
+        self.health = health
+        status = LaunchItemStatus(item: item, health: health)
+    }
 
     var id: LaunchItem.ID { item.id }
 }
@@ -229,9 +238,10 @@ struct StartupView: View {
                         help: "Jobs with a process running right now")
             SummaryCard(title: "Third party", value: items.filter { $0.publisher == .thirdParty }.count, tint: Theme.network,
                         help: "Installed by something other than macOS")
-            // Named for what launchd does with them, apart from the Login
-            // Items the note below says aren't listed or counted.
+            // Its caption says what's counted, so the note below about the
+            // Login Items it leaves out reads as a distinction, not a contradiction.
             SummaryCard(title: "Start at login", value: items.filter(\.startsAutomatically).count, tint: Theme.memory,
+                        caption: "Launch jobs set to run at login",
                         help: "launchd agents and daemons set to run as soon as they're loaded: agents when you log in, "
                             + "daemons when the Mac starts up, unless they're disabled. The Login Items in System "
                             + "Settings aren't in this count: macOS keeps them private.")
@@ -380,11 +390,21 @@ private struct SummaryCard: View {
     var value: Int
     var tint: Color
     var glow = 0.0
+    /// What the number counts, under it, where a tooltip alone wouldn't be seen.
+    var caption: String?
     var help: String
 
     var body: some View {
         Card(tint: tint, glow: glow) {
-            Stat(label: title, value: String(value), color: tint)
+            VStack(alignment: .leading, spacing: 3) {
+                Stat(label: title, value: String(value), color: tint)
+                if let caption {
+                    Text(caption)
+                        .font(.metadata)
+                        .foregroundStyle(.secondaryText)
+                        .lineLimit(2)
+                }
+            }
         }
         .help(help)
     }
@@ -532,18 +552,11 @@ private struct StartupTable: View {
     }
 
     private var statusColumn: some Column {
-        TableColumn("Status", value: \.item.state) { row in
-            LaunchStateLabel(state: row.item.state, health: row.health)
-                .help(statusHelp(row))
+        TableColumn("Status", value: \.status) { row in
+            LaunchStateLabel(status: row.status)
+                .help("\(row.status.summary)\n\(row.status.explanation)\nlaunchd: \(row.status.registration.title)")
         }
         .fitted(StartupColumn.status)
-    }
-
-    private func statusHelp(_ row: StartupRow) -> String {
-        let state = row.item.pid.map { "\(row.item.state.title), PID \($0)" } ?? row.item.state.title
-        guard let headline = row.health.headline else { return state }
-        let exit = row.item.job?.lastExit.map { "\nLast exit: \($0.description)" } ?? ""
-        return "\(state)\n\(headline)\(exit)"
     }
 
     /// Highest first on the first click, as on the Processes table.
@@ -642,48 +655,52 @@ private struct ThirdPartyBadge: View {
     }
 }
 
-/// A coloured dot and the state, with the PID while it runs and there's
-/// room. A job that needs a look has a warning sign for its dot, and says
-/// Restarting, Crashed or Failed when that's more to the point.
+/// What a job is doing: a coloured dot and the state, with its detail (the
+/// PID, the exit code, the signal) where there's room. A job that needs a
+/// look has a warning sign for its dot. The table's Status column and the
+/// details' header both show this, so the two never disagree; whether
+/// launchd has the job loaded is the header's line of its own.
 struct LaunchStateLabel: View {
-    var state: LaunchItemState
-    var health: LaunchJobHealth = .healthy
+    var status: LaunchItemStatus
     @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            label(showsPID: true)
-            label(showsPID: false)
+            label(showsDetail: true)
+            label(showsDetail: false)
         }
+        .accessibilityElement(children: .combine)
     }
 
-    private func label(showsPID: Bool) -> some View {
+    private func label(showsDetail: Bool) -> some View {
         HStack(spacing: 6) {
-            if health.needsAttention {
+            if status.needsAttention {
                 // On a selected row it turns white like the row's text.
                 Image(systemName: "exclamationmark.triangle.fill")
                     .imageScale(.small)
                     .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(LaunchJobHealth.tint))
             } else {
-                Circle().fill(state.color).frame(width: 7, height: 7)
+                Circle().fill(status.color).frame(width: 7, height: 7)
             }
-            Text(health.stateTitle(isRunning: state.isRunning) ?? state.title)
-            if showsPID, case let .running(pid) = state {
-                // Verbatim, so the PID isn't grouped like a quantity ("4,673").
-                Text(verbatim: "PID \(pid)").foregroundStyle(.secondaryText).monospacedDigit()
+            Text(status.title)
+            if showsDetail, let detail = status.detail {
+                // Verbatim, so a PID isn't grouped like a quantity ("4,673").
+                Text(verbatim: detail).foregroundStyle(.secondaryText).monospacedDigit()
             }
         }
         .lineLimit(1)
     }
 }
 
-extension LaunchItemState {
+extension LaunchItemStatus {
+    /// The dot's colour. The states that need a look show a warning sign instead.
     var color: Color {
-        switch self {
+        switch execution {
         case .running: Theme.disk
-        case .loaded: Theme.cpu
+        case .notRunning: Theme.cpu
         case .disabled: Theme.swap
         case .notLoaded: Theme.other
+        case .restarting, .crashed, .failed: LaunchJobHealth.tint
         }
     }
 }
@@ -744,14 +761,15 @@ private struct NoProblemsNote: View {
 
 /// What the table can't show, above it where it reads as the table's scope:
 /// Login Items live where only an administrator can read them, so neither
-/// the list nor the Start at login card has them. The text wraps rather
-/// than truncating in a narrow window.
+/// the list nor the Start at login card (whose caption says it counts launch
+/// jobs) has them. The text wraps rather than truncating in a narrow window.
 private struct LoginItemsNote: View {
     static let settings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Label("Login Items aren't listed or counted: macOS keeps them private. System Settings shows and changes them.",
+            Label("Login Items (System Settings > General > Login Items) aren't in this list or the Start at login "
+                + "count: macOS doesn't let other apps read them.",
                   systemImage: "info.circle")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)

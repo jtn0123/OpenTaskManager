@@ -140,7 +140,7 @@ struct LaunchJobWatchTests {
         #expect(watch.health(of: item) == .restarting(count: 3))
         let text = watch.health(of: item).explanation(for: item, record: watch.record(for: item), time: offset)
         #expect(text == "Restarted 3 times since +0, the last at +30, after its run before ended: killed by signal 11 (SIGSEGV).")
-        #expect(watch.health(of: item).stateTitle(isRunning: true) == "Restarting")
+        #expect(LaunchItemStatus(item: item, health: watch.health(of: item)).title == "Restarting")
     }
 
     @Test func aKeepAliveJobThatKeepsEndingIsRestarting() {
@@ -189,14 +189,14 @@ struct LaunchJobWatchTests {
 
     @Test func explainsFailuresAndCrashes() {
         let failed = job(pid: nil, lastExit: .code(78))
-        #expect(LaunchJobHealth.failed(code: 78).stateTitle(isRunning: false) == "Failed")
+        #expect(LaunchItemStatus(item: failed, health: .failed(code: 78)).title == "Failed")
         #expect(LaunchJobHealth.failed(code: 78).explanation(for: failed, record: nil, time: offset)
             == "Exited with code 78 (EX_CONFIG: a setup problem, such as a program or file it can't find "
             + "or isn't allowed to open).")
         #expect(LaunchJobHealth.failed(code: 3).explanation(for: failed, record: nil, time: offset) == "Exited with code 3.")
         let crashed = job(pid: 42, lastExit: .code(-11))
         // Running again, it keeps saying Running.
-        #expect(LaunchJobHealth.crashed(signal: 11).stateTitle(isRunning: true) == nil)
+        #expect(LaunchItemStatus(item: crashed, health: .crashed(signal: 11)).title == "Running")
         #expect(LaunchJobHealth.crashed(signal: 11).explanation(for: crashed, record: nil, time: offset)
             == "Killed by signal 11 (SIGSEGV): the program crashed. It's running again now.")
         #expect(LaunchJobHealth.healthy.headline == nil)

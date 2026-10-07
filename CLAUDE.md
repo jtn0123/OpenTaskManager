@@ -88,7 +88,11 @@ Manager OG or any other proprietary task manager.
   launchd's list alone, no plists, is read again every 10 s and noted in
   `LaunchJobStore`, whose `LaunchJobWatch` in OTMKit counts restarts by label,
   scope, PID and start time and names failed, crashed and restarting jobs for
-  the Problems filter; the CPU and Memory cells look launchd's PID up in the
+  the Problems filter; `LaunchItemStatus` in OTMKit is the one label for what
+  a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
+  running, Disabled, Not loaded) that the Status column, the details' header
+  and the Apps page share, with launchd's Loaded or Not loaded on a line of
+  its own, never in its place; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
   Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
   the main actor when the page opens and on Refresh, then streams bundle sizes in
@@ -188,7 +192,9 @@ Manager OG or any other proprietary task manager.
   with endpoints that must carry on, so a reused descriptor or PID is a new
   socket. It feeds the "Seen for" column (time this page has seen a socket,
   never its age), New on listeners seen opening (5 min), the details'
-  timeline, and Closed recently (15 min, at most 200). `ConnectionStore.shared`
+  timeline, and Closed recently (15 min, at most 200; empty, it says since
+  when it's been watched without a gap, `closedCoverage`, with Show Open
+  Sockets, under counts headed "Open now"). `ConnectionStore.shared`
   lasts the session, so time away from the page shows as an unwatched gap.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s or more, not `ps %cpu`, and only once the graphs'

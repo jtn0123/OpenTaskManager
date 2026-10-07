@@ -8,6 +8,8 @@ struct AppDetail: View {
     var size: UInt64?
     var isMeasuring: Bool
     var pids: [Int32]
+    /// What the Startup page has seen of launchd's jobs, for each launch item's state.
+    var launchJobs: LaunchJobWatch
     /// Opens the Startup page on this app's launch items, with one of them
     /// selected when it's given.
     var showInStartup: (LaunchItem?) -> Void
@@ -146,8 +148,16 @@ struct AppDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(app.launchItems) { item in
+                    // The state the Startup page gives it, so the two pages say the same.
+                    let status = LaunchItemStatus(item: item, health: launchJobs.health(of: item))
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Circle().fill(item.state.color).frame(width: 7, height: 7)
+                        if status.needsAttention {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(LaunchJobHealth.tint)
+                        } else {
+                            Circle().fill(status.color).frame(width: 7, height: 7)
+                        }
                         VStack(alignment: .leading, spacing: 1) {
                             // Opens it on the Startup page, selected among the app's other items.
                             Button { showInStartup(item) } label: {
@@ -156,9 +166,10 @@ struct AppDetail: View {
                             .buttonStyle(.link)
                             .font(.callout)
                             .help("Show \(item.label) on the Startup page")
-                            Text("\(item.scope.title) · \(item.launchSummary) · \(item.state.title)")
+                            Text("\(item.scope.title) · \(item.launchSummary) · \(status.title)")
                                 .font(.callout).foregroundStyle(.secondaryText)
                                 .lineLimit(1)
+                                .help("\(status.summary). launchd: \(status.registration.title)")
                         }
                     }
                 }
