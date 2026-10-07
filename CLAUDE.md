@@ -89,7 +89,11 @@ Manager OG or any other proprietary task manager.
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
   layer alone reads the pointer; each finished scan's summary is saved once, off
   the main actor, to Application Support/OpenTaskManager/Scans, and the Changes
-  list colours the treemap by what changed since an earlier scan),
+  list colours the treemap by what changed since an earlier scan; the change
+  picked there is named above the map, not in a tag over it (`PickedChangeBar`:
+  its trail with the outlined folder underlined, why the map can only outline
+  what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
+  Reveal in Finder)),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -197,6 +201,10 @@ build, `-sensorFixture <file>` loads a recording from
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
   Scope first, then PID, then Protocol; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
+  Its six summary cards fold into a strip of chips (rows from
+  `GridMath.stripRows`) when they don't fit one row or the details are open,
+  so the table keeps its height; a mouse-opened pane folds them a
+  double-click later, so the second click still lands on the same row.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its

@@ -149,6 +149,16 @@ public struct DiskScanReport: Sendable {
     }
 }
 
+extension DiskUsage {
+    /// The folder to open to see `change`, a change below this scan's
+    /// folder: the folder that changed, while the scan has it, else the one
+    /// holding the file, package or removed folder; as deep as the scan kept.
+    public func folder(showing change: DiskSizeChange) -> DiskItem {
+        let path = (rootPath as NSString).appendingPathComponent(change.path)
+        return closestFolder(to: change.kind == .folder ? path : (path as NSString).deletingLastPathComponent)
+    }
+}
+
 /// Two saved scans of the same scope, compared.
 ///
 /// Sizes a summary left out count as "at most" the limit it noted, and

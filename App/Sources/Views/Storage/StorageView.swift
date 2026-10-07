@@ -365,17 +365,18 @@ private struct StorageResultsView: View {
 
     /// Picks a change in the Changes list and outlines where it is in the
     /// treemap, without leaving the open folder (whose changes the list
-    /// shows); `opening` also opens the folder holding it.
+    /// shows); `opening` also opens the folder that changed (or the one
+    /// holding a file), still in Changes.
     private func pick(_ change: DiskSizeChange, exists: Bool, opening: Bool) {
         let usage = result.usage
         let path = (usage.rootPath as NSString).appendingPathComponent(change.path)
         if opening {
             hover.enter(nil)
-            store.folder = usage.closestFolder(to: (path as NSString).deletingLastPathComponent).id
+            store.folder = usage.folder(showing: change).id
         }
         let direction = change.direction()
         hover.mark(path, exists: exists, in: usage, figure: StorageChangeStyle.caption(change, direction), direction: direction,
-                   change: change.id)
+                   change: change)
     }
 
     /// In Changes, keeps a change picked: the largest in the open folder,
@@ -505,8 +506,8 @@ private struct CategoriesCard: View {
     }
 }
 
-/// The treemap of the open folder, with the way back above it and what the
-/// pointer is over below.
+/// The treemap of the open folder, with the way back above it (and in
+/// Changes, the change picked in the list) and what the pointer is over below.
 private struct TreemapCard: View {
     let store: StorageStore
     let result: StorageResult
@@ -546,6 +547,9 @@ private struct TreemapCard: View {
                 .buttonStyle(.borderless)
                 .help("Copy this folder's path")
                 .accessibilityLabel("Copy Path")
+            }
+            if let changes {
+                PickedChangeBar(store: store, usage: usage, folder: folder, hover: hover, since: changes.since, open: open)
             }
             Group {
                 if usage.children(of: folder).contains(where: { $0.allocatedSize > 0 }) {

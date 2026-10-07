@@ -432,7 +432,8 @@ private struct TreemapPointer: View {
         // The deepest of those is the picked item itself, or only what holds
         // it: too small or too deep to draw here, or kept only in a folder's
         // "smaller items".
-        let isExact = hover.pick?.isKept == true && (markedInner?.item?.id ?? marked?.id) == hover.marked.last
+        let drawn = markedInner?.item?.id ?? marked?.id
+        let isExact = hover.pick?.isKept == true && drawn == hover.marked.last
         Color.clear
             .contentShape(Rectangle())
             .overlay(alignment: .topLeading) {
@@ -453,9 +454,10 @@ private struct TreemapPointer: View {
                         }
                     }
                     .allowsHitTesting(false)
-                } else if let marked, let pick = hover.pick {
+                } else if let marked, let pick = hover.pick, pick.change == nil {
                     // Names what the outline stands for, until the pointer explores the map,
-                    // clear of the name of the folder holding it.
+                    // clear of the name of the folder holding it. A change has the bar
+                    // above the map (`PickedChangeBar`) instead, which hides no tiles.
                     TagPlacement(tile: markedInner?.rect ?? marked.rect, heading: marked.header) {
                         PickTag(pick: pick, isExact: isExact, trail: Format.trail(pick.path, under: folderPath))
                     }
@@ -479,6 +481,11 @@ private struct TreemapPointer: View {
                 }
             }
             .onAppear { restingAt = NSEvent.mouseLocation }
+            // Once per pick, folder or size: what the bar above says it outlined.
+            .onChange(of: OutlinedMark(folder: folder.id, chain: hover.marked, drawn: drawn), initial: true) { _, mark in
+                hover.outline(mark)
+            }
+            .onDisappear { hover.outline(nil) }
             .onChange(of: layout.key) {
                 // The tile that was hovered may be somewhere else now.
                 restingAt = NSEvent.mouseLocation
@@ -550,11 +557,11 @@ private struct MarkHighlight: View {
     }
 }
 
-/// Names what the outline stands for: the item picked in the list itself
-/// ("build"), or, when that's too small or too deep to draw here, the region
-/// holding it ("Contains build"), with its size or change, and where it is
-/// below the open folder in the words the list uses ("Projects › webapp ›
-/// build").
+/// Names what the outline stands for: the file picked in Largest Files
+/// itself ("bundle.bin"), or, when that's too small or too deep to draw
+/// here, the region holding it ("Contains bundle.bin"), with its size, and
+/// where it is below the open folder in the words the list uses ("Projects ›
+/// webapp › build").
 private struct PickTag: View {
     let pick: StoragePick
     let isExact: Bool
@@ -562,7 +569,7 @@ private struct PickTag: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 7)
-        let title = isExact ? pick.name : pick.exists ? "Contains \(pick.name)" : "Held \(pick.name)"
+        let title = isExact ? pick.name : "Contains \(pick.name)"
         VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title)
@@ -571,7 +578,7 @@ private struct PickTag: View {
                     .truncationMode(.middle)
                 Text(pick.figure)
                     .font(.callout.weight(.medium))
-                    .foregroundStyle(pick.direction.map(StorageChangeStyle.textStyle) ?? AnyShapeStyle(.secondaryText))
+                    .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                     .fixedSize()
             }

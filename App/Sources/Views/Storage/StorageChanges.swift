@@ -33,6 +33,16 @@ enum StorageChangeStyle {
         }
     }
 
+    /// A change's icon: what changed, or a lock when part of it couldn't be read.
+    static func symbol(_ change: DiskSizeChange, _ direction: DiskSizeChange.Direction) -> String {
+        if direction == .unclear { return "lock.fill" }
+        switch change.kind {
+        case .folder: return "folder.fill"
+        case .package: return "shippingbox.fill"
+        case .file: return "doc.fill"
+        }
+    }
+
     static func title(_ direction: DiskSizeChange.Direction) -> String {
         switch direction {
         case .grew: "Grew"
@@ -194,7 +204,7 @@ private struct ChangesReport: View {
         if !changes.isEmpty {
             SectionTitle(title: title)
             ForEach(changes) { change in
-                ChangeRow(store: store, root: usage.rootPath, under: path, change: change,
+                ChangeRow(store: store, usage: usage, folder: folder, under: path, change: change,
                           amount: Format.byteChange(change[keyPath: amount], grew: grew, exact: change.isExact),
                           direction: grew ? .grew : .shrank, detail: StorageChangeStyle.sizes(change), hover: hover, pick: pick)
             }
@@ -206,7 +216,7 @@ private struct ChangesReport: View {
         if !changes.isEmpty {
             SectionTitle(title: title)
             ForEach(changes) { change in
-                ChangeRow(store: store, root: usage.rootPath, under: path, change: change, amount: nil, direction: .unclear,
+                ChangeRow(store: store, usage: usage, folder: folder, under: path, change: change, amount: nil, direction: .unclear,
                           detail: note, hover: hover, pick: pick)
             }
         }
@@ -229,10 +239,13 @@ private struct SectionTitle: View {
 
 /// One folder or file that changed: its name and change, then where it is
 /// and its size before and after. Click to pick it and outline it in the
-/// treemap.
+/// treemap; double-click to open the folder that changed (or the one
+/// holding it).
 private struct ChangeRow: View {
     let store: StorageStore
-    let root: String
+    let usage: DiskUsage
+    /// The open folder.
+    let folder: DiskItem
     /// The open folder, below the scanned one.
     let under: String
     let change: DiskSizeChange
@@ -244,11 +257,14 @@ private struct ChangeRow: View {
     @State private var isHovering = false
 
     var body: some View {
-        let fullPath = (root as NSString).appendingPathComponent(change.path)
+        let fullPath = (usage.rootPath as NSString).appendingPathComponent(change.path)
         // Not in this scan: nothing to outline or reveal.
         let gone = !change.isListed && change.after.low == 0 && direction != .unclear
+        // What Open goes into, when that isn't the folder already open.
+        let target = usage.folder(showing: change)
+        let opens = target.id != folder.id
         HStack(spacing: 8) {
-            Image(systemName: symbol)
+            Image(systemName: StorageChangeStyle.symbol(change, direction))
                 .font(.system(size: 14))
                 .foregroundStyle(StorageChangeStyle.fill(direction))
                 .frame(width: 22, height: 22)
@@ -276,26 +292,23 @@ private struct ChangeRow: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture { pick(change, !gone, false) }
+        // Alongside the click, which picks it at once rather than waiting to
+        // see whether a second click follows.
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            if opens { pick(change, !gone, true) }
+        })
         .contextMenu {
             Button("Show in Treemap") { pick(change, !gone, false) }
-            Button("Open Enclosing Folder") { pick(change, !gone, true) }
+            if opens { Button("Open “\(target.name)”") { pick(change, !gone, true) } }
             Divider()
             if !gone { Button("Reveal in Finder") { store.reveal(fullPath) } }
             Button("Copy Path") { store.copyPath(fullPath) }
         }
         .help("\((fullPath as NSString).abbreviatingWithTildeInPath)\n\(StorageChangeStyle.sizes(change))"
-            + (StorageChangeStyle.reason(change).map { "\n\($0)" } ?? ""))
+            + (StorageChangeStyle.reason(change).map { "\n\($0)" } ?? "")
+            + (opens ? "\nDouble-click to open \(target.name)." : ""))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-    }
-
-    private var symbol: String {
-        if direction == .unclear { return "lock.fill" }
-        switch change.kind {
-        case .folder: return "folder.fill"
-        case .package: return "shippingbox.fill"
-        case .file: return "doc.fill"
-        }
     }
 
     /// The folder holding it, as a trail below the open folder ("Projects ›
@@ -360,5 +373,158 @@ private struct BaselineMenu: View {
         }
         .fixedSize()
         .help("Compare with an earlier scan of this folder. The last \(DiskScanHistory.keptPerScope) scans of each folder are kept.")
+    }
+}
+
+/// Above the treemap in Changes: the change picked in the list, as a trail
+/// from the open folder down to it with how it changed ("Projects › webapp ›
+/// build  +150 MB"), and what the treemap outlines for it: its own tile, or
+/// the deepest tile drawn on the way there (underlined in the trail as it's
+/// ringed on the map), with why the change itself isn't drawn. Open goes into
+/// the folder that changed (or the one holding a file), still in Changes;
+/// Reveal shows it in Finder. Its own view, so a pick redraws only it.
+struct PickedChangeBar: View {
+    let store: StorageStore
+    let usage: DiskUsage
+    let folder: DiskItem
+    let hover: StorageHover
+    /// When the scan compared with was made.
+    let since: Date
+    var open: (Int) -> Void
+
+    var body: some View {
+        if let pick = hover.pick, let change = pick.change {
+            let reach = reach(pick)
+            let target = usage.folder(showing: change)
+            let shape = RoundedRectangle(cornerRadius: 8)
+            VStack(alignment: .leading, spacing: 3) {
+                ViewThatFits(in: .horizontal) {
+                    row(pick, change, reach: reach, target: target, compact: false)
+                    row(pick, change, reach: reach, target: target, compact: true)
+                    row(pick, change, reach: reach, target: target, compact: true, truncates: true)
+                }
+                // Until the treemap has outlined a new pick, a blank line
+                // holds the note's place, so the bar keeps its height.
+                Text(reach.map { note($0, change: change) } ?? " ")
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .lineLimit(2)
+                    .padding(.leading, 30)
+                    .accessibilityHidden(reach == nil)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(shape.fill(Color.accentColor.opacity(0.07)))
+            .overlay(shape.strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// How the treemap shows the pick, and which of the trail's names it outlines.
+    private struct Reach {
+        let kind: TreemapReach
+        let step: Int?
+    }
+
+    /// What the treemap drew for `pick`, once it has outlined it.
+    private func reach(_ pick: StoragePick) -> Reach? {
+        guard let outlined = hover.outlined, outlined.chain == hover.marked,
+              let start = hover.marked.firstIndex(of: folder.id) else { return nil }
+        let path = Array(hover.marked[(start + 1)...])
+        let kind = TreemapReach.of(path: path, drawn: outlined.drawn, exists: pick.exists, isKept: pick.isKept)
+        // A folder's "smaller items" isn't one of the trail's names.
+        let step = outlined.drawn.flatMap { drawn in
+            usage.items.indices.contains(drawn) && usage.items[drawn].kind != .smallerItems ? path.firstIndex(of: drawn) : nil
+        }
+        return Reach(kind: kind, step: step)
+    }
+
+    private func row(_ pick: StoragePick, _ change: DiskSizeChange, reach: Reach?, target: DiskItem, compact: Bool,
+                     truncates: Bool = false) -> some View {
+        let direction = pick.direction ?? .unclear
+        return HStack(spacing: 8) {
+            Image(systemName: StorageChangeStyle.symbol(change, direction))
+                .font(.system(size: 14))
+                .foregroundStyle(StorageChangeStyle.fill(direction))
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            trail(pick, reach: reach)
+                .lineLimit(1)
+                .truncationMode(.head)
+                .fixedSize(horizontal: !truncates, vertical: false)
+            Text(pick.figure)
+                .fontWeight(.semibold)
+                .foregroundStyle(StorageChangeStyle.textStyle(direction))
+                .monospacedDigit()
+                .fixedSize()
+            Spacer(minLength: 8)
+            actions(pick, target: target, compact: compact)
+        }
+        .font(.callout)
+    }
+
+    /// The names from the open folder down to the change, the change's own
+    /// in bold, and the one the treemap outlines underlined: solid when it's
+    /// the change itself, dashed (like its ring) when it only holds it.
+    private func trail(_ pick: StoragePick, reach: Reach?) -> Text {
+        let names = Format.trailNames(pick.path, under: usage.path(of: folder.id))
+        let exact = reach?.kind == .drawn
+        return names.enumerated().reduce(Text("")) { text, entry in
+            let (index, name) = entry
+            var part: Text = index == names.count - 1 ? Text(name).fontWeight(.semibold) : Text(name).foregroundStyle(.secondaryText)
+            if index == reach?.step { part = part.underline(pattern: exact ? .solid : .dash, color: .accentColor) }
+            return index == 0 ? part : text + Text(Format.trailSeparator).foregroundStyle(.secondaryText) + part
+        }
+    }
+
+    private func actions(_ pick: StoragePick, target: DiskItem, compact: Bool) -> some View {
+        HStack(spacing: 6) {
+            if target.id != folder.id {
+                Button {
+                    open(target.id)
+                } label: {
+                    if compact {
+                        Image(systemName: "plus.magnifyingglass")
+                    } else {
+                        Text("Open “\(target.name)”")
+                    }
+                }
+                .help("Open \(target.name) in the treemap, still showing what changed")
+                .accessibilityLabel("Open \(target.name)")
+            }
+            Button {
+                store.reveal(pick.path)
+            } label: {
+                if compact {
+                    Image(systemName: "folder")
+                } else {
+                    Text("Reveal in Finder")
+                }
+            }
+            .disabled(!pick.exists)
+            .help(pick.exists ? "Show \(pick.name) in Finder" : "\(pick.name) isn't there any more")
+            .accessibilityLabel("Reveal in Finder")
+        }
+        .fixedSize()
+    }
+
+    /// Where the change is on the treemap, or why it isn't drawn there.
+    private func note(_ reach: Reach, change: DiskSizeChange) -> String {
+        let holder = reach.kind.holder.flatMap { usage.items.indices.contains($0) ? StorageStyle.name(usage.items[$0]) : nil }
+        switch reach.kind {
+        case .drawn:
+            return change.kind == .folder ? "Outlined in the treemap. Open it to see what changed inside." : "Outlined in the treemap."
+        case .tooDeep:
+            return holder.map { "Too deep to draw from here: \($0), which holds it, is outlined." } ?? "Too deep to draw from here."
+        case .tooSmall:
+            return holder.map { "Too small to draw at this size: \($0), which holds it, is outlined." } ?? "Too small to draw at this size."
+        case .notKept:
+            return holder.map { "Too small for the scan to keep on its own: it's counted in \($0), outlined." }
+                ?? "Too small for the scan to keep on its own."
+        case .removed:
+            let gone = "Removed since \(StorageChangeStyle.when(since))"
+            return holder.map { "\(gone): \($0), where it was, is outlined." } ?? "\(gone), so there's nothing to outline."
+        }
     }
 }
