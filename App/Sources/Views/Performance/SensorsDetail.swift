@@ -109,23 +109,14 @@ struct SensorsDetail: View {
                         .frame(minWidth: 110, idealWidth: 180, maxWidth: 180)
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Lowest and highest since \(Self.time(model.sensorExtremes.since))")
-                    .font(.callout)
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-                    .help("Every reading counts toward the range, one each \(Format.timeSpan(model.updateSpeed.rawValue)). "
-                        + "A sensor that gives no reading leaves its range alone.")
-                Button {
-                    model.resetSensorExtremes()
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                }
-                .controlSize(.small)
-                .help("Start every lowest and highest again from now")
-                Spacer(minLength: 0)
+            // The since line and Reset are the table's, so they stick to the
+            // top of the page with the column titles.
+            SensorReadingTable(rows: rows, extremes: model.sensorExtremes, thermalState: pressure ? thermalState : nil,
+                               since: "Lowest and highest since \(Self.time(model.sensorExtremes.since))",
+                               sinceHelp: "Every reading counts toward the range, one each \(Format.timeSpan(model.updateSpeed.rawValue)). "
+                                   + "A sensor that gives no reading leaves its range alone.") {
+                model.resetSensorExtremes()
             }
-            SensorReadingTable(rows: rows, extremes: model.sensorExtremes, thermalState: pressure ? thermalState : nil)
             if all.isEmpty {
                 noSensors()
             } else if rows.isEmpty, !pressure {

@@ -7,12 +7,18 @@ import SwiftUI
 /// since the reset. AppKit rather than SwiftUI: the rows are made when the
 /// set of rows changes (a search, a sensor appearing), and a tick only sets
 /// the figures that changed, so it never lays out a few hundred SwiftUI
-/// cells. The table sizes itself to its rows and scrolls with the page.
+/// cells. The table sizes itself to its rows and scrolls with the page; its
+/// heading sticks to the top of the page while the rows scroll under it.
 struct SensorReadingTable: NSViewRepresentable {
     var rows: [SensorReading]
     var extremes: SensorExtremes
     /// nil leaves out the thermal pressure row (a search that doesn't match it).
     var thermalState: ThermalState?
+    /// "Lowest and highest since 14:02:31", over the column titles.
+    var since: String
+    /// How the lowest and highest are kept, on hover.
+    var sinceHelp: String
+    var reset: @MainActor () -> Void
 
     func makeNSView(context: Context) -> SensorTableView {
         SensorTableView()
@@ -20,6 +26,7 @@ struct SensorReadingTable: NSViewRepresentable {
 
     func updateNSView(_ view: SensorTableView, context: Context) {
         view.update(rows: rows, extremes: extremes, thermalState: thermalState)
+        view.showSince(since, help: sinceHelp, reset: reset)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: SensorTableView, context: Context) -> CGSize? {
@@ -134,7 +141,7 @@ final class SensorTableView: NSView {
 
         var height: CGFloat {
             switch self {
-            case .header: 20
+            case .header: SensorHeaderView.height
             case .pressure: 24
             case .group: 30
             case .reading: 22
@@ -142,8 +149,8 @@ final class SensorTableView: NSView {
         }
     }
 
-    /// The table's lines for these rows: the column titles, thermal
-    /// pressure, then each group's heading and its rows.
+    /// The table's lines for these rows: the heading, thermal pressure,
+    /// then each group's heading and its rows.
     static func lines(rows: [SensorReading], pressure: Bool) -> [Line] {
         var lines: [Line] = [.header]
         if pressure { lines.append(.pressure) }
@@ -167,6 +174,8 @@ final class SensorTableView: NSView {
     private var rowViews: [String: SensorRowView] = [:]
     /// Each group's sources as its heading shows them, to notice a change.
     private var groupSources: [SensorGroup: String] = [:]
+    /// The page's clip view, whose scrolling moves the heading.
+    private weak var clipView: NSClipView?
 
     init() {
         super.init(frame: .zero)
@@ -198,6 +207,11 @@ final class SensorTableView: NSView {
         updateGroupSources(rows)
     }
 
+    func showSince(_ text: String, help: String, reset: @escaping @MainActor () -> Void) {
+        header.showSince(text, help: help)
+        header.reset = reset
+    }
+
     /// Makes and drops rows to match a new set; rows that stay keep their views.
     private func rebuild(_ lines: [Line], rows: [SensorReading]) {
         let ids = Set(rows.map(\.id))
@@ -219,13 +233,14 @@ final class SensorTableView: NSView {
                 index = 0
                 if groupViews[row.group] == nil {
                     let view = SensorGroupView(group: row.group)
-                    addSubview(view)
+                    // Under the heading, which rows scroll beneath.
+                    addSubview(view, positioned: .below, relativeTo: header)
                     groupViews[row.group] = view
                 }
             }
             let view = rowViews[row.id] ?? {
                 let view = SensorRowView()
-                addSubview(view)
+                addSubview(view, positioned: .below, relativeTo: header)
                 rowViews[row.id] = view
                 return view
             }()
@@ -251,15 +266,66 @@ final class SensorTableView: NSView {
         }
     }
 
+    // MARK: Sticky heading
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        followScrolling()
+    }
+
+    /// Watches the page's scroll view, so the heading moves as it scrolls.
+    /// Nothing here runs per tick: only scrolling and layout move it.
+    private func followScrolling() {
+        let clip = window == nil ? nil : enclosingScrollView?.contentView
+        guard clip !== clipView else { return }
+        let center = NotificationCenter.default
+        center.removeObserver(self)
+        clipView = clip
+        guard let clip else { return }
+        clip.postsBoundsChangedNotifications = true
+        center.addObserver(self, selector: #selector(pageScrolled), name: NSView.boundsDidChangeNotification, object: clip)
+        // Cards above the table growing or shrinking move it without a scroll.
+        if let page = clip.documentView {
+            center.addObserver(self, selector: #selector(pageResized), name: NSView.frameDidChangeNotification, object: page)
+        }
+        pinHeader()
+    }
+
+    @objc private func pageScrolled(_ notification: Notification) {
+        pinHeader()
+    }
+
+    @objc private func pageResized(_ notification: Notification) {
+        // After the page has placed the table, not before.
+        needsLayout = true
+    }
+
+    /// Keeps the heading level with the top of the visible area once the
+    /// table's top has scrolled past it (`StickyHeader`).
+    private func pinHeader() {
+        var visibleTop: CGFloat = 0
+        if let clip = clipView {
+            let inset = clip.contentInsets.top
+            let edge = clip.isFlipped ? clip.bounds.minY + inset : clip.bounds.maxY - inset
+            visibleTop = convert(NSPoint(x: 0, y: edge), from: clip).y
+        }
+        let y = CGFloat(StickyHeader.offset(visibleTop: Double(visibleTop), tableHeight: Double(bounds.height),
+                                            headerHeight: Double(SensorHeaderView.height)))
+        if header.frame.minY != y { header.setFrameOrigin(NSPoint(x: 0, y: y)) }
+        header.isPinned = y > 0
+    }
+
     override func layout() {
         super.layout()
+        followScrolling()
         let columns = SensorColumns(width: bounds.width)
         var y: CGFloat = 0
         for line in lines {
             let frame = NSRect(x: 0, y: y, width: bounds.width, height: line.height)
             switch line {
             case .header:
-                header.frame = frame
+                // Its slot stays at the top; `pinHeader` places it.
+                header.frame.size = frame.size
                 header.columns = columns
             case .pressure:
                 pressureRow.frame = frame
@@ -272,31 +338,74 @@ final class SensorTableView: NSView {
             }
             y += line.height
         }
+        pinHeader()
     }
 }
 
 // MARK: - Rows
 
-/// The column titles.
+/// The table's heading: when the lowest and highest count from, with Reset
+/// and a key to the range bars, over the column titles. It sticks to the top
+/// of the page while the rows scroll under it, and takes a solid fill and a
+/// hairline only then, so at rest it reads as part of the card.
 private final class SensorHeaderView: NSView {
+    nonisolated static let sinceHeight: CGFloat = 28
+    nonisolated static let titlesHeight: CGFloat = 20
+    nonisolated static let height = sinceHeight + titlesHeight
+    static let rangeHelp = "Each bar spans the sensor's scale. The coloured band runs from the lowest to the highest "
+        + "reading since the reset, and the tick marks the reading now."
+
+    private let since = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
+    private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
+    private let key = SensorRangeKey()
     private let name = SensorStyle.field(font: SensorStyle.metadata, color: .secondaryText)
     private let now = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
     private let low = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
     private let high = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
     private let range = SensorStyle.field(font: SensorStyle.metadata, color: .secondaryText)
+    private let rangeInfo = NSImageView()
+    private let rule = SensorRuleView()
+
+    var reset: (@MainActor () -> Void)?
 
     var columns = SensorColumns() {
         didSet { if columns != oldValue { needsLayout = true } }
     }
 
+    /// Stuck to the top of the page, over rows.
+    var isPinned = false {
+        didSet {
+            guard isPinned != oldValue else { return }
+            rule.isHidden = !isPinned
+            needsDisplay = true
+        }
+    }
+
     override var isFlipped: Bool { true }
+    override var wantsUpdateLayer: Bool { true }
 
     init() {
         super.init(frame: .zero)
+        wantsLayer = true
+        since.setAccessibilityElement(true)
+        resetButton.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .medium))
+        resetButton.imagePosition = .imageLeading
+        resetButton.bezelStyle = .push
+        resetButton.controlSize = .small
+        resetButton.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
+        resetButton.target = self
+        resetButton.action = #selector(resetPressed)
+        resetButton.toolTip = "Start every lowest and highest again from now"
         for (field, title) in [(name, "Sensor"), (now, "Now"), (low, "Lowest"), (high, "Highest"), (range, "Range")] {
             field.stringValue = title
-            addSubview(field)
         }
+        rangeInfo.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .regular))
+        rangeInfo.contentTintColor = .secondaryText
+        for view in [range, rangeInfo] as [NSView] { view.toolTip = Self.rangeHelp }
+        rule.isHidden = true
+        for view in [since, resetButton, key, name, now, low, high, range, rangeInfo, rule] as [NSView] { addSubview(view) }
     }
 
     @available(*, unavailable)
@@ -304,16 +413,92 @@ private final class SensorHeaderView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func showSince(_ text: String, help: String) {
+        if since.stringValue != text {
+            since.stringValue = text
+            needsLayout = true
+        }
+        if since.toolTip != help { since.toolTip = help }
+    }
+
+    @objc private func resetPressed() {
+        reset?()
+    }
+
+    override func updateLayer() {
+        layer?.cornerRadius = 6
+        // Opaque, so the rows under it don't show through: the page's
+        // background washed with the card's colour, close to the card itself.
+        layer?.backgroundColor = isPinned
+            ? NSColor.windowBackgroundColor.blended(withFraction: 0.07, of: NSColor(Theme.thermal).fillShade)?.cgColor
+            : nil
+    }
+
     override func layout() {
         super.layout()
+        let inset = SensorColumns.inset
+        // The first line: since when, Reset beside it, and the key at the far end.
+        let sinceSize = since.fittingSize
+        let button = resetButton.fittingSize
+        let sinceWidth = min(ceil(sinceSize.width), max(bounds.width - 2 * inset - button.width - 8, 0))
+        since.frame = NSRect(x: inset, y: ((Self.sinceHeight - sinceSize.height) / 2).rounded(), width: sinceWidth, height: sinceSize.height)
+        resetButton.frame = NSRect(x: since.frame.maxX + 8, y: ((Self.sinceHeight - button.height) / 2).rounded(),
+                                   width: button.width, height: button.height)
+        let keyWidth = key.fittingWidth
+        let keyX = bounds.width - inset - keyWidth
+        key.frame = NSRect(x: keyX, y: 0, width: keyWidth, height: Self.sinceHeight)
+        key.isHidden = columns.barWidth == 0 || keyX < resetButton.frame.maxX + 16
+        // The column titles.
         let height = ceil(name.intrinsicContentSize.height)
-        let y = bounds.height - height - 2
+        let y = bounds.height - height - 3
         name.frame = NSRect(x: columns.labelX, y: y, width: columns.labelWidth, height: height)
         now.frame = NSRect(x: columns.nowX, y: y, width: SensorColumns.value, height: height)
         low.frame = NSRect(x: columns.lowX, y: y, width: SensorColumns.value, height: height)
         high.frame = NSRect(x: columns.highX, y: y, width: SensorColumns.value, height: height)
-        range.frame = NSRect(x: columns.barX, y: y, width: columns.barWidth, height: height)
+        let rangeWidth = min(ceil(range.fittingSize.width), columns.barWidth)
+        range.frame = NSRect(x: columns.barX, y: y, width: rangeWidth, height: height)
+        rangeInfo.frame = NSRect(x: range.frame.maxX + 1, y: y, width: 12, height: height)
         range.isHidden = columns.barWidth == 0
+        rangeInfo.isHidden = range.isHidden
+        rule.frame = NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1)
+    }
+}
+
+/// A key to the range bars: a small bar and what its band and tick mean.
+private final class SensorRangeKey: NSView {
+    private static let barWidth: CGFloat = 30
+    private static let gap: CGFloat = 6
+
+    private let bar = SensorRangeBar()
+    private let text = SensorStyle.field(font: SensorStyle.metadata, color: .secondaryText)
+
+    override var isFlipped: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        bar.color = NSColor(Theme.thermal)
+        bar.set(scale: 0...1, lowest: 0.2, highest: 0.75, now: 0.55)
+        text.stringValue = "band: lowest to highest · tick: now"
+        for view in [self, bar, text] as [NSView] { view.toolTip = SensorHeaderView.rangeHelp }
+        addSubview(bar)
+        addSubview(text)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    var fittingWidth: CGFloat {
+        Self.barWidth + Self.gap + ceil(text.fittingSize.width)
+    }
+
+    override func layout() {
+        super.layout()
+        bar.frame = NSRect(x: 0, y: ((bounds.height - 10) / 2).rounded(), width: Self.barWidth, height: 10)
+        let height = ceil(text.intrinsicContentSize.height)
+        text.frame = NSRect(x: Self.barWidth + Self.gap, y: ((bounds.height - height) / 2).rounded(),
+                            width: max(bounds.width - Self.barWidth - Self.gap, 0), height: height)
     }
 }
 
@@ -399,6 +584,8 @@ final class SensorRowView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         for view in [dot, label, now, low, high, bar] as [NSView] { addSubview(view) }
+        // Over the row's own hover text, which says where the reading comes from.
+        bar.toolTip = SensorHeaderView.rangeHelp
         setAccessibilityElement(true)
         setAccessibilityRole(.row)
     }

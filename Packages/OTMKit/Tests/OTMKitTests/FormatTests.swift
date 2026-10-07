@@ -126,6 +126,19 @@ struct HistoryTests {
         #expect(Format.roughDuration(.nan) == "—")
     }
 
+    @Test func agoTakesOneWholeUnit() {
+        #expect(Format.ago(0) == "just now")
+        #expect(Format.ago(59.9) == "just now")
+        #expect(Format.ago(60) == "1 min ago")
+        // Rounded down: it was 59 minutes, not yet an hour.
+        #expect(Format.ago(3_599) == "59 min ago")
+        #expect(Format.ago(2 * 3_600 + 50 * 60) == "2 h ago")
+        #expect(Format.ago(86_400) == "1 day ago")
+        #expect(Format.ago(3 * 86_400 + 5) == "3 days ago")
+        #expect(Format.ago(-30) == "just now")
+        #expect(Format.ago(.nan) == "—")
+    }
+
     @Test func sensorReadings() {
         #expect(Format.celsius(61.6) == "62 °C")
         #expect(Format.celsius(.nan) == "—")

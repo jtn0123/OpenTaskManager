@@ -112,6 +112,19 @@ public enum Format {
         return hours % 24 == 0 ? days : "\(days) \(hours % 24) h"
     }
 
+    /// How long ago something happened, in one whole unit, for a label
+    /// beside a saved result: "just now", "5 min ago", "2 h ago", "3 days ago".
+    /// A time in the future (a clock set back) reads as just now.
+    public static func ago(_ seconds: TimeInterval) -> String {
+        guard seconds.isFinite else { return "—" }
+        let whole = Int(max(seconds, 0))
+        if whole < 60 { return "just now" }
+        if whole < 3600 { return "\(whole / 60) min ago" }
+        if whole < 86_400 { return "\(whole / 3600) h ago" }
+        let days = whole / 86_400
+        return days == 1 ? "1 day ago" : "\(days) days ago"
+    }
+
     /// CPU time as `h:mm:ss.cc`, the way `ps` and Activity Monitor show it.
     public static func cpuTime(_ seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }
