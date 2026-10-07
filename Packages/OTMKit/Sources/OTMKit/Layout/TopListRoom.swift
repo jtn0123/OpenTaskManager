@@ -5,7 +5,8 @@ import Foundation
 ///
 /// Only entries whose figure reads as something get a row: one that rounds to
 /// "0.0%" would only fill the list with zeros. Below the rows a line says the
-/// rest are idle, so the line takes a row's room while it shows. As apps go
+/// rest are idle, so the line counts as a row of room while it shows, though
+/// it may be shorter than one (`height`). As apps go
 /// idle and busy the rows come and go from one sample to the next, so the
 /// card keeps room for the most rows the list needed over the last `hold`
 /// seconds: it grows at once but shrinks only once fewer have been enough
@@ -47,6 +48,18 @@ public struct TopListRoom: Equatable, Sendable {
     /// under them while there's room left for it.
     public static func needed(listed: Int, limit: Int) -> Int {
         listed >= limit ? limit : max(listed, 0) + 1
+    }
+
+    /// How tall `rows` of room are, as `update` gives them: a full list's
+    /// rows, or the entries before the idle line and the line, which is
+    /// `idleLine` tall, each `spacing` apart. So a sparse list takes its rows
+    /// and a short footer, not a row's room for the footer.
+    public static func height(rows: Int, limit: Int, row: Double, idleLine: Double, spacing: Double) -> Double {
+        if rows >= limit {
+            return Double(limit) * row + Double(max(limit - 1, 0)) * spacing
+        }
+        let listed = max(rows - 1, 0)
+        return Double(listed) * (row + spacing) + idleLine
     }
 
     /// The room after an update that lists `listed` entries, at `time` in

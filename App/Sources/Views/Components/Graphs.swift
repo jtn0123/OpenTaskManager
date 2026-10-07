@@ -161,15 +161,15 @@ extension NSColor {
 }
 
 extension Font {
-    /// Metadata: labels, units, short facts and status bars. 11 pt at the
-    /// default text size, the smallest text the app draws.
-    static let metadata = Font.subheadline
+    /// Metadata: labels, units, captions and short facts. 12 pt at the
+    /// default text size, the floor for anything a reading depends on.
+    static let metadata = Font.callout
     /// Explanatory captions and notes: what something means, why a reading
-    /// is missing, what a button will do. 12 pt, a size up from `metadata`,
-    /// since these are read rather than scanned.
+    /// is missing, what a button will do. 12 pt, as `metadata`.
     static let explanation = Font.callout
-    /// Rows of tables and lists: 12 pt.
-    static let tableText = Font.callout
+    /// Rows of tables and lists, graph legends and the process inspector's
+    /// facts: 13 pt, a step up from the captions, since these are what's read.
+    static let tableText = Font.body
 }
 
 extension NSColor {
@@ -869,7 +869,7 @@ final class CardSurfaceView: NSView {
 struct ProcessBarRow: View {
     /// A row's height: the icon or a line of table text, whichever is
     /// taller, and the padding, so a list can keep room for rows it isn't showing.
-    static let height = max(16, ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .callout)))) + 6
+    static let height = max(16, ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .body)))) + 6
 
     var icon: NSImage
     var name: String

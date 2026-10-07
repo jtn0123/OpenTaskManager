@@ -123,7 +123,7 @@ struct NetworkAppsSection: View {
             Text("Receive").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
             Text("Send").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
         }
-        .font(.tableText)
+        .font(.metadata)
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 6)
     }
@@ -150,11 +150,16 @@ struct TopNetworkCard: View {
         store.hasMeasured && store.apps.hasMoved(inLast: holdReadings)
     }
 
+    /// Whether the rows are too narrow for a name beside both rate columns
+    /// (a third of a 1180-point Overview); then each shows its busier direction.
+    @State private var showsOneRate = false
+
     var body: some View {
         let store = model.networkActivity
         let history = store.apps
         let top = history.ranking(bands: 0, rows: 6, holding: Self.holdReadings).rows
         let peak = top.compactMap { history.latest[$0]?.total }.max() ?? 0
+        let widthForBothRates = NetworkUsageRow.widthForBothRates
         Card {
             HStack(alignment: .firstTextBaseline) {
                 Label("Top Network", systemImage: "network")
@@ -162,7 +167,7 @@ struct TopNetworkCard: View {
                     .foregroundStyle(Theme.network)
                 Spacer(minLength: 8)
                 Text("every \(Format.timeSpan(NetworkActivityStore.refreshSeconds))")
-                    .font(.subheadline)
+                    .font(.metadata)
                     .foregroundStyle(.secondaryText)
                     .help("Read with nettop every \(Format.timeSpan(NetworkActivityStore.refreshSeconds)) while this page is open")
             }
@@ -180,10 +185,11 @@ struct TopNetworkCard: View {
                     let usage = history.latest[pid] ?? NetworkUsage(received: 0, sent: 0, processes: 0)
                     let identity = store.identity(pid)
                     NetworkUsageRow(icon: identity.icon, name: identity.name, usage: usage,
-                                    fraction: peak > 0 ? usage.total / peak : 0)
+                                    fraction: peak > 0 ? usage.total / peak : 0, showsOneRate: showsOneRate)
                         .help("\(identity.name): receiving \(Format.bitsPerSecond(usage.received)), sending \(Format.bitsPerSecond(usage.sent))")
                 }
             }
+            .onGeometryChange(for: Bool.self) { $0.size.width < widthForBothRates } action: { showsOneRate = $0 }
         }
         .task { await store.track(model: model) }
     }
@@ -195,7 +201,7 @@ struct NetworkUsageRow: View {
     /// Wide enough for the widest rate ("99.9 Mbps") and its arrow, so the
     /// columns line up from row to row.
     static let rateColumnWidth: CGFloat = {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
         return ceil(("99.9 Mbps" as NSString).size(withAttributes: [.font: font]).width) + 14
     }()
 
@@ -205,6 +211,12 @@ struct NetworkUsageRow: View {
     var badge: String?
     var usage: NetworkUsage
     var fraction: Double
+    /// Shows only the busier direction, for a list too narrow for both columns.
+    var showsOneRate = false
+
+    /// The narrowest row that still leaves a name about 110 points beside
+    /// both rate columns: the icon, four gaps, the spacer's minimum and the padding.
+    static let widthForBothRates: CGFloat = 110 + 2 * rateColumnWidth + 16 + 5 * 8 + 12
 
     var body: some View {
         HStack(spacing: 8) {
@@ -217,10 +229,14 @@ struct NetworkUsageRow: View {
                 Text(badge).foregroundStyle(.secondaryText).fixedSize()
             }
             Spacer(minLength: 8)
-            rate(usage.received, symbol: "arrow.down", color: Theme.network)
-            rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
+            if !showsOneRate || usage.received >= usage.sent {
+                rate(usage.received, symbol: "arrow.down", color: Theme.network)
+            }
+            if !showsOneRate || usage.sent > usage.received {
+                rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
+            }
         }
-        .font(.callout)
+        .font(.tableText)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(alignment: .leading) {

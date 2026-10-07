@@ -56,7 +56,9 @@ Manager OG or any other proprietary task manager.
   UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
   Model/BenchmarkTrend splits a test's runs into lines only comparable runs
   share and gives each figure's points their spread and verdict against a
-  picked baseline, for the workspace's static Swift Charts (`BenchmarkTrendView`,
+  picked baseline (beside each chart's change in a word, "within spread",
+  "faster", "lower": `BenchmarkChange.verdictWord`), for the workspace's
+  static Swift Charts (`BenchmarkTrendView`,
   `-openBenchmarkBaseline cpu:3`); the resource cards fold their runs into
   `SavedRunsDisclosure`, whose Compare in Benchmarks ticks the latest pair;
   System/CommandRunner runs every system tool with a timeout),
@@ -195,7 +197,9 @@ Manager OG or any other proprietary task manager.
   history, and each app group's as it stood each tick, is as long, `Float`,
   appended in place, ranked by running totals, `ProcessTotal` of OTMKit's
   `RunningSum`, never re-summed; a graph reads one ring per app), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
-  their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump.
+  their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump;
+  the idle line under the rows is a footer shorter than a row
+  (`TopListRoom.height`), so a sparse list alone in its row stays compact.
   Performance's Fit collected data toggle (`GraphFit`, in the main graph's
   time axis until the window is nearly full) narrows that one window, through
   the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
@@ -431,12 +435,17 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   `Theme.appColors(for:in:)` (`SeriesSlots`), so an app keeps its colour as the
   ranking changes.
 - Secondary text (labels, captions, units, footnotes) takes
-  `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt);
-  explanations meant to be read (what a reading means, why it's missing, what
-  a button does) `.font(.explanation)` (12 pt); and table
-  and list rows `.font(.tableText)` (12 pt), all from `Graphs.swift`. The
-  Thermals table's rows are a step up (13 pt, body), since its readings are
-  what the page is for, with its supporting text at 12 pt. The
+  `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (12 pt, the
+  floor for anything a reading depends on); explanations meant to be read
+  (what a reading means, why it's missing, what a button does)
+  `.font(.explanation)` (12 pt); and table and list rows, graph legends and
+  the process inspector's facts `.font(.tableText)` (13 pt), all from
+  `Graphs.swift`. Live graphs' axis labels and coverage caption are 12 pt
+  too (`StreamGraphView.captionFont`), placed so the caption still fits under
+  the middle label of the Overview's 72-point graphs. The Thermals table's
+  rows are 13 pt (body), with its supporting text at 12 pt. Benchmarks'
+  comparison table keeps that size in a narrow window by dropping a figure's
+  variant under its name and stacking the two spreads (`ViewThatFits`). The
   system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
   Search finds are marked in primary ink, bold, over `TextTone.highlight`,
   which keeps 4.5:1 on every card in both appearances.

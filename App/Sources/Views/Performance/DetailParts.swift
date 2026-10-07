@@ -48,14 +48,18 @@ struct MetricStrip<Content: View>: View {
 
 /// The apps using the most of one resource, with bars relative to the leader.
 ///
-/// Only apps whose figure reads as more than zero get a row; under them one
-/// line says the rest are idle, and Show all opens Processes sorted by the
-/// same figure. The list keeps room for the most rows it needed lately
-/// (`TopListRoom`), so the card doesn't change height as apps go idle and
-/// busy from one tick to the next.
+/// Only apps whose figure reads as more than zero get a row; under them a
+/// compact footer, a line of text shorter than a row, says the rest are idle,
+/// and Show all opens Processes sorted by the same figure. The list keeps
+/// room for the most rows it needed lately (`TopListRoom`), so the card
+/// doesn't change height as apps go idle and busy from one tick to the next;
+/// a card alone in its row is as tall as that room, while `FillGrid` evens it
+/// with a taller neighbour.
 struct TopAppsCard: View {
     private static let limit = 6
     private static let spacing: CGFloat = 4
+    /// The idle footer's line: explanation text and a point either side.
+    private static let footerHeight = ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .callout))) + 2
 
     @Environment(AppModel.self) private var model
     @AppStorage("page") private var page: Page = .overview
@@ -106,7 +110,7 @@ struct TopAppsCard: View {
                             .font(.explanation)
                             .foregroundStyle(.secondaryText)
                             .padding(.horizontal, 6)
-                            .frame(height: ProcessBarRow.height)
+                            .frame(height: Self.footerHeight)
                             .help(cutoff.map { "Apps under \($0) aren't listed." } ?? "Apps that would read \(zero) aren't listed.")
                     }
                 }
@@ -133,8 +137,9 @@ struct TopAppsCard: View {
         }
     }
 
+    /// The room for `rows` of `TopListRoom`, the idle footer shorter than a row.
     private static func height(rows: Int) -> CGFloat {
-        CGFloat(rows) * ProcessBarRow.height + CGFloat(max(rows - 1, 0)) * spacing
+        CGFloat(TopListRoom.height(rows: rows, limit: limit, row: ProcessBarRow.height, idleLine: footerHeight, spacing: spacing))
     }
 
     /// Every app, busiest first, in the Processes table.
@@ -186,7 +191,7 @@ struct CapabilityNote: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
+            Text(label).font(.metadata).foregroundStyle(.secondaryText)
             Label(text, systemImage: "info.circle")
                 .font(.callout)
                 .foregroundStyle(.secondaryText)

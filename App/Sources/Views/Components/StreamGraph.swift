@@ -142,11 +142,15 @@ final class StreamGraphView: NSView {
         var tangents: [Double]
     }
 
-    /// The axis labels' size. 12 pt, the app's size for explanations, would
-    /// leave no room for the caption under the middle label in a 72-point graph.
-    private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+    /// The axis labels' and the coverage caption's size: 12 pt, the app's
+    /// metadata size.
+    private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
     /// The top label's note ("auto scale").
-    private static let noteFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    private static let noteFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    /// An axis label's or the caption's line. The caption sits a point off
+    /// the plot's padding and a point under the middle label, so the two fit
+    /// one above the other in a 72-point graph (Overview's).
+    private static let labelHeight: CGFloat = 15
 
     private let plot = CALayer()
     private let grid = CAShapeLayer()
@@ -553,10 +557,9 @@ final class StreamGraphView: NSView {
         topLabel.isHidden = axis == nil
         midLabel.isHidden = axis == nil
         guard let axis else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         for (label, value, y) in [(topLabel, ceiling, plotRect.height - padding), (midLabel, ceiling / 2, padding + usable / 2)] {
             let color = NSColor(cgColor: labelColor) ?? .secondaryText
-            let text = NSMutableAttributedString(string: axis(value), attributes: [.font: font, .foregroundColor: color])
+            let text = NSMutableAttributedString(string: axis(value), attributes: [.font: Self.captionFont, .foregroundColor: color])
             if label === topLabel, let note = configuration.axisNote {
                 // The note in the accent colour, so a scale that isn't fixed
                 // isn't read as one that is.
@@ -571,7 +574,7 @@ final class StreamGraphView: NSView {
             }
             label.string = text
             label.shadowColor = NSColor.windowBackgroundColor.cgColor
-            label.frame = CGRect(x: 5, y: y - 14, width: max(plotRect.width - 10, 0), height: 14)
+            label.frame = CGRect(x: 5, y: y - Self.labelHeight, width: max(plotRect.width - 10, 0), height: Self.labelHeight)
         }
     }
 }
@@ -656,10 +659,10 @@ extension StreamGraphView {
     /// In full or short form, whichever fits the `room` left of the first
     /// sample, and only below the axis's middle label.
     private func placeCaption(_ coverage: GraphCoverage, room: CGFloat, in plotRect: CGRect, configuration: Configuration) {
-        let bottom = verticalPadding + 2
-        let height: CGFloat = 15
+        let bottom = verticalPadding + 1
+        let height = Self.labelHeight
         // The middle axis label's lower edge (see `drawGrid`).
-        let clearance = plotRect.height / 2 - 14
+        let clearance = plotRect.height / 2 - Self.labelHeight
         if coverage.caption != accessibilityCaption {
             accessibilityCaption = coverage.caption
             setAccessibilityHelp(coverage.spokenCaption)
@@ -686,7 +689,7 @@ extension StreamGraphView {
             captionBadge.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.7 : 0.8).cgColor
         }
         captionBadge.frame = CGRect(x: inset, y: bottom, width: width + 8, height: height)
-        captionLabel.frame = CGRect(x: 4, y: 0, width: width + 1, height: 14)
+        captionLabel.frame = CGRect(x: 4, y: 0, width: width + 1, height: height)
     }
 
     private func captionWidth(_ text: String) -> CGFloat {

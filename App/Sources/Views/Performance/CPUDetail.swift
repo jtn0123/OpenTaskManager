@@ -223,8 +223,8 @@ struct CPUDetail: View {
                     Spacer()
                     Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? AnyShapeStyle(color) : AnyShapeStyle(.secondaryText))
                 }
-                // The metadata size: in a small multiple, a bigger label would hide the graph's top.
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                // The metadata size, 12 pt: in a small multiple, a bigger label would hide the graph's top.
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
                 .padding(.horizontal, 5)
                 .padding(.top, 3)
             }
