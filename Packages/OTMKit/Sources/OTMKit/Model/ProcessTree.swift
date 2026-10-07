@@ -136,14 +136,17 @@ public enum ProcessTreeBuilder {
         }
 
         // Follow responsibility up to the process that owns the group. Chains
-        // are short in practice; the hop limit guards against cycles.
+        // are short in practice; the hop limit guards against cycles. An
+        // owner that started after the process can't be the one responsible
+        // for it: that one ended and macOS gave its PID to a later process.
         var roots: [Int32] = []
         roots.reserveCapacity(processes.count)
         for index in processes.indices {
             var current = index
             for _ in 0..<4 {
                 let owner = processes[current].responsiblePID
-                guard owner != processes[current].pid, let next = indexByPID[owner] else { break }
+                guard owner != processes[current].pid, let next = indexByPID[owner],
+                      !started(processes[next], after: processes[current]) else { break }
                 current = next
             }
             roots.append(processes[current].pid)
@@ -174,21 +177,39 @@ public enum ProcessTreeBuilder {
         }
     }
 
+    /// Whether `process` started later than `other`; false when either
+    /// start time is unknown.
+    static func started(_ process: ProcessSample, after other: ProcessSample) -> Bool {
+        guard let start = process.startTime, let otherStart = other.startTime else { return false }
+        return start > otherStart
+    }
+
     // MARK: Tree
 
     static func tree(_ processes: [ProcessSample]) -> [ProcessNode] {
         let present = Set(processes.map(\.pid))
-        let children = Dictionary(grouping: processes.filter { $0.parentPID != $0.pid && present.contains($0.parentPID) }, by: \.parentPID)
-
-        func node(for process: ProcessSample, depth: Int) -> ProcessNode {
-            // Depth guard: PID reuse can, in theory, produce a cycle.
-            let kids = depth > 64 ? [] : (children[process.pid] ?? []).map { node(for: $0, depth: depth + 1) }
-            return .process(process, children: kids)
-        }
-
+        let children = childrenByParent(processes, present: present)
         return processes
             .filter { $0.parentPID == $0.pid || !present.contains($0.parentPID) }
-            .map { node(for: $0, depth: 0) }
+            .map { treeNode(for: $0, children: children, depth: 0) }
+    }
+
+    /// The row Tree shows for `root`, with everything under it, without
+    /// building the rest of the tree. nil once `root` has ended.
+    public static func subtree(of root: ProcessIdentity, in processes: [ProcessSample]) -> ProcessNode? {
+        guard let process = root.find(in: processes) else { return nil }
+        return treeNode(for: process, children: childrenByParent(processes, present: Set(processes.map(\.pid))), depth: 0)
+    }
+
+    /// Each listed process's children, by its PID.
+    private static func childrenByParent(_ processes: [ProcessSample], present: Set<Int32>) -> [Int32: [ProcessSample]] {
+        Dictionary(grouping: processes.filter { $0.parentPID != $0.pid && present.contains($0.parentPID) }, by: \.parentPID)
+    }
+
+    private static func treeNode(for process: ProcessSample, children: [Int32: [ProcessSample]], depth: Int) -> ProcessNode {
+        // Depth guard: PID reuse can, in theory, produce a cycle.
+        let kids = depth > 64 ? [] : (children[process.pid] ?? []).map { treeNode(for: $0, children: children, depth: depth + 1) }
+        return .process(process, children: kids)
     }
 
     // MARK: Filtering
