@@ -276,6 +276,13 @@ final class AppModel {
     /// so a Mac without power sensors (a VM) hides its power figures from the
     /// first frame rather than a second later. nil until a sample has told.
     private(set) var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
+    /// Whether this Mac attributes GPU time to processes (`ProcessGPUReporting`),
+    /// kept across launches and written only when it changes, like
+    /// `measuresProcessEnergy`. nil until the samples have told.
+    private(set) var reportsProcessGPU = UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+    @ObservationIgnored private var gpuReporting = ProcessGPUReporting(
+        isReported: UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+    )
 
     var isPaused = false {
         didSet { isPaused ? stop() : start() }
@@ -434,6 +441,7 @@ final class AppModel {
         var totalPower = 0.0
         var totalMemory = 0.0
         var anyPower = false
+        var anyGPU = false
         for process in snapshot.processes {
             var history = processHistory[process.pid] ?? History(capacity: Self.processHistoryCapacity)
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
@@ -444,12 +452,9 @@ final class AppModel {
             totalPower += point.powerWatts
             totalMemory += Double(point.memory)
             if process.powerWatts != nil { anyPower = true }
+            if process.gpuTime != nil { anyGPU = true }
         }
-        // The rule in `ProcessSample.measuresEnergy`, without a second walk.
-        if snapshot.interval > 0, !snapshot.processes.isEmpty, anyPower != measuresProcessEnergy {
-            measuresProcessEnergy = anyPower
-            UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
-        }
+        noteWhatProcessesReport(snapshot, anyPower: anyPower, anyGPU: anyGPU)
         processHistory = processes
         processGPUHistory.append(totalGPU)
         processPowerHistory.append(totalPower)
@@ -457,6 +462,22 @@ final class AppModel {
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
         record(snapshot)
+    }
+
+    /// Whether this Mac measures energy and GPU time per process, from the
+    /// tick's walk over the processes (any reading at all), saved when it changes.
+    private func noteWhatProcessesReport(_ snapshot: SystemSnapshot, anyPower: Bool, anyGPU: Bool) {
+        guard !snapshot.processes.isEmpty else { return }
+        // The rule in `ProcessSample.measuresEnergy`, without a second walk.
+        if snapshot.interval > 0, anyPower != measuresProcessEnergy {
+            measuresProcessEnergy = anyPower
+            UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
+        }
+        gpuReporting.record(anyGPUTime: anyGPU)
+        if let reported = gpuReporting.isReported, reported != reportsProcessGPU {
+            reportsProcessGPU = reported
+            UserDefaults.standard.set(reported, forKey: "reportsProcessGPU")
+        }
     }
 
     /// Records this tick's sensors, clocks and power rails in the Thermals

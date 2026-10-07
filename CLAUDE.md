@@ -163,8 +163,15 @@ build, `-sensorFixture <file>` loads a recording from
   `ProcessColumn.priority` first (the maths is `ColumnFit` in OTMKit's Layout/),
   apart from the user's Columns choices, and shows them again when there's room.
   A column this Mac can't fill (Power, when `AppModel.measuresProcessEnergy`
-  is false) starts hidden the same way; the Columns menu says why, and the
-  user can still turn it on.
+  is false; GPU, when `reportsProcessGPU` is, because no process had any GPU
+  time for a few samples, `ProcessGPUReporting` in OTMKit) starts hidden the
+  same way; the Columns menu says why, and the user can still turn it on. An
+  idle GPU still reports (0%); a VM's paravirtual GPU does too.
+- The process inspector shows one process. When the selected row has others
+  nested under it, whose sum the collapsed row shows, a note under its header
+  says so with the row's figures and a Show Helpers button that expands it. Its
+  memory graph and facts name their measure (footprint, as in the Memory
+  column, beside real memory), defined in `MemoryMeasure`.
 - Pages with a table and details (Processes, Startup, Apps, Drivers,
   Connections) use `InspectorSplit`: the pane appears beside the table once
   something is selected, its width is draggable and remembered, and in a

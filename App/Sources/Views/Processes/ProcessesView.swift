@@ -19,10 +19,16 @@ struct ProcessesView: View {
     @State private var isNarrow = false
     /// In a narrow window, the inspector covers the table.
     @State private var showsFullDetail = false
+    /// Process rows the user expanded, so the inspector knows whether the
+    /// selected row shows its own figures or its group's.
+    @State private var expandedRows: Set<Int64> = []
+    @State private var tableLink = ProcessTableLink()
 
     var body: some View {
         VStack(spacing: 0) {
             if let snapshot = model.snapshot {
+                // Covered by the inspector, the table is hidden and not updated.
+                let table = isNarrow && showsFullDetail ? nil : configuration(for: snapshot)
                 // The table gets the full width until there's something to inspect.
                 InspectorSplit(
                     listMinimum: tableMinimum,
@@ -33,8 +39,7 @@ struct ProcessesView: View {
                     backTitle: "Processes"
                 ) {
                     ProcessOutlineView(
-                        // Covered by the inspector, the table is hidden and not updated.
-                        configuration: isNarrow && showsFullDetail ? nil : configuration(for: snapshot),
+                        configuration: table,
                         selection: $selection,
                         sortKey: $sortKey,
                         ascending: $ascending,
@@ -42,10 +47,12 @@ struct ProcessesView: View {
                         onShowInspector: openDetails,
                         onToggleColumn: { hiddenColumns.toggle($0, unreported: unreportedColumns) },
                         onMinimumWidthChange: { tableMinimum = $0 },
-                        onHiddenToFitChange: { hiddenToFit = $0 }
+                        onHiddenToFitChange: { hiddenToFit = $0 },
+                        link: tableLink,
+                        onExpandedChange: { expandedRows = $0 }
                     )
                 } detail: {
-                    inspector
+                    inspector(group: selectedRowGroup(in: table?.nodes, snapshot: snapshot))
                 }
                 Divider()
                 StatusBar(snapshot: snapshot)
@@ -91,9 +98,9 @@ struct ProcessesView: View {
         }
     }
 
-    @ViewBuilder private var inspector: some View {
+    @ViewBuilder private func inspector(group: ProcessRowGroup?) -> some View {
         if let pid = selection.first, selection.count == 1, model.process(pid) != nil {
-            ProcessInspectorView(pid: pid)
+            ProcessInspectorView(pid: pid, group: group)
         } else if let pid = selection.first, selection.count == 1 {
             ContentUnavailableView(
                 "Process ended",
@@ -159,9 +166,32 @@ struct ProcessesView: View {
     }
 
     /// Columns with nothing to show on this Mac, such as Power in a VM.
-    /// Changes at most once per launch, so the table refits only then.
+    /// Changes at most a few times per launch, so the table refits only then.
     private var unreportedColumns: Set<ProcessColumn> {
-        ProcessColumn.unreported(measuresEnergy: model.measuresProcessEnergy)
+        ProcessColumn.unreported(measuresEnergy: model.measuresProcessEnergy, reportsGPU: model.reportsProcessGPU)
+    }
+
+    /// What the selected row counts besides its process, when it has rows
+    /// nested under it: the inspector shows the process alone and says so.
+    /// Found in the table's rows; while the inspector covers the table, they
+    /// are built here instead, unsorted, as the table would have them.
+    private func selectedRowGroup(in nodes: [ProcessNode]?, snapshot: SystemSnapshot) -> ProcessRowGroup? {
+        guard showInspector, selection.count == 1, let pid = selection.first, mode != .flat else { return nil }
+        let nodes = nodes ?? ProcessTreeBuilder.build(snapshot.processes, mode: mode, appPIDs: Set(model.regularApps.keys), filter: search)
+        guard let node = ProcessTreeBuilder.node(for: pid, in: nodes), !node.children.isEmpty else { return nil }
+        return ProcessRowGroup(
+            totals: node.totals,
+            mode: mode,
+            isExpanded: expandedRows.contains(node.id),
+            show: { showNested(pid) }
+        )
+    }
+
+    /// The inspector's Show Helpers: the row expanded, in view, beside the
+    /// inspector or, in a narrow window, back in place of it.
+    private func showNested(_ pid: Int32) {
+        if isNarrow { showsFullDetail = false }
+        tableLink.showNested(pid)
     }
 
     private var detailsHelp: String {

@@ -88,10 +88,23 @@ enum ProcessColumn: String, CaseIterable {
     }
 
     /// Columns this Mac has no figures for, which start hidden: Power when
-    /// it doesn't measure energy per process (a virtual machine), where
-    /// every row would read "—". nil `measuresEnergy` is unknown yet.
-    static func unreported(measuresEnergy: Bool?) -> Set<ProcessColumn> {
-        measuresEnergy == false ? [.power] : []
+    /// it doesn't measure energy per process (a virtual machine), and GPU
+    /// when no process has any GPU time (`ProcessGPUReporting`), where every
+    /// row would read "—". nil is unknown yet, and counts as reported.
+    static func unreported(measuresEnergy: Bool?, reportsGPU: Bool?) -> Set<ProcessColumn> {
+        var columns: Set<ProcessColumn> = []
+        if measuresEnergy == false { columns.insert(.power) }
+        if reportsGPU == false { columns.insert(.gpu) }
+        return columns
+    }
+
+    /// The header's tooltip, for columns whose name alone doesn't say what they measure.
+    var headerHelp: String? {
+        switch self {
+        case .memory: MemoryMeasure.column
+        case .gpu: "GPU: the share of the GPU's time each process used. \"—\" for a process that hasn't used the GPU."
+        default: nil
+        }
     }
 
     /// Closes the Columns menus while a column is hidden to fit.
@@ -136,6 +149,21 @@ enum ProcessColumn: String, CaseIterable {
     static let defaultTableMinimum: CGFloat = allCases.filter { $0.priority == nil }.reduce(4) { width, column in
         width + (column == .name ? column.minWidth : column.width) + spacing
     }
+}
+
+/// What the process memory figures measure, for the table's Memory header
+/// and the inspector, which shows two of them side by side.
+enum MemoryMeasure {
+    static let footprint = "Memory footprint: what macOS charges to this process. It counts the memory the process has "
+        + "written to, compressed pages included, but not shared libraries or files it can read back from disk. "
+        + "The table's Memory column shows it, as Activity Monitor's does."
+    static let resident = "Real memory: the pages this process has in RAM right now, shared libraries and mapped files "
+        + "included. A page shared with other processes counts in each of them, so it's usually more than the footprint "
+        + "and doesn't add up across processes."
+    static let restricted = "Resident memory: the pages this process has in RAM, shared ones included. macOS reveals only "
+        + "this of other users' and system processes, so the table shows it for them too."
+    static let column = "Memory: each process's footprint, what macOS charges to it, as in Activity Monitor. A collapsed "
+        + "row adds up the processes under it. System processes show their resident size, the most macOS reveals of them."
 }
 
 /// The columns switched off in the Columns menu, and the ones this Mac can't

@@ -15,6 +15,18 @@ struct ProcessTableConfiguration {
     var fastTierName: String
 }
 
+/// Lets the page act on the table directly: the inspector's Show Helpers
+/// expands the selected row without waiting for the next refresh.
+@MainActor
+final class ProcessTableLink {
+    fileprivate weak var coordinator: ProcessOutlineView.Coordinator?
+
+    /// Expands the row for `pid` and scrolls the processes under it into view.
+    func showNested(_ pid: Int32) {
+        coordinator?.showNested(pid)
+    }
+}
+
 struct ProcessOutlineView: NSViewRepresentable {
     /// Nil while the inspector covers the table: it's hidden and not updated.
     var configuration: ProcessTableConfiguration?
@@ -30,6 +42,10 @@ struct ProcessOutlineView: NSViewRepresentable {
     /// Called when the columns that are on but hidden to fit the width change,
     /// so the Columns menu can say so.
     var onHiddenToFitChange: (Set<ProcessColumn>) -> Void
+    var link: ProcessTableLink
+    /// Called when a process row is expanded or collapsed, with the rows now
+    /// expanded, so the inspector can say what the selected row shows.
+    var onExpandedChange: (Set<Int64>) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -55,6 +71,7 @@ struct ProcessOutlineView: NSViewRepresentable {
             let header = ProcessHeaderCell(textCell: column.title)
             header.alignment = column.isNumeric ? .right : .left
             tableColumn.headerCell = header
+            tableColumn.headerToolTip = column.headerHelp
             tableColumn.width = column.width
             tableColumn.minWidth = column.minWidth
             // Name fills whatever the others leave, so it isn't dragged.
@@ -86,6 +103,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         menu.delegate = coordinator
         outline.menu = menu
         coordinator.outline = outline
+        link.coordinator = coordinator
 
         let scroll = NSScrollView()
         scroll.documentView = outline
@@ -133,6 +151,8 @@ struct ProcessOutlineView: NSViewRepresentable {
         /// Largest value in each relative-scaled column this refresh.
         private var peaks = Peaks()
         private var reportedMinimumWidth: CGFloat = 0
+        /// A row whose nested rows to scroll into view once the table shows.
+        private var revealing: Int64?
 
         struct Peaks {
             var memory: Double = 0
@@ -206,6 +226,39 @@ struct ProcessOutlineView: NSViewRepresentable {
             refreshVisibleCells(in: outline)
             restoreSelection(in: outline, keeping: tableSelection)
             isRestoring = false
+            if revealing != nil {
+                // Back from the full-width inspector: once the table is laid out again.
+                DispatchQueue.main.async { [weak self] in self?.scrollToReveal() }
+            }
+        }
+
+        /// Expands the row for `pid`, and any section it's in, then scrolls
+        /// the rows under it into view, now or once the table shows again.
+        func showNested(_ pid: Int32) {
+            guard let outline, let item = items[Int64(pid)], !item.children.isEmpty else { return }
+            var ancestors: [Any] = []
+            var ancestor = outline.parent(forItem: item)
+            while let current = ancestor {
+                ancestors.insert(current, at: 0)
+                ancestor = outline.parent(forItem: current)
+            }
+            // Through the delegate, which records each as expanded by the user.
+            ancestors.forEach { outline.expandItem($0) }
+            outline.expandItem(item)
+            revealing = item.id
+            if outline.enclosingScrollView?.isHidden == false { scrollToReveal() }
+        }
+
+        /// The row's last nested row, then the row itself, so as many of them
+        /// show as fit, with the row on top.
+        private func scrollToReveal() {
+            guard let id = revealing, let outline else { return }
+            revealing = nil
+            guard let item = items[id] else { return }
+            let row = outline.row(forItem: item)
+            guard row >= 0 else { return }
+            outline.scrollRowToVisible(min(row + item.children.count, outline.numberOfRows - 1))
+            outline.scrollRowToVisible(row)
         }
 
         private func updateColumns(_ outline: ProcessOutline, configuration: ProcessTableConfiguration) {
@@ -425,6 +478,10 @@ struct ProcessOutlineView: NSViewRepresentable {
                 if isExpanded { collapsedSections.remove(item.id) } else { collapsedSections.insert(item.id) }
             } else {
                 if isExpanded { expanded.insert(item.id) } else { expanded.remove(item.id) }
+                let report = parent.onExpandedChange
+                let rows = expanded
+                // Not during the outline's own update.
+                DispatchQueue.main.async { report(rows) }
             }
         }
 
