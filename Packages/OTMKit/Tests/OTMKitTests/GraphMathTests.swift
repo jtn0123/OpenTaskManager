@@ -1,5 +1,6 @@
-import Testing
+import Foundation
 @testable import OTMKit
+import Testing
 
 struct GraphMathTests {
     @Test(arguments: [
