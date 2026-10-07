@@ -22,6 +22,8 @@ USAGE:
                                  extensions; --all adds Apple's kexts
   otm apps [--sizes] [--json]    Installed apps: version, kind, architecture,
                                  signer, last opened; --sizes adds disk space
+  otm devices [--all] [--json]   USB, Thunderbolt, Bluetooth, audio and video
+                                 devices; --all adds serial numbers and addresses
   otm inspect PID [--json]       Arguments, environment and open files
   otm du [PATH] [--depth N] [-n COUNT] [--changes] [--json]
                                  What's using the space under PATH (default: the
@@ -598,6 +600,14 @@ case "apps":
         if intel > 0 { footer += ", \(intel) Intel only (run under Rosetta)" }
         if let sizes { footer += ", \(Format.bytes(sizes.values.reduce(0, +))) on disk" }
         print(footer)
+    }
+
+case "devices":
+    let devices = PeripheralReader.read()
+    if options.json {
+        printJSON(devices)
+    } else {
+        print(SystemReport.deviceText(devices, includeIdentifiers: options.all), terminator: "")
     }
 
 case "ports":

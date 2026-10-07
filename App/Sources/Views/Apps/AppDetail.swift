@@ -10,6 +10,8 @@ struct AppDetail: View {
     var pids: [Int32]
     /// Opens the Startup page on this app's launch items.
     var showInStartup: () -> Void
+    /// Opens the removal review; nil for apps it isn't offered for.
+    var moveToTrash: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -154,6 +156,18 @@ struct AppDetail: View {
                     .help(app.launchItems.isEmpty ? "This app has no launch items" : "Open the Startup page on this app's launch items")
                 Button { AppActions.copy(app.bundleIdentifier ?? "") } label: { Text("Copy Bundle ID").frame(maxWidth: .infinity) }
                     .disabled(app.bundleIdentifier == nil)
+            }
+            // A row of its own, apart from the everyday actions, and red
+            // because it ends in the Trash (after a review).
+            if let moveToTrash {
+                GridRow {
+                    Button(role: .destructive, action: moveToTrash) {
+                        Label("Move to Trash…", systemImage: "trash").frame(maxWidth: .infinity)
+                    }
+                    .foregroundStyle(.red)
+                    .gridCellColumns(2)
+                    .help("Review the app and what it keeps in your Library, then move them to the Trash")
+                }
             }
         }
     }

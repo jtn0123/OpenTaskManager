@@ -10,7 +10,8 @@ struct OverviewView: View {
         if let snapshot = model.snapshot {
             let groups = model.appGroups
             // Unknown until the first samples say; until then the card stays.
-            let measuresEnergy = snapshot.measuresProcessEnergy != false
+            let measuresEnergy = model.measuresProcessEnergy != false
+            let networkRanks = TopNetworkStrip.hasRanking(model.networkActivity)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     FillGrid(minimum: 210) {
@@ -34,21 +35,34 @@ struct OverviewView: View {
                             TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
                                     metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
                         }
-                        TopNetworkCard()
+                        if networkRanks { TopNetworkCard() }
                     }
-                    // A whole card would only say there's nothing to rank.
-                    if !measuresEnergy {
-                        CapabilityNotice(title: "Top Energy", symbol: "bolt.fill", color: Theme.power, text: Unavailable.energy)
+                    // A whole card would only say there's nothing to rank, so
+                    // each takes a line and the cards above share its width.
+                    if !measuresEnergy || !networkRanks {
+                        FillGrid(minimum: 360, spacing: 12) {
+                            if !measuresEnergy {
+                                NoticeStrip(title: "Top Energy", symbol: "bolt.fill", color: Theme.power, text: Unavailable.energy)
+                            }
+                            if !networkRanks { TopNetworkStrip() }
+                        }
                     }
                     StorageCard(volumes: snapshot.volumes)
                 }
                 .padding(20)
             }
-            .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
+            .defaultScrollAnchor(Self.startsAtEnd ? .bottom : .top)
+            .followsEnd(Self.startsAtEnd)
+            // Keeps nettop running whether Top Network is a card or a strip,
+            // so switching between them doesn't drop a reading.
+            .task { await model.networkActivity.track(model: model) }
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
+
+    /// `-openScroll bottom` starts the page scrolled to the end, for screenshots.
+    private static let startsAtEnd = LaunchArgument.string("openScroll") == "bottom"
 
     // MARK: Gauges
 
@@ -200,30 +214,97 @@ private struct GaugeCard: View {
     }
 }
 
-/// A one-line note where a card would be, for a ranking this Mac can't
-/// make, so saying so doesn't take a whole card's room. The dashed edge
-/// marks it as something missing rather than a reading.
-private struct CapabilityNotice: View {
+/// A one-line note where a card or graph would be, so saying there's
+/// nothing to show doesn't take its room: a reading this Mac can't make,
+/// or a ranking with nothing in it right now. A dashed edge marks something
+/// missing rather than a reading; a quiet ranking keeps a plain one.
+struct NoticeStrip: View {
     var title: String
     var symbol: String
     var color: Color
     var text: String
+    /// The hover text; by default, that the reading isn't available.
+    var help: String?
+    var isMissing = true
+    /// Metadata-sized, for a row among an inspector's graphs.
+    var compact = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 10)
-        HStack(spacing: 8) {
+        let shape = RoundedRectangle(cornerRadius: compact ? 8 : 10)
+        HStack(spacing: compact ? 6 : 8) {
             Image(systemName: symbol).foregroundStyle(color)
             Text(title).fontWeight(.medium).fixedSize()
             Text(text).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 0)
         }
-        .font(.callout)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .font(compact ? .metadata : .callout)
+        .padding(.horizontal, compact ? 10 : 14)
+        .padding(.vertical, compact ? 6 : 8)
         .background(color.fillShade.opacity(0.06), in: shape)
-        .overlay(shape.strokeBorder(Color.primary.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-        .help("\(title) isn't available. \(text)")
+        .overlay(shape.strokeBorder(Color.primary.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: isMissing ? [4, 3] : [])))
+        .help(help ?? "\(title) isn't available. \(text)")
         .accessibilityElement(children: .combine)
+    }
+}
+
+private extension View {
+    /// For `-openScroll bottom`: the cards fill in and swap over the first
+    /// samples, which left the page partway down, so it follows the end as
+    /// the page grows until someone scrolls. Without the flag, nothing is attached.
+    @ViewBuilder func followsEnd(_ follows: Bool) -> some View {
+        if #available(macOS 15, *), follows {
+            modifier(FollowsEnd())
+        } else {
+            self
+        }
+    }
+}
+
+@available(macOS 15, *)
+private struct FollowsEnd: ViewModifier {
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var isFollowing = true
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onScrollGeometryChange(for: CGFloat.self, of: \.contentSize.height) { _, _ in
+                if isFollowing { position.scrollTo(edge: .bottom) }
+            }
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting { isFollowing = false }
+            }
+    }
+}
+
+/// Top Network as a strip while there's nothing to rank: still measuring,
+/// nettop unavailable, or no app moving data lately. The card comes back
+/// as soon as an app sends or receives anything.
+private struct TopNetworkStrip: View {
+    @Environment(AppModel.self) private var model
+
+    /// Quiet readings the card stays for before it gives way to the strip,
+    /// so a pause in the traffic doesn't move the cards around.
+    private static let holdReadings = 10
+
+    /// Whether the card has rows to show, or had some within the hold.
+    static func hasRanking(_ store: NetworkActivityStore) -> Bool {
+        store.hasMeasured && store.apps.hasMoved(inLast: holdReadings)
+    }
+
+    var body: some View {
+        let store = model.networkActivity
+        let cadence = "Read with nettop every \(Format.timeSpan(NetworkActivityStore.refreshSeconds)) while this page is open."
+        if store.isUnavailable {
+            NoticeStrip(title: "Top Network", symbol: "network", color: Theme.network, text: Unavailable.processNetwork)
+        } else if !store.hasMeasured {
+            NoticeStrip(title: "Top Network", symbol: "network", color: Theme.network, text: "Measuring which apps use the network…",
+                        help: cadence, isMissing: false)
+        } else {
+            let span = Format.roughDuration(Double(min(store.apps.length, Self.holdReadings)) * NetworkActivityStore.refreshSeconds)
+            NoticeStrip(title: "Top Network", symbol: "network", color: Theme.network, text: "Nothing sent or received in the last \(span)",
+                        help: "\(cadence) The ranking comes back when an app sends or receives something.", isMissing: false)
+        }
     }
 }
 

@@ -90,6 +90,13 @@ public struct NetworkActivityHistory<Key: Hashable & Comparable & Sendable>: Sen
     /// Whether anything moved at all in the window.
     public var isQuiet: Bool { totals.isEmpty }
 
+    /// Whether anything moved in the newest `readings` readings. A ranking
+    /// that keeps its room for a few quiet readings doesn't come and go
+    /// with every pause in the traffic.
+    public func hasMoved(inLast readings: Int) -> Bool {
+        totals.values.contains { $0.suffix(max(readings, 0)).contains { $0 > 0 } }
+    }
+
     public mutating func append(_ usage: [Key: NetworkUsage]) {
         length = min(length + 1, capacity)
         var next: [Key: [Double]] = [:]

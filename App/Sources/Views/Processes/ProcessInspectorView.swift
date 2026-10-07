@@ -85,33 +85,43 @@ struct ProcessInspectorView: View {
                 capacity: AppModel.processHistoryCapacity - 2
             )
             if !process.isRestricted {
-                HStack(spacing: 12) {
-                    GraphPanel(
-                        title: "Power",
-                        trailing: process.powerWatts.map(Format.watts) ?? "—",
-                        // Unmeasured power is kept as 0 W, so draw nothing (the
-                        // graph's "not recorded" shading) rather than a zero line.
-                        series: [GraphSeries(values: process.powerWatts == nil ? [] : history.map(\.powerWatts), color: Theme.power)],
-                        height: 60,
-                        minimumCeiling: 0.5,
-                        axis: Format.watts,
-                        capacity: AppModel.processHistoryCapacity - 2
-                    )
-                    if process.gpuTime != nil {
+                if measuresPower {
+                    HStack(spacing: 12) {
                         GraphPanel(
-                            title: "GPU",
-                            trailing: Format.percent(process.gpuFraction ?? 0, digits: 1),
-                            series: [GraphSeries(values: history.map(\.gpuFraction), color: Theme.gpu)],
+                            title: "Power",
+                            trailing: process.powerWatts.map(Format.watts) ?? "—",
+                            // Unmeasured power is kept as 0 W, so draw nothing (the
+                            // graph's "not recorded" shading) rather than a zero line.
+                            series: [GraphSeries(values: process.powerWatts == nil ? [] : history.map(\.powerWatts), color: Theme.power)],
                             height: 60,
-                            minimumCeiling: 0.05,
-                            maximumCeiling: 1,
-                            axis: { Format.percent($0) },
+                            minimumCeiling: 0.5,
+                            axis: Format.watts,
                             capacity: AppModel.processHistoryCapacity - 2
                         )
+                        if process.gpuTime != nil { gpuGraph(process, history: history) }
                     }
+                } else {
+                    // Without power sensors (a VM) every reading would be "—",
+                    // so one line says so instead of a graph with nothing in it.
+                    NoticeStrip(title: "Power", symbol: "bolt.fill", color: Theme.power, text: "Not reported on this Mac",
+                                help: Unavailable.energy, compact: true)
+                    if process.gpuTime != nil { gpuGraph(process, history: history) }
                 }
             }
         }
+    }
+
+    private func gpuGraph(_ process: ProcessSample, history: [ProcessPoint]) -> some View {
+        GraphPanel(
+            title: "GPU",
+            trailing: Format.percent(process.gpuFraction ?? 0, digits: 1),
+            series: [GraphSeries(values: history.map(\.gpuFraction), color: Theme.gpu)],
+            height: 60,
+            minimumCeiling: 0.05,
+            maximumCeiling: 1,
+            axis: { Format.percent($0) },
+            capacity: AppModel.processHistoryCapacity - 2
+        )
     }
 
     private func overview(_ process: ProcessSample) -> some View {
@@ -123,7 +133,9 @@ struct ProcessInspectorView: View {
                 FactRow(label: "Threads", value: process.threadCount > 0 ? String(process.threadCount) : "—")
                 if !process.isRestricted {
                     FactRow(label: "Real memory", value: Format.bytes(process.residentMemory))
-                    FactRow(label: "Power", value: process.powerWatts.map(Format.watts) ?? "—")
+                    if measuresPower {
+                        FactRow(label: "Power", value: process.powerWatts.map(Format.watts) ?? "—")
+                    }
                     FactRow(label: "Disk read",
                             value: "\(Format.bytesPerSecond(process.diskReadRate)) · \(Format.bytes(process.diskReadTotal)) total")
                     FactRow(label: "Disk written",
@@ -239,6 +251,11 @@ struct ProcessInspectorView: View {
     }
 
     // MARK: Helpers
+
+    /// Unknown counts as measured until the first samples say, like the Overview.
+    private var measuresPower: Bool {
+        model.measuresProcessEnergy != false
+    }
 
     private func loadDetails() async {
         details = Details()

@@ -8,10 +8,14 @@ final class ProcessOutline: NSOutlineView {
     var onDelete: (() -> Void)?
     var onHiddenToFitChange: ((Set<ProcessColumn>) -> Void)?
 
-    /// Columns switched off in the Columns menu.
+    /// Columns switched off in the Columns menu, and those this Mac doesn't
+    /// report that weren't switched on anyway.
     var userHidden: Set<ProcessColumn> = [] {
         didSet { if userHidden != oldValue { fitColumns() } }
     }
+
+    /// Columns this Mac has no figures for, named as such in the header's menu.
+    var unreported: Set<ProcessColumn> = []
 
     /// Columns that are on but hidden because the table is too narrow for them.
     private(set) var hiddenToFit: Set<ProcessColumn> = []

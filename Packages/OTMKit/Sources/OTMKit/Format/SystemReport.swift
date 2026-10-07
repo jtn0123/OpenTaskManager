@@ -29,7 +29,7 @@ public struct InfoRow: Sendable, Hashable {
 
 public struct InfoSection: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable {
-        case processor, memory, graphics, displays, storage, network, battery, software, security
+        case processor, memory, graphics, displays, storage, network, usb, thunderbolt, bluetooth, audio, battery, software, security
     }
 
     public var id: Kind { kind }
@@ -41,8 +41,9 @@ public struct InfoSection: Sendable, Hashable, Identifiable {
 /// Turns a `SystemInfo` into titled label/value sections, shared by the
 /// System page's cards and the plain-text summary it copies.
 public enum SystemReport {
+    /// `devices` is nil while the device report is still being read.
     public static func sections(
-        _ info: SystemInfo, displays: [DisplayInfo], security: SecurityStatus?, now: Date = Date()
+        _ info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, security: SecurityStatus?, now: Date = Date()
     ) -> [InfoSection] {
         var sections = [
             InfoSection(kind: .processor, title: "Processor", rows: processor(info)),
@@ -52,6 +53,7 @@ public enum SystemReport {
             InfoSection(kind: .storage, title: "Storage", rows: storage(info)),
             InfoSection(kind: .network, title: "Network", rows: network(info)),
         ]
+        sections += deviceSections(devices)
         if let battery = info.battery {
             sections.append(InfoSection(kind: .battery, title: "Battery", rows: self.battery(battery)))
         }
@@ -63,7 +65,8 @@ public enum SystemReport {
     /// The whole page as plain text. Serial number, hardware UUID and MAC
     /// addresses are left out unless `includeIdentifiers` is set.
     public static func text(
-        _ info: SystemInfo, displays: [DisplayInfo], security: SecurityStatus?, includeIdentifiers: Bool, now: Date = Date()
+        _ info: SystemInfo, displays: [DisplayInfo], devices: PeripheralInventory?, security: SecurityStatus?, includeIdentifiers: Bool,
+        now: Date = Date()
     ) -> String {
         let hardware = info.hardware
         var lines = [
@@ -74,7 +77,20 @@ public enum SystemReport {
         if includeIdentifiers {
             lines += identifiers(hardware).map { "\($0.label): \($0.value)" }
         }
-        for section in sections(info, displays: displays, security: security, now: now) {
+        lines += textLines(sections(info, displays: displays, devices: devices, security: security, now: now),
+                           includeIdentifiers: includeIdentifiers)
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// Just the attached devices, as `otm devices` prints them.
+    public static func deviceText(_ devices: PeripheralInventory, includeIdentifiers: Bool) -> String {
+        textLines(deviceSections(devices), includeIdentifiers: includeIdentifiers).dropFirst().joined(separator: "\n") + "\n"
+    }
+
+    /// Each section as a blank line, its title and indented rows.
+    private static func textLines(_ sections: [InfoSection], includeIdentifiers: Bool) -> [String] {
+        var lines: [String] = []
+        for section in sections {
             let rows = section.rows.filter { includeIdentifiers || !$0.isSensitive }
             guard !rows.isEmpty else { continue }
             lines.append("")
@@ -91,7 +107,7 @@ public enum SystemReport {
                 }
             }
         }
-        return lines.joined(separator: "\n") + "\n"
+        return lines
     }
 
     /// Serial number and hardware UUID, as sensitive rows.

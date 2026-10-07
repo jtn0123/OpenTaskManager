@@ -28,7 +28,9 @@ Manager OG or any other proprietary task manager.
   (the last 10 per scope) and Model/DiskScanComparison (interval diff maths) back
   Storage's Changes mode and `otm du --changes`;
   System/InstalledApps, MachO and CodeSigning find and read app bundles for the
-  Apps page and `otm apps`; Layout/ holds the width maths for the details
+  Apps page and `otm apps`, and System/AppRemoval finds what an app keeps in
+  your Library for its Move to Trash review (tests use a fake home, never
+  yours; items go through `NSWorkspace.recycle`, never rm); Layout/ holds the width maths for the details
   pane, `SplitMath`, and the process table's columns, `ColumnFit`;
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
@@ -46,7 +48,9 @@ Manager OG or any other proprietary task manager.
   never per tick),
   Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
   Views/System (hardware and security facts, read once when the page opens, never
-  per tick; the rows come from `SystemReport` in OTMKit),
+  per tick; the rows come from `SystemReport` in OTMKit, and attached devices from
+  one `system_profiler -json` run, `PeripheralReader` in OTMKit's System/Peripherals,
+  again on Refresh),
   Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
   the main actor when the page opens and on Refresh, never per tick; parsing is
   in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),
@@ -108,7 +112,8 @@ screencapture -x -o -l <windowID> out.png
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
-`-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page,
+`-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
+(add `-openAppRemoval YES` to open its Move to Trash review),
 `-openDriver <text>` selects the first extension on the Drivers page whose name
 or bundle ID contains it (switching the Third party/Apple filter if it hides it),
 `-openUser <name>` opens that user's top processes on the Users page (and
@@ -135,6 +140,9 @@ locked or the window is on another Space.
 - When the process table runs out of width it hides optional columns, lowest
   `ProcessColumn.priority` first (the maths is `ColumnFit` in OTMKit's Layout/),
   apart from the user's Columns choices, and shows them again when there's room.
+  A column this Mac can't fill (Power, when `AppModel.measuresProcessEnergy`
+  is false) starts hidden the same way; the Columns menu says why, and the
+  user can still turn it on.
 - Pages with a table and details (Processes, Startup, Apps, Drivers,
   Connections) use `InspectorSplit`: the pane appears beside the table once
   something is selected, its width is draggable and remembered, and in a
@@ -144,6 +152,9 @@ locked or the window is on another Space.
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
   the status bar out of a 730-point window. Plain wrapping text is enough.
+  The pane's minimum height also sets the page's, so a tall pinned part
+  (Startup's status and Restart/Stop) goes in `ViewThatFits(in: .vertical)`
+  with a fallback that scrolls it with the rest (see `StartupItemDetail`).
 - Performance and History fit the narrowest window (820 points with the
   sidebar shown) without clipping or scrolling sideways. Performance's resource
   list is an `HStack` column sized from the page width, not an `HSplitView`,

@@ -31,11 +31,7 @@ struct ConnectionTable: View {
             .width(min: 38, ideal: 46, max: 80)
 
             TableColumn("Protocol", value: \.protocolName) { row in
-                HStack(spacing: 4) {
-                    Text(row.connection.transport.rawValue)
-                    Text(row.connection.family.shortLabel).foregroundStyle(.secondaryText)
-                }
-                .lineLimit(1)
+                ProtocolLabel(connection: row.connection)
             }
             .width(min: 56, ideal: 72, max: 110)
 
@@ -59,10 +55,36 @@ struct ConnectionTable: View {
             .width(min: 60, ideal: 76, max: 130)
 
             TableColumn("Scope", value: \.scopeOrder) { row in
-                ScopeLabel(connection: row.connection)
+                // The symbol alone once the column is too narrow for the words.
+                ViewThatFits(in: .horizontal) {
+                    ScopeLabel(connection: row.connection)
+                    ScopeLabel(connection: row.connection).labelStyle(.iconOnly)
+                }
+                .help(row.connection.scope.label)
             }
             .width(min: 80, ideal: 114, max: 170)
         }
+    }
+}
+
+/// "UDP IPv4" while it fits, then netstat's shorter "UDP4", so a narrow
+/// window doesn't cut it to "U…".
+private struct ProtocolLabel: View {
+    var connection: Connection
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                Text(connection.transport.rawValue)
+                Text(connection.family.shortLabel).foregroundStyle(.secondaryText)
+            }
+            HStack(spacing: 0) {
+                Text(connection.transport.rawValue)
+                Text(connection.family.digits).foregroundStyle(.secondaryText)
+            }
+        }
+        .lineLimit(1)
+        .help("\(connection.transport.rawValue) over \(connection.family.rawValue)")
     }
 }
 
@@ -134,6 +156,15 @@ extension Connection.Family {
         case .ipv4: "IPv4"
         case .ipv6: "IPv6"
         case .dual: "IPv4/6"
+        }
+    }
+
+    /// The version alone, as netstat appends it ("tcp46").
+    var digits: String {
+        switch self {
+        case .ipv4: "4"
+        case .ipv6: "6"
+        case .dual: "46"
         }
     }
 }
