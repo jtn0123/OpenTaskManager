@@ -77,6 +77,9 @@ Manager OG or any other proprietary task manager.
 - The process table updates rows in place: `OrderedDiff` moves, inserts and
   removes rows, and visible cells are restyled. Don't go back to calling
   `reloadData()` every tick.
+- The Thermals table (`SensorTableView`) is AppKit rows made only when the set
+  of rows changes; a tick sets just the figures that changed. Its rows and
+  ranges are `SensorTable` and `SensorExtremes` in OTMKit.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
   per sample and a Core Animation scroll slides them between samples. Changing
   numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
@@ -134,6 +137,10 @@ instances run: `-openPage` saves the page, so every running instance follows
 the last launch, and `-page <name>` keeps a throwaway instance on its page. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
+
+A Mac or VM with no sensors can still show a full Thermals page: in a debug
+build, `-sensorFixture <file>` loads a recording from
+`otm sensors --extremes 20 --json` in place of the sensors (`SensorFixture`).
 
 ## Conventions
 

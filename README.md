@@ -44,8 +44,11 @@ samples and scale their axes to round numbers.
   over the last three minutes and read with `nettop` every 3 s while shown. The
   Overview's Top Network card lists the busiest.
 - Thermals: chip, SSD and battery temperatures over time, each fan's speed
-  within its range, and every die sensor's lowest and highest reading since
-  launch.
+  within its range, and a searchable table of every sensor, clock and power
+  rail this Mac reports (die temperatures, cluster and GPU clocks and active
+  shares, battery and DC input voltage and current, fans), grouped by part,
+  with each one's lowest and highest since launch or the last Reset. macOS's
+  thermal pressure has a row of its own; it's a level, not a temperature.
 
 **History**: a flight recorder. Every 10 seconds the app writes CPU (average
 and busiest moment), memory and pressure, GPU, power, disk, network, chip
@@ -154,7 +157,8 @@ showing how far it has got as it goes (it can be stopped at any time).
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
-- The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
+- The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`
+  (`--extremes 60` samples for a minute and prints each reading's range),
   `ports`, `net` (the processes moving the most network traffic), `drivers`
   (system extensions and third-party kexts), `apps` (the installed apps, with
   `--sizes` to measure them), `devices` (USB, Thunderbolt, Bluetooth, audio and
@@ -206,7 +210,8 @@ allocated size, link count and type in the same call, and keeps only each
 folder's 200 largest items, so memory stays bounded on a full disk.
 
 Power by part of the chip and clock speeds come from IOReport,
-whole-system power and fan speeds from read-only SMC keys, and temperatures
+whole-system power, fan speeds and DC input voltage and current from
+read-only SMC keys, and temperatures
 from the HID event system's sensors. All three are undocumented, so
 OpenTaskManager loads them at run time and shows "—" for anything a Mac
 doesn't report.
