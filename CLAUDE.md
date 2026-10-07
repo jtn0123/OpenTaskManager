@@ -89,8 +89,8 @@ Manager OG or any other proprietary task manager.
   opens Compare with them picked, counted back from the range's end, with B the
   same length before A when left out; the pinned rail folds to a strip (the
   section at the top, the span, the moment, Play and speed, a slim track that
-  marks spike events) once
-  the charts' top has scrolled under it, and comes back whole at the top or
+  marks spike events) once the charts' top has scrolled under it, and comes
+  back whole at the top or
   from the strip's button: `RailFold` in OTMKit's Layout/ holds the rule, and
   `HistoryPageScroll` follows the clip view's bounds, so it moves only on
   scroll, never per tick, and only `HistoryPinnedRail` reads it, so the charts

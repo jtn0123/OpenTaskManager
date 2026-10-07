@@ -31,20 +31,35 @@ enum HistorySpikeStyle {
         + "2 minutes before to 1 minute after, with the busiest processes. Each kind waits 10 minutes before it can capture "
         + "again. The newest 20 are kept, in Application Support."
 
-    /// "yes 48%, yes 46%, WindowServer 2% of the CPU time": the busiest
-    /// few, their figures shortened, the measure said once at the end.
+    /// "5 × yes 74%, WindowServer 2% of the CPU time": the busiest few,
+    /// processes of one name added up as the event lane counts them, their
+    /// figures shortened, the measure said once at the end.
     static func contributors(_ incident: SpikeIncident, count: Int = 3) -> String? {
-        let shown = incident.contributors.prefix(count)
-        guard let measure = shown.first?.measure else { return nil }
-        let parts = shown.map { contributor in
+        guard let measure = incident.contributors.first?.measure else { return nil }
+        var named: [(name: String, members: [SpikeContributor])] = []
+        for contributor in incident.contributors {
+            if let index = named.firstIndex(where: { $0.name == contributor.name }) {
+                named[index].members.append(contributor)
+            } else {
+                named.append((contributor.name, [contributor]))
+            }
+        }
+        let shown = named.prefix(count)
+        let parts = shown.map { group in
+            let name = group.members.count > 1 ? "\(group.members.count) × \(group.name)" : group.name
             switch measure {
-            case .cpu: "\(contributor.name) \(contributor.share.map { Format.percent($0) } ?? Format.percent(contributor.average / 100))"
-            case .memory: "\(contributor.name) \(Format.bytes(contributor.peak))"
-            case .disk: "\(contributor.name) \(Format.bytesPerSecond(contributor.average))"
+            case .cpu:
+                let shares = group.members.compactMap(\.share)
+                let figure = shares.count == group.members.count ? shares.reduce(0, +)
+                    : group.members.reduce(0) { $0 + $1.average } / 100
+                return "\(name) \(Format.percent(figure))"
+            // Peaks added up: the most they could have held together.
+            case .memory: return "\(name) \(Format.bytes(group.members.reduce(0) { $0 + $1.peak }))"
+            case .disk: return "\(name) \(Format.bytesPerSecond(group.members.reduce(0) { $0 + $1.average }))"
             }
         }
         let tail = switch measure {
-        case .cpu: shown.allSatisfy { $0.share != nil } ? " of the CPU time" : " of a core"
+        case .cpu: shown.allSatisfy { $0.members.allSatisfy { $0.share != nil } } ? " of the CPU time" : " of a core"
         case .memory: " at most"
         case .disk: " on average"
         }

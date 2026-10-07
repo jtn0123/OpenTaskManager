@@ -76,19 +76,22 @@ func capturesList(_ entries: [SpikeCaptureEntry], directory: URL) -> String {
             + "or History's Spikes list."
     }
     let time = Date.FormatStyle(date: .abbreviated, time: .standard)
+    // The start, then the rest indented past the longest date ("Sep 30, 2026 at 10:02:14 AM").
+    let width = 30
+    let indent = String(repeating: " ", count: width)
     var lines = ["\(entries.count) spike \(entries.count == 1 ? "capture" : "captures") in \(folder), newest first", ""]
     for entry in entries {
         let headline = entry.incident?.headline ?? (entry.session.note.isEmpty ? "Recording" : entry.session.note)
-        lines.append("\(pad(entry.session.start.formatted(time), 26))\(headline)")
+        lines.append(pad(entry.session.start.formatted(time) + "  ", width) + headline)
         var detail = ["\(Format.roughDuration(entry.session.duration)) captured", Format.bytes(UInt64(max(entry.bytes, 0)))]
         if let incident = entry.incident, incident.triggers.count > 1 {
             detail.append("also " + incident.triggers.dropFirst().map(\.kind.label).joined(separator: ", "))
         }
-        lines.append(String(repeating: " ", count: 26) + detail.joined(separator: " · "))
+        lines.append(indent + detail.joined(separator: " · "))
         for contributor in entry.incident?.contributors.prefix(3) ?? [] {
-            lines.append(String(repeating: " ", count: 28) + "\(contributor.name) (PID \(contributor.identity.pid)): \(contributor.figureText)")
+            lines.append(indent + "  \(contributor.name) (PID \(contributor.identity.pid)): \(contributor.figureText)")
         }
-        lines.append(String(repeating: " ", count: 26) + entry.url.lastPathComponent)
+        lines.append(indent + entry.url.lastPathComponent)
         lines.append("")
     }
     lines.removeLast()

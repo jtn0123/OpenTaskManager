@@ -15,8 +15,9 @@ public struct SpikeRecorder: Sendable {
     public static let topCPUKept = 5
     public static let topMemoryKept = 5
     public static let topDiskKept = 3
-    /// The processes an incident names.
-    public static let contributorsKept = 5
+    /// The processes an incident names: more than a top list holds, so
+    /// several workers of one name taking turns in it are all counted.
+    public static let contributorsKept = 8
     static let processesPerSlot = topCPUKept + topMemoryKept + topDiskKept
 
     /// One update in the ring, and how much of its slot of `processes` each top list fills.
