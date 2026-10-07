@@ -103,10 +103,13 @@ in at the screen, their Terminal and remote logins, and their busiest
 processes. Root and the service accounts sit together underneath, collapsed.
 
 **System**: what this Mac is: model, chip and core types, memory, graphics,
-displays, drives and volumes, network ports, battery health, macOS and kernel
-versions, uptime, and whether SIP, FileVault and Gatekeeper are on. The serial
-number, hardware UUID and MAC addresses stay hidden until you ask, and Copy
-Summary puts the page on the clipboard as plain text.
+displays, drives and volumes, network ports, attached devices (USB devices
+and the hub each hangs off, Thunderbolt and USB4 ports and chains, Bluetooth
+devices with their battery levels, audio devices with their channels and
+defaults, and cameras), battery health, macOS and kernel versions, uptime, and
+whether SIP, FileVault and Gatekeeper are on. The serial number, hardware UUID,
+MAC addresses and device serials stay hidden until you ask, Refresh reads the
+devices again, and Copy Summary puts the page on the clipboard as plain text.
 
 **Drivers**: the system extensions and kernel extensions loaded on the Mac.
 - Counts of system extensions by kind, third-party kexts, loaded kexts and
@@ -150,7 +153,8 @@ showing how far it has got as it goes (it can be stopped at any time).
 - The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`,
   `ports`, `net` (the processes moving the most network traffic), `drivers`
   (system extensions and third-party kexts), `apps` (the installed apps, with
-  `--sizes` to measure them), `inspect`, `kill` and `du` (the Storage page's
+  `--sizes` to measure them), `devices` (USB, Thunderbolt, Bluetooth, audio and
+  video), `inspect`, `kill` and `du` (the Storage page's
   scan, as a table of a folder's largest items), with JSON output.
 
 OpenTaskManager is light. Graphs, gauges and core tiles animate in Core
@@ -191,7 +195,8 @@ the launchd property lists themselves, plus `launchctl list` and
 `kmutil showloaded` as a fallback. The Apps page reads each bundle's
 Info.plist, the Mach-O header of its executable, its code signature through
 the Security framework (without validating the whole bundle, so notarization
-isn't shown), and Spotlight's last-opened date. The Storage scan
+isn't shown), and Spotlight's last-opened date. Attached devices come from
+one `system_profiler -json` report, run when the System page opens. The Storage scan
 walks folders with `FileManager`'s enumerator, asking for each file's
 allocated size, link count and type in the same call, and keeps only each
 folder's 200 largest items, so memory stays bounded on a full disk.

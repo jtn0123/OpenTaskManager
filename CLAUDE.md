@@ -43,7 +43,9 @@ Manager OG or any other proprietary task manager.
   never per tick),
   Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
   Views/System (hardware and security facts, read once when the page opens, never
-  per tick; the rows come from `SystemReport` in OTMKit),
+  per tick; the rows come from `SystemReport` in OTMKit, and attached devices from
+  one `system_profiler -json` run, `PeripheralReader` in OTMKit's System/Peripherals,
+  again on Refresh),
   Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
   the main actor when the page opens and on Refresh, never per tick; parsing is
   in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),

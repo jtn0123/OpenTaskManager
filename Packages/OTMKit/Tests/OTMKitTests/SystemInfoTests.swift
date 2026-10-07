@@ -204,7 +204,7 @@ struct SystemReportTests {
 
     @Test func summaryLeavesOutIdentifiersUnlessAsked() {
         let now = Self.boot.addingTimeInterval(90_000)
-        let hidden = SystemReport.text(info(), displays: [display], security: nil, includeIdentifiers: false, now: now)
+        let hidden = SystemReport.text(info(), displays: [display], devices: nil, security: nil, includeIdentifiers: false, now: now)
         #expect(hidden.hasPrefix("MacBook Pro (16-inch, M5 Pro)\nMac17,8 · Apple M5 Pro · 48 GB memory · macOS 27.2 (26B5101f)\n"))
         #expect(!hidden.contains("SERIAL123"))
         #expect(!hidden.contains("UUID-456"))
@@ -212,18 +212,19 @@ struct SystemReportTests {
         #expect(hidden.contains("  Up time: 1d 1h"))
         #expect(hidden.contains("    IPv6: 2001:db8::5\n          2001:db8::6\n"))
 
-        let shown = SystemReport.text(info(), displays: [display], security: nil, includeIdentifiers: true, now: now)
+        let shown = SystemReport.text(info(), displays: [display], devices: nil, security: nil, includeIdentifiers: true, now: now)
         #expect(shown.contains("Serial number: SERIAL123"))
         #expect(shown.contains("Hardware UUID: UUID-456"))
         #expect(shown.contains("    Hardware address: a4:83:e7:0b:12:9c"))
     }
 
     @Test func sectionsFollowThePageOrder() {
-        let kinds = SystemReport.sections(info(), displays: [display], security: nil).map(\.kind)
-        #expect(kinds == [.processor, .memory, .graphics, .displays, .storage, .network, .software, .security])
+        let kinds = SystemReport.sections(info(), displays: [display], devices: nil, security: nil).map(\.kind)
+        // Until the device report arrives, its cards say so; Thunderbolt waits to see if there is any.
+        #expect(kinds == [.processor, .memory, .graphics, .displays, .storage, .network, .usb, .bluetooth, .audio, .software, .security])
         let battery = BatteryInfo(percent: 80, isCharging: false, isPluggedIn: true, cycleCount: 3, health: 1.03, designCapacity: 8579,
                                   fullChargeCapacity: 8817, condition: BatteryCondition(summary: "Normal", isEstimated: true))
-        let withBattery = SystemReport.sections(info(battery: battery), displays: [], security: nil)
+        let withBattery = SystemReport.sections(info(battery: battery), displays: [], devices: nil, security: nil)
         #expect(withBattery.map(\.kind).contains(.battery))
         let rows = withBattery.first { $0.kind == .battery }?.rows ?? []
         #expect(rows.contains(InfoRow("Charge", "80%, plugged in")))
@@ -232,14 +233,14 @@ struct SystemReportTests {
     }
 
     @Test func storageKeepsVolumesWithTheirDrive() {
-        let rows = SystemReport.sections(info(), displays: [], security: nil).first { $0.kind == .storage }?.rows ?? []
+        let rows = SystemReport.sections(info(), displays: [], devices: nil, security: nil).first { $0.kind == .storage }?.rows ?? []
         #expect(rows.map(\.label) == ["APPLE SSD", "Capacity", "Device", "Macintosh HD", "Other volumes", "Installer"])
         #expect(rows[0].isHeading && rows[0].value == "Internal SSD")
         #expect(rows[3].value == "1 TB free of 1.99 TB · APFS")
     }
 
     @Test func networkHidesLinkLocalTunnels() {
-        let rows = SystemReport.sections(info(), displays: [], security: nil).first { $0.kind == .network }?.rows ?? []
+        let rows = SystemReport.sections(info(), displays: [], devices: nil, security: nil).first { $0.kind == .network }?.rows ?? []
         #expect(rows.filter(\.isHeading).map(\.label) == ["Wi-Fi", "bridge100"])
         // The BSD name follows a friendly name, but isn't repeated when it's all there is.
         #expect(rows.filter(\.isHeading).map(\.value) == ["en0", ""])
@@ -251,11 +252,11 @@ struct SystemReportTests {
     }
 
     @Test func securityShowsProgressThenResults() {
-        let checking = SystemReport.sections(info(), displays: [], security: nil).first { $0.kind == .security }?.rows ?? []
+        let checking = SystemReport.sections(info(), displays: [], devices: nil, security: nil).first { $0.kind == .security }?.rows ?? []
         #expect(checking.map(\.value) == ["Checking…", "Checking…", "Checking…"])
 
         let status = SecurityStatus(sip: .enabled, fileVault: .off, gatekeeper: nil)
-        let rows = SystemReport.sections(info(), displays: [], security: status).first { $0.kind == .security }?.rows ?? []
+        let rows = SystemReport.sections(info(), displays: [], devices: nil, security: status).first { $0.kind == .security }?.rows ?? []
         #expect(rows == [
             InfoRow("System Integrity Protection", "Enabled", status: .good),
             InfoRow("FileVault", "Off", status: .warning),
@@ -277,7 +278,7 @@ struct LiveSystemInfoTests {
         #expect(info.volumes.contains { $0.isRoot })
         if info.hardware.marketingName?.contains("MacBook") == true { #expect(info.hardware.kind == .laptop) }
 
-        let text = SystemReport.text(info, displays: [], security: nil, includeIdentifiers: false)
+        let text = SystemReport.text(info, displays: [], devices: nil, security: nil, includeIdentifiers: false)
         #expect(text.hasPrefix(info.hardware.displayName))
         if let serial = info.hardware.serialNumber { #expect(!text.contains(serial)) }
         if let uuid = info.hardware.hardwareUUID { #expect(!text.contains(uuid)) }

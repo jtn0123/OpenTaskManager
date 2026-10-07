@@ -4,13 +4,15 @@ import OTMKit
 import SwiftUI
 
 /// What this Mac is: model, chip and memory up top, then a card each for the
-/// processor, memory, graphics, displays, storage, network, battery, software
-/// and security. Read once when the page opens (displays again when they
-/// change), never per sample.
+/// processor, memory, graphics, displays, storage, network, attached devices,
+/// battery, software and security. Read once when the page opens (displays
+/// again when they change, devices on Refresh), never per sample.
 struct SystemInfoView: View {
     @Environment(AppModel.self) private var model
     @State private var info: SystemInfo?
     @State private var displays: [DisplayInfo] = []
+    @State private var devices: PeripheralInventory?
+    @State private var readingDevices = false
     @State private var security: SecurityStatus?
     /// Serial number, hardware UUID and MAC addresses stay masked until asked for.
     @State private var showsIdentifiers = false
@@ -25,6 +27,15 @@ struct SystemInfoView: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await readDevices() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(readingDevices)
+                .help("Read the attached USB, Thunderbolt, Bluetooth, audio and video devices again")
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: copySummary) {
                     Label(copied ? "Copied" : "Copy Summary", systemImage: copied ? "checkmark" : "doc.on.doc")
@@ -49,7 +60,9 @@ struct SystemInfoView: View {
                 // Only the uptime moves, so a minute is often enough.
                 TimelineView(.everyMinute) { context in
                     FillGrid(minimum: 300) {
-                        ForEach(SystemReport.sections(info, displays: displays, security: security, now: context.date)) { section in
+                        let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security,
+                                                             now: context.date)
+                        ForEach(sections) { section in
                             InfoCard(section: section, showsIdentifiers: showsIdentifiers)
                         }
                     }
@@ -62,6 +75,8 @@ struct SystemInfoView: View {
 
     private func load() async {
         displays = DisplayReader.read()
+        // The device report takes longest, so it starts first and runs alongside.
+        async let deviceRead: Void = readDevices()
         if info == nil {
             let topology = model.topology
             info = await Task.detached(priority: .userInitiated) { SystemInfoReader.read(topology: topology) }.value
@@ -69,11 +84,25 @@ struct SystemInfoView: View {
         if security == nil {
             security = await SecurityReader.read()
         }
+        await deviceRead
+    }
+
+    /// Runs `system_profiler` on a background queue, so waiting for it doesn't
+    /// hold up a Swift concurrency thread.
+    private func readDevices() async {
+        guard !readingDevices else { return }
+        readingDevices = true
+        devices = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: PeripheralReader.read())
+            }
+        }
+        readingDevices = false
     }
 
     private func copySummary() {
         guard let info else { return }
-        let text = SystemReport.text(info, displays: displays, security: security, includeIdentifiers: showsIdentifiers)
+        let text = SystemReport.text(info, displays: displays, devices: devices, security: security, includeIdentifiers: showsIdentifiers)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true
@@ -282,6 +311,10 @@ private struct SystemStyle {
     private static let battery = Theme.data(0.30, 0.80, 0.40)
     private static let software = Theme.data(0.52, 0.50, 0.96)
     private static let security = Theme.data(0.24, 0.74, 0.56)
+    private static let usb = Theme.data(0.40, 0.56, 0.92)
+    private static let thunderbolt = Theme.data(0.96, 0.66, 0.20)
+    private static let bluetooth = Theme.data(0.20, 0.58, 0.98)
+    private static let audio = Theme.data(0.90, 0.40, 0.62)
 
     let tint: Color
     let symbol: String
@@ -294,6 +327,10 @@ private struct SystemStyle {
         case .displays: (Self.displays, "display")
         case .storage: (Theme.disk, "internaldrive")
         case .network: (Theme.network, "network")
+        case .usb: (Self.usb, "cable.connector")
+        case .thunderbolt: (Self.thunderbolt, "bolt.horizontal")
+        case .bluetooth: (Self.bluetooth, "antenna.radiowaves.left.and.right")
+        case .audio: (Self.audio, "hifispeaker")
         case .battery: (Self.battery, "battery.75percent")
         case .software: (Self.software, "gearshape")
         case .security: (Self.security, "lock.shield")
