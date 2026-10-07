@@ -535,9 +535,7 @@ private struct LatestFigures: View, Equatable {
     var body: some View {
         let groups = BenchmarkFigureGroup.groups(run.measurements.map(\.id), in: [run])
         VStack(alignment: .leading, spacing: 8) {
-            // Tiles with a line per variant ("6 workers 595 MB/s ±2.8%") need
-            // more room, so they wrap two to a row in a narrow window rather than cut figures.
-            FillGrid(minimum: groups.contains { $0.ids.count > 1 } ? 210 : 150, spacing: 10) {
+            FigureGrid(spacing: 10) {
                 ForEach(groups) { group in
                     FigureTile(name: group.name, measurements: group.ids.compactMap(run.measurement), tint: tint)
                 }
@@ -567,6 +565,27 @@ private struct LatestFigures: View, Equatable {
             text += " Medians of timed repeats; ± is half the gap between the slowest and fastest."
         }
         return text
+    }
+}
+
+/// A `FillGrid` whose minimum is the widest tile's own width, so in a narrow
+/// window the tiles go two to a row, or one, before a figure is cut. Widths
+/// are measured when the tiles change (a new run), not on every layout pass.
+private struct FigureGrid: Layout {
+    var spacing: CGFloat
+
+    func makeCache(subviews: Subviews) -> CGFloat {
+        (subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0).rounded(.up)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat) -> CGSize {
+        var none: Void = ()
+        return FillGrid(minimum: cache, spacing: spacing).sizeThatFits(proposal: proposal, subviews: subviews, cache: &none)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout CGFloat) {
+        var none: Void = ()
+        FillGrid(minimum: cache, spacing: spacing).placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &none)
     }
 }
 

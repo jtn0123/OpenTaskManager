@@ -1,11 +1,11 @@
 import Foundation
 
 /// Why two runs can't be compared, said plainly. Only runs of the same test,
-/// workloads, settings, kind of build, Mac and target measure the same thing.
+/// version, settings, kind of build, Mac and target measure the same thing.
 public enum BenchmarkRefusal: Sendable, Equatable {
     case sameRun
     case differentTests(BenchmarkKind, BenchmarkKind)
-    case differentWorkloadVersions(Int, Int)
+    case differentVersions(BenchmarkKind, Int, Int)
     /// One run from a debug build and one from a release build; `baselineOptimized` says which is which.
     case differentBuilds(baselineOptimized: Bool)
     case differentMachines(String, String)
@@ -18,8 +18,9 @@ public enum BenchmarkRefusal: Sendable, Equatable {
             return "That's the same run twice. Pick two different runs."
         case let .differentTests(baseline, compared):
             return "These are different tests (\(baseline.title) and \(compared.title)), so their figures don't measure the same thing."
-        case let .differentWorkloadVersions(baseline, compared):
-            return "The runs used different versions of the workloads (v\(baseline) and v\(compared)), so they didn't do the same work. "
+        case let .differentVersions(kind, baseline, compared):
+            let outcome = kind == .cpu || kind == .gpu ? "they didn't do the same work" : "they didn't measure the same way"
+            return "The runs used different versions of the \(kind.versionName) (v\(baseline) and v\(compared)), so \(outcome). "
                 + "Compare two runs of the same version."
         case let .differentBuilds(baselineOptimized):
             let order = baselineOptimized ? "The earlier run is from a release build and the later one from a debug build"
@@ -126,7 +127,7 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
         if baseline.id == compared.id { return .sameRun }
         if baseline.kind != compared.kind { return .differentTests(baseline.kind, compared.kind) }
         if baseline.workloadVersion != compared.workloadVersion {
-            return .differentWorkloadVersions(baseline.workloadVersion, compared.workloadVersion)
+            return .differentVersions(baseline.kind, baseline.workloadVersion, compared.workloadVersion)
         }
         if let one = baseline.build, let other = compared.build, one.optimized != other.optimized {
             return .differentBuilds(baselineOptimized: one.optimized)

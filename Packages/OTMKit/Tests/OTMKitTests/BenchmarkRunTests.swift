@@ -148,8 +148,15 @@ struct BenchmarkRunTests {
 
     @Test func refusesDifferentWorkloadVersions() {
         let refused = refusal(BenchmarkRun(cpu(at: 100, suite: 1)), BenchmarkRun(cpu(at: 200, suite: 2)))
-        #expect(refused == .differentWorkloadVersions(1, 2))
-        #expect(refused?.reason.contains("v1 and v2") == true)
+        #expect(refused == .differentVersions(.cpu, 1, 2))
+        #expect(refused?.reason.hasPrefix("The runs used different versions of the workloads (v1 and v2)") == true)
+        // The disk and Internet tests have no workloads: their method is versioned.
+        var earlier = disk(at: 100), later = disk(at: 200)
+        later.version = earlier.version + 1
+        let disks = refusal(BenchmarkRun(earlier), BenchmarkRun(later))
+        #expect(disks == .differentVersions(.disk, earlier.version, later.version))
+        #expect(disks?.reason.contains("different versions of the test (v\(earlier.version) and v\(later.version))") == true)
+        #expect(disks?.reason.contains("workload") == false)
     }
 
     @Test func refusesDebugAgainstRelease() {

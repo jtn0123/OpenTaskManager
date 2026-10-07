@@ -88,7 +88,7 @@ private struct RunsTable: View {
         let showsBuild = runs.contains { $0.build != nil }
         let showsTarget = !kind.measuresThisMac || kind == .disk
         Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
-            // A heading wraps over its unit rather than truncate where the card is narrow.
+            // A heading wraps over its unit, to three lines ("Random / 4K read / IOPS"), rather than truncate where the card is narrow.
             GridRow(alignment: .bottom) {
                 Text("").gridColumnAlignment(.leading)
                 Text(variants ? "" : "When").gridColumnAlignment(.leading)
@@ -96,7 +96,7 @@ private struct RunsTable: View {
                 if showsTarget { Text(variants ? "" : "On").gridColumnAlignment(.leading) }
                 ForEach(groups) { group in
                     Text("\(group.name) \(group.unit)")
-                        .lineLimit(2)
+                        .lineLimit(3)
                         .multilineTextAlignment(group.ids.count > 1 ? .center : .trailing)
                         .fixedSize(horizontal: false, vertical: true)
                         .gridCellColumns(group.ids.count)
@@ -177,7 +177,8 @@ private struct RunRow: View {
                     .foregroundStyle(debug ? AnyShapeStyle(BenchmarkLook.debug) : AnyShapeStyle(.secondaryText))
             }
             if showsTarget {
-                Text(run.target?.name ?? "—").truncationMode(.middle).frame(maxWidth: 140, alignment: .leading)
+                // Room for a usual volume name ("Macintosh HD") before the wrapping headings take it.
+                Text(run.target?.name ?? "—").truncationMode(.middle).frame(minWidth: 90, maxWidth: 140, alignment: .leading)
             }
             ForEach(groups) { group in
                 ForEach(group.ids, id: \.self) { id in
