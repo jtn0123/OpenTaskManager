@@ -116,10 +116,10 @@ struct CapabilityNote: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
             Label(text, systemImage: "info.circle")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .lineLimit(1)
                 .frame(minHeight: Self.figureHeight)
         }

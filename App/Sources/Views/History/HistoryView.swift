@@ -190,7 +190,7 @@ struct HistoryView: View {
     }
 
     private func recording(_ status: String) -> Text {
-        Text(recordedLabel).foregroundStyle(.primary).fontWeight(.medium) + Text(status).foregroundStyle(.secondary)
+        Text(recordedLabel).foregroundStyle(.primary).fontWeight(.medium) + Text(status).foregroundStyle(.secondaryText)
     }
 
     private var title: some View {

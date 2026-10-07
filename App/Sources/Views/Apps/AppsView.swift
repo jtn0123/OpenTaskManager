@@ -249,7 +249,7 @@ private struct AppsCard<Content: View>: View {
                 // Two lines in the narrowest window; the grid keeps the cards level.
                 Text(detail)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .lineLimit(2)
             }
         }
@@ -383,7 +383,7 @@ struct ArchitectureLabel: View {
                 .help("Built only for 32-bit or PowerPC processors, which current macOS can't run")
         case .unknown:
             Text(app.architecture.title)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .help("Its executable is missing or isn't a Mach-O program (a script, say)")
         case .appleSilicon, .universal:
             Text(app.architecture.title)
@@ -422,7 +422,7 @@ private struct AppsStatusBar: View {
         }
         .font(.subheadline)
         .monospacedDigit()
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondaryText)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
     }

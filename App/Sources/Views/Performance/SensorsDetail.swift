@@ -93,7 +93,7 @@ struct SensorsDetail: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Sensors").font(.headline)
                 Spacer()
-                Text("lowest and highest since launch").font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Text("lowest and highest since launch").font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
                 GridRow {
@@ -106,7 +106,7 @@ struct SensorsDetail: View {
                     }
                 }
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 ForEach(sensors.temperatures) { reading in
                     let range = ranges[reading.name] ?? reading.celsius...reading.celsius
                     GridRow {
@@ -115,8 +115,8 @@ struct SensorsDetail: View {
                             Text(reading.label)
                         }
                         Text(Format.celsius(reading.celsius)).fontWeight(.medium)
-                        Text(Format.celsius(range.lowerBound)).foregroundStyle(.secondary)
-                        Text(Format.celsius(range.upperBound)).foregroundStyle(.secondary)
+                        Text(Format.celsius(range.lowerBound)).foregroundStyle(.secondaryText)
+                        Text(Format.celsius(range.upperBound)).foregroundStyle(.secondaryText)
                         if bars {
                             RangeBar(range: range, value: reading.celsius, color: Theme.sensor(reading.kind))
                                 .frame(minWidth: 120, maxWidth: .infinity)

@@ -19,7 +19,7 @@ struct HistoryMomentPanel: View {
                 HistoryMomentDetails(point: point, bucket: bucket)
             } else {
                 Text("Nothing recorded yet").font(.headline)
-                Text("Click or drag on a graph to pick a moment and see it here.").font(.callout).foregroundStyle(.secondary)
+                Text("Click or drag on a graph to pick a moment and see it here.").font(.callout).foregroundStyle(.secondaryText)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -42,9 +42,9 @@ struct HistoryMomentPanel: View {
             Text(bucket <= FlightRecorder.span ? "Average of \(Int(FlightRecorder.span)) seconds"
                  : "Average of the \(Format.timeSpan(bucket)) up to this time")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
             if let hint = scrubber.hint {
-                Text(hint).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(hint).font(.subheadline).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -83,7 +83,7 @@ struct HistoryMomentSummary: View {
                     .fixedSize()
                 Text(bucket <= FlightRecorder.span ? "\(Int(FlightRecorder.span)) s average" : "\(Format.timeSpan(bucket)) average")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if scrubber.pinned != nil {
@@ -121,7 +121,7 @@ struct HistoryMomentSummary: View {
                             Text(figure.name).lineLimit(1)
                         }
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                         Text(figure.value).font(.callout.weight(.medium)).monospacedDigit().lineLimit(1)
                     }
                 }
@@ -215,12 +215,12 @@ struct HistoryMomentDetails: View {
         GridRow(alignment: .firstTextBaseline) {
             HStack(spacing: 6) {
                 Circle().fill(color).frame(width: 7, height: 7)
-                Text(name).foregroundStyle(.secondary)
+                Text(name).foregroundStyle(.secondaryText)
             }
             VStack(alignment: .leading, spacing: 0) {
                 Text(value).fontWeight(.medium).monospacedDigit()
                 if !detail.isEmpty {
-                    Text(detail).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    Text(detail).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit()
                 }
             }
         }
@@ -290,7 +290,7 @@ private struct AppBars: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            Text(title).font(.subheadline).foregroundStyle(.secondaryText)
             if apps.isEmpty {
                 Text("—").font(.callout).foregroundStyle(.tertiary)
             }
@@ -299,7 +299,7 @@ private struct AppBars: View {
                 HStack(spacing: 8) {
                     Text(app.name).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
-                    Text(format(app.value)).monospacedDigit().foregroundStyle(.secondary)
+                    Text(format(app.value)).monospacedDigit().foregroundStyle(.secondaryText)
                 }
                 .font(.callout)
                 .padding(.horizontal, 6)

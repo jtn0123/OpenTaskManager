@@ -79,7 +79,7 @@ struct PowerDetail: View {
                 .chartFrame(height: DetailGraph.primary, tint: Theme.power)
             Text("Rest of system covers the display, storage, radios, fans and power conversion.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
         }
     }
 

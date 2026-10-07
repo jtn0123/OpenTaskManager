@@ -19,7 +19,7 @@ struct DriverDetail: View {
                     facts
                     Text(about)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     labelled("Bundle ID", item.bundleID)
                     if let system = item.systemExtension { systemDetails(system) }
@@ -39,7 +39,7 @@ struct DriverDetail: View {
             ExtensionIcon(item: item, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.headline).lineLimit(2)
-                Text(item.kind).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Text(item.kind).font(.subheadline).foregroundStyle(.secondaryText).lineLimit(1)
             }
         }
     }
@@ -60,7 +60,7 @@ struct DriverDetail: View {
     private var facts: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             GridRow {
-                Text("Status").foregroundStyle(.secondary)
+                Text("Status").foregroundStyle(.secondaryText)
                 ExtensionStatusLabel(status: item.status)
             }
             .font(.callout)
@@ -69,7 +69,7 @@ struct DriverDetail: View {
             if let kext = item.kernelExtension {
                 // Verbatim, so the tag isn't grouped like a quantity ("1,234").
                 GridRow {
-                    Text("Load tag").foregroundStyle(.secondary)
+                    Text("Load tag").foregroundStyle(.secondaryText)
                     Text(verbatim: "\(kext.loadTag)").textSelection(.enabled)
                 }
                 .font(.callout)
@@ -93,7 +93,7 @@ struct DriverDetail: View {
             }
         }
         VStack(alignment: .leading, spacing: 2) {
-            Text("Reported as").font(.subheadline).foregroundStyle(.secondary)
+            Text("Reported as").font(.subheadline).foregroundStyle(.secondaryText)
             Text(verbatim: system.state)
                 .font(.subheadline.monospaced())
                 .textSelection(.enabled)
@@ -102,7 +102,7 @@ struct DriverDetail: View {
         if let location = system.settingsLocation {
             Text("Change it in \(location).")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -174,7 +174,7 @@ struct DriverDetail: View {
     private func links(_ title: String, _ bundleIDs: [String]) -> some View {
         if !bundleIDs.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(title) (\(bundleIDs.count))").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(title) (\(bundleIDs.count))").font(.subheadline).foregroundStyle(.secondaryText)
                 ForEach(bundleIDs.prefix(Self.linkLimit), id: \.self) { bundleID in
                     Text(bundleID)
                         .font(.subheadline.monospaced())
@@ -186,7 +186,7 @@ struct DriverDetail: View {
                 if bundleIDs.count > Self.linkLimit {
                     Text("and \(bundleIDs.count - Self.linkLimit) more")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                 }
             }
         }
@@ -194,7 +194,7 @@ struct DriverDetail: View {
 
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
             CopyableText(value: value).font(.subheadline)
         }
     }

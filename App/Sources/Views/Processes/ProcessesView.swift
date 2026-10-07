@@ -270,7 +270,7 @@ private struct StatusBar: View {
         }
         .font(.subheadline)
         .monospacedDigit()
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondaryText)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
     }

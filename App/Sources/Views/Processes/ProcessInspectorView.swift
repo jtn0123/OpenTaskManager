@@ -57,7 +57,7 @@ struct ProcessInspectorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName(for: process)).font(.headline).lineLimit(1)
                 Text("PID \(process.pid) · \(process.userName) · \(process.state.rawValue)")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondaryText)
             }
         }
     }
@@ -157,7 +157,7 @@ struct ProcessInspectorView: View {
                 labelled("Command line", command)
             } else if details.loaded {
                 Text("Command line and environment are only visible for your own processes.")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                    .font(.subheadline).foregroundStyle(.secondaryText)
             }
         }
     }
@@ -193,7 +193,7 @@ struct ProcessInspectorView: View {
                     }
                 }
                 if shown.isEmpty {
-                    Text("Nothing open.").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Nothing open.").font(.subheadline).foregroundStyle(.secondaryText)
                 }
             } else {
                 unavailable("Open files unavailable", "macOS only lists open files for your own processes.")
@@ -260,7 +260,7 @@ struct ProcessInspectorView: View {
 
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
             Text(value).font(.caption.monospaced()).textSelection(.enabled)
         }
     }
@@ -268,7 +268,7 @@ struct ProcessInspectorView: View {
     private func unavailable(_ title: String, _ detail: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.callout)
-            Text(detail).font(.subheadline).foregroundStyle(.secondary)
+            Text(detail).font(.subheadline).foregroundStyle(.secondaryText)
         }
     }
 

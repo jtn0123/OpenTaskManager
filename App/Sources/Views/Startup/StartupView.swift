@@ -374,7 +374,7 @@ struct LaunchStateLabel: View {
             Text(state.title)
             if case let .running(pid) = state {
                 // Verbatim, so the PID isn't grouped like a quantity ("4,673").
-                Text(verbatim: "PID \(pid)").foregroundStyle(.secondary).monospacedDigit()
+                Text(verbatim: "PID \(pid)").foregroundStyle(.secondaryText).monospacedDigit()
             }
         }
         .lineLimit(1)
@@ -424,7 +424,7 @@ private struct StartupStatusBar: View {
         }
         .font(.subheadline)
         .monospacedDigit()
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondaryText)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
     }

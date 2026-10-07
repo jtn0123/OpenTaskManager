@@ -47,7 +47,7 @@ struct CPUDetail: View {
         let caption = Text(mode == "cores" ? "% Utilization of each core" : mode == "tiers" ? "% Utilization by core type"
                            : "% Utilization over \(AppModel.graphSpan)s")
             .font(.subheadline)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.secondaryText)
         return VStack(alignment: .leading, spacing: 6) {
             // The caption moves above the picker when the pane is too narrow for both.
             ViewThatFits(in: .horizontal) {
@@ -165,7 +165,7 @@ struct CPUDetail: View {
         VStack(alignment: .leading, spacing: 12) {
             ForEach(topology.tiers, id: \.level) { tier in
                 let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level }
-                Text("\(tier.name) cores").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(tier.name) cores").font(.subheadline).foregroundStyle(.secondaryText)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(max(cpus.count, 1), 6)), spacing: 6) {
                     ForEach(cpus, id: \.self) { cpu in
                         coreGraph(cpu, color: Theme.tier(tier.level))
@@ -186,7 +186,7 @@ struct CPUDetail: View {
                         in: RoundedRectangle(cornerRadius: 5))
             .overlay(alignment: .top) {
                 HStack {
-                    Text("\(cpu)").foregroundStyle(.secondary)
+                    Text("\(cpu)").foregroundStyle(.secondaryText)
                     Spacer()
                     Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? color : .secondary)
                 }

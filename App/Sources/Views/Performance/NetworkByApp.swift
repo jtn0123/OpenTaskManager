@@ -23,7 +23,7 @@ struct NetworkAppsSection: View {
                 } else {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("Measuring which apps are using the network…").foregroundStyle(.secondary)
+                        Text("Measuring which apps are using the network…").foregroundStyle(.secondaryText)
                     }
                     .font(.callout)
                 }
@@ -42,7 +42,7 @@ struct NetworkAppsSection: View {
                 Text(byProcess ? "Processes using the network" : "Apps using the network").font(.headline)
                 Text("Received and sent on every interface · updates every \(Format.timeSpan(NetworkActivityStore.refreshSeconds))")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -67,7 +67,7 @@ struct NetworkAppsSection: View {
                 .font(.callout.weight(.medium))
             Text("Nothing sent or received in the last \(Format.roughDuration(seconds)).")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -104,7 +104,7 @@ struct NetworkAppsSection: View {
                     .help(help(identity.name, usage))
                 }
                 if ranking.rows.allSatisfy({ history.latest[$0] == nil }) {
-                    Text("Quiet right now.").font(.callout).foregroundStyle(.secondary).padding(.horizontal, 6)
+                    Text("Quiet right now.").font(.callout).foregroundStyle(.secondaryText).padding(.horizontal, 6)
                 }
             }
         }
@@ -118,7 +118,7 @@ struct NetworkAppsSection: View {
             Text("Send").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
         }
         .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondaryText)
         .padding(.horizontal, 6)
     }
 

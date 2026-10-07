@@ -120,7 +120,7 @@ struct HistoryChartCard: View {
         ForEach(spec.lines) { line in
             HStack(spacing: 5) {
                 RoundedRectangle(cornerRadius: 2).fill(line.color).frame(width: 9, height: 9)
-                Text(line.name).foregroundStyle(.secondary)
+                Text(line.name).foregroundStyle(.secondaryText)
                 Text(spec.summary(of: line, in: points)).monospacedDigit()
             }
             .font(.callout)
@@ -211,7 +211,7 @@ struct HistoryChartCard: View {
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
                 // Centred under its line, as `GraphMath.timeTicks` spaces them: a
                 // label hanging right of its tick ran past the plot's end and was cut.
-                AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 10.5)).foregroundStyle(.secondaryText)
             }
         }
         .chartPlotStyle { plot in
@@ -264,7 +264,7 @@ private struct HistoryPlotOverlay: View {
             ForEach(labels.indices, id: \.self) { index in
                 Text(labels[index])
                     .font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .offset(x: plot.minX + 6, y: plot.minY + 3 + plot.height / 2 * CGFloat(index))
             }
             Rectangle()

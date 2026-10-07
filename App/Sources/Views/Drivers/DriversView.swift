@@ -270,13 +270,13 @@ private struct DriverSummaryCard: View {
                 Image(systemName: symbol).foregroundStyle(tint)
             }
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.secondaryText)
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 1) {
                 AnimatedNumber(value: Double(value), format: { Format.fixed($0, 0) }, font: Self.valueFont)
                 Text(detail)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondaryText)
                     .lineLimit(1)
             }
         }
@@ -303,7 +303,7 @@ private struct EmptyNote<Actions: View>: View {
                 .font(.title3.weight(.semibold))
             Text(detail)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
             actions
                 .padding(.top, 6)
         }
@@ -425,7 +425,7 @@ private struct DriverTable: View {
     private var versionColumn: some Column {
         TableColumn("Version", value: \.version) { item in
             Text(item.version.isEmpty ? "—" : item.version)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
                 .lineLimit(1)
                 .help(item.version)
         }
@@ -531,7 +531,7 @@ private struct DriversStatusBar: View {
         }
         .font(.subheadline)
         .monospacedDigit()
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondaryText)
         .lineLimit(1)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)

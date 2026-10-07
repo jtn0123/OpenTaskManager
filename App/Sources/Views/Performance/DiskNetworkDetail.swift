@@ -50,7 +50,7 @@ struct DiskDetail: View {
                         Text(volume.name)
                         Spacer()
                         Text("\(Format.bytes(volume.availableBytes)) free of \(Format.bytes(volume.totalBytes))")
-                            .foregroundStyle(.secondary).monospacedDigit()
+                            .foregroundStyle(.secondaryText).monospacedDigit()
                     }
                     .font(.callout)
                     let used = Double(volume.usedBytes) / Double(max(volume.totalBytes, 1))

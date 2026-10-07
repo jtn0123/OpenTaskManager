@@ -23,7 +23,7 @@ struct StartupItemDetail: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     facts
-                    if let note { Text(note).font(.subheadline).foregroundStyle(.secondary) }
+                    if let note { Text(note).font(.subheadline).foregroundStyle(.secondaryText) }
                     program
                     launches
                     labelled("Property list", item.plistPath)
@@ -38,10 +38,10 @@ struct StartupItemDetail: View {
                     Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
                     Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                 }
             } else if item.publisher == .thirdParty, let reason = LaunchControl.restriction(for: item) {
-                Text(reason).font(.subheadline).foregroundStyle(.secondary)
+                Text(reason).font(.subheadline).foregroundStyle(.secondaryText)
             }
             HStack {
                 Button("Reveal in Finder") { StartupActions.reveal(item) }
@@ -72,7 +72,7 @@ struct StartupItemDetail: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.headline).lineLimit(2)
                 Text(item.label)
-                    .font(.subheadline.monospaced()).foregroundStyle(.secondary)
+                    .font(.subheadline.monospaced()).foregroundStyle(.secondaryText)
                     .lineLimit(1).truncationMode(.middle)
                     .textSelection(.enabled)
                     .help(item.label)
@@ -83,7 +83,7 @@ struct StartupItemDetail: View {
     private var facts: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             GridRow {
-                Text("Status").foregroundStyle(.secondary)
+                Text("Status").foregroundStyle(.secondaryText)
                 LaunchStateLabel(state: item.state)
             }
             .font(.callout)
@@ -109,7 +109,7 @@ struct StartupItemDetail: View {
         let arguments = item.arguments.first == item.program ? Array(item.arguments.dropFirst()) : item.arguments
         if !arguments.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Arguments").font(.subheadline).foregroundStyle(.secondary)
+                Text("Arguments").font(.subheadline).foregroundStyle(.secondaryText)
                 ForEach(Array(arguments.enumerated()), id: \.offset) { _, argument in
                     CopyableText(value: argument).font(.subheadline)
                 }
@@ -119,7 +119,7 @@ struct StartupItemDetail: View {
 
     private var launches: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Launches").font(.subheadline).foregroundStyle(.secondary)
+            Text("Launches").font(.subheadline).foregroundStyle(.secondaryText)
             if item.isUnreadable {
                 Text("Unknown: the property list can't be read").font(.callout)
             } else {
@@ -127,7 +127,7 @@ struct StartupItemDetail: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Image(systemName: "arrowtriangle.right.fill")
                             .font(.system(size: 6))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondaryText)
                         Text(line).font(.callout).textSelection(.enabled)
                     }
                 }
@@ -139,7 +139,7 @@ struct StartupItemDetail: View {
         if let pid = service.pid {
             // The status row above already shows the PID.
             GridRow {
-                Text("Process").foregroundStyle(.secondary)
+                Text("Process").foregroundStyle(.secondaryText)
                 Button("Show in Processes") { showProcess(pid) }
                     .buttonStyle(.link)
                     .help("Select PID \(String(pid)) on the Processes page")
@@ -151,7 +151,7 @@ struct StartupItemDetail: View {
         }
         if service.isRunning, let reason = service.startReason {
             GridRow {
-                Text("Started by").foregroundStyle(.secondary)
+                Text("Started by").foregroundStyle(.secondaryText)
                 Text(LaunchServiceInfo.describe(startReason: reason))
                     .help("launchd's reason: \(reason)")
             }
@@ -159,7 +159,7 @@ struct StartupItemDetail: View {
         }
         if let priority = service.priority {
             GridRow {
-                Text("Priority").foregroundStyle(.secondary)
+                Text("Priority").foregroundStyle(.secondaryText)
                 Text(priority.title).help(priority.explanation)
             }
             .font(.callout)
@@ -180,7 +180,7 @@ struct StartupItemDetail: View {
             }
             Text(service.isRunning ? afterStop : "Runs it once, now.")
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondaryText)
         }
     }
 
@@ -228,7 +228,7 @@ struct StartupItemDetail: View {
 
     private func labelled(_ label: String, _ value: String, isCode: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
             CopyableText(value: value, monospaced: isCode).font(.subheadline)
         }
     }

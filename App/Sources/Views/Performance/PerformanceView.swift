@@ -111,7 +111,7 @@ private struct ResourceRow: View {
                 .frame(width: compact ? 48 : 64, height: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline)
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(3)
+                Text(subtitle).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(3)
             }
         }
         .padding(.vertical, 4)
