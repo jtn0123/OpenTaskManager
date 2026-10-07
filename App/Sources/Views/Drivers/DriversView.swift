@@ -17,6 +17,10 @@ enum DriversFilter: String, CaseIterable, Identifiable {
         case .all: true
         }
     }
+
+    /// Whether rows can differ in publisher. Under Apple or Third party the
+    /// column would say the same thing on every row, so it gives its room to Name.
+    var showsPublisher: Bool { self == .all }
 }
 
 /// What's been added to macOS below the app level: system extensions (network
@@ -115,7 +119,7 @@ struct DriversView: View {
     private func content(_ rows: [ExtensionItem], scan: ExtensionScan) -> some View {
         let selected = rows.first { $0.id == selection }
         return InspectorSplit(
-            listMinimum: DriverTable.minimumWidth,
+            listMinimum: DriverTable.minimumWidth(showsPublisher: filter.showsPublisher),
             // Like the Processes inspector, the details take room only once
             // something is selected.
             wantsInspector: showInspector && selected != nil,
@@ -124,7 +128,8 @@ struct DriversView: View {
             widthKey: "driversInspectorWidth",
             backTitle: "Drivers"
         ) {
-            DriverTable(rows: rows, selection: $selection, sortOrder: $sortOrder, open: openDetails)
+            DriverTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,
+                        open: openDetails)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } detail: {
             if let selected {
@@ -310,13 +315,31 @@ private struct EmptyNote<Actions: View>: View {
 // MARK: - Table
 
 private struct DriverTable: View {
+    typealias Column = TableColumnContent<ExtensionItem, KeyPathComparator<ExtensionItem>>
+
     var rows: [ExtensionItem]
+    /// Off while the filter leaves one publisher, as every row would say it.
+    var showsPublisher: Bool
     @Binding var selection: ExtensionItem.ID?
     @Binding var sortOrder: [KeyPathComparator<ExtensionItem>]
     var open: () -> Void
 
-    /// The columns' minimum widths and the gaps between them.
-    static let minimumWidth: CGFloat = 150 + 100 + 100 + 70 + 55 + 5 * 17
+    /// Narrowest each column gets: room for its usual values, so Name is
+    /// the one that gives way. All five fit the narrowest window.
+    private enum Minimum {
+        static let name: CGFloat = 150
+        static let kind: CGFloat = 115
+        static let status: CGFloat = 115
+        static let publisher: CGFloat = 70
+        static let version: CGFloat = 55
+    }
+
+    /// The columns at their narrowest, the gaps between them, and the
+    /// table's own insets and scroller.
+    static func minimumWidth(showsPublisher: Bool) -> CGFloat {
+        let columns = Minimum.name + Minimum.kind + Minimum.status + Minimum.version + (showsPublisher ? Minimum.publisher : 0)
+        return columns + (showsPublisher ? 5 : 4) * 17 + 32
+    }
 
     var body: some View {
         // Brings a row picked before the table appeared (`-openDriver`) into view.
@@ -327,35 +350,27 @@ private struct DriverTable: View {
         }
     }
 
+    /// The other columns hold short values that repeat down the table, so they
+    /// start at the width those need and stop soon after; Name takes the rest.
     private var table: some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name) { item in
-                HStack(spacing: 6) {
-                    ExtensionIcon(item: item, size: 16)
-                    Text(item.name).lineLimit(1)
+        Group {
+            // Two tables rather than a conditional column, which needs macOS 14.4.
+            if showsPublisher {
+                Table(rows, selection: $selection, sortOrder: $sortOrder) {
+                    nameColumn
+                    kindColumn
+                    statusColumn
+                    publisherColumn
+                    versionColumn
                 }
-                .help(item.bundleID)
+            } else {
+                Table(rows, selection: $selection, sortOrder: $sortOrder) {
+                    nameColumn
+                    kindColumn
+                    statusColumn
+                    versionColumn
+                }
             }
-            .width(min: 150, ideal: 210)
-            TableColumn("Kind", value: \.category) { item in
-                Text(item.kind).lineLimit(1)
-            }
-            .width(min: 100, ideal: 135)
-            TableColumn("Status", value: \.status) { item in
-                ExtensionStatusLabel(status: item.status)
-            }
-            .width(min: 100, ideal: 155)
-            TableColumn("Publisher", value: \.publisher) { item in
-                Text(item.publisher.title)
-                    .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
-            }
-            .width(min: 70, ideal: 90)
-            TableColumn("Version", value: \.version) { item in
-                Text(item.version.isEmpty ? "—" : item.version)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .width(min: 55, ideal: 80)
         }
         .contextMenu(forSelectionType: ExtensionItem.ID.self) { ids in
             if let id = ids.first, let item = rows.first(where: { $0.id == id }) {
@@ -371,6 +386,50 @@ private struct DriverTable: View {
         } primaryAction: { _ in
             open()
         }
+    }
+
+    private var nameColumn: some Column {
+        TableColumn("Name", value: \.name) { item in
+            HStack(spacing: 6) {
+                ExtensionIcon(item: item, size: 16)
+                Text(item.name).lineLimit(1)
+            }
+            // The whole name, for when the column cuts it short.
+            .help("\(item.name)\n\(item.bundleID)")
+        }
+        .width(min: Minimum.name, ideal: 260)
+    }
+
+    private var kindColumn: some Column {
+        TableColumn("Kind", value: \.category) { item in
+            Text(item.kind).lineLimit(1).help(item.kind)
+        }
+        .width(min: Minimum.kind, ideal: 120, max: 140)
+    }
+
+    private var statusColumn: some Column {
+        TableColumn("Status", value: \.status) { item in
+            ExtensionStatusLabel(status: item.status).help(item.status.title)
+        }
+        .width(min: Minimum.status, ideal: 120, max: 160)
+    }
+
+    private var publisherColumn: some Column {
+        TableColumn("Publisher", value: \.publisher) { item in
+            Text(item.publisher.title)
+                .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
+        }
+        .width(min: Minimum.publisher, ideal: 75, max: 100)
+    }
+
+    private var versionColumn: some Column {
+        TableColumn("Version", value: \.version) { item in
+            Text(item.version.isEmpty ? "—" : item.version)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .help(item.version)
+        }
+        .width(min: Minimum.version, ideal: 60, max: 90)
     }
 }
 

@@ -124,6 +124,9 @@ locked or the window is on another Space.
   displayed through `CPUScale`, which defaults to share of the whole CPU.
 - Restricted processes (root and other users) only have CPU and memory, read
   via `/bin/ps`. Show "—" for other fields, never zero.
+- When the process table runs out of width it hides optional columns, lowest
+  `ProcessColumn.priority` first (the maths is `ColumnFit` in OTMKit's Layout/),
+  apart from the user's Columns choices, and shows them again when there's room.
 - In a details pane beside a table, wrapping text outside the pane's scroll
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
