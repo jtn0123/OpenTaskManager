@@ -133,6 +133,7 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
             cells += columns.map { column in
                 guard let measurement = run.measurement(column.id) else { return "—" }
                 return measurement.unit.format(measurement.value) + (measurement.plusMinus.map { " \($0)" } ?? "")
+                    + Self.qualifier(measurement.caveat)
             }
             cells.append(run.conditions.joined(separator: "; "))
             rows.append(Self.row(cells))
@@ -156,7 +157,18 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
         } else {
             parts.append("Each figure is measured once.")
         }
+        // What a "(timing unverified)" in the table means, once.
+        var caveats: [BenchmarkFigureCaveat] = []
+        for caveat in runs.flatMap({ $0.measurements.compactMap(\.caveat) }) where !caveats.contains(caveat) {
+            caveats.append(caveat)
+        }
+        parts += caveats.map { "\($0.title): \($0.explanation)" }
         return parts.joined(separator: " ")
+    }
+
+    /// " (timing unverified)" after a figure in doubt, else nothing.
+    private static func qualifier(_ caveat: BenchmarkFigureCaveat?) -> String {
+        caveat.map { " (\($0.title.lowercased()))" } ?? ""
     }
 
     private func comparison(_ entry: ComparisonEntry, earlier: BenchmarkRun, later: BenchmarkRun, when: DateFormatter) -> [String] {
@@ -172,7 +184,8 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
         ]
         for change in changes {
             lines.append(Self.row([
-                change.title, change.unit.format(change.baseline), change.unit.format(change.compared),
+                change.title, change.unit.format(change.baseline) + Self.qualifier(change.baselineCaveat),
+                change.unit.format(change.compared) + Self.qualifier(change.comparedCaveat),
                 change.change.map(BenchmarkChange.formatChange) ?? "—", change.spreadText, change.verdict.title.lowercased(),
             ]))
         }

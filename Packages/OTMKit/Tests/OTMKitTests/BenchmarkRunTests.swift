@@ -20,11 +20,15 @@ private func cpu(at time: TimeInterval, machine: CPUBenchmarkMachine = mac, opti
                               thermalStateAtEnd: .nominal, lowPowerMode: lowPower, seconds: 21, workloads: workloads)
 }
 
-private func gpu(at time: TimeInterval, optimized: Bool = true, rates: [Double] = [8e12, 8.2e12, 7.9e12]) -> GPUBenchmarkResult {
+/// `shortTimed` workloads' GPU time falls 50 ms short of their wall time, as a VM's can.
+private func gpu(at time: TimeInterval, optimized: Bool = true, rates: [Double] = [8e12, 8.2e12, 7.9e12],
+                 shortTimed: Set<GPUWorkload> = []) -> GPUBenchmarkResult {
     let device = GPUBenchmarkDevice(name: "Apple M5 Pro", cores: 20, model: "Mac17,8", unifiedMemory: true, workingSetBytes: 36 << 30)
-    let workloads = GPUWorkload.allCases.map {
-        GPUWorkloadResult(workload: $0, measurement: GPUBenchmarkMeasurement(repeats: rates, gpuSeconds: [0.5, 0.5, 0.5],
-                                                                             wallSeconds: [0.501, 0.501, 0.501], unitsPerRepeat: 40))
+    let workloads = GPUWorkload.allCases.map { workload in
+        let gpu = shortTimed.contains(workload) ? 0.45 : 0.5
+        return GPUWorkloadResult(workload: workload, measurement: GPUBenchmarkMeasurement(repeats: rates, gpuSeconds: [gpu, gpu, gpu],
+                                                                                          wallSeconds: [0.501, 0.501, 0.501],
+                                                                                          unitsPerRepeat: 40))
     }
     return GPUBenchmarkResult(date: Date(timeIntervalSince1970: time), suiteVersion: 1, configuration: .standard, device: device,
                               osVersion: "macOS 27.2 (27C61)", appVersion: optimized ? "otm 0.1.0" : "OpenTaskManager 0.1.0",
@@ -97,6 +101,20 @@ struct BenchmarkRunTests {
         #expect(run.measurement("compute")?.value == 8e12)
         #expect(run.machine?.name == "Apple M5 Pro · 20 cores · Mac17,8")
         #expect(run.conditions == ["thermal pressure fair"])
+        #expect(run.measurements.allSatisfy { $0.caveat == nil })
+    }
+
+    @Test func aGPUFigureTimedShortCarriesItsOwnCaveat() {
+        let run = BenchmarkRun(gpu(at: 100, shortTimed: [.fill]))
+        #expect(run.measurement("fill")?.caveat == .timingUnverified)
+        #expect(run.measurement("compute")?.caveat == nil)
+        #expect(run.measurement("memory")?.caveat == nil)
+        // It qualifies that figure, not the run.
+        #expect(run.conditions == ["thermal pressure fair"])
+        #expect(run.headlineSummary.hasSuffix("Fill rate 8.00 Tpixel/s (timing unverified)"))
+        #expect(BenchmarkFigureCaveat.timingUnverified.title == "Timing unverified")
+        #expect(BenchmarkFigureCaveat.timingUnverified.explanation.hasSuffix("so the figure may read high."))
+        #expect(BenchmarkFigureCaveat.timingUnverified.brief.hasSuffix("so the figure may read high"))
     }
 
     @Test func adaptsADiskResult() {
@@ -252,6 +270,39 @@ struct BenchmarkRunTests {
         #expect(links.caveats.first?.contains("not on this Mac; these runs reached different servers (edge-1.example, then edge-2.example)") == true)
     }
 
+    @Test func aFigureInDoubtQualifiesItsChange() throws {
+        let later = try #require(comparison(BenchmarkRun(gpu(at: 100)), BenchmarkRun(gpu(at: 200, shortTimed: [.fill]))))
+        let fill = try #require(later.changes.first { $0.id == "fill" })
+        #expect(fill.baselineCaveat == nil)
+        #expect(fill.comparedCaveat == .timingUnverified)
+        #expect(fill.caveat == .timingUnverified)
+        #expect(fill.caveatNote == "Fill rate: timing unverified in the later run, so this change may not be real.")
+        #expect(later.changes.first { $0.id == "compute" }?.caveat == nil)
+        // First, since it bears on a row's verdict.
+        #expect(later.caveats.first == fill.caveatNote)
+
+        let both = try #require(comparison(BenchmarkRun(gpu(at: 100, shortTimed: [.fill])), BenchmarkRun(gpu(at: 200, shortTimed: [.fill]))))
+        #expect(both.changes.first { $0.id == "fill" }?.caveatNote?.contains("in both runs") == true)
+        let earlier = try #require(comparison(BenchmarkRun(gpu(at: 100, shortTimed: [.fill])), BenchmarkRun(gpu(at: 200))))
+        #expect(earlier.changes.first { $0.id == "fill" }?.caveatNote?.contains("in the earlier run") == true)
+    }
+
+    @Test func verdictSummaryCountsTheMovesFirst() throws {
+        let compared = try #require(comparison(BenchmarkRun(cpu(at: 100)), BenchmarkRun(cpu(at: 200, multi: [140, 135, 138]))))
+        // Each workload's multi figure moved past both spreads; its single figure didn't move.
+        #expect(compared.verdictSummary == "3 better · 3 unchanged")
+        let disks = try #require(comparison(BenchmarkRun(disk(at: 100)), BenchmarkRun(disk(at: 200, readSeconds: 0.4))))
+        #expect(disks.verdictSummary == "2 measured once · 2 unchanged")
+    }
+
+    @Test func refusalsHaveAShortForm() {
+        #expect(BenchmarkRefusal.differentBuilds(baselineOptimized: true).summary == "a debug and a release build")
+        #expect(BenchmarkRefusal.differentTargets(.disk, "A", "B").summary == "different volumes")
+        #expect(BenchmarkRefusal.differentTargets(.network, "en0", "en1").summary == "different interfaces")
+        #expect(BenchmarkRefusal.differentSettings(name: "Workers", baseline: "6", compared: "8").summary == "different settings (workers)")
+        #expect(BenchmarkRefusal.sameRun.summary == "the same run twice")
+    }
+
     // MARK: - Units
 
     @Test func unitsScaleToTheLargestFigure() {
@@ -330,6 +381,21 @@ struct BenchmarkExportTests {
         let gpu = try #require(markdown.range(of: "## GPU"))
         let internet = try #require(markdown.range(of: "## Internet"))
         #expect(gpu.lowerBound < internet.lowerBound)
+        #expect(!markdown.contains("timing unverified"))
+    }
+
+    @Test func aFigureInDoubtIsQualifiedWhereverItIsExported() throws {
+        let utc = TimeZone(identifier: "UTC") ?? .current
+        let runs = [BenchmarkRun(gpu(at: 0)), BenchmarkRun(gpu(at: 60, shortTimed: [.fill]))]
+        let export = BenchmarkExport(exported: Date(timeIntervalSince1970: 120), app: "otm", runs: runs, comparisons: [(runs[0], runs[1])])
+        let markdown = export.markdown(timeZone: utc)
+        #expect(markdown.contains("| 8.00 Tpixel/s ±1.9% (timing unverified) |"))
+        #expect(markdown.contains("| Fill rate | 8.00 Tpixel/s | 8.00 Tpixel/s (timing unverified) |"))
+        #expect(markdown.contains("Timing unverified: The GPU's own clock"))
+        #expect(markdown.contains("- Fill rate: timing unverified in the later run, so this change may not be real."))
+        let read = try BenchmarkExport.read(export.json())
+        #expect(read.runs.first?.measurement("fill")?.caveat == .timingUnverified)
+        #expect(read.comparisons.first?.changes?.first { $0.id == "fill" }?.comparedCaveat == .timingUnverified)
     }
 
     @Test func libraryAdaptsEveryHistoryWithoutRewritingIt() throws {

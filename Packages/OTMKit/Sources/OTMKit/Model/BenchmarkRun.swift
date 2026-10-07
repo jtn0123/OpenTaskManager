@@ -89,6 +89,39 @@ public enum BenchmarkUnit: String, Sendable, Codable {
     }
 }
 
+/// Why one figure may not be what it seems. It travels with the figure, so
+/// every place that shows the figure (a card, a saved run, a comparison, an
+/// export) can qualify it right beside the number.
+public enum BenchmarkFigureCaveat: String, Sendable, Codable {
+    /// The GPU's own time for the repeats fell well short of the time from
+    /// commit to completion (`GPUBenchmarkMeasurement.gpuTimeLooksShort`),
+    /// so the figure, work over that time, may read high.
+    case timingUnverified
+
+    /// A few words to put beside the figure: "Timing unverified".
+    public var title: String {
+        switch self {
+        case .timingUnverified: "Timing unverified"
+        }
+    }
+
+    /// Why, in a clause, for a footnote under a table: "the GPU's clock ran short, so the figure may read high".
+    public var brief: String {
+        switch self {
+        case .timingUnverified: "the GPU's own clock ran short of the wall clock, so the figure may read high"
+        }
+    }
+
+    /// The reason in full, for a tooltip or the methodology.
+    public var explanation: String {
+        switch self {
+        case .timingUnverified:
+            "The GPU's own clock put this figure's repeats well short of the time from commit to completion. A virtual "
+                + "machine's GPU can under-report its time, and other apps' GPU work can hold up a start, so the figure may read high."
+        }
+    }
+}
+
 /// One figure of a run: a median of timed repeats, with the slowest and
 /// fastest of them, or a single measurement.
 public struct BenchmarkMeasurement: Sendable, Codable, Equatable, Identifiable {
@@ -106,9 +139,11 @@ public struct BenchmarkMeasurement: Sendable, Codable, Equatable, Identifiable {
     public var high: Double?
     /// Timed repeats behind the figure; nil when the test measures once.
     public var repeats: Int?
+    /// Why the figure itself may be off; nil for most.
+    public var caveat: BenchmarkFigureCaveat?
 
     public init(id: String, name: String, variant: String? = nil, value: Double, unit: BenchmarkUnit, low: Double? = nil,
-                high: Double? = nil, repeats: Int? = nil) {
+                high: Double? = nil, repeats: Int? = nil, caveat: BenchmarkFigureCaveat? = nil) {
         self.id = id
         self.name = name
         self.variant = variant
@@ -117,15 +152,17 @@ public struct BenchmarkMeasurement: Sendable, Codable, Equatable, Identifiable {
         self.low = low
         self.high = high
         self.repeats = repeats
+        self.caveat = caveat
     }
 
     /// From timed repeats: their median, slowest and fastest.
-    init(id: String, name: String, variant: String? = nil, repeats values: [Double], unit: BenchmarkUnit) {
+    init(id: String, name: String, variant: String? = nil, repeats values: [Double], unit: BenchmarkUnit,
+         caveat: BenchmarkFigureCaveat? = nil) {
         let sorted = values.sorted()
         let middle = sorted.count / 2
         let median = sorted.isEmpty ? 0 : sorted.count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
         self.init(id: id, name: name, variant: variant, value: median, unit: unit, low: sorted.first, high: sorted.last,
-                  repeats: values.isEmpty ? nil : values.count)
+                  repeats: values.isEmpty ? nil : values.count, caveat: caveat)
     }
 
     /// "Integer, 6 workers".
@@ -221,7 +258,8 @@ public struct BenchmarkRun: Sendable, Codable, Equatable, Identifiable {
     /// "macOS 27.2 (27C61)".
     public var osVersion: String?
     /// What may have held the figures back or flattered them: heat, Low
-    /// Power Mode, a cache the test couldn't bypass.
+    /// Power Mode, a cache the test couldn't bypass. A doubt about one
+    /// figure alone is that measurement's `caveat` instead.
     public var conditions: [String]
     public var measurements: [BenchmarkMeasurement]
 
@@ -259,9 +297,13 @@ public struct BenchmarkRun: Sendable, Codable, Equatable, Identifiable {
         }
     }
 
-    /// "Integer 549 MB/s · Floating point 150 MFLOP/s · Memory 28.5 GB/s".
+    /// "Integer 549 MB/s · Floating point 150 MFLOP/s · Memory 28.5 GB/s",
+    /// a figure in doubt qualified beside it: "Fill rate 335 Gpixel/s (timing unverified)".
     public var headlineSummary: String {
-        headline.map { "\($0.name) \($0.unit.format($0.value))" }.joined(separator: " · ")
+        headline.map { measurement in
+            "\(measurement.name) \(measurement.unit.format(measurement.value))"
+                + (measurement.caveat.map { " (\($0.title.lowercased()))" } ?? "")
+        }.joined(separator: " · ")
     }
 
     /// The settings in a line: "6 workers · 256 KB hash buffer · …".
@@ -313,15 +355,12 @@ public extension BenchmarkRun {
             case .memory: .bytesPerSecond
             case .fill: .pixelsPerSecond
             }
+            // A GPU time that looked short qualifies that one figure, not the run.
             return BenchmarkMeasurement(id: workload.workload.rawValue, name: workload.workload.title,
-                                        repeats: workload.measurement.repeats, unit: unit)
+                                        repeats: workload.measurement.repeats, unit: unit,
+                                        caveat: workload.measurement.gpuTimeLooksShort ? .timingUnverified : nil)
         }
-        var conditions = Self.conditions(thermal: result.worstThermalState, lowPower: result.lowPowerMode)
-        let short = result.shortTimedWorkloads.map { $0.workload.title.lowercased() }
-        if !short.isEmpty {
-            conditions.append("GPU time looked short for \(short.joined(separator: " and ")), so "
-                + "\(short.count == 1 ? "that figure" : "those figures") may read high")
-        }
+        let conditions = Self.conditions(thermal: result.worstThermalState, lowPower: result.lowPowerMode)
         let device = result.device
         self.init(
             id: Self.id(.gpu, result.date), kind: .gpu, date: result.date, workloadVersion: result.suiteVersion,

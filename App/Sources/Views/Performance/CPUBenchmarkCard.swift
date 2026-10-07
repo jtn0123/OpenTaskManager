@@ -8,7 +8,8 @@ import SwiftUI
 /// with the run's progress, not per tick. Figures from a debug build, which
 /// runs the workloads many times slower, carry a badge by the title and a
 /// line just above them, so they're never read as this Mac's speed; a
-/// release build's carry nothing extra.
+/// release build's carry nothing extra. The figures come first; what the
+/// workloads do and how they're timed fold away under Methodology.
 struct CPUBenchmarkCard: View, Equatable {
     /// Debug builds' figures, in the badge and the history's Build column.
     fileprivate static let debugColor = Theme.data(0.96, 0.50, 0.08)
@@ -28,10 +29,6 @@ struct CPUBenchmarkCard: View, Equatable {
                 if debugFigures { debugQualification }
                 tiles(result: nil, progress: progress, workers: run.workers)
             } else {
-                Text(caption)
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
                 if let failure = store.failure {
                     Label(failure, systemImage: "exclamationmark.triangle")
                         .font(.callout)
@@ -41,7 +38,7 @@ struct CPUBenchmarkCard: View, Equatable {
                 if let latest = results.first {
                     if debugFigures { debugQualification }
                     tiles(result: latest, progress: nil, workers: latest.workloads.first?.multi.workers ?? CPUBenchmark.defaultWorkers)
-                    Text(Self.details(latest))
+                    Text(Self.tested(latest))
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .textSelection(.enabled)
@@ -50,6 +47,13 @@ struct CPUBenchmarkCard: View, Equatable {
             }
             if results.count > 1 {
                 CPUBenchmarkHistory(results: results)
+            }
+            MethodologyDisclosure(preview: "Integer, floating point and memory, on 1 and \(CPUBenchmark.defaultWorkers) workers · "
+                + "about \(Self.plannedSeconds) s") {
+                Text(caption)
+                if run == nil, let latest = results.first {
+                    Text(Self.details(latest))
+                }
             }
         }
         .task { store.handleLaunchArgument() }
@@ -109,17 +113,20 @@ struct CPUBenchmarkCard: View, Equatable {
         return "\(progress.phase.workload.title), \(workers)…"
     }
 
-    /// When, and what the figures depend on.
-    private static func details(_ result: CPUBenchmarkResult) -> String {
+    /// Under the figures: when, in which build, and anything that held them back.
+    private static func tested(_ result: CPUBenchmarkResult) -> String {
         var parts = [
             "Tested \(result.date.formatted(date: .abbreviated, time: .shortened))",
             result.optimized ? "release build" : "debug build",
-            "workloads v\(result.suiteVersion)",
-            result.osVersion,
-            result.appVersion,
             "thermal state \(result.worstThermalState.rawValue)",
         ]
         if result.lowPowerMode { parts.append("Low Power Mode on") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// In the methodology: the versions, and how the figures are taken.
+    private static func details(_ result: CPUBenchmarkResult) -> String {
+        let parts = ["Workloads v\(result.suiteVersion)", result.osVersion, result.appVersion]
         return parts.joined(separator: " · ") + ". Medians of \(result.configuration.repeats) timed repeats; "
             + "± is half the gap between the slowest and fastest. Scaling is all workers' speed over one worker's."
     }

@@ -6,7 +6,9 @@ import SwiftUI
 /// speed and spread, with the last runs on this Mac. It has no inputs and
 /// reads only `GPUBenchmarkStore`, so it redraws with the run's progress,
 /// not per tick. Without a Metal GPU, or when the GPU can't run or time the
-/// workloads (as a VM's might not), it says so in place of the figures.
+/// workloads (as a VM's might not), it says so in place of the figures. The
+/// figures come first and the workloads' description folds away under
+/// Methodology; a figure whose GPU time looked short says so at the figure.
 struct GPUBenchmarkCard: View, Equatable {
     var body: some View {
         let store = GPUBenchmarkStore.shared
@@ -18,28 +20,16 @@ struct GPUBenchmarkCard: View, Equatable {
                 let progress = store.progress
                 GPUBenchmarkRunning(text: progress.map { "\($0.workload.title)…" } ?? "Compiling the shaders…", started: run.started,
                                     expected: "about \(Self.plannedSeconds) s", fraction: progress?.fraction ?? 0)
-                if !CPUBenchmark.isOptimizedBuild { debugBuildLine }
                 tiles(result: nil, progress: progress)
             } else {
-                Text(caption(store.device))
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
                 if store.device == nil {
                     SpeedTestFailure(text: GPUBenchmarkError.noDevice.message)
                 } else if let failure = store.failure {
                     SpeedTestFailure(text: failure)
                 }
                 if let latest = results.first {
-                    if !latest.optimized { debugBuildLine }
                     tiles(result: latest, progress: nil)
-                    if let note = latest.timingNote {
-                        Label(note, systemImage: "clock.badge.exclamationmark")
-                            .font(.callout)
-                            .foregroundStyle(.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text(Self.details(latest))
+                    Text(Self.tested(latest))
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .textSelection(.enabled)
@@ -48,6 +38,16 @@ struct GPUBenchmarkCard: View, Equatable {
             }
             if results.count > 1 {
                 GPUBenchmarkHistory(results: results)
+            }
+            MethodologyDisclosure(preview: "FP32 compute, memory and fill rate, timed by the GPU · about \(Self.plannedSeconds) s") {
+                Text(caption(store.device))
+                Text("The GPU runs the same shaders and times them itself in any build, so a debug build's figures match a release build's.")
+                if run == nil, let latest = results.first {
+                    if let note = latest.timingNote {
+                        Label(note, systemImage: "clock.badge.exclamationmark")
+                    }
+                    Text(Self.details(latest))
+                }
             }
         }
         .task { store.handleLaunchArgument() }
@@ -64,16 +64,6 @@ struct GPUBenchmarkCard: View, Equatable {
             + "multiply–adds, reading a \(Format.wholeBytes(UInt64(standard.memoryBytes))) buffer, and blending full-screen layers "
             + "into an offscreen \(standard.fillSize) × \(standard.fillSize) image. Each warms up, then runs \(standard.repeats) "
             + "repeats timed by the GPU itself, and every result is checked. It keeps the GPU busy for about \(Self.plannedSeconds) s."
-    }
-
-    /// Above figures measured in a debug build. Measured: a debug and a
-    /// release build give the same figures, because the GPU's work doesn't
-    /// depend on how the app was compiled.
-    private var debugBuildLine: some View {
-        Text("Measured in a debug build, which doesn't change these figures: the GPU runs the same shaders and times them itself.")
-            .font(.callout)
-            .foregroundStyle(.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func header(run: GPUBenchmarkStore.Run?, store: GPUBenchmarkStore) -> some View {
@@ -95,18 +85,25 @@ struct GPUBenchmarkCard: View, Equatable {
         }
     }
 
-    /// When, on what, and what the figures depend on.
-    private static func details(_ result: GPUBenchmarkResult) -> String {
+    /// Under the figures: when, on what, and anything that held them back.
+    private static func tested(_ result: GPUBenchmarkResult) -> String {
         var parts = [
             "Tested \(result.date.formatted(date: .abbreviated, time: .shortened))",
             result.device.summary,
-            result.optimized ? "release build" : "debug build",
-            "workloads v\(result.suiteVersion)",
-            result.osVersion,
-            result.appVersion,
             "thermal state \(result.worstThermalState.rawValue)",
         ]
         if result.lowPowerMode { parts.append("Low Power Mode on") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// In the methodology: the build, versions, and how the figures are taken.
+    private static func details(_ result: GPUBenchmarkResult) -> String {
+        let parts = [
+            result.optimized ? "Release build" : "Debug build",
+            "workloads v\(result.suiteVersion)",
+            result.osVersion,
+            result.appVersion,
+        ]
         return parts.joined(separator: " · ") + ". Medians of \(result.configuration.repeats) repeats, each timed by the GPU "
             + "from start to finish; ± is half the gap between the slowest and fastest."
     }
@@ -125,29 +122,36 @@ struct GPUBenchmarkCard: View, Equatable {
     }
 }
 
-/// One workload's median and spread.
+/// One workload's median and spread. A figure whose GPU time looked short
+/// (as a VM's can) is drawn in the secondary colour with "Timing
+/// unverified" under it, the reason and the timings in its tooltip.
 private struct GPUBenchmarkTile: View {
     let workload: GPUWorkload
     let measurement: GPUBenchmarkMeasurement?
     let measuring: Bool
 
     var body: some View {
+        let caveat: BenchmarkFigureCaveat? = measurement?.gpuTimeLooksShort == true ? .timingUnverified : nil
         VStack(alignment: .leading, spacing: 4) {
             Text(workload.title).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
                 .help(workload.summary.prefix(1).uppercased() + workload.summary.dropFirst())
             Text(measurement.map { workload.format($0.median) } ?? (measuring ? "measuring…" : "—"))
-                .font(.title3.weight(.semibold))
+                .font(.title3.weight(caveat == nil ? .semibold : .regular))
                 .monospacedDigit()
                 .lineLimit(1)
-                .foregroundStyle(measurement == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
+                .foregroundStyle(measurement == nil || caveat != nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
                 .help(measurement.map(timing) ?? "")
+            if let caveat, let measurement {
+                FigureCaveatLabel(caveat: caveat, detail: repeatTiming(measurement))
+            }
             Text(footer).font(.explanation).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // The row's height, so a tile with a caveat's extra line doesn't stand taller than its neighbours.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.gpu.fillShade.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.gpu.opacity(0.22)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(caveat == nil ? Theme.gpu.opacity(0.22) : BenchmarkLook.caution.opacity(0.45)))
         .accessibilityElement(children: .combine)
     }
 
@@ -160,8 +164,12 @@ private struct GPUBenchmarkTile: View {
     /// What a repeat held and how long it took, on the GPU and from commit to completion.
     private func timing(_ measurement: GPUBenchmarkMeasurement) -> String {
         let units = workload == .fill ? "render passes" : "dispatches"
-        return "Each repeat: \(measurement.unitsPerRepeat) \(units), \(milliseconds(measurement.medianGPUSeconds)) on the GPU, "
-            + "\(milliseconds(measurement.medianWallSeconds)) from commit to completion"
+        return "Each repeat: \(measurement.unitsPerRepeat) \(units), \(repeatTiming(measurement))"
+    }
+
+    /// "449 ms on the GPU, 492 ms from commit to completion".
+    private func repeatTiming(_ measurement: GPUBenchmarkMeasurement) -> String {
+        "\(milliseconds(measurement.medianGPUSeconds)) on the GPU, \(milliseconds(measurement.medianWallSeconds)) from commit to completion"
     }
 }
 
@@ -174,7 +182,9 @@ private func milliseconds(_ seconds: Double) -> String {
     "\(Format.fixed(seconds * 1000, 0)) ms"
 }
 
-/// The last runs on this Mac, each workload in the unit that suits its column.
+/// The last runs on this Mac, each workload in the unit that suits its
+/// column. A figure whose GPU time looked short carries the caution mark,
+/// in the secondary colour, as the card's tile does.
 private struct GPUBenchmarkHistory: View {
     let results: [GPUBenchmarkResult]
 
@@ -202,7 +212,7 @@ private struct GPUBenchmarkHistory: View {
                         Text(result.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
                             .fixedSize()
                         ForEach(GPUWorkload.allCases.indices, id: \.self) { index in
-                            Text(result.result(GPUWorkload.allCases[index]).map { number($0.median, scales[index].divisor) } ?? "—")
+                            figure(result.result(GPUWorkload.allCases[index]), divisor: scales[index].divisor)
                         }
                         Text(result.optimized ? "release" : "debug")
                         Text(note(result)).gridColumnAlignment(.leading)
@@ -214,6 +224,22 @@ private struct GPUBenchmarkHistory: View {
             .foregroundStyle(.secondaryText)
             .monospacedDigit()
             .lineLimit(1)
+            if results.contains(where: { !$0.shortTimedWorkloads.isEmpty }) {
+                FigureCaveatFootnote(caveat: .timingUnverified)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func figure(_ measurement: GPUBenchmarkMeasurement?, divisor: Double) -> some View {
+        if let measurement, measurement.gpuTimeLooksShort {
+            HStack(spacing: 3) {
+                FigureCaveatMark(caveat: .timingUnverified)
+                Text(number(measurement.median, divisor))
+            }
+            .help(BenchmarkFigureCaveat.timingUnverified.explanation)
+        } else {
+            Text(measurement.map { number($0.median, divisor) } ?? "—")
         }
     }
 
@@ -227,13 +253,13 @@ private struct GPUBenchmarkHistory: View {
         return Format.fixed(scaled, scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2)
     }
 
-    /// What sets a run apart from the newest: other workloads, heat, or a GPU timing that looked short.
+    /// What sets a run apart from the newest: other workloads or heat. A
+    /// GPU timing that looked short is marked on its figure instead.
     private func note(_ result: GPUBenchmarkResult) -> String {
         var notes: [String] = []
         if let newest = results.first, result.suiteVersion != newest.suiteVersion { notes.append("v\(result.suiteVersion)") }
         if result.worstThermalState != .nominal { notes.append(result.worstThermalState.rawValue) }
         if result.lowPowerMode { notes.append("low power") }
-        if !result.shortTimedWorkloads.isEmpty { notes.append("short GPU time") }
         return notes.joined(separator: ", ")
     }
 }

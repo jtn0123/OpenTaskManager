@@ -88,7 +88,8 @@ func benchComparison(_ comparison: BenchmarkComparison, runs: [BenchmarkRun], nu
     ]
     for change in comparison.changes {
         lines.append(pad(change.title, 26) + pad(change.unit.format(change.baseline), 15) + pad(change.unit.format(change.compared), 15)
-            + pad(change.change.map(BenchmarkChange.formatChange) ?? "—", 9) + pad(change.spreadText, 18) + change.verdict.title.lowercased())
+            + pad(change.change.map(BenchmarkChange.formatChange) ?? "—", 9) + pad(change.spreadText, 18) + change.verdict.title.lowercased()
+            + (change.caveat.map { ", \($0.title.lowercased())" } ?? ""))
     }
     lines += ["", "A change counts only when the two runs' ranges of repeats, slowest to fastest, don't overlap; "
         + "± is half a run's range."]

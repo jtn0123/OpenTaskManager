@@ -31,7 +31,7 @@ struct InternetQualityCard: View, Equatable {
                 SpeedTestRunning(text: "Filling the connection to measure it…", started: run.started,
                                  expected: "about \(Int(NetworkQuality.typicalSeconds)) s")
             } else {
-                Text(caption(lastBytes: results.first?.bytesTransferred))
+                Text(cost(lastBytes: results.first?.bytesTransferred))
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -52,6 +52,12 @@ struct InternetQualityCard: View, Equatable {
             }
             if results.count > 1 {
                 history(results)
+            }
+            MethodologyDisclosure(preview: "macOS's networkQuality through \(name) (\(interface))") {
+                Text(caption)
+                if let latest = results.first {
+                    Text(Self.setup(latest))
+                }
             }
         }
         .modifier(SpeedTestReveal(reveal: reveal))
@@ -80,12 +86,18 @@ struct InternetQualityCard: View, Equatable {
         }
     }
 
-    /// Said before a test starts: what it measures and what it costs.
-    private func caption(lastBytes: UInt64?) -> String {
-        let cost = lastBytes.map { " The last test here moved \(Format.bytes($0))." } ?? ""
-        return "Measures download and upload capacity, and how responsive the connection stays when full, with macOS's "
+    /// Said before a test starts, over the figures: what it costs.
+    private func cost(lastBytes: UInt64?) -> String {
+        let last = lastBytes.map { " The last test here moved \(Format.bytes($0))." } ?? ""
+        return "Fills the connection for about \(Int(NetworkQuality.typicalSeconds)) s, which can use a lot of data on a "
+            + "fast line.\(last)"
+    }
+
+    /// Under Methodology: what it measures and with what.
+    private var caption: String {
+        "Measures download and upload capacity, and how responsive the connection stays when full, with macOS's "
             + "networkQuality tool through \(name) (\(interface)). It deliberately loads the connection for about "
-            + "\(Int(NetworkQuality.typicalSeconds)) s, which can use a lot of data on a fast line.\(cost)"
+            + "\(Int(NetworkQuality.typicalSeconds)) s."
     }
 
     // MARK: - Result
@@ -109,12 +121,18 @@ struct InternetQualityCard: View, Equatable {
         }
     }
 
-    /// When, through what, against which server, and how the run was set up.
+    /// When, and what it cost.
     private static func details(_ result: NetworkQualityResult) -> String {
-        var parts = ["Tested \(result.date.formatted(date: .abbreviated, time: .shortened))", result.configurationSummary]
-        if let endpoint = result.endpoint { parts.append(endpoint) }
+        var parts = ["Tested \(result.date.formatted(date: .abbreviated, time: .shortened))"]
         if let bytes = result.bytesTransferred { parts.append("\(Format.bytes(bytes)) moved") }
         return parts.joined(separator: " · ")
+    }
+
+    /// How the last run was set up, and against which server.
+    private static func setup(_ result: NetworkQualityResult) -> String {
+        var parts = ["Last run: \(result.configurationSummary)"]
+        if let endpoint = result.endpoint { parts.append(endpoint) }
+        return parts.joined(separator: " · ") + "."
     }
 
     private static func rate(_ bitsPerSecond: Double?) -> String {

@@ -158,10 +158,14 @@ struct DiskSpeedTestTests {
         result.fullFlush = true
         #expect(DiskSpeedTest.methodNote(result).hasPrefix("File-level results from a 256 KB file"))
         #expect(!DiskSpeedTest.methodNote(result).contains("F_NOCACHE"))
+        #expect(DiskSpeedTest.cautions(result).isEmpty)
         result.bypassedCache = false
         result.fullFlush = false
         #expect(DiskSpeedTest.methodNote(result).contains("ignored F_NOCACHE"))
         #expect(DiskSpeedTest.methodNote(result).contains("fsync only"))
+        // The card keeps these beside the figures and folds the rest away.
+        #expect(DiskSpeedTest.cautions(result).count == 2)
+        #expect(DiskSpeedTest.methodNote(result) == ([DiskSpeedTest.fileLevelNote(result)] + DiskSpeedTest.cautions(result)).joined(separator: " "))
     }
 
     @Test func resultsRoundTripThroughJSON() throws {

@@ -6,7 +6,8 @@ import SwiftUI
 /// deletes it. Shows MB/s and IOPS for each phase as it finishes, and the
 /// last few results for the volume. Its inputs don't change from tick to
 /// tick and it reads only `DiskSpeedStore`, so it redraws with the test's
-/// progress, not per tick.
+/// progress, not per tick. What the test writes stays in a line over the
+/// figures; how it measures folds away under Methodology.
 struct DiskSpeedCard: View, Equatable {
     /// The BSD name, "disk0".
     let disk: String
@@ -38,7 +39,7 @@ struct DiskSpeedCard: View, Equatable {
                                  expected: "usually 10–30 s", fraction: progress?.fraction ?? 0)
                 tiles(result: nil, progress: progress)
             } else {
-                Text(caption)
+                Text(summary)
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -52,8 +53,9 @@ struct DiskSpeedCard: View, Equatable {
                 }
                 if let latest = results.first {
                     tiles(result: latest, progress: nil)
-                    Text("Tested \(latest.date.formatted(date: .abbreviated, time: .shortened)) on \(latest.volume.name). "
-                        + DiskSpeedTest.methodNote(latest))
+                    // What this volume did that flatters the figures stays beside them.
+                    Text((["Tested \(latest.date.formatted(date: .abbreviated, time: .shortened)) on \(latest.volume.name)."]
+                            + DiskSpeedTest.cautions(latest)).joined(separator: " "))
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -61,6 +63,12 @@ struct DiskSpeedCard: View, Equatable {
             }
             if results.count > 1, let target {
                 history(results, on: target)
+            }
+            MethodologyDisclosure(preview: "1 MB blocks in sequence, then 4K blocks at random, in one checked file") {
+                Text(caption)
+                if let latest = results.first {
+                    Text(DiskSpeedTest.fileLevelNote(latest))
+                }
             }
         }
         .modifier(SpeedTestReveal(reveal: reveal))
@@ -71,6 +79,12 @@ struct DiskSpeedCard: View, Equatable {
             if let current { store.resolveVolume(of: current.path) }
             store.handleLaunchArgument(disk: disk, target: current)
         }
+    }
+
+    /// Over the figures: what running the test does to the folder.
+    private var summary: String {
+        "Writes a temporary file of up to \(Format.wholeBytes(DiskSpeedConfiguration.defaultFileSize)) there, reads it back, "
+            + "then deletes it."
     }
 
     private var caption: String {

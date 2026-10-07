@@ -37,6 +37,19 @@ public enum BenchmarkRefusal: Sendable, Equatable {
                 + "Compare two runs with the same settings."
         }
     }
+
+    /// The reason in a few words, for a line that has room for little else: "different builds".
+    public var summary: String {
+        switch self {
+        case .sameRun: "the same run twice"
+        case .differentTests: "different tests"
+        case .differentVersions: "different workload versions"
+        case .differentBuilds: "a debug and a release build"
+        case .differentMachines: "different hardware"
+        case let .differentTargets(kind, _, _): kind == .network ? "different interfaces" : kind == .disk ? "different volumes" : "different targets"
+        case let .differentSettings(name, _, _): "different settings (\(name.lowercased()))"
+        }
+    }
 }
 
 /// How one figure moved between two runs.
@@ -64,6 +77,9 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     public var baselineSpread: Double?
     public var comparedSpread: Double?
     public var verdict: Verdict
+    /// Why either run's figure may be off, as its measurement says.
+    public var baselineCaveat: BenchmarkFigureCaveat?
+    public var comparedCaveat: BenchmarkFigureCaveat?
 
     public init(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement) {
         id = baseline.id
@@ -75,6 +91,20 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         baselineSpread = baseline.spread
         comparedSpread = compared.spread
         verdict = Self.verdict(baseline: baseline, compared: compared)
+        baselineCaveat = baseline.caveat
+        comparedCaveat = compared.caveat
+    }
+
+    /// The doubt over either run's figure, which hangs over the change too.
+    public var caveat: BenchmarkFigureCaveat? {
+        baselineCaveat ?? comparedCaveat
+    }
+
+    /// "Fill rate: timing unverified in the later run, so this change may not be real."
+    public var caveatNote: String? {
+        guard let caveat else { return nil }
+        let runs = baselineCaveat != nil && comparedCaveat != nil ? "both runs" : baselineCaveat != nil ? "the earlier run" : "the later run"
+        return "\(title): \(caveat.title.lowercased()) in \(runs), so this change may not be real."
     }
 
     /// (to − from) / from, nil when `from` isn't a positive figure.
@@ -150,8 +180,18 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
         return nil
     }
 
+    /// How many figures got each verdict, the moves first: "1 better · 5 within spread".
+    public var verdictSummary: String {
+        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .measuredOnce, .unchanged]
+        return order.compactMap { verdict in
+            let count = changes.count { $0.verdict == verdict }
+            return count == 0 ? nil : "\(count) \(verdict.title.lowercased())"
+        }.joined(separator: " · ")
+    }
+
     private static func caveats(_ baseline: BenchmarkRun, _ compared: BenchmarkRun, changes: [BenchmarkChange]) -> [String] {
-        var caveats: [String] = []
+        // Doubts about single figures first: they bear on those rows' verdicts.
+        var caveats = changes.compactMap(\.caveatNote)
         if !baseline.kind.measuresThisMac {
             var line = "Internet figures depend on the connection, the server and other traffic at the time, not on this Mac"
             if let one = baseline.target?.detail, let other = compared.target?.detail, one != other {
