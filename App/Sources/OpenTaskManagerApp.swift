@@ -117,9 +117,12 @@ private struct PageCommands: Commands {
     }
 }
 
-/// The toolbar's page menu, there only while the sidebar is hidden: the
-/// page's icon with a chevron, just before the title that names the page,
-/// and every page in its menu, the current one ticked, with its ⌘ shortcut.
+/// The toolbar's page menu, there only while the sidebar is hidden: one
+/// glyph of its own, a list, whatever the page, with a chevron, just before
+/// the title that names the page, and every page in its menu, the current
+/// one ticked, with its ⌘ shortcut. The page's own icon there changed with
+/// every page and, in a glass capsule beside the live badge's, read as one
+/// more monitoring control; out of the glass it sits with the title.
 /// A narrow window hides the sidebar, and with it every page that could be
 /// seen; the View menu's list has to be known about. A real toolbar item,
 /// since a menu on the title itself did nothing on macOS 26. The title keeps
@@ -127,6 +130,9 @@ private struct PageCommands: Commands {
 /// sent the sidebar's own toggle to the overflow menu, for good, once the
 /// sidebar was shown in a narrow window (macOS 26).
 private struct PageSwitcher: View {
+    /// Not the sidebar's own glyph, which its toggle beside it has.
+    private static let symbol = "list.bullet"
+
     @Binding var page: Page
 
     var body: some View {
@@ -138,15 +144,14 @@ private struct PageSwitcher: View {
                 .keyboardShortcut(item.shortcut)
             }
         } label: {
-            Label(page.rawValue, systemImage: page.symbol)
+            Label("Pages", systemImage: Self.symbol)
                 .labelStyle(.iconOnly)
         }
         .fixedSize()
-        .help("Go to another page. ⌘1 to ⌘9 switch from anywhere, and the sidebar, hidden while the window "
-            + "is narrow, lists them too.")
-        .accessibilityLabel("Page")
+        .help("Pages")
+        .accessibilityLabel("Pages")
         .accessibilityValue(page.rawValue)
-        .accessibilityHint("Shows the list of pages")
+        .accessibilityHint("Shows the list of pages, which ⌘1 to ⌘9 also switch between")
     }
 }
 
@@ -241,9 +246,13 @@ struct ContentView: View {
                 LiveBadge()
             }
             if !sidebar.isShown {
+                // Without a glass capsule of its own, so it sits with the
+                // title it changes rather than reading as one more control
+                // beside the live badge's.
                 ToolbarItem(placement: .navigation) {
                     PageSwitcher(page: $page)
                 }
+                .withoutSharedBackground()
             }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })) {
@@ -253,6 +262,18 @@ struct ContentView: View {
         }
         .onAppear {
             WindowOpener.openMainWindow = { openWindow(id: "main") }
+        }
+    }
+}
+
+private extension ToolbarContent {
+    /// The item drawn on the toolbar itself, out of the glass capsule macOS
+    /// 26 puts toolbar items in (earlier versions have none).
+    @ToolbarContentBuilder func withoutSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
         }
     }
 }
