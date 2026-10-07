@@ -108,6 +108,11 @@ public enum RecordingFileError: Error, Equatable, LocalizedError {
 /// Saved as versioned JSON with the `otmrecording` extension. Every time is
 /// in seconds since 1970 UTC; a figure the Mac didn't report is `null` in a
 /// record, never zero, and `reported` says which ones it reported at all.
+///
+/// `events` came later, within version 1: an optional key that a file
+/// written before it simply lacks (it has no events), and that a build from
+/// before it ignores, as JSON readers ignore keys they don't know. An event
+/// of a kind this build doesn't know is left out.
 public struct RecordingFile: Sendable, Equatable {
     /// Marks the JSON as a recording, whatever the file's name.
     public static let format = "io.github.jtn0123.OpenTaskManager.recording"
@@ -126,15 +131,19 @@ public struct RecordingFile: Sendable, Equatable {
     public var reported: [RecordingFigure: Bool]
     /// Oldest first.
     public var records: [HistoryRecord]
+    /// What happened during the session, oldest first; none in a file from
+    /// before events were kept.
+    public var events: [HistoryEvent]
 
     public init(session: RecordingSession, machine: RecordingMachine, generator: String, exported: Date,
-                recordSeconds: TimeInterval = FlightRecorder.span, records: [HistoryRecord]) {
+                recordSeconds: TimeInterval = FlightRecorder.span, records: [HistoryRecord], events: [HistoryEvent] = []) {
         self.session = session
         self.machine = machine
         self.generator = generator
         self.exported = exported
         self.recordSeconds = recordSeconds
         self.records = records.sorted { $0.time < $1.time }
+        self.events = events.sorted { $0.time < $1.time }
         reported = Dictionary(uniqueKeysWithValues: RecordingFigure.allCases.map { figure in
             (figure, records.contains { $0.values[keyPath: figure.keyPath] != nil })
         })
@@ -155,6 +164,9 @@ public struct RecordingFile: Sendable, Equatable {
         "chipCelsius": "degrees Celsius, the hottest die sensor",
         "topCPU": "the busiest apps by CPU, in percent of one core (100 = one core)",
         "topMemory": "the apps using the most memory, in bytes",
+        "events": "what happened during the session (kind appLaunched, appQuit, processStarted, processExited, "
+            + "networkChanged, sleep or wake), each at a time in seconds since 1970-01-01 00:00 UTC; approximate "
+            + "when found by comparing one update's process list with the next",
     ]
 
     // MARK: - Encoding
@@ -198,7 +210,8 @@ public struct RecordingFile: Sendable, Equatable {
             generator: wire.generator,
             exported: Date(timeIntervalSince1970: wire.exported),
             recordSeconds: wire.sampling.recordSeconds,
-            records: wire.records.map(\.record)
+            records: wire.records.map(\.record),
+            events: (wire.events ?? []).compactMap(\.event)
         )
         // The file's own flags win: they say what the Mac reported, which a
         // reader shouldn't second-guess from the records.
@@ -268,6 +281,8 @@ private struct Wire: Codable {
     let units: [String: String]?
     let reported: [String: Bool]
     let records: [WireRecord]
+    /// Missing from files written before events were kept.
+    let events: [WireEvent]?
 
     init(_ file: RecordingFile) {
         format = RecordingFile.format
@@ -283,6 +298,32 @@ private struct Wire: Codable {
         units = RecordingFile.units
         reported = Dictionary(uniqueKeysWithValues: file.reported.map { ($0.key.rawValue, $0.value) })
         records = file.records.map(WireRecord.init)
+        events = file.events.map(WireEvent.init)
+    }
+}
+
+private struct WireEvent: Codable {
+    let time: Double
+    /// A `HistoryEvent.Kind`; one this build doesn't know is skipped.
+    let kind: String
+    let name: String
+    let detail: String
+    let count: Int
+    let approximate: Bool
+
+    init(_ event: HistoryEvent) {
+        time = event.time.timeIntervalSince1970
+        kind = event.kind.rawValue
+        name = event.name
+        detail = event.detail
+        count = event.count
+        approximate = event.isApproximate
+    }
+
+    var event: HistoryEvent? {
+        guard time.isFinite, let kind = HistoryEvent.Kind(rawValue: kind) else { return nil }
+        return HistoryEvent(time: Date(timeIntervalSince1970: time), kind: kind, name: name, detail: detail, count: count,
+                            isApproximate: approximate)
     }
 }
 

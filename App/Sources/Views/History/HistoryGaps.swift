@@ -99,9 +99,10 @@ struct HistoryGapHatch: View {
     }
 }
 
-/// A recording file's gaps, counted after the line under the title, each a
+/// The range's gaps, counted on the coverage line under the title, each a
 /// click away: its start, end and length, and picking one pins the moment
-/// recording picked up again. The longest are listed when there are many.
+/// recording picked up again and outlines the gap on the timeline and the
+/// charts. The longest are listed when there are many.
 struct HistoryGapsMenu: View {
     let gaps: [HistoryGap]
     let points: [HistoryPoint]
@@ -126,13 +127,18 @@ struct HistoryGapsMenu: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        // Takes back the button's own inset, so the dots either side on the coverage line sit evenly.
+        .padding(.horizontal, -2)
         .help("Stretches with nothing recorded: the app wasn't running, the Mac slept, or updates were paused. "
-            + "The graphs hatch them. Pick one to pin the moment recording picked up again.")
+            + "The graphs and the timeline hatch them, and every figure leaves them out. "
+            + "Pick one to pin the moment recording picked up again.")
     }
 
-    /// Pins the first point after `gap`, or the last before one at the end.
+    /// Pins the first point after `gap`, or the last before one at the end,
+    /// and outlines the gap.
     private func pin(after gap: HistoryGap) {
         let after = points.first { $0.time > gap.end } ?? points.last { $0.time <= gap.start }
         scrubber.pin(after?.time)
+        scrubber.selectedGap = gap
     }
 }

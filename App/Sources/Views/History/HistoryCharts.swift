@@ -28,6 +28,9 @@ struct HistoryLine: Identifiable {
 
     var id: String { name }
     let name: String
+    /// The legend's name for the line's figure, when the line's own name
+    /// doesn't say what it sums up: CPU's "Window average" and "Window peak".
+    var legend: String?
     let color: Color
     let value: (HistoryValues) -> Double?
     var fill = true
@@ -64,9 +67,11 @@ struct HistoryChartSpec: Identifiable {
         func has(_ value: (HistoryValues) -> Double?) -> Bool { points.contains { value($0.values) != nil } }
         var specs = [
             HistoryChartSpec(title: "CPU", symbol: "cpu", tint: Theme.cpu, lines: [
-                HistoryLine(name: "Average", color: Theme.cpu, value: { $0.cpu }, meaning: "the share of the whole CPU in use"),
-                HistoryLine(name: "Peak", color: Theme.cpu.opacity(0.7), value: { $0.cpuPeak }, fill: false, stroke: .dashed,
-                            summary: .maximum, meaning: "the share of the whole CPU in use at the busiest single update"),
+                HistoryLine(name: "Average", legend: "Window average", color: Theme.cpu, value: { $0.cpu },
+                            meaning: "the share of the whole CPU in use"),
+                HistoryLine(name: "Peak", legend: "Window peak", color: Theme.cpu.opacity(0.7), value: { $0.cpuPeak }, fill: false,
+                            stroke: .dashed, summary: .maximum,
+                            meaning: "the share of the whole CPU in use at the busiest single update"),
             ], format: { Format.percent($0) }, ceiling: 1, followsCPUScale: true),
             HistoryChartSpec(title: "Memory", symbol: "memorychip", tint: Theme.memory, lines: [
                 HistoryLine(name: "Used", color: Theme.memory, value: { $0.memory },
@@ -139,20 +144,26 @@ struct HistoryChartSpec: Identifiable {
         }
     }
 
+    /// What the legend's figures sum up, when every line's figure is an
+    /// average and its name doesn't say so: "Window average", once before them.
+    var legendLead: String? {
+        lines.allSatisfy { $0.legend == nil && $0.summary == .average } ? "Window average" : nil
+    }
+
     /// The legend's tooltip for a line, whose points each cover `bucket`
     /// seconds: what it plots, and what the figure beside it sums up.
     /// "Peak: the share of the whole CPU in use at the busiest single update
-    /// within each 10-second record. The figure is the highest over the time shown."
+    /// within each 10-second record. Window peak: the highest over the
+    /// window shown."
     static func definition(of line: HistoryLine, bucket: TimeInterval) -> String {
-        let stretch = bucket <= FlightRecorder.span ? "each \(Int(FlightRecorder.span))-second record"
-            : "each point's \(Format.timeSpan(bucket))"
+        let stretch = "each \(HistoryInterval.adjective(max(bucket, FlightRecorder.span))) point"
         let plotted = switch line.summary {
         case .average: "\(line.name): \(line.meaning), averaged over \(stretch)."
         case .maximum: "\(line.name): \(line.meaning) within \(stretch)."
         }
         let figure = switch line.summary {
-        case .average: "The figure is its average over the time shown."
-        case .maximum: "The figure is the highest over the time shown."
+        case .average: "Window average: its average over the window shown, counting recorded time only; gaps are left out."
+        case .maximum: "Window peak: the highest over the window shown."
         }
         return [plotted, line.note, figure].compactMap { $0 }.joined(separator: " ")
     }
@@ -213,12 +224,20 @@ struct HistoryChartCard: View {
     }
 
     /// Each line's sample, stroked as it's drawn, its name and its figure
-    /// over the time shown ("Peak 48%"); what both mean is in the tooltip.
-    private var legend: some View {
+    /// over the window shown ("Window peak 48%", or after a "Window average"
+    /// lead, "Used 60%"); what both mean is in the tooltip.
+    @ViewBuilder private var legend: some View {
+        if let lead = spec.legendLead {
+            Text(lead)
+                .font(.callout)
+                .foregroundStyle(.secondaryText)
+                .fixedSize()
+                .help("The figures beside each line are its average over the window shown, counting recorded time only.")
+        }
         ForEach(spec.lines) { line in
             HStack(spacing: 5) {
                 HistoryLineSample(line: line)
-                Text(line.name).foregroundStyle(.secondaryText)
+                Text(line.legend ?? line.name).foregroundStyle(.secondaryText)
                 Text(spec.summary(of: line, in: points)).monospacedDigit()
             }
             .font(.callout)
@@ -387,6 +406,12 @@ enum HistoryMoment {
         return width * time.timeIntervalSince(domain.lowerBound) / max(span, 1)
     }
 
+    /// The stretch a point's figures cover, as their label puts it: "10-second"
+    /// (average, peak), "4-minute" for coarser points.
+    static func scope(_ bucket: TimeInterval) -> String {
+        HistoryInterval.adjective(max(bucket, FlightRecorder.span))
+    }
+
     /// "7:03:20 AM", with seconds while points are that fine and the day
     /// when it isn't today.
     static func label(_ time: Date, bucket: TimeInterval) -> String {
@@ -467,7 +492,15 @@ private struct HistoryMarkers: View {
             if let marked = scrubber.marked {
                 band(marked.start, marked.end)
             }
-            if let gap = scrubber.hoveredGap {
+            if let compare = scrubber.compare {
+                if let b = compare.resolvedB, compare.a != nil {
+                    compared(.b, b)
+                }
+                if let a = compare.a {
+                    compared(.a, a)
+                }
+            }
+            if let gap = scrubber.hoveredGap ?? scrubber.selectedGap {
                 edges(of: gaps.drawn(gap))
             }
             if let playhead = scrubber.playhead, domain.contains(playhead) {
@@ -528,6 +561,28 @@ private struct HistoryMarkers: View {
                     .frame(width: 1, height: plot.height)
                     .offset(x: x(of: edge) - 0.5, y: plot.minY)
             }
+        }
+    }
+
+    /// A stretch being compared, tinted and lettered at its top left.
+    @ViewBuilder private func compared(_ side: HistoryCompareDraft.Side, _ range: ClosedRange<Date>) -> some View {
+        if range.lowerBound <= domain.upperBound, range.upperBound >= domain.lowerBound {
+            let tint = HistoryCompareDraft.tint(side)
+            let lower = x(of: max(range.lowerBound, domain.lowerBound))
+            let upper = max(x(of: min(range.upperBound, domain.upperBound)), lower + 1)
+            Rectangle()
+                .fill(tint.opacity(0.12))
+                .overlay(alignment: .leading) { Rectangle().fill(tint.opacity(0.6)).frame(width: 1) }
+                .overlay(alignment: .trailing) { Rectangle().fill(tint.opacity(0.6)).frame(width: 1) }
+                .frame(width: upper - lower, height: plot.height)
+                .offset(x: lower, y: plot.minY)
+            Text(side == .a ? "A" : "B")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.black)
+                .frame(width: 14, height: 14)
+                .background(RoundedRectangle(cornerRadius: 3).fill(tint))
+                // At the top, where the plots are mostly empty.
+                .offset(x: min(lower + 2, plot.maxX - 16), y: plot.minY + 2)
         }
     }
 

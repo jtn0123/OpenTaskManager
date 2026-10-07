@@ -214,6 +214,9 @@ final class AppModel {
     /// Network traffic by app, read with nettop only while a view shows it.
     let networkActivity = NetworkActivityStore()
     private var recording = HistoryAccumulator(span: FlightRecorder.span)
+    /// Saves what happened beside the history: apps launched and quit, busy
+    /// processes, network changes, sleep and wake.
+    @ObservationIgnored private lazy var historyEvents = recorder.map { HistoryEventMonitor(recorder: $0) }
     let topology: CPUTopology
 
     private(set) var snapshot: SystemSnapshot?
@@ -538,6 +541,8 @@ final class AppModel {
     /// Feeds the flight recorder, which writes a record every few seconds.
     private func record(_ snapshot: SystemSnapshot) {
         guard let recorder else { return }
+        // The apps NSWorkspace reports launching and quitting; background agents are left to the tracker.
+        historyEvents?.update(snapshot.processes, apps: Set(regularApps.keys), at: snapshot.timestamp)
         let apps = appGroups.compactMap { group in
             group.process.map { AppUsage(name: displayName(for: $0), cpuPercent: group.totals.cpuPercent, memory: Double(group.totals.memory)) }
         }

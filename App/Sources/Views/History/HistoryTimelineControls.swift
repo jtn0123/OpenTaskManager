@@ -101,22 +101,47 @@ struct HistoryTimelineControls: View {
     var body: some View {
         let naming = scrubber.draft?.end != nil
         HStack(spacing: 8) {
-            if let recorder {
-                sessionControls(recorder)
+            if scrubber.compare != nil {
+                // Comparing takes the row.
+                HistoryCompareControls(scrubber: scrubber)
             } else {
-                Label("Read-only recording", systemImage: "lock")
+                if let recorder {
+                    sessionControls(recorder)
+                } else {
+                    // Shortened rather than cut off in a narrow window.
+                    ViewThatFits(in: .horizontal) {
+                        Label("Read-only recording", systemImage: "lock")
+                        Label("Read-only", systemImage: "lock")
+                        Image(systemName: "lock")
+                    }
                     .font(.callout)
                     .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            // Naming a session takes the row.
-            if !naming {
-                HistoryTransport(scrubber: scrubber, player: player)
+                    .help("A recording file opens read-only: sessions can't be marked in it.")
+                    compareButton(nil)
+                }
+                Spacer(minLength: 0)
+                // Naming a session takes the row.
+                if !naming {
+                    HistoryTransport(scrubber: scrubber, player: player)
+                }
             }
         }
         .controlSize(.small)
         .frame(minHeight: 22)
+    }
+
+    /// Opens a comparison with `selection` (a picked session) as A, else
+    /// with A still to pick.
+    private func compareButton(_ selection: ClosedRange<Date>?) -> some View {
+        Button {
+            scrubber.draft = nil
+            scrubber.compare = HistoryCompareDraft(selection: selection)
+        } label: {
+            Label("Compare", systemImage: "rectangle.split.2x1")
+        }
+        .fixedSize()
+        .help(selection == nil ? "Compare two stretches of the timeline: drag along it to pick A, then B or the same length before A"
+            : "Compare this session with the same length just before it, or with another stretch you drag along the timeline")
     }
 
     @ViewBuilder private func sessionControls(_ recorder: FlightRecorder) -> some View {
@@ -153,6 +178,7 @@ struct HistoryTimelineControls: View {
                 .lineLimit(1)
                 .layoutPriority(-1)
                 .help("\(HistorySessionStyle.title(session)), \(HistorySessionStyle.span(session.start, session.end))")
+            compareButton(session.start...session.end)
             Button("Export…") { Task { await store.export(session, from: recorder) } }
                 .fixedSize()
                 .help("Save this session as a recording file, to open later or on another Mac")
@@ -182,6 +208,7 @@ struct HistoryTimelineControls: View {
             }
             .font(.explanation)
             .foregroundStyle(.secondaryText)
+            compareButton(nil)
         }
     }
 

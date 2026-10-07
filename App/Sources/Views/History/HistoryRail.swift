@@ -37,17 +37,20 @@ extension HistoryMoment {
 }
 
 /// The timeline over the charts. Its track shows which stretches of the
-/// range were recorded, and its handle carries the moments shown: where
-/// playback is ("Playing"), a pinned moment, and one the pointer previews
-/// ("Preview"), each its own pill, or "Latest" (a file's "End") at the right
-/// end when nothing is picked; over a gap, what wasn't recorded. Times run
-/// along it below. Clicking or dragging along it moves playback while there
-/// is any, and otherwise pins a moment, like the charts; hovering previews
-/// one, and a Shift-drag marks a session. Saved sessions ride above the
-/// track, and the controls to mark, export and play back sit under it.
+/// range were recorded, its gaps hatched between dashed edges, and its
+/// handle carries the moments shown: where playback is ("Playing"), a pinned
+/// moment, and one the pointer previews ("Preview"), each its own pill, or
+/// "Latest" (a file's "End") at the right end when nothing is picked; over a
+/// gap, what wasn't recorded, from when to when. Times run along it below.
+/// Clicking or dragging along it moves playback while there is any, and
+/// otherwise pins a moment, like the charts; hovering previews one, and a
+/// Shift-drag marks a session. While comparing, a drag picks A or B
+/// instead. Saved sessions, the stretches compared and the events ride
+/// above the track, and the controls to mark, compare, export and play
+/// back sit under it.
 ///
 /// The track spans the same width as the charts' plots, so the handle sits
-/// over their markers. Only its handle, the sessions above it and the
+/// over their markers. Only its handle, the lanes above it and the
 /// controls read the scrubber, so none of this redraws the charts.
 struct HistoryRail: View {
     let scrubber: HistoryScrubber
@@ -59,6 +62,8 @@ struct HistoryRail: View {
     let points: [HistoryPoint]
     /// The stretches with nothing recorded.
     let gaps: [HistoryGap]
+    /// What happened within the range.
+    let events: [HistoryEvent]
     let domain: ClosedRange<Date>
     /// Seconds each point averages.
     let bucket: TimeInterval
@@ -70,6 +75,8 @@ struct HistoryRail: View {
         case seeking
         /// Marking a session from this moment, for a Shift-drag.
         case marking(Date)
+        /// Picking A or B from this moment, while comparing.
+        case comparing(Date)
     }
 
     @State private var drag: Drag?
@@ -79,6 +86,10 @@ struct HistoryRail: View {
             VStack(alignment: .leading, spacing: 3) {
                 if recorder != nil {
                     HistorySessionLane(scrubber: scrubber, store: store, domain: domain)
+                }
+                HistoryCompareLaneSlot(scrubber: scrubber, domain: domain)
+                if let first = events.first, let last = events.last, first.time <= domain.upperBound, last.time >= domain.lowerBound {
+                    HistoryEventLane(scrubber: scrubber, player: player, events: events, points: points, domain: domain, bucket: bucket)
                 }
                 track
                 HistoryRailLabels(domain: domain)
@@ -91,7 +102,8 @@ struct HistoryRail: View {
         GeometryReader { geometry in
             let width = geometry.size.width
             ZStack(alignment: .leading) {
-                HistoryCoverage(points: points, domain: domain, bucket: bucket, width: width)
+                HistoryCoverage(points: points, gaps: gaps, domain: domain, bucket: bucket, width: width)
+                HistoryRailGapOutline(scrubber: scrubber, domain: domain, width: width)
                 HistoryRailHandle(scrubber: scrubber, domain: domain, bucket: bucket, width: width)
             }
             .frame(width: width, height: geometry.size.height)
@@ -104,12 +116,20 @@ struct HistoryRail: View {
             }
             .gesture(DragGesture(minimumDistance: 0)
                 .onChanged { value in dragged(from: value.startLocation.x, to: value.location.x, width: width) }
-                .onEnded { _ in drag = nil })
+                .onEnded { _ in ended() })
         }
         .frame(height: 22)
-        .help(recorder == nil ? "Click or drag along the timeline to move playback, or to pin a moment when there's none"
-            : "Click or drag along the timeline to move playback, or to pin a moment when there's none. "
-            + "Shift-drag along the timeline to mark a session.")
+        .help("Click or drag along the timeline to move playback, or to pin a moment when there's none. "
+            + (recorder == nil ? "" : "Shift-drag along the timeline to mark a session. ")
+            + "While comparing, drag along it to pick A or B. Hover a hatched gap to see when nothing was recorded.")
+    }
+
+    /// After a drag that picked A, the next one picks B.
+    private func ended() {
+        if case .comparing = drag, scrubber.compare?.picking == .a, scrubber.compare?.a != nil {
+            scrubber.compare?.picking = .b
+        }
+        drag = nil
     }
 
     /// Previews the moment under the pointer, or names the gap it's over
@@ -127,10 +147,21 @@ struct HistoryRail: View {
     private func dragged(from start: CGFloat, to end: CGFloat, width: CGFloat) {
         guard let time = moment(at: end, width: width) else { return }
         if drag == nil {
-            let from = recorder != nil && NSEvent.modifierFlags.contains(.shift) ? moment(at: start, width: width) : nil
-            drag = from.map(Drag.marking) ?? (scrubber.playhead != nil ? .seeking : .pinning)
+            if scrubber.compare != nil, let from = moment(at: start, width: width) {
+                drag = .comparing(from)
+            } else {
+                let from = recorder != nil && NSEvent.modifierFlags.contains(.shift) ? moment(at: start, width: width) : nil
+                drag = from.map(Drag.marking) ?? (scrubber.playhead != nil ? .seeking : .pinning)
+            }
         }
         switch drag {
+        case .comparing(let from):
+            let stretch = HistoryCompareDraft.stretch(from: from, to: time, bucket: bucket)
+            switch scrubber.compare?.picking {
+            case .a: if scrubber.compare?.a != stretch { scrubber.compare?.a = stretch }
+            case .b: if scrubber.compare?.b != stretch { scrubber.compare?.b = stretch }
+            case nil: break
+            }
         case .marking(let from):
             scrubber.session = nil
             scrubber.draft = HistorySessionDraft(from: from, to: time == from ? nil : time, bucket: bucket)
@@ -272,29 +303,66 @@ private struct HistorySessionLane: View {
     }
 }
 
-/// The rail's track: recorded stretches in colour, bare track where nothing
-/// was recorded (the app wasn't running, or the Mac slept).
+/// The rail's track: recorded stretches in colour, and each gap (the app
+/// wasn't running, the Mac slept) hatched between dashed edges, at least a
+/// couple of points wide, so even a short one shows and can be hovered. One
+/// canvas, drawn again only on a load or a resize.
 private struct HistoryCoverage: View {
     let points: [HistoryPoint]
+    let gaps: [HistoryGap]
     let domain: ClosedRange<Date>
     let bucket: TimeInterval
     let width: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            Capsule()
-                .fill(Color.primary.opacity(0.09))
-                .frame(width: width, height: 6)
-            ForEach(stretches, id: \.lowerBound) { stretch in
-                let start = HistoryMoment.x(of: stretch.lowerBound, width: width, domain: domain)
-                let end = HistoryMoment.x(of: stretch.upperBound, width: width, domain: domain)
-                Capsule()
-                    .fill(LinearGradient(colors: [Color.accentColor.opacity(0.8), Color.accentColor.opacity(0.5)],
-                                         startPoint: .top, endPoint: .bottom))
-                    .frame(width: max(end - start, 3), height: 6)
-                    .alignmentGuide(.leading) { _ in -start }
+        let dark = colorScheme == .dark
+        let ink = Color(nsColor: .labelColor)
+        Canvas { context, size in
+            let middle = size.height / 2
+            context.fill(Path(roundedRect: CGRect(x: 0, y: middle - 3, width: size.width, height: 6), cornerRadius: 3),
+                         with: .color(Color.primary.opacity(0.09)))
+            var hatch = Path()
+            var edges = Path()
+            var clip = Path()
+            for gap in gaps {
+                let start = x(gap.start)
+                let end = max(x(gap.end), start + 2)
+                let band = CGRect(x: start, y: middle - 5, width: end - start, height: 10)
+                clip.addRect(band)
+                for edge in [start, end] {
+                    edges.move(to: CGPoint(x: edge, y: band.minY))
+                    edges.addLine(to: CGPoint(x: edge, y: band.maxY))
+                }
+            }
+            if !clip.isEmpty {
+                context.fill(clip, with: .color(HistoryGapStyle.wash(dark: dark)))
+                var lines = context
+                lines.clip(to: clip)
+                var position = -size.height
+                while position < size.width + 4 {
+                    hatch.move(to: CGPoint(x: position, y: middle + 5))
+                    hatch.addLine(to: CGPoint(x: position + 10, y: middle - 5))
+                    position += 4
+                }
+                lines.stroke(hatch, with: .color(ink.opacity(dark ? 0.32 : 0.26)), lineWidth: 1)
+                context.stroke(edges, with: .color(ink.opacity(dark ? 0.5 : 0.42)), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+            }
+            let fill = GraphicsContext.Shading.linearGradient(
+                Gradient(colors: [Color.accentColor.opacity(0.8), Color.accentColor.opacity(0.5)]),
+                startPoint: CGPoint(x: 0, y: middle - 3), endPoint: CGPoint(x: 0, y: middle + 3))
+            for stretch in stretches {
+                let start = x(stretch.lowerBound)
+                let length = max(x(stretch.upperBound) - start, 3)
+                context.fill(Path(roundedRect: CGRect(x: start, y: middle - 3, width: length, height: 6), cornerRadius: 3), with: fill)
             }
         }
+        .frame(width: width)
+        .accessibilityLabel(gaps.isEmpty ? "Recorded throughout" : "\(gaps.count) gaps not recorded")
+    }
+
+    private func x(_ time: Date) -> CGFloat {
+        HistoryMoment.x(of: min(max(time, domain.lowerBound), domain.upperBound), width: width, domain: domain)
     }
 
     /// Each unbroken run of points, from the start of its first bucket to its last point.
@@ -312,6 +380,26 @@ private struct HistoryCoverage: View {
         }
         if let run = current { runs.append(run.range) }
         return runs
+    }
+}
+
+/// An outline round the gap under the pointer, or else the one picked from
+/// the gaps menu, so it stands out from the rest.
+private struct HistoryRailGapOutline: View {
+    let scrubber: HistoryScrubber
+    let domain: ClosedRange<Date>
+    let width: CGFloat
+
+    var body: some View {
+        if let gap = scrubber.hoveredGap ?? scrubber.selectedGap, gap.end >= domain.lowerBound, gap.start <= domain.upperBound {
+            let start = HistoryMoment.x(of: max(gap.start, domain.lowerBound), width: width, domain: domain)
+            let end = max(HistoryMoment.x(of: min(gap.end, domain.upperBound), width: width, domain: domain), start + 2)
+            RoundedRectangle(cornerRadius: 3)
+                .strokeBorder(Color.primary.opacity(0.7), lineWidth: 1.5)
+                .frame(width: end - start + 6, height: 16)
+                .alignmentGuide(.leading) { _ in -(start - 3) }
+                .allowsHitTesting(false)
+        }
     }
 }
 
