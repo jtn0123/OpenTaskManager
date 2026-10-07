@@ -3,11 +3,16 @@ import OTMKit
 import SwiftUI
 
 /// What this Mac is: model, chip and memory up top, then a card each for the
-/// processor, memory, graphics, displays, storage, network and its
-/// configuration, attached devices, battery, software and security. Read
-/// once when the page opens and again on Refresh (displays also when they
-/// change), never per sample.
+/// processor, memory, graphics, displays, storage, controllers and readers,
+/// network, its configuration and shares, the firewall, attached devices,
+/// battery, software and security. Read once when the page opens and again
+/// on Refresh (displays also when they change), never per sample; the
+/// slower hardware report once a session (`HardwareInventoryStore`).
 struct SystemInfoView: View {
+    /// Below this page width the toolbar's buttons drop their titles, so an
+    /// 820-point window keeps Save Report out of the overflow menu.
+    private nonisolated static let titledButtonsWidth: CGFloat = 900
+
     @Environment(AppModel.self) private var model
     @AppStorage("page") private var page: Page = .overview
     @State private var info: SystemInfo?
@@ -17,6 +22,9 @@ struct SystemInfoView: View {
     @State private var devicesReadAt: Date?
     @State private var readingDevices = false
     @State private var security: SecurityStatus?
+    @State private var firewall: FirewallStatus?
+    @State private var readingFirewall = false
+    @State private var showsButtonTitles = true
     /// Serial number, hardware UUID and MAC addresses stay masked until asked for.
     @State private var showsIdentifiers = false
     @State private var copied = false
@@ -30,6 +38,7 @@ struct SystemInfoView: View {
                 ProgressView("Reading system information…").frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .onGeometryChange(for: Bool.self) { $0.size.width >= Self.titledButtonsWidth } action: { showsButtonTitles = $0 }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
@@ -37,15 +46,15 @@ struct SystemInfoView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(readingDevices)
-                .help("Read this page again: free space, network settings, and the attached USB, Thunderbolt, Bluetooth, "
-                    + "audio and video devices")
+                .disabled(readingDevices || HardwareInventoryStore.shared.isReading)
+                .help("Read this page again: free space, network settings and shares, the firewall, memory and controller "
+                    + "details, and the attached USB, Thunderbolt, Bluetooth, audio and video devices")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(action: copySummary) {
                     Label(copied ? "Copied" : "Copy Summary", systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
-                .labelStyle(.titleAndIcon)
+                .labelStyle(ToolbarLabelStyle(showsTitle: showsButtonTitles))
                 .disabled(info == nil)
                 .help(showsIdentifiers
                     ? "Copy this page as plain text, including the serial number, hardware UUID and MAC addresses"
@@ -55,7 +64,7 @@ struct SystemInfoView: View {
                 Button(action: saveReport) {
                     Label("Save Report…", systemImage: "square.and.arrow.down")
                 }
-                .labelStyle(.titleAndIcon)
+                .labelStyle(ToolbarLabelStyle(showsTitle: showsButtonTitles))
                 .disabled(info == nil || saving)
                 .help("Save this page as a Markdown or JSON file. Identifiers stay out unless you include them.")
             }
@@ -72,15 +81,18 @@ struct SystemInfoView: View {
                 HeroCard(info: info, showsIdentifiers: $showsIdentifiers)
                 // Only the uptime moves, so a minute is often enough.
                 TimelineView(.everyMinute) { context in
-                    let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, now: context.date)
+                    let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, firewall: firewall,
+                                                         hardware: HardwareInventoryStore.shared.inventory, now: context.date)
                     let links = networkLinks(info)
+                    let exposedSockets: () -> Void = { openExposedSockets() }
                     // Columns that each run their own length, so a short card
                     // (Displays, an empty Bluetooth) beside a long one (Storage,
                     // a full USB list) leaves no hole, inside it or below it.
                     // One column in a narrow window.
                     ColumnGrid(minimum: 340) {
                         ForEach(sections) { section in
-                            InfoCard(section: section, showsIdentifiers: showsIdentifiers, links: section.kind.isNetwork ? links : nil)
+                            InfoCard(section: section, showsIdentifiers: showsIdentifiers, links: section.kind.isNetwork ? links : nil,
+                                     showExposedSockets: section.kind == .firewall ? exposedSockets : nil)
                         }
                     }
                 }
@@ -108,10 +120,18 @@ struct SystemInfoView: View {
         }
     }
 
+    /// Opens the Connections page on the sockets other devices could try to
+    /// reach, which the firewall's settings alone can't say.
+    private func openExposedSockets() {
+        model.requestedConnectionFilter = .exposed
+        page = .connections
+    }
+
     private func load() async {
         displays = DisplayReader.read()
         // The device report takes longest, so it starts first and runs alongside.
         async let deviceRead: Void = readDevices()
+        async let firewallRead: Void = readFirewall()
         if info == nil {
             let topology = model.topology
             info = await Task.detached(priority: .userInitiated) { SystemInfoReader.read(topology: topology) }.value
@@ -121,16 +141,32 @@ struct SystemInfoView: View {
         }
         // Each port's last Internet quality test, loaded once a session.
         await NetworkQualityStore.shared.load()
+        await firewallRead
         await deviceRead
+        // The memory, controller and reader details, once a session, after
+        // the devices so two system_profiler runs don't compete.
+        await HardwareInventoryStore.shared.load()
     }
 
-    /// Reads the hardware, network configuration and devices again.
+    /// Reads the hardware, network configuration, firewall and devices again.
     private func refresh() async {
         async let deviceRead: Void = readDevices()
+        async let firewallRead: Void = readFirewall()
         let topology = model.topology
         info = await Task.detached(priority: .userInitiated) { SystemInfoReader.read(topology: topology) }.value
         displays = DisplayReader.read()
+        await firewallRead
         await deviceRead
+        await HardwareInventoryStore.shared.read()
+    }
+
+    /// The firewall's settings change rarely but can at any time, so they're
+    /// read each time the page opens, unlike the hardware.
+    private func readFirewall() async {
+        guard !readingFirewall else { return }
+        readingFirewall = true
+        firewall = await FirewallReader.read()
+        readingFirewall = false
     }
 
     /// Runs `system_profiler` on a background queue, so waiting for it doesn't
@@ -164,15 +200,18 @@ struct SystemInfoView: View {
             displays = DisplayReader.read()
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
             let generator = "OpenTaskManager \(version)".trimmingCharacters(in: .whitespaces)
+            let hardware = HardwareInventoryStore.shared
             let report = SystemReportDocument(info: fresh, displays: displays, devices: devices, devicesCollectedAt: devicesReadAt,
-                                              security: security, generator: generator)
+                                              security: security, firewall: firewall, hardware: hardware.inventory,
+                                              hardwareCollectedAt: hardware.readAt, generator: generator)
             await SystemReportSavePanel.write(report, as: choice)
         }
     }
 
     private func copySummary() {
         guard let info else { return }
-        let text = SystemReport.text(info, displays: displays, devices: devices, security: security, includeIdentifiers: showsIdentifiers)
+        let text = SystemReport.text(info, displays: displays, devices: devices, security: security, firewall: firewall,
+                                     hardware: HardwareInventoryStore.shared.inventory, includeIdentifiers: showsIdentifiers)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copied = true
@@ -316,6 +355,8 @@ private struct InfoCard: View {
     var showsIdentifiers: Bool
     /// On the Network card: each port's link to its traffic.
     var links: NetworkLinks?
+    /// On the Firewall card: opens the Connections page's exposed sockets.
+    var showExposedSockets: (() -> Void)?
     /// Devices opened to show their details, by position and name.
     @State private var opened: Set<String> = []
 
@@ -333,6 +374,19 @@ private struct InfoCard: View {
                 }
             }
             .font(.callout)
+            if let note = section.note {
+                Text(note)
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            if let showExposedSockets {
+                Button("Show exposed sockets", action: showExposedSockets)
+                    .buttonStyle(.link)
+                    .font(.explanation)
+                    .help("Open the Connections page on the sockets listening on addresses other devices could try to reach")
+            }
         }
     }
 
@@ -453,8 +507,10 @@ private struct InfoValue: View {
                 Text(Self.mask).foregroundStyle(.tertiaryText).accessibilityLabel("Hidden")
                     .help("Hidden. Use Show at the top of the page to reveal it.")
             } else if row.isCode {
-                // An IPv6 address breaks between its groups, so its prefix never sits alone on a line.
-                CopyableText(value: row.value, forms: row.isAddress ? AddressBreaks.forms(row.value) : [])
+                // An IPv6 address breaks between its groups, so its prefix never sits alone on a line,
+                // and a driver or bundle ID after its dots, never hyphenated mid-word.
+                CopyableText(value: row.value,
+                             forms: row.isAddress ? AddressBreaks.forms(row.value) : AddressBreaks.dottedForms(row.value))
             } else {
                 Text(row.value)
                     .textSelection(.enabled)
@@ -542,6 +598,20 @@ private struct DeviceRow: View {
     }
 }
 
+/// A toolbar button's title and icon in a wide page, its icon alone in a
+/// narrow one (the title stays as its accessibility label).
+private struct ToolbarLabelStyle: LabelStyle {
+    var showsTitle: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        if showsTitle {
+            TitleAndIconLabelStyle().makeBody(configuration: configuration)
+        } else {
+            IconOnlyLabelStyle().makeBody(configuration: configuration)
+        }
+    }
+}
+
 private struct StatusIcon: View {
     private static let good = Theme.data(.systemGreen)
     private static let warning = Theme.data(.systemOrange)
@@ -571,6 +641,7 @@ private struct SystemStyle {
     private static let thunderbolt = Theme.data(0.96, 0.66, 0.20)
     private static let bluetooth = Theme.data(0.20, 0.58, 0.98)
     private static let audio = Theme.data(0.90, 0.40, 0.62)
+    private static let controllers = Theme.data(0.30, 0.66, 0.78)
 
     let tint: Color
     let symbol: String
@@ -582,8 +653,11 @@ private struct SystemStyle {
         case .graphics: (Theme.gpu, "cube.transparent")
         case .displays: (Self.displays, "display")
         case .storage: (Theme.disk, "internaldrive")
+        case .controllers: (Self.controllers, "sdcard")
         case .network: (Theme.network, "network")
         case .networkConfiguration: (Theme.network, "point.3.connected.trianglepath.dotted")
+        case .networkVolumes: (Theme.network, "externaldrive.connected.to.line.below")
+        case .firewall: (Self.security, "network.badge.shield.half.filled")
         case .usb: (Self.usb, "cable.connector")
         case .thunderbolt: (Self.thunderbolt, "bolt.horizontal")
         case .bluetooth: (Self.bluetooth, "antenna.radiowaves.left.and.right")

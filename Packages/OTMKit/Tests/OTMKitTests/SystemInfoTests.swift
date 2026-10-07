@@ -221,7 +221,8 @@ struct SystemReportTests {
     @Test func sectionsFollowThePageOrder() {
         let kinds = SystemReport.sections(info(), displays: [display], devices: nil, security: nil).map(\.kind)
         // Until the device report arrives, its cards say so; Thunderbolt waits to see if there is any.
-        #expect(kinds == [.processor, .memory, .graphics, .displays, .storage, .network, .usb, .bluetooth, .audio, .software, .security])
+        #expect(kinds == [.processor, .memory, .graphics, .displays, .storage, .controllers, .network, .firewall, .usb, .bluetooth, .audio,
+                          .software, .security])
         let battery = BatteryInfo(percent: 80, isCharging: false, isPluggedIn: true, cycleCount: 3, health: 1.03, designCapacity: 8579,
                                   fullChargeCapacity: 8817, condition: BatteryCondition(summary: "Normal", isEstimated: true))
         let withBattery = SystemReport.sections(info(battery: battery), displays: [], devices: nil, security: nil)

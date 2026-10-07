@@ -119,6 +119,10 @@ extension SystemReportJSON {
         let proxies: NetworkProxies
         /// Configured: System Settings' services, in its order.
         let services: [NetworkService]
+        /// Configured: System Settings' locations, the one in use first.
+        let locations: [NetworkLocationJSON]
+        /// Shares mounted from servers now, from the mount table.
+        let volumes: [NetworkVolumeJSON]
 
         init(_ configuration: NetworkConfiguration, keep: Bool) {
             primaryInterface = configuration.primaryIPv4?.interface
@@ -139,6 +143,8 @@ extension SystemReportJSON {
             dns = NetworkDNS(configuration.dns, keep: keep)
             proxies = NetworkProxies(configuration.proxies, keep: keep)
             services = configuration.services.map { NetworkService($0, keep: keep) }
+            locations = configuration.locations.map(NetworkLocationJSON.init)
+            volumes = configuration.volumes.map { NetworkVolumeJSON($0, keep: keep) }
         }
     }
 
@@ -265,28 +271,32 @@ extension SystemReportJSON {
         let includesIdentifiers: Bool
         let network: [NetworkPort]
         @Nullable var networkConfiguration: NetworkSetup?
+        @Nullable var firewall: Firewall?
 
-        init(collectedAt: Date, includesIdentifiers: Bool, network: [NetworkPort], networkConfiguration: NetworkSetup?) {
+        init(collectedAt: Date, includesIdentifiers: Bool, network: [NetworkPort], networkConfiguration: NetworkSetup?,
+             firewall: Firewall?) {
             self.collectedAt = collectedAt
             self.includesIdentifiers = includesIdentifiers
             self.network = network
             self.networkConfiguration = networkConfiguration
+            self.firewall = firewall
         }
     }
 }
 
 extension SystemReportDocument {
-    /// The report's `network` and `networkConfiguration` fields alone, with
-    /// the same header, as `otm netconfig --json` prints them.
-    public static func networkJSON(_ ports: [NetworkPortInfo], configuration: NetworkConfiguration?, includeIdentifiers keep: Bool,
-                                   collectedAt: Date = Date()) throws -> Data {
+    /// The report's `network`, `networkConfiguration` and `firewall` fields
+    /// alone, with the same header, as `otm netconfig --json` prints them.
+    public static func networkJSON(_ ports: [NetworkPortInfo], configuration: NetworkConfiguration?, firewall: FirewallStatus? = nil,
+                                   includeIdentifiers keep: Bool, collectedAt: Date = Date()) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
         let report = SystemReportJSON.NetworkOnly(
             collectedAt: collectedAt, includesIdentifiers: keep,
             network: ports.filter(\.isWorthListing).map { SystemReportJSON.NetworkPort($0, configuration: configuration, keep: keep) },
-            networkConfiguration: configuration.map { SystemReportJSON.NetworkSetup($0, keep: keep) }
+            networkConfiguration: configuration.map { SystemReportJSON.NetworkSetup($0, keep: keep) },
+            firewall: firewall.map(SystemReportJSON.Firewall.init)
         )
         return try encoder.encode(report)
     }

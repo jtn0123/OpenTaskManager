@@ -20,9 +20,11 @@ struct SystemReportNetworkTests {
     )
 
     /// Every identifier in the fixture: addresses, routers, DNS servers,
-    /// search domains, proxy hosts and the PAC file's address.
+    /// search domains, proxy hosts, the PAC file's address, and the file
+    /// servers, shares and account of the mounted volumes.
     private static let identifiers = [
         "192.168.1", "2001:db8", "fe80::1", "10.0.0", "10.8.0", "9.9.9.9", "home.arpa", "corp.example", "a4:83:e7", "00:e0:4c",
+        "jamie", "export/builds",
     ]
 
     private func sections() -> [InfoSection] {
@@ -45,8 +47,8 @@ struct SystemReportNetworkTests {
 
     @Test func networkConfigurationCardFollowsTheNetworkCard() {
         let kinds = sections().map(\.kind)
-        #expect(kinds == [.processor, .memory, .graphics, .displays, .storage, .network, .networkConfiguration, .usb, .bluetooth, .audio,
-                          .software, .security])
+        #expect(kinds == [.processor, .memory, .graphics, .displays, .storage, .controllers, .network, .networkConfiguration,
+                          .networkVolumes, .firewall, .usb, .bluetooth, .audio, .software, .security])
         #expect(kinds.filter(\.isNetwork) == [.network, .networkConfiguration])
         #expect(sections().first { $0.kind == .networkConfiguration }?.title == "Network Configuration")
     }
@@ -119,6 +121,9 @@ struct SystemReportNetworkTests {
         ])
 
         let configured = group("Configured", in: all)
+        #expect(configured.map(\.label).prefix(3) == ["Location", "Other location", "Service order"])
+        #expect(value("Location", in: configured) == "Automatic (in use)")
+        #expect(value("Other location", in: configured) == "Office: USB 10/100/1000 LAN, Wi-Fi (inactive)")
         #expect(value("Service order", in: configured) == """
         1. Wi-Fi (en0) · connected
         2. USB 10/100/1000 LAN (en7) · connected
@@ -167,7 +172,11 @@ struct SystemReportNetworkTests {
         #expect(text.contains("\nNetwork\n  Wi-Fi (en0, primary)\n    Status: Connected\n    IPv4: 192.168.1.9/24\n"))
         #expect(text.contains("    Router: 192.168.1.1\n            fe80::1\n"))
         #expect(text.contains("\nNetwork Configuration\n  In use now\n    Primary: Wi-Fi (en0)\n"))
-        #expect(text.contains("  Configured (in System Settings)\n    Service order: 1. Wi-Fi (en0) · connected\n"))
+        #expect(text.contains("  Configured (in System Settings)\n    Location: Automatic (in use)\n"
+                + "    Other location: Office: USB 10/100/1000 LAN, Wi-Fi (inactive)\n    Service order: 1. Wi-Fi (en0) · connected\n"))
+        // A share's server and where it's mounted are copied like addresses; the account isn't.
+        #expect(text.contains("\nNetwork Volumes\n  Media (SMB)\n    Server: nas.home.arpa\n    Share: Media\n"))
+        #expect(!text.contains("Account: "))
         #expect(!text.contains("a4:83:e7"))
         #expect(SystemReport.text(Self.info, displays: [], devices: nil, security: nil, includeIdentifiers: true).contains("a4:83:e7"))
     }
@@ -183,12 +192,19 @@ struct SystemReportNetworkTests {
         #expect(hidden.contains("  - Default route: IPv4: utun4 (VPN or tunnel), IPv6: en0\n"))
         #expect(hidden.contains("  - Proxies: HTTPS, auto-config (PAC) in use\n"))
         #expect(hidden.contains("- **Wi-Fi** (en0, primary)\n  - Status: Connected\n  - Channel: 36 (5 GHz, 80 MHz wide)\n"))
+        // The shares keep their protocol and space, not where they're from.
+        #expect(hidden.contains("\n## Network Volumes\n\n- **Media** (SMB)\n  - Mounted at: `/Volumes/Media`\n"
+                + "  - Space: 1.25 TB free of 4 TB\n- **builds**"))
+        #expect(hidden.contains("- **builds** (NFS, read-only)\n  - Space: Not reported by the server\n"
+                + "  - Options: mounted on demand, hidden from Finder\n\nRead from this Mac's mount table"))
 
         let shown = report.markdown(includeIdentifiers: true)
         #expect(shown.contains("  - IPv4: `192.168.1.9/24`\n"))
         #expect(shown.contains("  - Router: `192.168.1.1`, `fe80::1`\n"))
         #expect(shown.contains("  - DNS servers: `192.168.1.1`, `2001:db8::1`\n"))
         #expect(shown.contains("  - HTTP proxy: `proxy.corp.example:8080 (off)`\n"))
+        #expect(shown.contains("- **Media** (SMB)\n  - Server: `nas.home.arpa`\n  - Share: `Media`\n  - Mounted at: `/Volumes/Media`\n"))
+        #expect(shown.contains("  - Account: `jamie`\n"))
     }
 
     @Test func jsonLeavesNetworkIdentifiersOutUnlessAsked() throws {
@@ -234,6 +250,20 @@ struct SystemReportNetworkTests {
         #expect(services.map { $0["name"] as? String } == ["Wi-Fi", "USB 10/100/1000 LAN", "Thunderbolt Bridge"])
         #expect(services[1]["manualDNSServers"] is NSNull && services[2]["isEnabled"] as? Bool == false)
         #expect(services[0]["ipv4ConfigMethod"] as? String == "DHCP")
+        let locations = try #require(setup["locations"] as? [[String: Any]])
+        #expect(locations.map { $0["name"] as? String } == ["Automatic", "Office"])
+        #expect(locations.map { $0["isCurrent"] as? Bool } == [true, false])
+        let office = try #require(locations[1]["services"] as? [[String: Any]])
+        #expect(office.map { $0["isEnabled"] as? Bool } == [true, false])
+        let volumes = try #require(setup["volumes"] as? [[String: Any]])
+        #expect(volumes.map { $0["kind"] as? String } == ["smb", "nfs"])
+        #expect(volumes.map { $0["name"] as? String } == ["Media", "builds"])
+        #expect(volumes[0]["server"] is NSNull && volumes[0]["share"] is NSNull && volumes[0]["account"] is NSNull)
+        // A mount point in a home folder names the user.
+        #expect(volumes[0]["mountPoint"] as? String == "/Volumes/Media" && volumes[1]["mountPoint"] is NSNull)
+        #expect(volumes[0]["availableBytes"] as? Int == 1_250_000_000_000 && volumes[1]["totalBytes"] is NSNull)
+        #expect(volumes[1]["isReadOnly"] as? Bool == true && volumes[1]["isAutomounted"] as? Bool == true)
+        #expect(volumes[1]["isHiddenFromFinder"] as? Bool == true)
 
         let shown = try #require(JSONSerialization.jsonObject(with: report.json(includeIdentifiers: true)) as? [String: Any])
         let shownPort = try #require((shown["network"] as? [[String: Any]])?.first)
@@ -244,12 +274,19 @@ struct SystemReportNetworkTests {
         let shownSetup = try #require(shown["networkConfiguration"] as? [String: Any])
         #expect((shownSetup["dns"] as? [String: Any])?["servers"] as? [String] == ["192.168.1.1", "2001:db8::1"])
         #expect(((shownSetup["proxies"] as? [String: Any])?["http"] as? [String: Any])?["host"] as? String == "proxy.corp.example")
+        let shownVolumes = try #require(shownSetup["volumes"] as? [[String: Any]])
+        #expect(shownVolumes[0]["server"] as? String == "nas.home.arpa" && shownVolumes[0]["account"] as? String == "jamie")
+        #expect(shownVolumes[1]["share"] as? String == "/export/builds")
+        #expect(shownVolumes[1]["mountPoint"] as? String == "/Users/jamie/builds")
     }
 
     @Test func netconfigPrintsTheTwoCards() throws {
         let text = SystemReport.networkText(NetworkFixture.ports, configuration: NetworkFixture.configuration, includeIdentifiers: false)
         #expect(text.hasPrefix("Network\n  Wi-Fi (en0, primary)\n    Status: Connected\n    IPv4: 192.168.1.9/24\n"))
         #expect(text.contains("\n\nNetwork Configuration\n  In use now\n"))
+        #expect(text.contains("\n\nNetwork Volumes\n  Media (SMB)\n    Server: nas.home.arpa\n"))
+        // The firewall's card only when it was read.
+        #expect(!text.contains("Firewall"))
         #expect(!text.contains("a4:83:e7"))
         #expect(text.hasSuffix("\n") && !text.hasSuffix("\n\n"))
         let all = SystemReport.networkText(NetworkFixture.ports, configuration: NetworkFixture.configuration, includeIdentifiers: true)
@@ -258,7 +295,11 @@ struct SystemReportNetworkTests {
         let data = try SystemReportDocument.networkJSON(NetworkFixture.ports, configuration: NetworkFixture.configuration,
                                                         includeIdentifiers: false, collectedAt: Self.collected)
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(Set(json.keys) == ["format", "schemaVersion", "collectedAt", "includesIdentifiers", "network", "networkConfiguration"])
+        #expect(Set(json.keys) == [
+            "format", "schemaVersion", "collectedAt", "includesIdentifiers", "network", "networkConfiguration", "firewall",
+        ])
+        // Not read here: there, but null.
+        #expect(json["firewall"] is NSNull)
         #expect(json["format"] as? String == SystemReportDocument.format)
         let text2 = try #require(String(data: data, encoding: .utf8))
         #expect(!text2.contains("192.168.1"))

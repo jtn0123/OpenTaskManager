@@ -1,19 +1,27 @@
 import Foundation
 
 /// The System page's Network card (each port's addresses, router, link and
-/// how System Settings sets it up) and its Network Configuration card (what
+/// how System Settings sets it up), its Network Configuration card (what
 /// the whole Mac uses now: the primary service, default routes, tunnels, DNS
-/// and proxies, then the services as configured). Addresses, routers, DNS
-/// servers, search domains and proxy hosts are `isAddress` rows: shown and
-/// copied like the page's IP addresses, left out of a saved report unless
-/// identifiers are included.
+/// and proxies, then the locations and services as configured) and its
+/// Network Volumes card (shares mounted from servers). Addresses, routers,
+/// DNS servers, search domains, proxy hosts, file servers and shares are
+/// `isAddress` rows: shown and copied like the page's IP addresses, left
+/// out of a saved report unless identifiers are included.
 extension SystemReport {
-    /// The Network card, and the configuration card when it was read.
+    /// The Network card, and the configuration and volumes cards when the
+    /// configuration was read.
     static func networkSections(_ ports: [NetworkPortInfo], _ configuration: NetworkConfiguration?) -> [InfoSection] {
         var sections = [InfoSection(kind: .network, title: "Network", rows: networkRows(ports, configuration))]
         if let configuration {
             sections.append(InfoSection(kind: .networkConfiguration, title: "Network Configuration",
                                         rows: configurationRows(configuration)))
+            sections.append(InfoSection(
+                kind: .networkVolumes, title: "Network Volumes", rows: volumeRows(configuration.volumes),
+                note: configuration.volumes.isEmpty ? nil
+                    : "Read from this Mac's mount table, so listing a share never contacts its server. "
+                    + "Free space is the server's last answer."
+            ))
         }
         return sections
     }
@@ -115,7 +123,50 @@ extension SystemReport {
         rows += dnsRows(configuration.dns)
         rows += proxyRows(configuration.proxies)
         rows.append(InfoRow("Configured", "in System Settings", isHeading: true))
+        rows += locationRows(configuration.locations)
         rows += serviceRows(configuration.services)
+        return rows
+    }
+
+    /// The location in use, then each other one with its services. The one
+    /// in use has its services in the service order below.
+    static func locationRows(_ locations: [NetworkLocation]) -> [InfoRow] {
+        guard !locations.isEmpty else { return [InfoRow("Location", "Couldn't read", status: .unknown)] }
+        let current = locations.first(where: \.isCurrent)
+        var rows = [InfoRow("Location", current.map { $0.name + (locations.count == 1 ? " (the only one)" : " (in use)") } ?? "None chosen")]
+        let others = locations.filter { !$0.isCurrent }
+        if !others.isEmpty {
+            let lines = others.map { location in
+                let services = location.services.map { $0.name + ($0.isEnabled ? "" : " (inactive)") }
+                return location.name + ": " + (services.isEmpty ? "no services" : services.joined(separator: ", "))
+            }
+            rows.append(InfoRow(others.count == 1 ? "Other location" : "Other locations", lines.joined(separator: "\n")))
+        }
+        return rows
+    }
+
+    // MARK: - Volumes
+
+    /// Each mounted share: protocol, server, share, where it's mounted and
+    /// its space. The server and share are addresses; the account identifies
+    /// the user, so it's hidden like a serial number.
+    static func volumeRows(_ volumes: [NetworkVolume]) -> [InfoRow] {
+        guard !volumes.isEmpty else { return [InfoRow("Shares", "None mounted")] }
+        var rows: [InfoRow] = []
+        for volume in volumes {
+            rows.append(InfoRow(volume.name, volume.kind.title, isHeading: true, state: volume.isReadOnly ? "read-only" : nil))
+            rows.append(InfoRow("Server", volume.server ?? "Not recorded", isCode: volume.server != nil, isAddress: volume.server != nil))
+            if let share = volume.share { rows.append(InfoRow("Share", share, isCode: true, isAddress: true)) }
+            rows.append(InfoRow("Mounted at", volume.mountPoint, isCode: true, isAddress: volume.mountPoint.hasPrefix("/Users/")))
+            if let total = volume.totalBytes, let free = volume.availableBytes {
+                rows.append(InfoRow("Space", "\(SystemFacts.decimalBytes(free)) free of \(SystemFacts.decimalBytes(total))"))
+            } else {
+                rows.append(InfoRow("Space", "Not reported by the server"))
+            }
+            if let account = volume.account { rows.append(InfoRow("Account", account, isSensitive: true, isCode: true)) }
+            let options = [volume.isAutomounted ? "mounted on demand" : nil, volume.isHidden ? "hidden from Finder" : nil].compactMap { $0 }
+            if !options.isEmpty { rows.append(InfoRow("Options", options.joined(separator: ", "))) }
+        }
         return rows
     }
 

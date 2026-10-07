@@ -80,7 +80,12 @@ Manager OG or any other proprietary task manager.
   the network cards' addresses, routes, DNS and proxies come from
   `NetworkConfigurationReader` (SCDynamicStore, `getifaddrs`, a route dump,
   CoreWLAN without the SSID, which needs Location), also read on Refresh and
-  printed by `otm netconfig`),
+  printed by `otm netconfig`, with locations (SCPreferences, read-only), shares
+  from the mount table (`getfsstat` with `MNT_NOWAIT`, never the server) and the
+  firewall's settings (`FirewallReader`: `system_profiler` and `socketfilterfw`,
+  no root, so never pf; settings, never a claim of reachability); memory type,
+  storage controllers, SD and smart-card readers come from one lazy
+  `system_profiler` run a session, `HardwareInventoryStore`, and `otm hardware`),
   Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
   the main actor when the page opens and on Refresh, never per tick; parsing is
   in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),

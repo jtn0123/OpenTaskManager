@@ -7,7 +7,8 @@ import SystemConfiguration
 /// SCDynamicStore for services, DNS and proxies, `getifaddrs` for addresses,
 /// flags and MTU (`if_data`), `SIOCGIFXMEDIA` and `SIOCGIFAFLAG_IN6` for
 /// media and IPv6 address flags, a `NET_RT_DUMP` sysctl for default routes,
-/// and CoreWLAN for the Wi-Fi channel. Takes a few milliseconds; call it off
+/// CoreWLAN for the Wi-Fi channel, SCPreferences for the locations and the
+/// mount table for network shares. Takes a few milliseconds; call it off
 /// the main thread, when a page opens or on Refresh, never per tick.
 public enum NetworkConfigurationReader {
     /// The store keys the configuration is built from: what's set up, and
@@ -33,7 +34,8 @@ public enum NetworkConfigurationReader {
                 return String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             }
         } ?? []
-        return NetworkConfiguration(store: values, proxies: proxies, interfaces: readInterfaces(), routes: routes)
+        return NetworkConfiguration(store: values, proxies: proxies, interfaces: readInterfaces(), routes: routes,
+                                    locations: NetworkLocation.read(), volumes: NetworkVolumeReader.read())
     }
 
     // MARK: - Interfaces

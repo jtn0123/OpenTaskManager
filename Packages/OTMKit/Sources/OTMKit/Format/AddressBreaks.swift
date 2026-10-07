@@ -4,7 +4,9 @@ import Foundation
 /// its groups, in lines of even length, and never before its prefix, so
 /// "/64" can't end up alone on a line. Text wrapping only breaks after the
 /// slash, which is exactly where it shouldn't. For the System page's
-/// network cards; the app shows the first form that fits.
+/// network cards; the app shows the first form that fits. Reverse-DNS
+/// names (driver and bundle IDs) break after their dots the same way, since
+/// wrapping would otherwise hyphenate one mid-word.
 public enum AddressBreaks {
     /// `text` (one address a line, as a network card's value holds them)
     /// broken over more and more lines: the longest IPv6 address in two,
@@ -12,7 +14,19 @@ public enum AddressBreaks {
     /// them. Other lines (IPv4, host names) stay whole. Empty when there's
     /// no IPv6 address to break.
     public static func forms(_ text: String, upTo parts: Int = 4) -> [String] {
-        let lines = text.components(separatedBy: "\n").map { (line: $0, groups: groups($0)) }
+        forms(text, upTo: parts, grouping: groups)
+    }
+
+    /// `text` (one name a line: "com.apple.CryptoTokenKit.pivtoken 1.0")
+    /// broken after the dots of its reverse-DNS names in the same way, with
+    /// anything after a name (its version) kept on its last line. Empty
+    /// when no line starts with such a name.
+    public static func dottedForms(_ text: String, upTo parts: Int = 4) -> [String] {
+        forms(text, upTo: parts, grouping: dottedGroups)
+    }
+
+    private static func forms(_ text: String, upTo parts: Int, grouping: (String) -> [String]?) -> [String] {
+        let lines = text.components(separatedBy: "\n").map { (line: $0, groups: grouping($0)) }
         guard let longest = lines.filter({ $0.groups != nil }).max(by: { $0.line.count < $1.line.count })?.groups else { return [] }
         var forms: [String] = []
         for part in 2...max(parts, 2) where part <= longest.count {
@@ -45,6 +59,19 @@ public enum AddressBreaks {
         }
         if !current.isEmpty { groups.append(current) }
         return groups
+    }
+
+    /// A reverse-DNS name's parts ("com.", "apple.", "pivtoken 1.0"), each
+    /// with the dot after it and the last with whatever follows the name;
+    /// nil unless the line starts with a name of three parts or more (an
+    /// IPv4 address or a version number, all digits, isn't one).
+    static func dottedGroups(_ line: String) -> [String]? {
+        let name = line.prefix { $0 != " " }
+        let parts = name.split(separator: ".", omittingEmptySubsequences: false)
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        guard parts.count >= 3, name.contains(where: \.isLetter),
+              parts.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy(allowed.contains) }) else { return nil }
+        return parts.dropLast().map { String($0) + "." } + [String(parts[parts.count - 1]) + String(line.dropFirst(name.count))]
     }
 
     /// `groups` in as few even lines as keep within `width` characters, or

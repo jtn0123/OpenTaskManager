@@ -153,6 +153,11 @@ struct ConnectionsView: View {
     /// `--args -openConnection 443` selects the first socket matching that
     /// search (a port, address or process name) once, for screenshots.
     private func selectRequestedConnection() {
+        // "Show exposed sockets" on the System page's Firewall card.
+        if let requested = model.requestedConnectionFilter {
+            model.requestedConnectionFilter = nil
+            filter = requested
+        }
         guard !openedRequest, selection == nil, let query = LaunchArgument.string("openConnection") else { return }
         openedRequest = true
         selection = store.rows.sorted(using: sortOrder).first { $0.matches(query) }?.id

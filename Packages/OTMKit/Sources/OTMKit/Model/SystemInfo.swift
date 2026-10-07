@@ -148,13 +148,22 @@ public struct DiskInfo: Sendable, Hashable, Identifiable {
     public let isInternal: Bool?
     public let isSolidState: Bool?
     public let size: UInt64?
+    /// How it's attached, as the I/O Registry's "Physical Interconnect"
+    /// says: "Apple Fabric", "PCI-Express", "SATA", "USB", "Thunderbolt",
+    /// "Secure Digital". nil where the driver doesn't say (a virtual disk).
+    public let interconnect: String?
+    /// "Internal" or "External", from the same place.
+    public let interconnectLocation: String?
 
-    public init(bsdName: String, model: String?, isInternal: Bool?, isSolidState: Bool?, size: UInt64?) {
+    public init(bsdName: String, model: String?, isInternal: Bool?, isSolidState: Bool?, size: UInt64?, interconnect: String? = nil,
+                interconnectLocation: String? = nil) {
         self.bsdName = bsdName
         self.model = model
         self.isInternal = isInternal
         self.isSolidState = isSolidState
         self.size = size
+        self.interconnect = interconnect
+        self.interconnectLocation = interconnectLocation
     }
 }
 
