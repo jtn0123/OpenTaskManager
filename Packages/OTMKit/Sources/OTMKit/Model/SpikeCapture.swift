@@ -225,8 +225,11 @@ public struct SpikeCapture: Sendable, Equatable {
 }
 
 extension SpikeTrigger {
-    /// The trigger as a History event: "CPU" with what crossed as its detail.
+    /// The trigger as a History event: the kind in a word ("CPU", "Memory")
+    /// with what crossed as its detail, naming the pressure for a pressure
+    /// kind ("Memory pressure reached warning").
     public var event: HistoryEvent {
-        HistoryEvent(time: time, kind: .spike, name: kind.label, detail: summary)
+        let detail = kind.shortLabel == kind.label ? summary : "\(kind.label) \(summary)"
+        return HistoryEvent(time: time, kind: .spike, name: kind.shortLabel, detail: detail)
     }
 }

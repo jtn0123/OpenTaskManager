@@ -196,7 +196,7 @@ struct HistoryPinnedRail: View {
         let state = scroll.fold.state
         if state == .folded {
             HistoryRailStrip(scroll: scroll, scrubber: scrubber, player: player, recorder: recorder, points: points, gaps: gaps,
-                             domain: domain, bucket: bucket, span: span)
+                             spikes: events.filter { $0.kind == .spike }, domain: domain, bucket: bucket, span: span)
                 .modifier(HistoryPinnedRoom())
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { scroll.setStripHeight($0) }
         } else {
@@ -237,6 +237,8 @@ private struct HistoryRailStrip: View {
     let recorder: FlightRecorder?
     let points: [HistoryPoint]
     let gaps: [HistoryGap]
+    /// Spike captures' events, the one kind the strip marks.
+    let spikes: [HistoryEvent]
     let domain: ClosedRange<Date>
     let bucket: TimeInterval
     let span: String
@@ -260,6 +262,7 @@ private struct HistoryRailStrip: View {
             .controlSize(.small)
             HistoryRailTrack(scrubber: scrubber, recorder: recorder, points: points, gaps: gaps, domain: domain, bucket: bucket,
                              height: 14, compact: true)
+                .overlay { HistorySpikeStripMarks(spikes: spikes, domain: domain) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

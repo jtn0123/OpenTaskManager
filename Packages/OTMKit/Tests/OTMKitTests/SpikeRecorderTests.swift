@@ -253,6 +253,10 @@ struct SpikeRecorderTests {
         #expect(file.events.map(\.kind) == [.appLaunched, .spike])
         #expect(file.events.last?.name == "CPU")
         #expect(file.events.last?.detail == "95% of the whole CPU for 10 s")
+        // A pressure kind is a word in the event's name, and named in full in its detail.
+        let pressure = SpikeTrigger(kind: .memory, time: date(40), since: date(39), figure: 0.6, threshold: 0, level: "warning")
+        #expect(pressure.event.name == "Memory")
+        #expect(pressure.event.detail == "Memory pressure reached warning")
         // Same-named processes are one app in the records, as in the flight recorder.
         #expect(file.records.last?.topCPU == [HistoryApp(name: "yes", value: 180), HistoryApp(name: "WindowServer", value: 5)])
         #expect(file.records.last?.values.cpuPeak == 0.95)

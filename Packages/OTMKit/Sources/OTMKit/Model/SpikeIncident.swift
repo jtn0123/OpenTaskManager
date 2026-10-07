@@ -23,6 +23,15 @@ public enum SpikeKind: String, Sendable, CaseIterable, Codable {
         case .network: "Network"
         }
     }
+
+    /// One word, for where room is short: "Memory spike captured".
+    public var shortLabel: String {
+        switch self {
+        case .memory: "Memory"
+        case .thermal: "Thermal"
+        default: label
+        }
+    }
 }
 
 /// One condition crossing its threshold: what crossed, when, and the figure

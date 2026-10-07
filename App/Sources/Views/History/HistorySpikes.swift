@@ -309,3 +309,44 @@ struct SpikeCaptureSettings: View {
         }
     }
 }
+
+/// Spike events as markers over the folded rail strip's track: the bolt the
+/// full card's event lane draws, those too close to draw apart as one with a
+/// count. They leave the track's hover, clicks and drags alone.
+struct HistorySpikeStripMarks: View {
+    let spikes: [HistoryEvent]
+    let domain: ClosedRange<Date>
+
+    private struct Group {
+        let x: CGFloat
+        var count: Int
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let size = HistoryEventMarker.size
+            ZStack(alignment: .leading) {
+                ForEach(Self.groups(spikes, domain: domain, width: width), id: \.x) { group in
+                    HistoryEventMarker(symbol: HistoryEventStyle.symbol(.spike), count: group.count, picked: false)
+                        .alignmentGuide(.leading) { _ in -min(max(group.x - size / 2, 0), max(width - size, 0)) }
+                }
+            }
+            .frame(width: width, height: geometry.size.height)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private static func groups(_ spikes: [HistoryEvent], domain: ClosedRange<Date>, width: CGFloat) -> [Group] {
+        var groups: [Group] = []
+        for event in spikes.filter({ domain.contains($0.time) }).sorted(by: { $0.time < $1.time }) {
+            let x = HistoryMoment.x(of: event.time, width: width, domain: domain)
+            if let last = groups.last, x - last.x < HistoryEventMarker.size {
+                groups[groups.count - 1].count += 1
+            } else {
+                groups.append(Group(x: x, count: 1))
+            }
+        }
+        return groups
+    }
+}
