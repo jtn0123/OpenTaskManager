@@ -182,6 +182,11 @@ Manager OG or any other proprietary task manager.
   The System page's jump bar and search (`SystemNavigator`; the matching is
   `SystemReportSearch` in OTMKit) scroll to stable ids (`SystemTarget`) through
   a `ScrollViewReader`, and follow the scrolling from the clip view's bounds.
+  The bar is in-page links, not tabs: "Jump to" and a link per group, the one
+  at the top underlined (a menu when narrow). A search marks its finds in the
+  cards' titles, labels and values (`SearchMarks`, ranges from
+  `SystemReportSearch.highlights`, which folds as the matching does), outlines
+  the match gone to, and puts Clear Search beside its count.
 - The Connections page's socket walk (`ConnectionSampler`, every process's
   descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
   runs it off the main actor every 3 s, only while the page is on screen.
@@ -344,7 +349,9 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   the window widens; a hide in a wide window is remembered (`sidebarHidden`)
   and a show in a narrow one lasts until the window crosses 900
   (`SidebarVisibility` in OTMKit). The View menu lists the pages (⌘1 to ⌘9).
-  With it hidden, a page menu (`PageSwitcher`, the page's icon) sits before
+  With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
+  "Pages", whatever the page, out of the toolbar's glass so it sits with the
+  title, not the live badge) sits before
   the title, and in a narrow window Pause drops its word to make room; keep
   the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
   overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
@@ -384,6 +391,8 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   Thermals table's rows are a step up (13 pt, body), since its readings are
   what the page is for, with its supporting text at 12 pt. The
   system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
+  Search finds are marked in primary ink, bold, over `TextTone.highlight`,
+  which keeps 4.5:1 on every card in both appearances.
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`
   (`TableFit.swift`), so no empty striped rows follow the last one.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

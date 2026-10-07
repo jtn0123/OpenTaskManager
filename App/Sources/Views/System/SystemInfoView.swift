@@ -9,7 +9,8 @@ import SwiftUI
 /// on Refresh (displays also when they change), never per sample; the
 /// slower hardware report once a session (`HardwareInventoryStore`). A jump
 /// bar over the cards goes to a group of them, and the toolbar's search
-/// narrows them to what matches (`SystemReportSearch`), going to each match.
+/// narrows them to what matches (`SystemReportSearch`), marking each find
+/// (`SearchMarks`) and going to each match.
 struct SystemInfoView: View {
     /// Below this page width the toolbar's buttons drop their titles, so an
     /// 820-point window keeps Save Report out of the overflow menu.
@@ -115,6 +116,8 @@ struct SystemInfoView: View {
                             }
                             cards(shown, info: info, search: search)
                         }
+                        // Every find in the cards' titles, labels and values is marked.
+                        .environment(\.searchTerms, search.terms)
                         .padding(20)
                         .background(SystemScrollTracker(navigator: navigator))
                         .coordinateSpace(.named(SystemNavigator.space))
@@ -299,8 +302,8 @@ private struct HeroCard: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(hardware.displayName).font(.largeTitle.weight(.semibold))
-                        Text(([info.software.computerName, hardware.modelIdentifier].compactMap { $0 }).joined(separator: " · "))
+                        MarkedText(hardware.displayName).font(.largeTitle.weight(.semibold))
+                        MarkedText(([info.software.computerName, hardware.modelIdentifier].compactMap { $0 }).joined(separator: " · "))
                             .font(.title3)
                             .foregroundStyle(.secondaryText)
                     }
@@ -342,7 +345,7 @@ private struct HeroCard: View {
     private func identifierRows(_ hardware: MacHardware) -> some View {
         ForEach(SystemReport.identifiers(hardware), id: \.label) { row in
             HStack(spacing: 5) {
-                Text(row.label).foregroundStyle(.secondaryText)
+                MarkedText(row.label).foregroundStyle(.secondaryText)
                 if showsIdentifiers {
                     CopyableText(value: row.value)
                 } else {
@@ -407,7 +410,9 @@ private struct NetworkLinks {
 /// port) start a group and indent the rows under them. On an attached-device
 /// card each device is one compact row instead, opening onto its details.
 /// During a search it shows only the rows found (`shown`, by index among the
-/// section's rows), with the devices whose facts matched opened.
+/// section's rows), with the devices whose facts matched opened, the words
+/// found marked wherever they are (`MarkedText`) and the match gone to
+/// outlined.
 private struct InfoCard: View {
     var section: InfoSection
     /// nil shows every row.
@@ -415,7 +420,7 @@ private struct InfoCard: View {
     /// Device headings a search opens.
     var opens: Set<Int> = []
     var showsIdentifiers: Bool
-    /// Marks the row a search goes to.
+    /// Outlines the row a search goes to.
     let navigator: SystemNavigator
     /// On the Network card: each port's link to its traffic.
     var links: NetworkLinks?
@@ -429,9 +434,13 @@ private struct InfoCard: View {
     var body: some View {
         let style = SystemStyle(section.kind)
         Card(tint: style.tint) {
-            Label(section.title, systemImage: style.symbol)
-                .font(.headline)
-                .foregroundStyle(style.tint)
+            Label {
+                MarkedText(section.title)
+            } icon: {
+                Image(systemName: style.symbol)
+            }
+            .font(.headline)
+            .foregroundStyle(style.tint)
             Group {
                 if section.hasDetails {
                     deviceList
@@ -440,7 +449,7 @@ private struct InfoCard: View {
                 }
             }
             .font(.callout)
-            .markedRowBackground()
+            .markedRowBackground(flashing: navigator.mark != nil)
             // A card cut down by a search leaves out what explains the whole.
             if let note = section.note, shown == nil || shown?.count == section.rows.count {
                 Text(note)
@@ -468,25 +477,25 @@ private struct InfoCard: View {
         }
     }
 
-    /// The row of this card the search marks.
-    private var marked: Int? {
-        if case let .row(kind, index) = navigator.mark, kind == section.kind { index } else { nil }
+    /// The row of this card the search has gone to.
+    private var current: Int? {
+        if case let .row(kind, index) = navigator.match, kind == section.kind { index } else { nil }
     }
 
     private var rowGrid: some View {
         let indices = shown ?? Array(section.rows.indices)
         let firstHeading = section.rows.firstIndex(where: \.isHeading)
-        let marked = marked
+        let current = current
         return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
             ForEach(indices, id: \.self) { index in
                 let row = section.rows[index]
                 if row.isHeading {
                     heading(row, isFirst: index == indices.first)
                         .id(SystemTarget.row(section.kind, index))
-                        .markedRow(marked == index)
+                        .markedRow(current == index)
                 } else {
                     InfoGridRow(row: row, showsIdentifiers: showsIdentifiers, indent: firstHeading.map { $0 < index } == true ? 10 : 0,
-                                target: .row(section.kind, index), isMarked: marked == index)
+                                target: .row(section.kind, index), isCurrent: current == index)
                 }
             }
         }
@@ -496,12 +505,12 @@ private struct InfoCard: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Group {
-                    Text(row.label).fontWeight(.semibold).lineLimit(1)
+                    MarkedText(row.label).fontWeight(.semibold).lineLimit(1)
                     if !row.value.isEmpty {
-                        Text(row.value).foregroundStyle(.secondaryText).lineLimit(1)
+                        MarkedText(row.value).foregroundStyle(.secondaryText).lineLimit(1)
                     }
                     if let state = row.state {
-                        Text(state)
+                        MarkedText(state)
                             .font(.explanation.weight(.medium))
                             .foregroundStyle(SystemStyle(section.kind).tint)
                             .padding(.horizontal, 6)
@@ -533,7 +542,7 @@ private struct InfoCard: View {
         let keys = blocks.compactMap { block in
             if case let .device(heading, details) = block, !details.isEmpty { key(heading) } else { nil }
         }
-        let marked = marked
+        let current = current
         return VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
@@ -541,13 +550,13 @@ private struct InfoCard: View {
                     Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
                         ForEach(run, id: \.self) { index in
                             InfoGridRow(row: section.rows[index], showsIdentifiers: showsIdentifiers, target: .row(section.kind, index),
-                                        isMarked: marked == index)
+                                        isCurrent: current == index)
                         }
                     }
                 case let .device(heading, details):
                     let key = key(heading)
                     DeviceRow(section: section, heading: heading, details: details, showsIdentifiers: showsIdentifiers,
-                              isOpen: opened.contains(key), marked: marked) { all in
+                              isOpen: opened.contains(key), current: current) { all in
                         let opening = !opened.contains(key)
                         if all {
                             opened = opening ? Set(keys) : []
@@ -576,19 +585,19 @@ private struct InfoGridRow: View {
     var indent: CGFloat = 0
     /// Where the page scrolls to reach it.
     var target: SystemTarget
-    /// A search has just gone to it.
-    var isMarked = false
+    /// The match a search has gone to.
+    var isCurrent = false
 
     var body: some View {
         GridRow {
-            Text(row.label)
+            MarkedText(row.label)
                 .foregroundStyle(.secondaryText)
                 .fixedSize()
                 .padding(.leading, indent)
                 .id(target)
-                .markedRow(isMarked)
+                .markedRow(isCurrent)
             InfoValue(row: row, showsIdentifiers: showsIdentifiers)
-                .markedRow(isMarked)
+                .markedRow(isCurrent)
         }
     }
 }
@@ -613,7 +622,7 @@ private struct InfoValue: View {
                 CopyableText(value: row.value,
                              forms: row.isAddress ? AddressBreaks.forms(row.value) : AddressBreaks.dottedForms(row.value))
             } else {
-                Text(row.value)
+                MarkedText(row.value)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -634,10 +643,11 @@ private struct DeviceRow: View {
     var details: [Int]
     var showsIdentifiers: Bool
     var isOpen: Bool
-    /// The card's row a search marks, if it's this device or one of its facts.
-    var marked: Int?
+    /// The card's row a search has gone to, if it's this device or one of its facts.
+    var current: Int?
     /// Called with true when Option is held.
     var toggle: (_ all: Bool) -> Void
+    @Environment(\.searchTerms) private var searchTerms
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -656,12 +666,12 @@ private struct DeviceRow: View {
                 }
             }
             .id(SystemTarget.row(section.kind, heading))
-            .markedRow(marked == heading)
+            .markedRow(current == heading)
             if isOpen, !details.isEmpty {
                 Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
                     ForEach(details, id: \.self) { index in
                         InfoGridRow(row: section.rows[index], showsIdentifiers: showsIdentifiers, target: .row(section.kind, index),
-                                    isMarked: marked == index)
+                                    isCurrent: current == index)
                     }
                 }
                 .padding(.leading, 15)
@@ -700,14 +710,16 @@ private struct DeviceRow: View {
     }
 
     private var name: Text {
-        let note = row.value.isEmpty ? Text("") : Text("  " + row.value).foregroundStyle(.secondaryText)
-        return Text(row.label).fontWeight(.medium) + note
+        let isCurrent = current == heading
+        let note = row.value.isEmpty ? Text("")
+            : (Text("  ") + SearchMarks.text(row.value, terms: searchTerms, current: isCurrent)).foregroundStyle(.secondaryText)
+        return SearchMarks.text(row.label, terms: searchTerms, current: isCurrent).fontWeight(.medium) + note
     }
 
     @ViewBuilder
     private var state: some View {
         if let state = row.state {
-            Text(state).foregroundStyle(.secondaryText).lineLimit(1)
+            MarkedText(state).foregroundStyle(.secondaryText).lineLimit(1)
         }
     }
 }
