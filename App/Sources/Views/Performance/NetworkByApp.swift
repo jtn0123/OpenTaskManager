@@ -150,11 +150,16 @@ struct TopNetworkCard: View {
         store.hasMeasured && store.apps.hasMoved(inLast: holdReadings)
     }
 
+    /// Whether the rows are too narrow for a name beside both rate columns
+    /// (a third of a 1180-point Overview); then each shows its busier direction.
+    @State private var showsOneRate = false
+
     var body: some View {
         let store = model.networkActivity
         let history = store.apps
         let top = history.ranking(bands: 0, rows: 6, holding: Self.holdReadings).rows
         let peak = top.compactMap { history.latest[$0]?.total }.max() ?? 0
+        let widthForBothRates = NetworkUsageRow.widthForBothRates
         Card {
             HStack(alignment: .firstTextBaseline) {
                 Label("Top Network", systemImage: "network")
@@ -180,10 +185,11 @@ struct TopNetworkCard: View {
                     let usage = history.latest[pid] ?? NetworkUsage(received: 0, sent: 0, processes: 0)
                     let identity = store.identity(pid)
                     NetworkUsageRow(icon: identity.icon, name: identity.name, usage: usage,
-                                    fraction: peak > 0 ? usage.total / peak : 0)
+                                    fraction: peak > 0 ? usage.total / peak : 0, showsOneRate: showsOneRate)
                         .help("\(identity.name): receiving \(Format.bitsPerSecond(usage.received)), sending \(Format.bitsPerSecond(usage.sent))")
                 }
             }
+            .onGeometryChange(for: Bool.self) { $0.size.width < widthForBothRates } action: { showsOneRate = $0 }
         }
         .task { await store.track(model: model) }
     }
@@ -205,6 +211,12 @@ struct NetworkUsageRow: View {
     var badge: String?
     var usage: NetworkUsage
     var fraction: Double
+    /// Shows only the busier direction, for a list too narrow for both columns.
+    var showsOneRate = false
+
+    /// The narrowest row that still leaves a name about 110 points beside
+    /// both rate columns: the icon, four gaps, the spacer's minimum and the padding.
+    static let widthForBothRates: CGFloat = 110 + 2 * rateColumnWidth + 16 + 5 * 8 + 12
 
     var body: some View {
         HStack(spacing: 8) {
@@ -217,8 +229,12 @@ struct NetworkUsageRow: View {
                 Text(badge).foregroundStyle(.secondaryText).fixedSize()
             }
             Spacer(minLength: 8)
-            rate(usage.received, symbol: "arrow.down", color: Theme.network)
-            rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
+            if !showsOneRate || usage.received >= usage.sent {
+                rate(usage.received, symbol: "arrow.down", color: Theme.network)
+            }
+            if !showsOneRate || usage.sent > usage.received {
+                rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
+            }
         }
         .font(.tableText)
         .padding(.horizontal, 6)
