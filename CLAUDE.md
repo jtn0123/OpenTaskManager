@@ -26,6 +26,7 @@ Manager OG or any other proprietary task manager.
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
   Views/Processes (NSOutlineView table in `ProcessOutlineView`), Views/Performance,
+  Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
@@ -49,6 +50,11 @@ Manager OG or any other proprietary task manager.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.
+- The Connections page's socket walk (`ConnectionSampler`, every process's
+  descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
+  runs it off the main actor every 3 s, only while the page is on screen.
+  Anything on that page that changes every tick (the traffic card) reads the
+  model in its own view, so the table isn't rebuilt each second.
 - Budget: each page should use under about 10% of one core in a debug build.
   Measure CPU time over 20 s, not `ps %cpu`.
 
@@ -62,12 +68,15 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance|Startup` sets the starting page, and
+`-openPage Overview|Processes|Performance|Connections|Startup` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
-(`-openScroll bottom` starts the page scrolled to the end), and `-openProcess <pid>`
-selects a process so its inspector shows. Don't pass
+(`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
+selects a process so its inspector shows, and `-openConnection <port or text>`
+selects the first matching socket on the Connections page so its details show. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
-sidebar stops working in that instance. Get the
+sidebar stops working in that instance. The exception is a capture while other
+instances run: `-openPage` saves the page, so every running instance follows
+the last launch, and `-page <name>` keeps a throwaway instance on its page. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
 

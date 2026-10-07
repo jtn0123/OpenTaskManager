@@ -20,7 +20,7 @@ struct OverviewView: View {
                     CoreMap(snapshot: snapshot)
                     FillGrid(minimum: 280) {
                         diskCard(snapshot)
-                        networkCard(snapshot)
+                        NetworkTrafficCard()
                         if let components = snapshot.power.components { powerCard(components) }
                     }
                     FillGrid(minimum: 280) {
@@ -102,19 +102,6 @@ struct OverviewView: View {
             histories: (AppModel.tailSum(ids.map { model.diskReadHistory[$0]?.values ?? [] }),
                         AppModel.tailSum(ids.map { model.diskWriteHistory[$0]?.values ?? [] })),
             format: Format.bytesPerSecond, minimumScale: 1_048_576, units: .binaryBytes
-        )
-    }
-
-    private func networkCard(_ snapshot: SystemSnapshot) -> some View {
-        let links = snapshot.network.filter(\.isPrimary)
-        let ids = links.map(\.id)
-        return ThroughputCard(
-            title: "Network", symbol: "network", color: Theme.network, secondaryColor: Theme.networkSecondary,
-            labels: ("Receive", "Send"),
-            rates: (links.reduce(0) { $0 + $1.receivedBytesPerSecond }, links.reduce(0) { $0 + $1.sentBytesPerSecond }),
-            histories: (AppModel.tailSum(ids.map { model.networkInHistory[$0]?.values ?? [] }),
-                        AppModel.tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
-            format: Format.bitsPerSecond, minimumScale: 125_000, units: .bits
         )
     }
 
@@ -254,7 +241,31 @@ private struct CoreMap: View {
     }
 }
 
-private struct ThroughputCard: View {
+/// Receive and send rates across the primary network interfaces, with their
+/// history. Reads the model itself, so on pages that otherwise refresh
+/// slowly (Connections) only this card redraws every tick.
+struct NetworkTrafficCard: View {
+    @Environment(AppModel.self) private var model
+    var title = "Network"
+    var compact = false
+
+    var body: some View {
+        let links = model.snapshot?.network.filter(\.isPrimary) ?? []
+        let ids = links.map(\.id)
+        ThroughputCard(
+            title: title, symbol: "network", color: Theme.network, secondaryColor: Theme.networkSecondary,
+            labels: ("Receive", "Send"),
+            rates: (links.reduce(0) { $0 + $1.receivedBytesPerSecond }, links.reduce(0) { $0 + $1.sentBytesPerSecond }),
+            histories: (AppModel.tailSum(ids.map { model.networkInHistory[$0]?.values ?? [] }),
+                        AppModel.tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
+            format: Format.bitsPerSecond, minimumScale: 125_000, units: .bits, compact: compact
+        )
+    }
+}
+
+struct ThroughputCard: View {
+    private static let compactFont = NSFont.numeric(size: 13, weight: .medium)
+
     var title: String
     var symbol: String
     var color: Color
@@ -266,22 +277,54 @@ private struct ThroughputCard: View {
     /// Keeps a quiet link from magnifying noise to full height.
     var minimumScale: Double
     var units: GraphMath.AxisUnits
+    /// One short row with the rates beside the graph, to sit among summary
+    /// cards. The graph grows to whatever height the row gives the card.
+    var compact = false
 
     var body: some View {
-        Card(tint: color) {
-            Label(title, systemImage: symbol).font(.headline)
-            HStack(spacing: 24) {
-                Stat(label: labels.0, number: rates.0, color: color, format: format)
-                Stat(label: labels.1, number: rates.1, color: secondaryColor, format: format)
+        if compact {
+            Card(tint: color) {
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(title, systemImage: symbol)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        rate(rates.0, symbol: "arrow.down", color: color).help(labels.0)
+                        rate(rates.1, symbol: "arrow.up", color: secondaryColor).help(labels.1)
+                    }
+                    // Fixed, so the graph doesn't shift as the numbers change width.
+                    .frame(width: 112, alignment: .leading)
+                    graph(axis: nil)
+                        .frame(minHeight: 34, maxHeight: .infinity)
+                }
             }
-            GraphView(
-                series: [
-                    GraphSeries(values: histories.0, color: color),
-                    GraphSeries(values: histories.1, color: secondaryColor, fill: false, dashed: true),
-                ],
-                capacity: 120, showsGrid: false, glows: true, minimumCeiling: minimumScale, axis: format, axisUnits: units
-            )
-            .frame(height: 72)
+        } else {
+            Card(tint: color) {
+                Label(title, systemImage: symbol).font(.headline)
+                HStack(spacing: 24) {
+                    Stat(label: labels.0, number: rates.0, color: color, format: format)
+                    Stat(label: labels.1, number: rates.1, color: secondaryColor, format: format)
+                }
+                graph(axis: format)
+                    .frame(height: 72)
+            }
+        }
+    }
+
+    private func graph(axis: ((Double) -> String)?) -> GraphView {
+        GraphView(
+            series: [
+                GraphSeries(values: histories.0, color: color),
+                GraphSeries(values: histories.1, color: secondaryColor, fill: false, dashed: true),
+            ],
+            capacity: 120, showsGrid: false, glows: true, minimumCeiling: minimumScale, axis: axis, axisUnits: units
+        )
+    }
+
+    private func rate(_ value: Double, symbol: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol).font(.caption.weight(.bold)).foregroundStyle(color)
+            AnimatedNumber(value: value, format: format, font: Self.compactFont)
         }
     }
 }

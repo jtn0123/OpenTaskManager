@@ -230,6 +230,9 @@ final class AppModel {
     /// Regular (Dock) apps by PID, refreshed each tick for grouping and icons.
     private(set) var regularApps: [Int32: NSRunningApplication] = [:]
     private(set) var lastError: String?
+    /// A process another page asked the Processes page to select, such as
+    /// the owner of a socket on the Connections page. Cleared once shown.
+    var requestedProcess: Int32?
     /// Highest whole-system draw seen on this Mac, kept across launches.
     private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
 

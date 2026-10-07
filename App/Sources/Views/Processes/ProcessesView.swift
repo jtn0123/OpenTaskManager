@@ -76,8 +76,18 @@ struct ProcessesView: View {
         }
     }
 
-    /// `--args -openProcess <pid>` selects that process once, for screenshots.
+    /// Selects a process another page asked for ("Show process" on the
+    /// Connections page), or once at launch the one given by
+    /// `--args -openProcess <pid>`, for screenshots.
     private func selectRequestedProcess() {
+        if let pid = model.requestedProcess {
+            model.requestedProcess = nil
+            guard model.process(pid) != nil else { return }
+            search = ""
+            selection = [pid]
+            showInspector = true
+            return
+        }
         guard selection.isEmpty, let pid = LaunchArgument.string("openProcess").flatMap(Int32.init),
               model.process(pid) != nil else { return }
         selection = [pid]
