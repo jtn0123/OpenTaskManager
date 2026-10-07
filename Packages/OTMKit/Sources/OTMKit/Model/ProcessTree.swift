@@ -223,14 +223,30 @@ public enum ProcessTreeBuilder {
             return node
         }
         guard sortedChildren.allSatisfy({ $0.section == nil }) else { return sortedChildren }
-        // Each row's figure is worked out once, not in every comparison.
+        // Each row's figure is worked out once, not in every comparison, and
+        // keys that compare figures alone never copy a row, which is big.
         let figures = sortedChildren.map { figure($0, by: key, cpuStep: cpuStep) }
+        let ids = sortedChildren.map(\.id)
+        let figuresOnly = comparesFiguresOnly(key)
         return sortedChildren.indices.sorted { lhs, rhs in
-            let order = compare(sortedChildren[lhs], sortedChildren[rhs], figures[lhs], figures[rhs], by: key)
-            if order == .orderedSame { return sortedChildren[lhs].id < sortedChildren[rhs].id }
+            let order = figuresOnly
+                ? order(figures[lhs], figures[rhs])
+                : compare(sortedChildren[lhs], sortedChildren[rhs], figures[lhs], figures[rhs], by: key)
+            if order == .orderedSame { return ids[lhs] < ids[rhs] }
             return ascending ? order == .orderedAscending : order == .orderedDescending
         }
         .map { sortedChildren[$0] }
+    }
+
+    private static func comparesFiguresOnly(_ key: ProcessSortKey) -> Bool {
+        switch key {
+        case .cpu, .memory, .power, .gpu, .disk, .topTier, .wakeups: true
+        case .name, .pid, .threads, .user, .neuralMemory: false
+        }
+    }
+
+    private static func order<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult {
+        a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame
     }
 
     /// The number a key compares, as shown; 0 for the keys compared otherwise.
@@ -251,9 +267,6 @@ public enum ProcessTreeBuilder {
 
     private static func compare(_ lhs: ProcessNode, _ rhs: ProcessNode, _ lhsFigure: Double, _ rhsFigure: Double,
                                 by key: ProcessSortKey) -> ComparisonResult {
-        func order<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult {
-            a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame
-        }
         let a = lhs.process, b = rhs.process
         switch key {
         case .name: return (a?.name ?? "").localizedCaseInsensitiveCompare(b?.name ?? "")

@@ -27,8 +27,7 @@ struct AnimatedNumber: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: AnimatedNumberView, context: Context) -> CGSize? {
-        let measured = (format(value) as NSString).size(withAttributes: [.font: font])
-        return CGSize(width: ceil(measured.width) + 1, height: GlyphCache.lineHeight(font))
+        CGSize(width: ceil(GlyphCache.width(of: format(value), font: font)) + 1, height: GlyphCache.lineHeight(font))
     }
 }
 
@@ -209,6 +208,26 @@ enum GlyphCache {
 
     static func lineHeight(_ font: NSFont) -> CGFloat {
         ceil(font.ascender - font.descender)
+    }
+
+    private struct WidthKey: Hashable {
+        let text: String
+        let font: NSFont
+    }
+
+    private static var widths: [WidthKey: CGFloat] = [:]
+
+    /// `text`'s width in `font`, typeset once. SwiftUI asks every number on a
+    /// page for its size on each layout pass, and setting the text each time
+    /// cost about 3% of a core on Overview.
+    static func width(of text: String, font: NSFont) -> CGFloat {
+        let key = WidthKey(text: text, font: font)
+        if let width = widths[key] { return width }
+        // Figures come and go; a cap keeps the cache to recent ones.
+        if widths.count >= 4_096 { widths.removeAll(keepingCapacity: true) }
+        let width = (text as NSString).size(withAttributes: [.font: font]).width
+        widths[key] = width
+        return width
     }
 
     static func glyph(_ text: String, font: NSFont, color: NSColor, scale: CGFloat) -> Glyph? {
