@@ -77,14 +77,15 @@ final class DiskSampler {
     }
 }
 
-enum VolumeReader {
+/// Mounted volumes and their space, for the Overview, System and Storage pages.
+public enum VolumeReader {
     private static let keys: [URLResourceKey] = [
         .volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
         .volumeAvailableCapacityKey, .volumeIsInternalKey, .volumeIsRemovableKey,
         .volumeLocalizedFormatDescriptionKey, .volumeIsRootFileSystemKey, .volumeIsBrowsableKey,
     ]
 
-    static func read() -> [VolumeInfo] {
+    public static func read() -> [VolumeInfo] {
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
         return urls.compactMap { url -> VolumeInfo? in
             guard let values = try? url.resourceValues(forKeys: Set(keys)),

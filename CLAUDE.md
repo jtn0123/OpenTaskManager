@@ -20,8 +20,10 @@ Manager OG or any other proprietary task manager.
 ## Layout
 
 - `Packages/OTMKit`: sampling library (System/, Model/, Monitor/, Format/,
-  Graphing/ for axis and curve maths; System/LaunchItems, LaunchTriggers and
-  Launchctl read launchd plists and parse `launchctl` output),
+  Graphing/ for axis and curve maths and the squarified `Treemap`;
+  System/LaunchItems, LaunchTriggers and Launchctl read launchd plists and
+  parse `launchctl` output; System/DiskUsageScanner walks a folder for the
+  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
@@ -34,6 +36,10 @@ Manager OG or any other proprietary task manager.
   Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
   Views/System (hardware and security facts, read once when the page opens, never
   per tick; the rows come from `SystemReport` in OTMKit),
+  Views/Storage (disk space: `StorageStore` keeps the session's last scan and
+  scans only on Scan or a scope pick, never on launch or per tick; the treemap
+  is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
+  layer alone reads the pointer),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -76,14 +82,19 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance|History|Connections|Startup|Users|System` sets the starting page, and
+`-openPage Overview|Processes|Performance|History|Connections|Startup|Users|System|Storage` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
-and `-openUser <name>` opens that user's top processes on the Users page (and
-the system accounts, for root or a service account). Don't pass
+`-openUser <name>` opens that user's top processes on the Users page (and
+the system accounts, for root or a service account), and
+`-openStorageScope <path>` scans that folder or volume when the Storage page
+opens, with `-openStorageFolder <path inside it>` opening a folder in the
+results and `-openStorageList largest` showing the largest files. Pick a
+scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
+Documents, Downloads and other apps' containers raise a privacy prompt. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
 sidebar stops working in that instance. The exception is a capture while other
 instances run: `-openPage` saves the page, so every running instance follows

@@ -35,13 +35,15 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Inspector: arguments, environment, open files, sockets | ✅ | |
 | Sample Process (stack sampling) | ✅ | Uses `/usr/bin/sample` |
 | Menu bar meters and top processes | ✅ | |
-| `otm` CLI with JSON output | ✅ | `ps`, `top`, `system`, `power`, `ports`, `inspect`, `kill` |
+| `otm` CLI with JSON output | ✅ | `ps`, `top`, `system`, `power`, `ports`, `inspect`, `kill`, `du` |
 | Overview dashboard with live core map | ✅ | |
 | Power by part of the chip | ✅ | CPU, GPU, Neural Engine, DRAM and the rest, from IOReport and the SMC |
 | CPU cluster and GPU clock speeds | ✅ | From IOReport residencies and the device tree's clock tables |
 | Memory by app, paging and compressor rates | ✅ | Stacked over time |
 | GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
 | System information page | ✅ | Hardware, displays, storage, network, battery health, software and security state; identifiers hidden until shown; Copy Summary |
+| Disk space analysis (Storage page) | ✅ | Scan Home, a volume or any folder: drill-down treemap, ranked contents, the 50 largest files and space by category, with Reveal in Finder and Copy Path. Allocated sizes, hard links counted once, bounded memory. Also `otm du` |
+| Move to Trash from the Storage page | ⬜ | TODO: Move to Trash (never delete outright) for items picked on the Storage page, with a confirmation that shows the size and an Undo, then update the totals without a rescan. Left out until then because it's destructive |
 | Privileged helper | ⬜ | Full details for root processes, including their sockets. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
 | Flight recorder | ✅ | SQLite history every 10 s, kept 7 days, with a scrubber that shows the busiest apps at any moment: "what was hogging the CPU at 3 a.m.?" |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |

@@ -62,6 +62,7 @@ enum Page: String, CaseIterable, Identifiable {
     case startup = "Startup"
     case users = "Users"
     case system = "System"
+    case storage = "Storage"
 
     var id: String { rawValue }
 
@@ -75,6 +76,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .startup: "sunrise"
         case .users: "person.2"
         case .system: "info.circle"
+        case .storage: "internaldrive"
         }
     }
 }
@@ -100,6 +102,7 @@ struct ContentView: View {
             case .startup: StartupView()
             case .users: UsersView()
             case .system: SystemInfoView()
+            case .storage: StorageView()
             }
         }
         .navigationTitle(page.rawValue)

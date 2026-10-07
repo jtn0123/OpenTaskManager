@@ -18,6 +18,10 @@ USAGE:
   otm net [-n COUNT] [--interval SECONDS] [--json]
                                  Processes moving the most network traffic
   otm inspect PID [--json]       Arguments, environment and open files
+  otm du [PATH] [--depth N] [-n COUNT] [--json]
+                                 What's using the space under PATH (default: the
+                                 current folder): biggest folders and files,
+                                 space by category
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -30,6 +34,7 @@ struct Options {
     var json = false
     var interval = 1.0
     var signal = "term"
+    var depth = 1
 }
 
 func parseOptions(_ arguments: [String]) -> Options {
@@ -45,6 +50,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-s", "--sort": options.sort = iterator.next() ?? options.sort
         case "-i", "--interval": options.interval = iterator.next().flatMap(Double.init) ?? options.interval
         case "--signal": options.signal = iterator.next() ?? options.signal
+        case "-d", "--depth": options.depth = iterator.next().flatMap(Int.init) ?? options.depth
         case "--json": options.json = true
         case "-h", "--help": options.command = "help"
         case "-v", "--version": options.command = "version"
@@ -252,6 +258,105 @@ struct Inspection: Encodable {
     let openFiles: [OpenFile]?
 }
 
+/// `otm du --json`: the scanned folder, its biggest children to `--depth`,
+/// the largest files and the space by category.
+struct DiskUsageReport: Encodable {
+    struct Entry: Encodable {
+        let name: String
+        let kind: String
+        let allocatedSize: UInt64
+        let logicalSize: UInt64
+        let itemCount: Int
+        let category: String
+        let children: [Entry]?
+    }
+
+    struct CategoryEntry: Encodable {
+        let category: String
+        let title: String
+        let allocatedSize: UInt64
+    }
+
+    let path: String
+    let allocatedSize: UInt64
+    let logicalSize: UInt64
+    let fileCount: Int
+    let folderCount: Int
+    let unreadableFolders: Int
+    let hardLinkDuplicates: Int
+    let seconds: Double
+    let children: [Entry]
+    let largestFiles: [DiskFile]
+    let categories: [CategoryEntry]
+
+    init(_ usage: DiskUsage, depth: Int, count: Int) {
+        func entries(_ item: DiskItem, depth: Int) -> [Entry] {
+            usage.children(of: item).prefix(count).map { child in
+                Entry(name: child.kind == .smallerItems ? "\(child.itemCount) smaller items" : child.name, kind: child.kind.rawValue,
+                      allocatedSize: child.allocatedSize, logicalSize: child.logicalSize, itemCount: child.itemCount,
+                      category: String(describing: child.category),
+                      children: depth > 1 && child.isFolder && !child.children.isEmpty ? entries(child, depth: depth - 1) : nil)
+            }
+        }
+        path = usage.rootPath
+        allocatedSize = usage.root.allocatedSize
+        logicalSize = usage.root.logicalSize
+        fileCount = usage.fileCount
+        folderCount = usage.folderCount
+        unreadableFolders = usage.unreadableFolders
+        hardLinkDuplicates = usage.hardLinkDuplicates
+        seconds = usage.duration
+        children = entries(usage.root, depth: max(depth, 1))
+        largestFiles = usage.largestFiles
+        categories = usage.categories.filter { $0.allocatedSize > 0 }.map {
+            CategoryEntry(category: String(describing: $0.category), title: $0.category.title, allocatedSize: $0.allocatedSize)
+        }
+    }
+}
+
+func diskUsageSummary(_ usage: DiskUsage, depth: Int, count: Int) -> String {
+    let root = usage.root
+    var lines = [
+        "\(usage.rootPath): \(Format.bytes(root.allocatedSize)) on disk, \(Format.bytes(root.logicalSize)) of data"
+            + " · \(usage.fileCount.formatted()) files, \(usage.folderCount.formatted()) folders · \(Format.fixed(usage.duration, 1)) s",
+        "",
+        pad("ON DISK", 10, right: true) + pad("SHARE", 8, right: true) + pad("ITEMS", 11, right: true) + "  NAME",
+    ]
+    func list(_ item: DiskItem, level: Int) {
+        for child in usage.children(of: item).prefix(count) {
+            let name: String
+            switch child.kind {
+            case .folder: name = child.name + "/" + (child.contentsOmitted ? "  (contents not kept)" : child.isUnreadable ? "  (unreadable)" : "")
+            case .package, .file: name = child.name
+            case .smallerItems: name = "(\(child.itemCount.formatted()) smaller items)"
+            }
+            let share = Double(child.allocatedSize) / Double(max(root.allocatedSize, 1))
+            lines.append(pad(Format.bytes(child.allocatedSize), 10, right: true) + pad(Format.percent(share, digits: 1), 8, right: true)
+                + pad(child.kind == .file ? "" : child.itemCount.formatted(), 11, right: true)
+                + "  " + String(repeating: "  ", count: level) + name)
+            if level + 1 < depth, child.isFolder { list(child, level: level + 1) }
+        }
+    }
+    list(root, level: 0)
+    if !usage.largestFiles.isEmpty {
+        lines += ["", "Largest files"]
+        for file in usage.largestFiles.prefix(min(count, 10)) {
+            lines.append(pad(Format.bytes(file.allocatedSize), 10, right: true) + "  " + file.path + (file.isPackage ? "/" : ""))
+        }
+    }
+    lines += ["", "By category"]
+    for total in usage.categories where total.allocatedSize > 0 {
+        let share = Double(total.allocatedSize) / Double(max(root.allocatedSize, 1))
+        lines.append(pad(Format.bytes(total.allocatedSize), 10, right: true) + pad(Format.percent(share), 6, right: true)
+            + "  " + total.category.title)
+    }
+    if usage.unreadableFolders > 0 {
+        lines += ["", "\(usage.unreadableFolders.formatted()) folders couldn't be read, so their contents aren't counted."
+            + " Give your terminal Full Disk Access to include them."]
+    }
+    return lines.joined(separator: "\n")
+}
+
 let options = parseOptions(Array(CommandLine.arguments.dropFirst()))
 let monitor = SystemMonitor()
 
@@ -385,6 +490,25 @@ case "inspect":
                 print("  \(pad(String(file.descriptor), 5, right: true))  \(kind)\(file.detail)")
             }
         }
+    }
+
+case "du":
+    let path = ((options.positional.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
+    var isFolder: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), isFolder.boolValue else { fail("no folder at \(path)") }
+    let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+    let request = url.path == "/" ? DiskScanRequest.volume(mountPoint: "/", isRoot: true) : DiskScanRequest(root: url)
+    let showsProgress = isatty(STDERR_FILENO) == 1 && !options.json
+    guard let usage = DiskUsageScanner.scan(request, progress: { progress in
+        guard showsProgress else { return }
+        let line = "Scanning: \(progress.itemCount.formatted()) items, \(Format.bytes(progress.allocatedSize))"
+        FileHandle.standardError.write(Data("\u{1B}[2K\r\(line)".utf8))
+    }) else { fail("scan cancelled") }
+    if showsProgress { FileHandle.standardError.write(Data("\u{1B}[2K\r".utf8)) }
+    if options.json {
+        printJSON(DiskUsageReport(usage, depth: options.depth, count: options.count))
+    } else {
+        print(diskUsageSummary(usage, depth: options.depth, count: options.count))
     }
 
 case "kill":
