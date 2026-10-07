@@ -24,6 +24,9 @@ Manager OG or any other proprietary task manager.
   System/LaunchItems, LaunchTriggers and Launchctl read launchd plists and
   parse `launchctl` output; System/DiskUsageScanner walks a folder for the
   Storage page and `otm du`, with the category rules in Model/DiskCategoryRules;
+  Model/DiskScanSummary (a scan's bounded, versioned summary), System/DiskScanHistory
+  (the last 10 per scope) and Model/DiskScanComparison (interval diff maths) back
+  Storage's Changes mode and `otm du --changes`;
   System/InstalledApps, MachO and CodeSigning find and read app bundles for the
   Apps page and `otm apps`, and System/AppRemoval finds what an app keeps in
   your Library for its Move to Trash review (tests use a fake home, never
@@ -57,7 +60,9 @@ Manager OG or any other proprietary task manager.
   Views/Storage (disk space: `StorageStore` keeps the session's last scan and
   scans only on Scan or a scope pick, never on launch or per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
-  layer alone reads the pointer),
+  layer alone reads the pointer; each finished scan's summary is saved once, off
+  the main actor, to Application Support/OpenTaskManager/Scans, and the Changes
+  list colours the treemap by what changed since an earlier scan),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -119,7 +124,8 @@ or bundle ID contains it (switching the Third party/Apple filter if it hides it)
 the system accounts, for root or a service account), and
 `-openStorageScope <path>` scans that folder or volume when the Storage page
 opens, with `-openStorageFolder <path inside it>` opening a folder in the
-results and `-openStorageList largest` showing the largest files. Pick a
+results and `-openStorageList largest|changes` showing the largest files or
+what changed since the last saved scan of that folder. Pick a
 scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
 Documents, Downloads and other apps' containers raise a privacy prompt. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the

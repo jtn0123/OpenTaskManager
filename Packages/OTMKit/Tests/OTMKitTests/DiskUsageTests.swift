@@ -95,7 +95,7 @@ struct DiskCategoryTests {
 }
 
 /// A folder of files with known sizes, removed when the test ends.
-private final class Fixture {
+final class Fixture {
     let root: URL
     private let fileManager = FileManager.default
 
@@ -263,6 +263,10 @@ struct DiskUsageScannerTests {
         let usage = try scan(fixture) { $0.largestFileLimit = 3 }
         #expect(usage.largestFiles.map(\.name) == ["file6.bin", "file5.bin", "file4.bin"])
         #expect(usage.largestFiles.first?.folder == fixture.url("folder0").path)
+        // Anything missing is no bigger than the smallest kept.
+        #expect(usage.largestFilesCutoff == (try fixture.allocated("folder0/file4.bin")))
+        // With room for every file, nothing is missing.
+        #expect(try scan(fixture) { $0.largestFileLimit = 10 }.largestFilesCutoff == 0)
     }
 
     @Test func dropsSmallFoldersContentsWhenOverBudget() throws {
@@ -298,10 +302,14 @@ struct DiskUsageScannerTests {
         let usage = try scan(fixture)
 
         #expect(usage.unreadableFolders == 1)
-        #expect(usage.unreadableExamples == [fixture.url("locked").path])
+        #expect(usage.unreadablePaths == [fixture.url("locked").path])
         #expect(usage.item(atPath: "locked")?.isUnreadable == true)
         #expect(usage.item(atPath: "open")?.isUnreadable == false)
         #expect(usage.root.logicalSize == 1_000)
+        // Counted in the folder and every folder holding it.
+        #expect(usage.item(atPath: "locked")?.unreadableCount == 1)
+        #expect(usage.item(atPath: "open")?.unreadableCount == 0)
+        #expect(usage.root.unreadableCount == 1)
     }
 
     @Test func stopsWhenCancelled() throws {

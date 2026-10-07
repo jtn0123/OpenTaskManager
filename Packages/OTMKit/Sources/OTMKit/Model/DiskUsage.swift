@@ -71,10 +71,13 @@ public struct DiskItem: Sendable, Codable, Hashable, Identifiable {
     public let contentsOmitted: Bool
     /// A folder the scan couldn't open, usually for want of Full Disk Access.
     public let isUnreadable: Bool
+    /// Folders the scan couldn't open, this one or any inside it. Their
+    /// contents are missing from the totals.
+    public let unreadableCount: Int
 
     public init(id: Int, parent: Int?, name: String, kind: DiskItemKind, allocatedSize: UInt64, logicalSize: UInt64,
                 itemCount: Int, category: DiskCategory, modified: Date?, children: Range<Int>,
-                contentsOmitted: Bool = false, isUnreadable: Bool = false) {
+                contentsOmitted: Bool = false, isUnreadable: Bool = false, unreadableCount: Int = 0) {
         self.id = id
         self.parent = parent
         self.name = name
@@ -87,6 +90,7 @@ public struct DiskItem: Sendable, Codable, Hashable, Identifiable {
         self.children = children
         self.contentsOmitted = contentsOmitted
         self.isUnreadable = isUnreadable
+        self.unreadableCount = unreadableCount
     }
 
     /// Something that can be opened to show what's inside.
@@ -131,20 +135,27 @@ public struct DiskCategoryTotal: Sendable, Codable, Hashable, Identifiable {
 /// totals (each keeping only its largest children), the largest files
 /// anywhere, and the space by category.
 public struct DiskUsage: Sendable, Codable {
+    /// Unreadable folders listed by path; the count covers the rest.
+    public static let unreadablePathLimit = 200
+
     public let rootPath: String
     /// Breadth first, so each item's children are contiguous. `items[0]` is
     /// the scanned folder.
     public let items: [DiskItem]
     /// Largest first.
     public let largestFiles: [DiskFile]
+    /// Files this size or smaller may be missing from `largestFiles`, which
+    /// had no room for them. Zero when it lists every file.
+    public let largestFilesCutoff: UInt64
     /// Every category, largest first.
     public let categories: [DiskCategoryTotal]
     public let fileCount: Int
     public let folderCount: Int
     /// Folders the scan couldn't open; their contents aren't counted.
     public let unreadableFolders: Int
-    /// The first few of them, for the explanation.
-    public let unreadableExamples: [String]
+    /// The first `unreadablePathLimit` of them, for the explanation and for
+    /// comparing scans.
+    public let unreadablePaths: [String]
     /// Extra names for files already counted (hard links), counted once.
     public let hardLinkDuplicates: Int
     /// Other volumes mounted inside the scanned folder, which the scan doesn't enter.
@@ -154,18 +165,19 @@ public struct DiskUsage: Sendable, Codable {
     public let duration: TimeInterval
     public let finishedAt: Date
 
-    public init(rootPath: String, items: [DiskItem], largestFiles: [DiskFile], categories: [DiskCategoryTotal],
-                fileCount: Int, folderCount: Int, unreadableFolders: Int, unreadableExamples: [String],
-                hardLinkDuplicates: Int, skippedVolumes: [String], detailThreshold: UInt64,
+    public init(rootPath: String, items: [DiskItem], largestFiles: [DiskFile], largestFilesCutoff: UInt64 = 0,
+                categories: [DiskCategoryTotal], fileCount: Int, folderCount: Int, unreadableFolders: Int,
+                unreadablePaths: [String], hardLinkDuplicates: Int, skippedVolumes: [String], detailThreshold: UInt64,
                 duration: TimeInterval, finishedAt: Date) {
         self.rootPath = rootPath
         self.items = items
         self.largestFiles = largestFiles
+        self.largestFilesCutoff = largestFilesCutoff
         self.categories = categories
         self.fileCount = fileCount
         self.folderCount = folderCount
         self.unreadableFolders = unreadableFolders
-        self.unreadableExamples = unreadableExamples
+        self.unreadablePaths = unreadablePaths
         self.hardLinkDuplicates = hardLinkDuplicates
         self.skippedVolumes = skippedVolumes
         self.detailThreshold = detailThreshold

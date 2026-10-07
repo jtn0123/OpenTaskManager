@@ -6,7 +6,8 @@ import Foundation
 /// be tested. A label that doesn't fit is left out rather than cut down,
 /// since "Ap…ns" names nothing; hovering shows the full name instead.
 public enum TreemapLabel {
-    public enum Fit: Sendable, Equatable {
+    /// Ordered: more shows more.
+    public enum Fit: Sendable, Equatable, Comparable {
         case none
         case name
         case nameAndSize
@@ -24,6 +25,25 @@ public enum TreemapLabel {
     public static func tile(name: Double, size: Double, lineHeight: Double, room: CGSize) -> Fit {
         guard name <= Double(room.width), lineHeight <= Double(room.height) else { return .none }
         return size <= Double(room.width) && 2 * lineHeight <= Double(room.height) ? .nameAndSize : .name
+    }
+
+    /// A plain tile whose name has a shorter form (see `shortName`): the
+    /// short one when it lets more show, else the whole one. `short` says
+    /// which to draw.
+    public static func tile(name: Double, shortName: Double?, size: Double, lineHeight: Double,
+                            room: CGSize) -> (fit: Fit, short: Bool) {
+        let whole = tile(name: name, size: size, lineHeight: lineHeight, room: room)
+        guard whole != .nameAndSize, let shortName else { return (whole, false) }
+        let short = tile(name: shortName, size: size, lineHeight: lineHeight, room: room)
+        return short > whole ? (short, true) : (whole, false)
+    }
+
+    /// A file's name without its extension ("Holiday-2026" for
+    /// "Holiday-2026.mov"), to try when the whole name doesn't fit. Still
+    /// a whole name rather than a cut one. Nil when there's nothing to drop.
+    public static func shortName(_ name: String) -> String? {
+        let stem = (name as NSString).deletingPathExtension
+        return stem.isEmpty || stem == name ? nil : stem
     }
 
     /// Where a tag of `size` goes for `tile` in a treemap of `bounds`: under
