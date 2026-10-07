@@ -68,6 +68,8 @@ struct AppsView: View {
     @State private var isNarrow = false
     /// In a narrow window, the details cover the table.
     @State private var showsFullDetail = false
+    /// The app whose removal review is open.
+    @State private var removing: InstalledApp?
 
     var body: some View {
         Group {
@@ -104,10 +106,23 @@ struct AppsView: View {
             await store.measureSizes()
         }
         .task { await store.followRunningApps() }
+        .sheet(item: $removing) { app in
+            AppRemovalSheet(app: app, otherApps: store.apps ?? []) {
+                store.forget(app.id)
+                // Its details go too; in a narrow window that means back to the list.
+                if selection == app.id {
+                    selection = nil
+                    showsFullDetail = false
+                }
+            }
+        }
         .onChange(of: filter) {
             // Drop a selection the filter hides, so its details go with it.
             guard let selection, let app = store.apps?.first(where: { $0.id == selection }) else { return }
-            if !filter.includes(AppRow(app: app, size: nil, pids: store.running[selection] ?? [])) { self.selection = nil }
+            if !filter.includes(AppRow(app: app, size: nil, pids: store.running[selection] ?? [])) {
+                self.selection = nil
+                showsFullDetail = false
+            }
         }
     }
 
@@ -139,13 +154,14 @@ struct AppsView: View {
                 backTitle: "Apps"
             ) {
                 AppsTable(rows: rows, isMeasuring: store.sizesLeft > 0, selection: $selection, sortOrder: $sortOrder,
-                          scrollTarget: $scrollTarget, showInStartup: showInStartup, open: openDetails)
+                          scrollTarget: $scrollTarget, showInStartup: showInStartup, moveToTrash: { removing = $0 },
+                          open: openDetails)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } detail: {
                 if let row = all.first(where: { $0.id == selection }) {
-                    AppDetail(app: row.app, size: row.size, isMeasuring: store.sizesLeft > 0, pids: row.pids) {
-                        showInStartup(row.app)
-                    }
+                    AppDetail(app: row.app, size: row.size, isMeasuring: store.sizesLeft > 0, pids: row.pids,
+                              showInStartup: { showInStartup(row.app) },
+                              moveToTrash: AppActions.offersRemoval(row.app) ? { removing = row.app } : nil)
                 } else {
                     ContentUnavailableView("No app selected", systemImage: "info.circle",
                                            description: Text("Select an app to see who signed it and what it starts."))
@@ -174,6 +190,8 @@ struct AppsView: View {
         selection = app.id
         scrollTarget = app.id
         openDetails()
+        // `-openAppRemoval YES` opens its removal review too.
+        if LaunchArgument.string("openAppRemoval") != nil, AppActions.offersRemoval(app) { removing = app }
     }
 
     /// Double-click: the pane in a wide window, the full-width details in a narrow one.
@@ -209,6 +227,8 @@ private struct AppsSummary: View {
         let total = sized.reduce(0) { $0 + Double($1.size ?? 0) }
         let largest = sized.max { $0.sizeOrder < $1.sizeOrder }
         let intel = rows.filter { $0.app.architecture == .intel }.count
+        // Apps whose executable couldn't be read: any of them might need Rosetta.
+        let unknown = rows.filter { $0.app.architecture == .unknown }
         let running = rows.filter(\.isRunning).count
         let selfStarting = rows.filter { $0.app.startsItself }.count
         let thirdParty = rows.filter { $0.app.kind == .thirdParty }.count
@@ -224,8 +244,8 @@ private struct AppsSummary: View {
                      help: "Space the bundles take on disk. Documents, caches and settings each app keeps in your Library aren't counted.") {
                 Stat(label: "Total size", number: total, color: Theme.memory, format: Format.bytes)
             }
-            AppsCard(tint: Theme.network, detail: intel == 0 ? "Nothing needs Rosetta" : "Run under Rosetta",
-                     help: "Apps built only for Intel processors. On Apple silicon they run under Rosetta translation.") {
+            AppsCard(tint: Theme.network, detail: AppText.intelDetail(intel: intel, unknown: unknown.count),
+                     help: AppText.intelHelp(unknown: unknown.map(\.app.name))) {
                 Stat(label: "Intel only", value: String(intel), color: Theme.network)
             }
             AppsCard(tint: Theme.disk, detail: selfStarting == 1 ? "1 app starts by itself" : "\(selfStarting) apps start by themselves",
@@ -266,6 +286,7 @@ private struct AppsTable: View {
     @Binding var sortOrder: [KeyPathComparator<AppRow>]
     @Binding var scrollTarget: InstalledApp.ID?
     var showInStartup: (InstalledApp) -> Void
+    var moveToTrash: (InstalledApp) -> Void
     var open: () -> Void
 
     /// The columns' minimum widths and the gaps between them, plus the
@@ -330,6 +351,10 @@ private struct AppsTable: View {
                 Button("Copy Bundle ID") { AppActions.copy(app.bundleIdentifier ?? "") }
                     .disabled(app.bundleIdentifier == nil)
                 Button("Copy Path") { AppActions.copy(app.path) }
+                if AppActions.offersRemoval(app) {
+                    Divider()
+                    Button("Move to Trash…") { moveToTrash(app) }
+                }
             }
         } primaryAction: { _ in
             open()
@@ -446,9 +471,32 @@ enum AppActions {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
+
+    /// Whether "Move to Trash…" is offered: never for Apple's apps, macOS's
+    /// own or OpenTaskManager (any copy of it).
+    static func offersRemoval(_ app: InstalledApp) -> Bool {
+        AppRemoval.refusal(for: app, ownBundleIdentifier: Bundle.main.bundleIdentifier, ownBundlePath: Bundle.main.bundlePath) == nil
+    }
 }
 
 enum AppText {
+    /// The Intel card's line. "Nothing needs Rosetta" only when every app's
+    /// architecture is known; otherwise the unknowns are counted beside the
+    /// confirmed ones, since any of them might be Intel-only.
+    static func intelDetail(intel: Int, unknown: Int) -> String {
+        if unknown > 0 { return "\(intel) confirmed · \(unknown) unknown" }
+        return intel == 0 ? "Nothing needs Rosetta" : "Run under Rosetta"
+    }
+
+    static func intelHelp(unknown names: [String]) -> String {
+        let intel = "Apps built only for Intel processors. On Apple silicon they run under Rosetta translation."
+        guard !names.isEmpty else { return intel }
+        let shown = names.count > 3 ? names.prefix(3).joined(separator: ", ") + " and \(names.count - 3) more"
+            : ListFormatter.localizedString(byJoining: names)
+        return intel + " Unknown: \(shown). Their executable is missing or isn't a Mach-O program (a script, say), so "
+            + "what they're built for can't be read, and they aren't counted above."
+    }
+
     /// "Today", "Yesterday" or the date ("Aug 18", "Mar 3, 2024"); a dash when Spotlight doesn't know.
     static func lastOpened(_ date: Date?) -> String {
         guard let date else { return "—" }

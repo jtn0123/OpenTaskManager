@@ -80,6 +80,14 @@ final class InstalledAppStore {
         sizesLeft = 0
     }
 
+    /// Drops an app that went to the Trash, without scanning again.
+    func forget(_ id: InstalledApp.ID) {
+        apps?.removeAll { $0.id == id }
+        sizes[id] = nil
+        running[id] = nil
+        Self.sizeCache[id] = nil
+    }
+
     /// Matches NSWorkspace's running apps to the installed ones.
     func updateRunning() {
         guard let apps else { return }
