@@ -380,7 +380,10 @@ final class AppModel {
             UserDefaults.standard.set(watts, forKey: "peakSystemWatts")
         }
         for gpu in snapshot.gpus {
-            gpuHistory[gpu.id, default: History(capacity: Self.historyCapacity)].append(gpu.deviceUtilization)
+            // An unreported load stays out of the history, so no graph draws it as 0%.
+            if let busy = gpu.deviceUtilization {
+                gpuHistory[gpu.id, default: History(capacity: Self.historyCapacity)].append(busy)
+            }
             gpuDetail[gpu.id, default: GPUHistory()].append(gpu)
         }
         for disk in snapshot.disks {

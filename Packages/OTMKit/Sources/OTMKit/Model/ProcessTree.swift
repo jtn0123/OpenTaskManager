@@ -25,7 +25,12 @@ public enum ProcessSection: Int, CaseIterable, Sendable {
 public struct ProcessTotals: Sendable, Hashable {
     public var cpuPercent: Double = 0
     public var memory: UInt64 = 0
+    /// Summed over the processes with a power reading; see `isPowerMeasured`.
     public var powerWatts: Double = 0
+    /// Whether any process counted here had a power reading. When none did
+    /// (restricted processes, or a Mac that doesn't count energy per process),
+    /// `powerWatts` is 0 for want of data, not a measured 0 W.
+    public var isPowerMeasured = false
     public var gpuFraction: Double = 0
     public var diskRate: Double = 0
     public var threads: Int = 0
@@ -37,6 +42,7 @@ public struct ProcessTotals: Sendable, Hashable {
         cpuPercent = process.cpuPercent
         memory = process.memory
         powerWatts = process.powerWatts ?? 0
+        isPowerMeasured = process.powerWatts != nil
         gpuFraction = process.gpuFraction ?? 0
         diskRate = process.diskReadRate + process.diskWriteRate
         threads = process.threadCount
@@ -47,6 +53,7 @@ public struct ProcessTotals: Sendable, Hashable {
         cpuPercent += other.cpuPercent
         memory += other.memory
         powerWatts += other.powerWatts
+        isPowerMeasured = isPowerMeasured || other.isPowerMeasured
         gpuFraction += other.gpuFraction
         diskRate += other.diskRate
         threads += other.threads

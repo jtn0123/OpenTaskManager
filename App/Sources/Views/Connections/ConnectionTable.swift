@@ -72,25 +72,35 @@ struct ScopeLabel: View {
             Text(connection.scope.label).lineLimit(1)
         } icon: {
             Image(systemName: connection.scope.symbol)
-                .foregroundStyle(connection.isExposed ? Color.orange : connection.scope.tint)
+                .foregroundStyle(connection.isExposed ? ConnectionTint.orange : connection.scope.tint)
         }
     }
 }
 
 // MARK: - Styling
 
+/// The system colours, deepened in light mode (see `Theme.data`), where the
+/// plain ones are too pale to read as text on white.
+enum ConnectionTint {
+    static let green = Theme.data(.systemGreen)
+    static let blue = Theme.data(.systemBlue)
+    static let orange = Theme.data(.systemOrange)
+    static let teal = Theme.data(.systemTeal)
+    static let purple = Theme.data(.systemPurple)
+}
+
 extension ConnectionKind {
     /// State text colour: listening green, established blue, and the rest
     /// fading as they wind down.
     var tint: Color {
         switch self {
-        case .listening: .green
-        case .established: .blue
-        case .connecting: .orange
+        case .listening: ConnectionTint.green
+        case .established: ConnectionTint.blue
+        case .connecting: ConnectionTint.orange
         case .closing: .gray
         case .closed: .secondary
-        case .udpBound: .teal
-        case .udpConnected: .purple
+        case .udpBound: ConnectionTint.teal
+        case .udpConnected: ConnectionTint.purple
         }
     }
 }
@@ -108,9 +118,9 @@ extension AddressScope {
     var tint: Color {
         switch self {
         case .loopback: .secondary
-        case .localNetwork: .teal
-        case .internet: .blue
-        case .allInterfaces: .orange
+        case .localNetwork: ConnectionTint.teal
+        case .internet: ConnectionTint.blue
+        case .allInterfaces: ConnectionTint.orange
         }
     }
 }

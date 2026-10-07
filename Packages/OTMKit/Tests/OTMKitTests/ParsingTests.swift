@@ -79,6 +79,19 @@ struct MiscParsingTests {
         #expect(GPUSampler.pid(fromCreator: "kernel") == nil)
     }
 
+    @Test func readsGPUUtilizationOnlyWhenReported() {
+        let appleSilicon: [String: Any] = ["Device Utilization %": 37, "Renderer Utilization %": 35, "In use system memory": 696_729_600]
+        #expect(GPUSampler.deviceUtilization(appleSilicon) == 0.37)
+        #expect(GPUSampler.deviceUtilization(["Device Utilization %": 0]) == 0, "an idle GPU is a real 0")
+        #expect(GPUSampler.deviceUtilization(["GPU Activity(%)": 12]) == 0.12)
+        #expect(GPUSampler.deviceUtilization(["Device Utilization %": 140]) == 1)
+        // A virtual machine's paravirtual GPU publishes memory figures and nothing about load.
+        let paravirtual: [String: Any] = ["Alloc system memory": 412_827_648, "In use system memory": 309_098_624, "recoveryCount": 0]
+        #expect(GPUSampler.deviceUtilization(paravirtual) == nil)
+        #expect(GPUSampler.deviceUtilization([:]) == nil)
+        #expect(GPUSampler.fraction("Tiler Utilization %", in: paravirtual) == nil)
+    }
+
     @Test func guessesInterfaceKinds() {
         #expect(NetworkSampler.guessKind("lo0", isLoopback: true) == .loopback)
         #expect(NetworkSampler.guessKind("utun3", isLoopback: false) == .vpn)

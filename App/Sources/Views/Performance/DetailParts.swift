@@ -25,15 +25,21 @@ struct TopAppsCard: View {
     var format: (ProcessTotals) -> String
     /// Values below this round to zero and aren't worth a row.
     var minimum: Double = 0
+    /// Why there's no ranking, when this Mac doesn't measure the metric at
+    /// all. Without it, every app would read 0 and the card "quiet".
+    var unavailable: String?
 
     var body: some View {
-        let top = groups.filter { metric($0.totals) > minimum }.sorted { metric($0.totals) > metric($1.totals) }.prefix(6)
+        let ranked = unavailable == nil ? groups.filter { metric($0.totals) > minimum } : []
+        let top = ranked.sorted { metric($0.totals) > metric($1.totals) }.prefix(6)
         let peak = top.first.map { metric($0.totals) } ?? 1
         Card {
             Label("Top \(title)", systemImage: symbol)
                 .font(.headline)
                 .foregroundStyle(color)
-            if top.isEmpty {
+            if let unavailable {
+                UnavailableNote(text: unavailable)
+            } else if top.isEmpty {
                 Text("Quiet right now.").font(.callout).foregroundStyle(.secondary)
             }
             VStack(spacing: 4) {
@@ -51,6 +57,25 @@ struct TopAppsCard: View {
             }
         }
     }
+}
+
+/// Says a reading isn't available on this Mac, so it isn't mistaken for a
+/// measured zero.
+struct UnavailableNote: View {
+    var text: String
+
+    var body: some View {
+        Label(text, systemImage: "questionmark.circle")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+}
+
+/// What to say where a reading isn't measured on this Mac.
+enum Unavailable {
+    static let gpuUtilization = "Utilization not reported"
+    static let gpuUtilizationDetail = "This GPU's driver doesn't report how busy it is."
+    static let energy = "This Mac doesn't report energy use per app."
 }
 
 /// One entry in a chart legend: swatch, name and the current value.
@@ -115,10 +140,7 @@ struct ChartCard<Chart: View>: View {
 extension View {
     /// The plot area look shared by detail charts: a tinted wash and a hairline border.
     func chartFrame(height: CGFloat, tint: Color) -> some View {
-        frame(height: height)
-            .background(LinearGradient(colors: [tint.opacity(0.10), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom),
-                        in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.25)))
+        frame(height: height).plotFrame(tint: tint)
     }
 }
 

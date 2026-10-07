@@ -1,41 +1,48 @@
 import OTMKit
 import SwiftUI
 
+/// The data colours. Each is a bright tone that glows on dark cards and, in
+/// light mode, a deeper shade of the same hue for lines and text (see
+/// `data(_:)`). Fills and washes take `fillShade`, which stays pastel.
 enum Theme {
-    static let cpu = Color(red: 0.24, green: 0.56, blue: 1.00)
-    static let memory = Color(red: 0.64, green: 0.42, blue: 0.96)
-    static let disk = Color(red: 0.20, green: 0.74, blue: 0.44)
-    static let diskSecondary = Color(red: 0.55, green: 0.86, blue: 0.40)
-    static let network = Color(red: 0.98, green: 0.55, blue: 0.20)
-    static let networkSecondary = Color(red: 0.98, green: 0.80, blue: 0.30)
-    static let gpu = Color(red: 0.10, green: 0.74, blue: 0.80)
-    static let power = Color(red: 0.95, green: 0.72, blue: 0.12)
-    static let thermal = Color(red: 1.00, green: 0.42, blue: 0.30)
-    static let fan = Color(red: 0.38, green: 0.78, blue: 0.98)
+    static let cpu = data(0.24, 0.56, 1.00)
+    static let memory = data(0.64, 0.42, 0.96)
+    static let disk = data(0.20, 0.74, 0.44)
+    static let diskSecondary = data(0.55, 0.86, 0.40)
+    static let network = data(0.98, 0.55, 0.20)
+    static let networkSecondary = data(0.98, 0.80, 0.30)
+    static let gpu = data(0.10, 0.74, 0.80)
+    static let power = data(0.95, 0.72, 0.12)
+    static let thermal = data(1.00, 0.42, 0.30)
+    static let fan = data(0.38, 0.78, 0.98)
 
     // Memory composition.
-    static let wired = Color(red: 0.93, green: 0.36, blue: 0.62)
-    static let compressed = Color(red: 0.98, green: 0.62, blue: 0.24)
-    static let cached = Color(red: 0.32, green: 0.70, blue: 0.86)
-    static let swap = Color(red: 0.96, green: 0.42, blue: 0.36)
+    static let wired = data(0.93, 0.36, 0.62)
+    static let compressed = data(0.98, 0.62, 0.24)
+    static let cached = data(0.32, 0.70, 0.86)
+    static let swap = data(0.96, 0.42, 0.36)
 
     // Power components.
-    static let neuralEngine = Color(red: 0.90, green: 0.40, blue: 0.86)
-    static let dram = Color(red: 0.62, green: 0.50, blue: 0.98)
-    static let restOfSystem = Color(red: 0.62, green: 0.58, blue: 0.48)
+    static let neuralEngine = data(0.90, 0.40, 0.86)
+    static let dram = data(0.62, 0.50, 0.98)
+    static let restOfSystem = data(0.62, 0.58, 0.48)
 
     /// Everything not broken out on its own.
-    static let other = Color(white: 0.50)
+    static let other = data(0.50, 0.50, 0.50)
 
     /// Distinct colours for "by app" series, in rank order.
     static let series: [Color] = [
-        Color(red: 0.26, green: 0.58, blue: 1.00),
-        Color(red: 0.98, green: 0.58, blue: 0.22),
-        Color(red: 0.16, green: 0.80, blue: 0.70),
-        Color(red: 0.94, green: 0.40, blue: 0.62),
-        Color(red: 0.62, green: 0.82, blue: 0.30),
-        Color(red: 0.70, green: 0.52, blue: 0.98),
+        data(0.26, 0.58, 1.00),
+        data(0.98, 0.58, 0.22),
+        data(0.16, 0.80, 0.70),
+        data(0.94, 0.40, 0.62),
+        data(0.62, 0.82, 0.30),
+        data(0.70, 0.52, 0.98),
     ]
+
+    private static let slowerTier = data(0.22, 0.82, 0.86)
+    private static let storageSensor = data(0.30, 0.80, 0.62)
+    private static let batterySensor = data(0.98, 0.78, 0.26)
 
     static func series(_ index: Int) -> Color {
         series[index % series.count]
@@ -43,20 +50,66 @@ enum Theme {
 
     /// Colour for a core tier: the fastest tier (level 0) gets the CPU blue.
     static func tier(_ level: Int) -> Color {
-        level == 0 ? cpu : Color(red: 0.22, green: 0.82, blue: 0.86)
+        level == 0 ? cpu : slowerTier
     }
 
     /// Colour for each kind of temperature sensor.
     static func sensor(_ kind: SensorKind) -> Color {
         switch kind {
         case .chip: thermal
-        case .storage: Color(red: 0.30, green: 0.80, blue: 0.62)
-        case .battery: Color(red: 0.98, green: 0.78, blue: 0.26)
+        case .storage: storageSensor
+        case .battery: batterySensor
         }
     }
 
     static func pressure(_ fraction: Double) -> Color {
         fraction > 0.9 ? .red : fraction > 0.75 ? .orange : .green
+    }
+
+    /// Contrast the light-mode shades reach against white: WCAG AA for text,
+    /// since the same colours draw headings, legends and state labels.
+    static let lightContrast = 4.5
+
+    /// A data colour: this sRGB tone in dark mode, and the same hue deepened
+    /// to `lightContrast` in light mode.
+    static func data(_ red: Double, _ green: Double, _ blue: Double) -> Color {
+        data(NSColor(srgbRed: red, green: green, blue: blue, alpha: 1))
+    }
+
+    /// A data colour from a system colour: unchanged in dark mode, deepened
+    /// in light mode, where the system tints are too pale for text.
+    static func data(_ base: NSColor) -> Color {
+        var tone = ColorContrast.RGB(red: 0, green: 0, blue: 0)
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            if let srgb = base.usingColorSpace(.sRGB) {
+                tone = ColorContrast.RGB(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent)
+            }
+        }
+        let deep = ColorContrast.deepened(tone, toContrast: lightContrast)
+        let light = NSColor(srgbRed: deep.red, green: deep.green, blue: deep.blue, alpha: 1)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? base : light
+        })
+    }
+}
+
+extension NSColor {
+    /// The shade for fills and washes: the bright tone a data colour has in
+    /// dark mode, in either appearance. Light mode deepens lines and text
+    /// (see `Theme.data`) but keeps its washes pastel.
+    var fillShade: NSColor {
+        var shade = self
+        NSAppearance(named: .darkAqua)?.performAsCurrentDrawingAppearance {
+            shade = usingColorSpace(.sRGB) ?? self
+        }
+        return shade
+    }
+}
+
+extension Color {
+    /// See `NSColor.fillShade`.
+    var fillShade: Color {
+        Color(nsColor: NSColor(self).fillShade)
     }
 }
 
@@ -86,9 +139,7 @@ struct GraphPanel: View {
             GraphView(series: series, maxValue: maxValue, capacity: capacity, glows: true, stacked: stacked,
                       minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits, cornerRadius: 8)
                 .frame(height: height)
-                .background(LinearGradient(colors: [tint.opacity(0.12), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom),
-                            in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.30)))
+                .plotFrame(tint: tint, wash: (0.12, 0.02), border: 0.30)
             TimeAxis(samples: capacity)
         }
     }
@@ -122,9 +173,37 @@ struct Sparkline: View {
     var body: some View {
         GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue,
                   capacity: capacity, showsGrid: false, lineWidth: 1.2, glows: true, cornerRadius: 3)
-            .background(LinearGradient(colors: [color.opacity(0.16), color.opacity(0.03)], startPoint: .top, endPoint: .bottom),
-                        in: RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(color.opacity(0.5), lineWidth: 0.75))
+            .plotFrame(tint: color, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
+    }
+}
+
+extension View {
+    /// The plot area look shared by graphs: a pastel wash behind and a hairline
+    /// border around, `wash` and `border` being opacities of the tint.
+    func plotFrame(tint: Color, wash: (top: Double, bottom: Double) = (0.10, 0.02), border: Double = 0.25,
+                   lineWidth: CGFloat = 1, cornerRadius: CGFloat = 8) -> some View {
+        modifier(PlotFrame(tint: tint, wash: wash, border: border, lineWidth: lineWidth, cornerRadius: cornerRadius))
+    }
+}
+
+/// See `plotFrame`. Light mode draws the border in the tint's deeper shade and
+/// a little stronger, so a plot's edge holds up on a pale card; the wash
+/// stays pastel in both.
+private struct PlotFrame: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var tint: Color
+    var wash: (top: Double, bottom: Double)
+    var border: Double
+    var lineWidth: CGFloat
+    var cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius)
+        let pastel = tint.fillShade
+        content
+            .background(LinearGradient(colors: [pastel.opacity(wash.top), pastel.opacity(wash.bottom)], startPoint: .top, endPoint: .bottom),
+                        in: shape)
+            .overlay(shape.strokeBorder(tint.opacity(colorScheme == .dark ? border : min(border * 1.8, 0.6)), lineWidth: lineWidth))
     }
 }
 
@@ -246,6 +325,7 @@ final class RingGaugeView: NSView {
     private let head = CALayer()
     private var lineWidth: CGFloat = 12
     private var fraction: CGFloat = 0
+    private var color: NSColor?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -288,13 +368,10 @@ final class RingGaugeView: NSView {
             self.lineWidth = lineWidth
             needsLayout = true
         }
-        track.strokeColor = color.withAlphaComponent(0.14).cgColor
-        glow.strokeColor = color.withAlphaComponent(0.35).cgColor
-        glow.shadowColor = color.cgColor
-        fill.colors = [(color.blended(withFraction: 0.45, of: .white) ?? color).cgColor, color.cgColor]
-        ticks.strokeColor = color.withAlphaComponent(0.30).cgColor
-        head.backgroundColor = (color.blended(withFraction: 0.75, of: .white) ?? .white).cgColor
-        head.shadowColor = color.cgColor
+        if color != self.color {
+            self.color = color
+            applyColors()
+        }
         head.isHidden = end < 0.005
         head.position = point(at: end)
         CATransaction.commit()
@@ -313,6 +390,30 @@ final class RingGaugeView: NSView {
         sweep.calculationMode = .paced
         sweep.timingFunction = CAMediaTimingFunction(name: .easeOut)
         head.add(sweep, forKey: "sweep")
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    /// The arc and ticks take the colour's shade for this appearance (deeper
+    /// in light mode); the track and glow keep the bright fill shade.
+    private func applyColors() {
+        guard let color else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let bright = color.fillShade
+            track.strokeColor = bright.withAlphaComponent(0.14).cgColor
+            glow.strokeColor = bright.withAlphaComponent(0.35).cgColor
+            glow.shadowColor = bright.cgColor
+            fill.colors = [(color.blended(withFraction: 0.45, of: .white) ?? color).cgColor, color.cgColor]
+            ticks.strokeColor = color.withAlphaComponent(0.30).cgColor
+            head.backgroundColor = (color.blended(withFraction: 0.75, of: .white) ?? .white).cgColor
+            head.shadowColor = bright.cgColor
+        }
+        CATransaction.commit()
     }
 
     override func layout() {
@@ -407,6 +508,7 @@ final class CoreTileRowView: NSView {
     private var tiles: [Tile] = []
     private var cpus: [Int] = []
     private var usages: [Double] = []
+    private var color = NSColor.controlAccentColor
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -421,6 +523,7 @@ final class CoreTileRowView: NSView {
     func update(cpus: [Int], usages: [Double], color: NSColor) {
         self.cpus = cpus
         self.usages = usages
+        self.color = color
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         while tiles.count < usages.count {
@@ -442,25 +545,51 @@ final class CoreTileRowView: NSView {
             tile.box.removeFromSuperlayer()
         }
         layoutTiles()
-        for tile in tiles {
-            tile.halo.shadowColor = color.cgColor
-            tile.box.backgroundColor = color.withAlphaComponent(0.10).cgColor
-            tile.level.colors = [color.cgColor, color.withAlphaComponent(0.55).cgColor]
-        }
+        applyColors()
         CATransaction.commit()
 
         CATransaction.begin()
         CATransaction.setAnimationDuration(0.4)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-        for (tile, usage) in zip(tiles, usages) {
-            let load = CGFloat(min(max(usage, 0), 1))
-            tile.level.bounds.size.height = CoreTileRow.tileSize.height * load
-            tile.box.borderColor = color.withAlphaComponent(0.25 + 0.6 * load).cgColor
-            tile.box.borderWidth = load > 0.75 ? 1.5 : 1
-            tile.halo.shadowOpacity = load > 0.5 ? Float(load) * 0.8 : 0
-        }
+        applyLoad()
         CATransaction.commit()
         updateToolTips()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        applyColors()
+        applyLoad()
+        CATransaction.commit()
+    }
+
+    /// Washes and glows take the bright fill shade, levels the colour's shade
+    /// for this appearance (deeper in light mode).
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            let bright = color.fillShade
+            let levelColors = [color.cgColor, color.withAlphaComponent(0.55).cgColor]
+            for tile in tiles {
+                tile.halo.shadowColor = bright.cgColor
+                tile.box.backgroundColor = bright.withAlphaComponent(0.10).cgColor
+                tile.level.colors = levelColors
+            }
+        }
+    }
+
+    /// Fills each tile to its load; the outline deepens with it.
+    private func applyLoad() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            for (tile, usage) in zip(tiles, usages) {
+                let load = CGFloat(min(max(usage, 0), 1))
+                tile.level.bounds.size.height = CoreTileRow.tileSize.height * load
+                tile.box.borderColor = color.withAlphaComponent(0.25 + 0.6 * load).cgColor
+                tile.box.borderWidth = load > 0.75 ? 1.5 : 1
+                tile.halo.shadowOpacity = load > 0.5 ? Float(load) * 0.8 : 0
+            }
+        }
     }
 
     override func layout() {
@@ -525,7 +654,8 @@ private struct CardSurface: NSViewRepresentable {
     }
 
     func updateNSView(_ view: CardSurfaceView, context: Context) {
-        view.update(tint: tint.map(NSColor.init), glow: glow)
+        // Washes stay pastel in light mode: only lines and text deepen.
+        view.update(tint: tint.map { NSColor($0).fillShade }, glow: glow)
     }
 }
 
@@ -574,7 +704,9 @@ final class CardSurfaceView: NSView {
         CATransaction.setAnimationDuration(0.6)
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
         halo.shadowOpacity = tint == nil ? 0 : Float(0.10 + 0.55 * self.glow)
-        surface.borderColor = borderColor.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            surface.borderColor = borderColor.cgColor
+        }
         CATransaction.commit()
     }
 
@@ -639,9 +771,11 @@ struct ProcessBarRow: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(alignment: .leading) {
+            // The bar sits behind text, so it keeps the pastel fill shade.
+            let bar = color.fillShade
             GeometryReader { proxy in
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(LinearGradient(colors: [color.opacity(0.30), color.opacity(0.12)], startPoint: .leading, endPoint: .trailing))
+                    .fill(LinearGradient(colors: [bar.opacity(0.30), bar.opacity(0.12)], startPoint: .leading, endPoint: .trailing))
                     .frame(width: proxy.size.width * min(max(fraction, 0), 1))
             }
         }

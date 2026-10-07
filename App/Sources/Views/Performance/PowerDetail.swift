@@ -5,8 +5,8 @@ struct PowerDetail: View {
     @Environment(AppModel.self) private var model
     var snapshot: SystemSnapshot
 
-    private static let charging = Color(red: 0.30, green: 0.85, blue: 0.45)
-    private static let discharging = Color(red: 0.98, green: 0.45, blue: 0.35)
+    private static let charging = Theme.data(0.30, 0.85, 0.45)
+    private static let discharging = Theme.data(0.98, 0.45, 0.35)
 
     var body: some View {
         let power = snapshot.power
@@ -27,9 +27,12 @@ struct PowerDetail: View {
                 clusterPower(clusters)
             }
             if power.adapter != nil || power.battery != nil { supply(power) }
-            byApp()
+            // Without per-process energy there's nothing to break down by app.
+            let perApp = snapshot.measuresProcessEnergy != false
+            if perApp { byApp() }
             TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: model.appGroups,
-                        metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
+                        metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01,
+                        unavailable: perApp ? nil : Unavailable.energy)
         }
     }
 

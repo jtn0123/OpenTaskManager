@@ -29,7 +29,8 @@ struct OverviewView: View {
                         TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
                                 metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
                         TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
-                                metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
+                                metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01,
+                                unavailable: snapshot.measuresProcessEnergy == false ? Unavailable.energy : nil)
                     }
                     StorageCard(volumes: snapshot.volumes)
                 }
@@ -69,10 +70,11 @@ struct OverviewView: View {
     }
 
     private func gpuGauge(_ gpu: GPUSample) -> some View {
-        GaugeCard(
-            title: "GPU", value: gpu.deviceUtilization * 100, format: { Format.fixed($0, 0) }, unit: "%",
-            fraction: gpu.deviceUtilization, color: Theme.gpu,
-            details: [gpu.name] + (gpu.coreCount.map { ["\($0) cores"] } ?? []),
+        let busy = gpu.deviceUtilization
+        return GaugeCard(
+            title: "GPU", value: busy.map { $0 * 100 }, format: { Format.fixed($0, 0) }, unit: "%",
+            fraction: busy ?? 0, color: Theme.gpu,
+            details: [gpu.name] + (gpu.coreCount.map { ["\($0) cores"] } ?? []) + (busy == nil ? [Unavailable.gpuUtilization] : []),
             history: model.gpuHistory[gpu.id]?.values ?? [], historyMax: 1
         )
     }
@@ -140,7 +142,8 @@ private struct GaugeCard: View {
     private static let valueFont = NSFont.numeric(size: 26, weight: .semibold, rounded: true)
 
     var title: String
-    var value: Double
+    /// nil when this Mac doesn't report the reading: the ring shows "—", not 0.
+    var value: Double?
     var format: (Double) -> String
     var unit: String
     var fraction: Double
@@ -156,8 +159,12 @@ private struct GaugeCard: View {
                 ZStack {
                     RingGauge(fraction: fraction, color: color, lineWidth: 10)
                     VStack(spacing: -2) {
-                        AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
-                        Text(unit).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        if let value {
+                            AnimatedNumber(value: value, format: format, font: Self.valueFont, alignment: .center)
+                            Text(unit).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        } else {
+                            Text("—").font(.system(size: 26, weight: .semibold, design: .rounded)).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .frame(width: 96, height: 96)
@@ -212,8 +219,7 @@ private struct CoreMap: View {
             GraphSeries(values: model.tierHistory(level: tier.level), color: Theme.tier(tier.level), fill: tier.level == 0)
         }
         return GraphView(series: series, maxValue: 1, capacity: 120, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
-            .background(Theme.cpu.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.cpu.opacity(0.18)))
+            .plotFrame(tint: Theme.cpu, wash: (0.05, 0.05), border: 0.18)
     }
 
     private func tierRow(_ tier: CPUTopology.Tier, topology: CPUTopology) -> some View {

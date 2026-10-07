@@ -222,7 +222,8 @@ struct MenuBarView: View {
                 meter("Memory", "\(Format.bytes(snapshot.memory.used)) · \(snapshot.memory.pressure.rawValue)",
                       model.memoryHistory.values, Theme.memory, 1)
                 if let gpu = snapshot.gpus.first {
-                    meter("GPU", Format.percent(gpu.deviceUtilization), model.gpuHistory[gpu.id]?.values ?? [], Theme.gpu, 1)
+                    meter("GPU", gpu.deviceUtilization.map { Format.percent($0) } ?? Unavailable.gpuUtilization,
+                          model.gpuHistory[gpu.id]?.values ?? [], Theme.gpu, 1)
                 }
                 if let watts = snapshot.power.systemWatts {
                     meter("Power", Format.watts(watts), model.powerHistory.values, Theme.power, nil)

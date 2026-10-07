@@ -48,12 +48,12 @@ struct ConnectionDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: connection.isExposed ? "exclamationmark.shield" : connection.scope.symbol)
-                    .foregroundStyle(connection.isExposed ? Color.orange : connection.scope.tint)
+                    .foregroundStyle(connection.isExposed ? ConnectionTint.orange : connection.scope.tint)
             }
             .font(.callout)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background((connection.isExposed ? Color.orange : connection.scope.tint).opacity(0.10),
+            .background((connection.isExposed ? ConnectionTint.orange : connection.scope.tint).opacity(0.10),
                         in: RoundedRectangle(cornerRadius: 8))
 
             Button(action: showProcess) {

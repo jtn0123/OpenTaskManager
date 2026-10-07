@@ -18,6 +18,13 @@ public struct SystemSnapshot: Sendable, Codable {
 
     public var threadCount: Int { processes.reduce(0) { $0 + $1.threadCount } }
 
+    /// Whether this Mac measures each process's energy use. false in a virtual
+    /// machine, whose kernel doesn't count it: rank nothing by energy then,
+    /// rather than calling every app idle. nil while it can't tell yet.
+    public var measuresProcessEnergy: Bool? {
+        ProcessSample.measuresEnergy(processes, interval: interval)
+    }
+
     /// The machine-level part of the snapshot, for callers that do not need the process list.
     public func withoutProcesses() -> SystemSnapshot {
         SystemSnapshot(
@@ -180,7 +187,10 @@ public struct GPUSample: Sendable, Codable, Identifiable {
     public let registryID: UInt64
     public let name: String
     public let coreCount: Int?
-    public let deviceUtilization: Double
+    /// Busy fraction of the whole GPU, 0...1. nil when the driver doesn't
+    /// report it (a virtual machine's paravirtual GPU): show that as unknown,
+    /// never as 0%.
+    public let deviceUtilization: Double?
     public let rendererUtilization: Double?
     public let tilerUtilization: Double?
     public let memoryInUse: UInt64?
