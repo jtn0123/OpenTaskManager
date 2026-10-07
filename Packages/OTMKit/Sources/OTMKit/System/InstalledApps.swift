@@ -49,7 +49,7 @@ public enum InstalledApps {
         var candidates = standardFolders(home: home).flatMap { bundles(inFolder: $0, depth: folderDepth) }
         candidates += standardBundles.filter { FileManager.default.fileExists(atPath: $0) }
         if useSpotlight {
-            candidates += spotlightBundles().filter { isListable(spotlightPath: $0, home: home) }
+            candidates += spotlightBundles().filter { isListable(spotlightPath: $0, home: home) && !isBackgroundOnly(bundleAt: $0) }
         }
         let locations = deduplicate(candidates)
         let apps = BoundedWork.map(locations, width: width) { read(bundleAt: $0.path, resolvedPath: $0.resolved) }
@@ -119,6 +119,17 @@ public enum InstalledApps {
             return parts.count >= 4 && parts[2] == "Applications"
         }
         return true
+    }
+
+    /// Faceless helpers (`LSBackgroundOnly`) that never show a window or a
+    /// Dock icon. Spotlight finds them outside the Applications folders, such
+    /// as the scanner helpers in /Library/Image Capture.
+    public static func isBackgroundOnly(bundleAt path: String) -> Bool {
+        switch propertyList(atPath: path + "/Contents/Info.plist")["LSBackgroundOnly"] {
+        case let flag as Bool: flag
+        case let text as String: ["1", "yes", "true"].contains(text.lowercased())
+        default: false
+        }
     }
 
     /// Drops repeats, keeping the first place each bundle was found. Two
@@ -291,5 +302,20 @@ public enum InstalledApps {
             if let match { pids[match, default: []].append(process.pid) }
         }
         return pids.mapValues { $0.sorted() }
+    }
+
+    /// The app a name or bundle ID most likely means (`-openApp Safari`):
+    /// an exact name, then an exact bundle ID, then the first name starting
+    /// with it, then the first name and the first bundle ID containing it,
+    /// all ignoring case.
+    public static func find(_ query: String, in apps: [InstalledApp]) -> InstalledApp? {
+        let query = query.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return nil }
+        func same(_ text: String?) -> Bool { text?.caseInsensitiveCompare(query) == .orderedSame }
+        func contains(_ text: String?) -> Bool { text?.localizedCaseInsensitiveContains(query) == true }
+        let lowered = query.lowercased()
+        return apps.first { same($0.name) } ?? apps.first { same($0.bundleIdentifier) }
+            ?? apps.first { $0.name.lowercased().hasPrefix(lowered) }
+            ?? apps.first { contains($0.name) } ?? apps.first { contains($0.bundleIdentifier) }
     }
 }

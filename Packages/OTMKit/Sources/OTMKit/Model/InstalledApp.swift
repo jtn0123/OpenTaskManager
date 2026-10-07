@@ -155,6 +155,21 @@ public struct InstalledApp: Sendable, Codable, Hashable, Identifiable {
 
     public var startsItself: Bool { !selfStartingItems.isEmpty }
 
+    /// Text for the Startup page's search (which looks at each item's name,
+    /// label, program and property list path) that finds as many of this
+    /// app's launch items as possible: usually the bundle ID, otherwise the
+    /// bundle path their programs share. Nil when the app has none.
+    public var startupSearchText: String? {
+        guard !launchItems.isEmpty else { return nil }
+        func found(by text: String) -> Int {
+            launchItems.filter { item in
+                [item.name, item.label, item.program ?? "", item.plistPath].contains { $0.localizedCaseInsensitiveContains(text) }
+            }.count
+        }
+        // Ties keep the earlier, more specific candidate.
+        return [bundleIdentifier, resolvedPath, path, name].compactMap { $0 }.max { found(by: $0) < found(by: $1) }
+    }
+
     /// Matches a search against the name, bundle ID, path and signing team.
     public func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespaces)

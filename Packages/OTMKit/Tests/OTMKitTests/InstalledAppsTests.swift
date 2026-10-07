@@ -67,7 +67,8 @@ private final class Scratch {
 
 private func app(_ path: String, resolved: String? = nil, id: String?, kind: AppKind = .thirdParty,
                  launchItems: [LaunchItem] = []) -> InstalledApp {
-    InstalledApp(path: path, resolvedPath: resolved ?? path, name: (path as NSString).lastPathComponent,
+    InstalledApp(path: path, resolvedPath: resolved ?? path,
+                 name: ((path as NSString).lastPathComponent as NSString).deletingPathExtension,
                  bundleIdentifier: id, version: "1.0", build: "1", minimumSystemVersion: nil, executablePath: nil,
                  kind: kind, hasAppStoreReceipt: false, isiOSApp: false, slices: nil, signature: .unknown,
                  lastOpened: nil, added: nil, launchItems: launchItems)
@@ -396,6 +397,20 @@ struct InstalledAppDiscoveryTests {
         #expect(InstalledApps.read(bundleAt: scratch.path + "/Gone.app", resolvedPath: scratch.path + "/Gone.app") == nil)
     }
 
+    @Test func spotsFacelessHelpers() throws {
+        let scratch = try Scratch()
+        try scratch.plist("Helper.app/Contents/Info.plist", ["LSBackgroundOnly": true])
+        try scratch.plist("Old.app/Contents/Info.plist", ["LSBackgroundOnly": "1"])
+        try scratch.plist("MenuBar.app/Contents/Info.plist", ["LSUIElement": true])
+        try scratch.plist("Off.app/Contents/Info.plist", ["LSBackgroundOnly": false])
+        #expect(InstalledApps.isBackgroundOnly(bundleAt: scratch.path + "/Helper.app"))
+        #expect(InstalledApps.isBackgroundOnly(bundleAt: scratch.path + "/Old.app"))
+        // A menu bar app has no Dock icon but does show windows, so it stays.
+        #expect(!InstalledApps.isBackgroundOnly(bundleAt: scratch.path + "/MenuBar.app"))
+        #expect(!InstalledApps.isBackgroundOnly(bundleAt: scratch.path + "/Off.app"))
+        #expect(!InstalledApps.isBackgroundOnly(bundleAt: scratch.path + "/Missing.app"))
+    }
+
     @Test func measuresAllocatedSize() throws {
         let scratch = try Scratch()
         try scratch.write("Big.app/Contents/Resources/data", Data(repeating: 7, count: 10_000))
@@ -460,6 +475,38 @@ struct InstalledAppMatchingTests {
         let busy = app("/Applications/Example.app", id: "com.example", launchItems: [onDemand, atLogin, hourly])
         #expect(busy.startsItself)
         #expect(busy.selfStartingItems == [atLogin, hourly])
+    }
+
+    @Test func startupSearchFindsTheAppsItems() {
+        let byLabel = launchItem(label: "com.microsoft.OneDriveStandaloneUpdaterDaemon", program: "/Library/Updater")
+        let byHelper = launchItem(label: "com.microsoft.onedrive.FinderSync", program: "/usr/libexec/helper")
+        let oneDrive = app("/Applications/OneDrive.app", id: "com.microsoft.OneDrive", launchItems: [byLabel, byHelper])
+        #expect(oneDrive.startupSearchText == "com.microsoft.OneDrive")
+
+        // Labels that don't carry the bundle ID: the programs' shared path finds them.
+        let first = launchItem(label: "net.example.agent", program: "/Applications/Tool.app/Contents/MacOS/agent")
+        let second = launchItem(label: "net.example.daemon", program: "/Applications/Tool.app/Contents/Library/daemon")
+        let tool = app("/Applications/Tool.app", id: "com.example.tool", launchItems: [first, second])
+        #expect(tool.startupSearchText == "/Applications/Tool.app")
+        #expect(app("/Applications/Quiet.app", id: "com.example.quiet").startupSearchText == nil)
+    }
+
+    @Test func findsTheAppANameOrBundleIDMeans() {
+        let safari = app("/Applications/Safari.app", id: "com.apple.Safari")
+        let preview = app("/Applications/Safari Technology Preview.app", id: "com.apple.SafariTechnologyPreview")
+        let xcode = app("/Applications/Xcode.app", id: "com.apple.dt.Xcode")
+        let scanner = app("/Library/Image Capture/AirScanLegacyDiscovery.app", id: "com.apple.AirScanLegacyDiscovery")
+        let legacy = app("/Applications/Legacy Tool.app", id: "com.example.legacytool")
+        // Sorted by name, as the scan returns them, with the longer name first to show exact names win.
+        let apps = [scanner, legacy, preview, safari, xcode]
+        #expect(InstalledApps.find("safari", in: apps) == safari)
+        #expect(InstalledApps.find(" com.apple.SafariTechnologyPreview ", in: apps) == preview)
+        // A name that starts with it beats one that merely contains it.
+        #expect(InstalledApps.find("legacy", in: apps) == legacy)
+        #expect(InstalledApps.find("Technology", in: apps) == preview)
+        #expect(InstalledApps.find("dt.xcode", in: apps) == xcode)
+        #expect(InstalledApps.find("Chrome", in: apps) == nil)
+        #expect(InstalledApps.find("  ", in: apps) == nil)
     }
 
     @Test func runningAppsMatchByPathThenUniqueBundleID() {

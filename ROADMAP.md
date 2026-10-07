@@ -35,13 +35,15 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Inspector: arguments, environment, open files, sockets | ✅ | |
 | Sample Process (stack sampling) | ✅ | Uses `/usr/bin/sample` |
 | Menu bar meters and top processes | ✅ | |
-| `otm` CLI with JSON output | ✅ | `ps`, `top`, `system`, `power`, `ports`, `drivers`, `inspect`, `kill`, `du` |
+| `otm` CLI with JSON output | ✅ | `ps`, `top`, `system`, `power`, `ports`, `drivers`, `apps`, `inspect`, `kill`, `du` |
 | Overview dashboard with live core map | ✅ | |
 | Power by part of the chip | ✅ | CPU, GPU, Neural Engine, DRAM and the rest, from IOReport and the SMC |
 | CPU cluster and GPU clock speeds | ✅ | From IOReport residencies and the device tree's clock tables |
 | Memory by app, paging and compressor rates | ✅ | Stacked over time |
 | GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
 | System information page | ✅ | Hardware, displays, storage, network, battery health, software and security state; identifiers hidden until shown; Copy Summary |
+| Installed apps page | ✅ | Every app in the Applications folders plus Spotlight's finds: version, kind (Apple, App Store, third party), architecture with Intel-only apps flagged for Rosetta, signer and team, size on disk, last opened, running PIDs and the launchd items each app owns. Notarization isn't shown: reading it means validating the whole bundle |
+| Uninstall apps (Move to Trash, with their leftovers) | ⬜ | The Apps page only reads for now. Needs a confirmation, a list of the app's support files, caches and launch items to remove with it, and care with apps that are running or installed by an administrator |
 | Drivers page | ✅ | System extensions (network, DriverKit, endpoint security) and loaded kernel extensions, third-party first, with publisher, status, and approvals that are waiting flagged and linked to System Settings. Kexts show their UUID, path, memory and links. Read on open and on Refresh. Also `otm drivers`. Connected devices (USB, Thunderbolt, PCI) aren't listed yet |
 | Disk space analysis (Storage page) | ✅ | Scan Home, a volume or any folder: drill-down treemap, ranked contents, the 50 largest files and space by category, with Reveal in Finder and Copy Path. Allocated sizes, hard links counted once, bounded memory. Also `otm du` |
 | Move to Trash from the Storage page | ⬜ | TODO: Move to Trash (never delete outright) for items picked on the Storage page, with a confirmation that shows the size and an Undo, then update the totals without a rescan. Left out until then because it's destructive |
