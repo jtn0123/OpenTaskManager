@@ -14,6 +14,9 @@ struct UsersView: View {
     @State private var showsSystemAccounts = false
     /// `--args -openUser root` expands that user once the first sample arrives.
     @State private var pendingUser = LaunchArgument.string("openUser")
+    /// Set once the page has opened a lone person's top processes, so
+    /// closing them sticks.
+    @State private var openedOnlyPerson = false
 
     var body: some View {
         Group {
@@ -24,7 +27,10 @@ struct UsersView: View {
             }
         }
         .task { await followSessions() }
-        .onChange(of: model.users.count, initial: true) { openRequestedUser() }
+        .onChange(of: model.users.count, initial: true) {
+            openRequestedUser()
+            openOnlyPerson()
+        }
     }
 
     private func content(_ snapshot: SystemSnapshot) -> some View {
@@ -93,6 +99,16 @@ struct UsersView: View {
         expanded.insert(user.uid)
         if user.isSystemAccount { showsSystemAccounts = true }
         pendingUser = nil
+    }
+
+    /// With one person on the Mac, the page has room for their busiest
+    /// processes, so they start open.
+    private func openOnlyPerson() {
+        guard !openedOnlyPerson, pendingUser == nil else { return }
+        let people = model.users.filter { !$0.isSystemAccount }
+        guard !people.isEmpty else { return }
+        openedOnlyPerson = true
+        if people.count == 1 { expanded.insert(people[0].uid) }
     }
 
     /// Who's at the screen and who's logged in change rarely, so check every
