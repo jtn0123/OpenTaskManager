@@ -63,6 +63,8 @@ struct FormatTests {
         #expect(Format.trail("Projects/webapp", under: "Projects") == "webapp")
         #expect(Format.trail("/demo/Projects/", under: "/demo/") == "Projects", "trailing slashes don't count")
         #expect(Format.trail("/demo", under: "/demo") == "", "the folder itself")
+        #expect(Format.trailNames("/demo/Projects/webapp/build", under: "/demo") == ["Projects", "webapp", "build"])
+        #expect(Format.trailNames("/demo", under: "/demo").isEmpty)
     }
 
     @Test func trailsMatchWholeFolderNames() {
