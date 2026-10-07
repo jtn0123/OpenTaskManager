@@ -273,9 +273,10 @@ struct HistoryChartCard: View {
             if let earliest, earliest > domain.lowerBound {
                 RectangleMark(xStart: .value("Time", domain.lowerBound), xEnd: .value("Time", min(earliest, domain.upperBound)))
                     .foregroundStyle(.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
-                    .annotation(position: .overlay, alignment: .center) {
+                    // A caption at its foot, like a live graph's, rather than a label over the middle of the plot.
+                    .annotation(position: .overlay, alignment: .bottomLeading) {
                         if earliest.timeIntervalSince(domain.lowerBound) > domain.upperBound.timeIntervalSince(domain.lowerBound) / 5 {
-                            Text("Not recorded yet").font(.subheadline).foregroundStyle(.tertiary)
+                            Text("Not recorded yet").font(.metadata).foregroundStyle(.secondaryText).padding([.leading, .bottom], 6)
                         }
                     }
             }

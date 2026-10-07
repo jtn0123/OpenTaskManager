@@ -6,13 +6,15 @@ struct GraphCoverageTests {
     @Test func captionsAFillingWindow() {
         let coverage = GraphCoverage(samples: 45, capacity: 300, interval: 1)
         #expect(!coverage.isFull)
-        #expect(coverage.caption == "45 s collected · 5-minute window")
+        #expect(coverage.caption == "45 s collected · 5 min window")
         #expect(coverage.shortCaption == "45 s collected")
+        #expect(coverage.spokenCaption == "45 s collected · 5 min window. Not recorded before that.")
     }
 
     @Test func noCaptionBeforeTheFirstSampleOrOnceFull() {
         #expect(GraphCoverage(samples: 0, capacity: 300, interval: 1).caption == nil)
         #expect(GraphCoverage(samples: 300, capacity: 300, interval: 1).caption == nil)
+        #expect(GraphCoverage(samples: 300, capacity: 300, interval: 1).spokenCaption == nil)
         #expect(GraphCoverage(samples: 301, capacity: 300, interval: 1).isFull)
         #expect(GraphCoverage(samples: 12, capacity: 300, interval: 0).caption == nil)
     }
@@ -32,10 +34,10 @@ struct GraphCoverageTests {
     }
 
     @Test(arguments: [
-        (300.0, "5-minute window"), (120.0, "2-minute window"), (60.0, "1-minute window"), (30.0, "30-second window"),
-        (150.0, "2 min 30 s window"), (7_200.0, "2-hour window"), (2.5, "2.5 s window"),
+        (300.0, "5 min window"), (120.0, "2 min window"), (60.0, "1 min window"), (30.0, "30 s window"),
+        (150.0, "2 min 30 s window"), (7_200.0, "2 h window"), (2.5, "2.5 s window"),
     ])
-    func windowNamesItsSpan(seconds: Double, expected: String) {
+    func windowNamesItsSpanLikeTheTimeAxis(seconds: Double, expected: String) {
         #expect(GraphCoverage.window(seconds) == expected)
     }
 }

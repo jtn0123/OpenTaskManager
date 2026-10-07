@@ -72,12 +72,13 @@ final class NetworkQualityStore {
         task = nil
     }
 
-    /// `--args -openSpeedTest start` starts a test when the card first
-    /// shows, for screenshots of a running and a finished test.
+    /// `--args -openResource network -openSpeedTest start` starts a test
+    /// when the card first shows, for screenshots of a running and a
+    /// finished test.
     func handleLaunchArgument(interface: String) {
         guard !handledLaunchArgument else { return }
         handledLaunchArgument = true
-        if LaunchArgument.string("openSpeedTest") == "start" { start(interface: interface) }
+        if LaunchArgument.startsTest(on: "network") { start(interface: interface) }
     }
 }
 
@@ -268,11 +269,11 @@ final class DiskSpeedStore {
         }
     }
 
-    /// `--args -openSpeedTest start` starts a test when the card first
-    /// shows, for screenshots of a running and a finished test.
+    /// `--args -openResource disk -openSpeedTest start` starts a test when
+    /// the card first shows, for screenshots of a running and a finished test.
     func handleLaunchArgument(disk: String, target: DiskSpeedTarget?) {
         guard !handledLaunchArgument else { return }
         handledLaunchArgument = true
-        if LaunchArgument.string("openSpeedTest") == "start", let target { start(disk: disk, target: target) }
+        if LaunchArgument.startsTest(on: "disk"), let target { start(disk: disk, target: target) }
     }
 }

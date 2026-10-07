@@ -86,7 +86,7 @@ struct ChipLayoutCard: View, Equatable {
                 memoryTile
             }
             Text(ChipLayoutReader.sources)
-                .font(.metadata)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -106,7 +106,7 @@ struct ChipLayoutCard: View, Equatable {
                     .lineLimit(1)
             }
             Text(summary)
-                .font(.metadata)
+                .font(.callout)
                 .foregroundStyle(.secondaryText)
         }
     }
@@ -127,7 +127,7 @@ struct ChipLayoutCard: View, Equatable {
             Text(gpu.cores.map { "\($0) cores" } ?? "Core count not reported").font(.callout)
             // A virtual machine's GPU has no model name, only "GPU".
             if gpu.name != "GPU" {
-                Text(gpu.name).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
+                Text(gpu.name).font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
             }
         } now: {
             NowLine(text: utilization.map { "\(Format.percent($0)) busy" } ?? Unavailable.gpuUtilization)
@@ -138,7 +138,7 @@ struct ChipLayoutCard: View, Equatable {
         ChipTile(title: "Neural Engine", color: Theme.neuralEngine,
                  link: activity.hasPowerDetail ? ("Power", { select(.power) }) : nil) {
             Text(engine.cores.map { "\($0) cores" } ?? "Core count not reported").font(.callout)
-            Text("Present in the I/O Registry").font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
+            Text("Present in the I/O Registry").font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
         } now: {
             NowLine(text: activity.neuralEngineWatts.map { "\(Format.watts($0)) power" } ?? "Power not reported")
                 .help("macOS reports the Neural Engine's power, not how busy it is.")
@@ -148,7 +148,7 @@ struct ChipLayoutCard: View, Equatable {
     private var memoryTile: some View {
         ChipTile(title: "Memory", color: Theme.memory, link: ("Memory details", { select(.memory) })) {
             Text(Format.wholeBytes(layout.memoryBytes)).font(.callout)
-            Text(layout.memoryType ?? "Type not reported").font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
+            Text(layout.memoryType ?? "Type not reported").font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
         } now: {
             let fraction = activity.memoryTotal > 0 ? Double(activity.memoryUsed) / Double(activity.memoryTotal) : 0
             NowLine(text: "\(Format.bytes(activity.memoryUsed)) used (\(Format.percent(fraction)))")
@@ -169,12 +169,12 @@ private struct ChipTile<Static: View, Now: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Circle().fill(color).frame(width: 7, height: 7)
-                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1).layoutPriority(1)
+                Text(title).font(.callout.weight(.semibold)).lineLimit(1).layoutPriority(1)
                 Spacer(minLength: 4)
                 if let link {
                     Button(link.title, action: link.action)
                         .buttonStyle(.link)
-                        .font(.metadata)
+                        .font(.callout)
                         .lineLimit(1)
                 }
             }
@@ -207,7 +207,7 @@ private struct NowLine: View {
 private struct NowMark: View {
     var body: some View {
         Text("Now")
-            .font(.caption2.weight(.semibold))
+            .font(.metadata.weight(.semibold))
             .foregroundStyle(.secondaryText)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
@@ -235,7 +235,7 @@ private struct CoreTypeTile<Activity: View>: View {
                 ClusterDiagram(clusters: clusters, color: color)
             } else {
                 Text("macOS doesn't say which CPUs are in which cluster.")
-                    .font(.metadata)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
             caches
@@ -273,7 +273,7 @@ private struct CoreTypeTile<Activity: View>: View {
                 }
             }
         }
-        .font(.metadata)
+        .font(.callout)
     }
 
     /// "192 KB instruction + 128 KB data, per core".
@@ -304,7 +304,7 @@ private struct ClusterDiagram: View {
                 HStack(spacing: 3) {
                     ForEach(cluster.cpus, id: \.self) { cpu in
                         Text("\(cpu)")
-                            .font(.system(size: 10, weight: .medium).monospacedDigit())
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
                             .frame(minWidth: 22, minHeight: 18)
                             .background(color.fillShade.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
                             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(color.opacity(0.35)))
@@ -335,16 +335,16 @@ private struct CoreTypeActivity: View {
                 Spacer(minLength: 4)
                 Button(single ? "Every core's graph" : "Graph by core type", action: showGraphs)
                     .buttonStyle(.link)
-                    .font(.metadata)
+                    .font(.callout)
                     .lineLimit(1)
                     .help(single ? "Show each core's load on the CPU graph" : "Show the CPU graph for each kind of core")
             }
             if clusters.isEmpty {
-                Text("Clock speed not reported").font(.metadata).foregroundStyle(.secondaryText)
+                Text("Clock speed not reported").font(.callout).foregroundStyle(.secondaryText)
             }
             ForEach(clusters) { cluster in
                 Text(clock(cluster))
-                    .font(.metadata)
+                    .font(.callout)
                     .monospacedDigit()
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)

@@ -15,8 +15,7 @@ struct DiskDetail: View {
         let choices = volumes.map { DiskSpeedVolumeChoice(name: $0.name, mountPoint: $0.mountPoint, isRoot: $0.isRoot) }
         ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
-                SpeedTestHeader(title: "Disk \(disk.bsdName.replacingOccurrences(of: "disk", with: ""))",
-                                subtitle: disk.model ?? disk.bsdName, action: "Test disk speed…",
+                SpeedTestHeader(title: DiskText.title(disk), subtitle: DiskText.device(disk), action: "Test disk speed…",
                                 help: "Go to the disk speed test below. It starts only when you click Run Test.",
                                 last: lastTest(choices)) {
                     SpeedTestHeader.scrollToCard(proxy)
@@ -31,8 +30,16 @@ struct DiskDetail: View {
                     .id(SpeedTestHeader.card)
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                     if let size = disk.size { FactRow(label: "Capacity", value: Format.bytes(size)) }
-                    FactRow(label: "Type", value: disk.isSolidState == true ? "SSD" : disk.isSolidState == false ? "Rotational" : "Unknown")
+                    FactRow(label: "Type", value: disk.isDiskImage ? "Disk image"
+                        : disk.isSolidState == true ? "SSD" : disk.isSolidState == false ? "Rotational" : "Unknown")
                     if let isInternal = disk.isInternal { FactRow(label: "Location", value: isInternal ? "Internal" : "External") }
+                    if let path = disk.imagePath {
+                        GridRow {
+                            Text("Image file").foregroundStyle(.secondaryText)
+                            CopyableText(value: path, monospaced: false, truncatesMiddle: true)
+                        }
+                        .font(.callout)
+                    }
                 }
             }
         }
@@ -87,6 +94,47 @@ struct DiskDetail: View {
                 }
             }
         }
+    }
+}
+
+/// What the Performance page calls a disk, the same in the list, the chips
+/// and the detail: the name people know it by (`DiskSample.name`, the
+/// startup volume's or an image's), with its device name ("disk0") after it.
+enum DiskText {
+    /// "Macintosh HD", or "Disk 4" when nothing names it better.
+    static func title(_ disk: DiskSample) -> String {
+        disk.name ?? "Disk \(disk.bsdName.replacingOccurrences(of: "disk", with: ""))"
+    }
+
+    /// "SSD", "External hard disk", "Disk image"; nil when the disk doesn't say.
+    static func kind(_ disk: DiskSample) -> String? {
+        if disk.isDiskImage { return "Disk image" }
+        guard disk.isInternal == false else { return disk.isSolidState.map { $0 ? "SSD" : "Hard disk" } }
+        return disk.isSolidState.map { $0 ? "External SSD" : "External hard disk" } ?? "External"
+    }
+
+    /// The list's line under the title: "disk0 · SSD" for a named disk; a
+    /// "Disk 4" title has its number already, so its model or kind.
+    static func identity(_ disk: DiskSample) -> String {
+        guard disk.name != nil else { return model(disk) ?? kind(disk) ?? disk.bsdName }
+        return [disk.bsdName, kind(disk)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The detail's subtitle: "disk0 · APPLE SSD AP0512Z", or its kind
+    /// where it has no model.
+    static func device(_ disk: DiskSample) -> String {
+        [disk.bsdName, model(disk) ?? kind(disk)].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The disk's model, but not a disk image's "Disk Image", so it reads
+    /// as its kind does in the list.
+    private static func model(_ disk: DiskSample) -> String? {
+        disk.isDiskImage ? nil : disk.model
+    }
+
+    /// Everything that names the disk, for a tooltip.
+    static func help(_ disk: DiskSample) -> String {
+        [title(disk), device(disk), disk.imagePath].compactMap { $0 }.joined(separator: " · ")
     }
 }
 
@@ -179,8 +227,10 @@ private struct SpeedTestHeader: View {
 
     var body: some View {
         TitleShortcutRow {
-            // In a narrow pane the subtitle gives way, not the title.
-            Text(title).font(.largeTitle.weight(.semibold)).lineLimit(1)
+            // In a narrow pane the subtitle gives way to the title, unless
+            // that's a disk image's long name, which is cut in the middle
+            // (whole in the tooltip) so its "disk4 · Disk image" still shows.
+            Text(title).font(.largeTitle.weight(.semibold)).lineLimit(1).truncationMode(.middle).help(title)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Button(action: reveal) {
                     Label(action, systemImage: "speedometer")
@@ -189,7 +239,7 @@ private struct SpeedTestHeader: View {
                 .help(help)
                 if let last {
                     Text(last)
-                        .font(.metadata)
+                        .font(.callout)
                         .foregroundStyle(.secondaryText)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -230,7 +280,10 @@ private struct TitleShortcutRow: Layout {
         let stacked = oneLine > width
         var widths = sizes.map(\.width)
         if stacked {
-            widths[0] = min(sizes[0].width, width)
+            // A title too long for the line (a disk image's) leaves the
+            // subtitle up to 40% of it; a shorter one keeps its width.
+            let subtitleShare = min(sizes[2].width, width * 0.4)
+            widths[0] = min(sizes[0].width, max(width - subtitleShare - spacing, 0))
             widths[1] = min(sizes[1].width, width)
             widths[2] = max(min(sizes[2].width, width - widths[0] - spacing), 0)
         }

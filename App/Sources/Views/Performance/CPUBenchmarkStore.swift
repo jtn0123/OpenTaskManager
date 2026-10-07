@@ -84,11 +84,12 @@ final class CPUBenchmarkStore {
         task = nil
     }
 
-    /// `--args -openSpeedTest start` starts a run when the card first
-    /// shows, for screenshots of a running and a finished benchmark.
+    /// `--args -openSpeedTest start` (with `-openResource cpu` or none)
+    /// starts a run when the card first shows, for screenshots of a running
+    /// and a finished benchmark.
     func handleLaunchArgument() {
         guard !handledLaunchArgument else { return }
         handledLaunchArgument = true
-        if LaunchArgument.string("openSpeedTest") == "start" { start() }
+        if LaunchArgument.startsTest(on: "cpu") { start() }
     }
 }

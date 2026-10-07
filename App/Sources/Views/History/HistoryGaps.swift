@@ -3,20 +3,20 @@ import OTMKit
 import SwiftUI
 
 /// How the History page shows a stretch with nothing recorded: the neutral
-/// wash and faint hatch of a live graph's "Not recorded yet", so a gap never
-/// reads as the values dropping.
+/// wash and faint hatch of a live graph's unrecorded stretch (`UnrecordedLook`),
+/// so a gap never reads as the values dropping.
 enum HistoryGapStyle {
     static func wash(dark: Bool) -> Color {
-        Color(nsColor: .windowBackgroundColor).opacity(dark ? 0.4 : 0.6)
+        Color(nsColor: .windowBackgroundColor).opacity(UnrecordedLook.washOpacity(dark: dark))
     }
 
     static func hatch(dark: Bool) -> Color {
-        Color(nsColor: .labelColor).opacity(dark ? 0.06 : 0.055)
+        Color(nsColor: .labelColor).opacity(UnrecordedLook.hatchOpacity(dark: dark))
     }
 
     /// The edges of a gap the pointer is over.
     static func edge(dark: Bool) -> Color {
-        Color(nsColor: .labelColor).opacity(dark ? 0.35 : 0.4)
+        Color(nsColor: .labelColor).opacity(UnrecordedLook.edgeOpacity(dark: dark))
     }
 
     /// "2 min 24 s", or "3 h 10 min" for a long one.
@@ -74,7 +74,7 @@ struct HistoryGapHatch: View {
     let domain: ClosedRange<Date>
     @Environment(\.colorScheme) private var colorScheme
 
-    private static let spacing: CGFloat = 10
+    private static let spacing = UnrecordedLook.hatchSpacing
 
     var body: some View {
         Canvas { context, size in
@@ -93,7 +93,7 @@ struct HistoryGapHatch: View {
                 diagonals.addLine(to: CGPoint(x: x + size.height, y: size.height))
                 x += Self.spacing
             }
-            context.stroke(diagonals, with: .color(HistoryGapStyle.hatch(dark: colorScheme == .dark)), lineWidth: 0.75)
+            context.stroke(diagonals, with: .color(HistoryGapStyle.hatch(dark: colorScheme == .dark)), lineWidth: UnrecordedLook.hatchWidth)
         }
         .allowsHitTesting(false)
     }

@@ -10,10 +10,24 @@ final class DiskSampler {
         let busyNanoseconds: UInt64
     }
 
+    /// A disk as the registry describes it, before its names are added.
+    private struct Found {
+        let bsdName: String
+        let model: String?
+        let isInternal: Bool?
+        let isSolidState: Bool?
+        let size: UInt64?
+        let counters: Counters
+    }
+
     private var previous: [String: Counters] = [:]
+    /// Each disk's names, read again only when the disks or the mounts change.
+    private var names: [String: DiskNameReader.Names] = [:]
+    private var namedDisks: [String] = []
+    private var namedMounts: Int32 = -1
 
     func sample(interval: TimeInterval) -> [DiskSample] {
-        var disks: [DiskSample] = []
+        var found: [Found] = []
         var seen: [String: Counters] = [:]
 
         IORegistry.forEachService(matching: "IOBlockStorageDriver") { driver in
@@ -49,31 +63,49 @@ final class DiskSampler {
                 busyNanoseconds: (stats.uint64("Total Time (Read)") ?? 0) + (stats.uint64("Total Time (Write)") ?? 0)
             )
             seen[bsdName] = counters
+            found.append(Found(bsdName: bsdName, model: model, isInternal: isInternal, isSolidState: isSolidState,
+                               size: size, counters: counters))
+        }
 
-            let before = previous[bsdName]
+        found.sort { $0.bsdName.localizedStandardCompare($1.bsdName) == .orderedAscending }
+        refreshNames(found.map(\.bsdName))
+        let disks = found.map { disk in
+            let before = previous[disk.bsdName]
             func rate(_ keyPath: KeyPath<Counters, UInt64>) -> Double {
-                guard let before, interval > 0, counters[keyPath: keyPath] >= before[keyPath: keyPath] else { return 0 }
-                return Double(counters[keyPath: keyPath] - before[keyPath: keyPath]) / interval
+                guard let before, interval > 0, disk.counters[keyPath: keyPath] >= before[keyPath: keyPath] else { return 0 }
+                return Double(disk.counters[keyPath: keyPath] - before[keyPath: keyPath]) / interval
             }
-
-            disks.append(DiskSample(
-                bsdName: bsdName,
-                model: model,
-                isInternal: isInternal,
-                isSolidState: isSolidState,
-                size: size,
+            return DiskSample(
+                bsdName: disk.bsdName,
+                model: disk.model,
+                isInternal: disk.isInternal,
+                isSolidState: disk.isSolidState,
+                size: disk.size,
+                name: names[disk.bsdName]?.name,
+                imagePath: names[disk.bsdName]?.imagePath,
                 readBytesPerSecond: rate(\.read),
                 writeBytesPerSecond: rate(\.written),
                 readOperationsPerSecond: rate(\.readOps),
                 writeOperationsPerSecond: rate(\.writeOps),
-                totalRead: counters.read,
-                totalWritten: counters.written,
+                totalRead: disk.counters.read,
+                totalWritten: disk.counters.written,
                 activeFraction: min(rate(\.busyNanoseconds) / 1_000_000_000, 1)
-            ))
+            )
         }
 
         previous = seen
-        return disks.sorted { $0.bsdName.localizedStandardCompare($1.bsdName) == .orderedAscending }
+        return disks
+    }
+
+    /// Reads the disks' names when a disk came or went, or a volume was
+    /// mounted or ejected (an image's volume mounts a moment after its disk
+    /// appears); otherwise a sample costs one `getfsstat` count.
+    private func refreshNames(_ disks: [String]) {
+        let mounts = DiskNameReader.mountCount()
+        guard disks != namedDisks || mounts != namedMounts else { return }
+        names = DiskNameReader.read(disks: disks)
+        namedDisks = disks
+        namedMounts = mounts
     }
 }
 

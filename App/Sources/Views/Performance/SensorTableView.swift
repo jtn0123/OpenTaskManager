@@ -358,11 +358,12 @@ private final class SensorHeaderView: NSView {
     private let since = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
     private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     private let key = SensorRangeKey()
-    private let name = SensorStyle.field(font: SensorStyle.metadata, color: .secondaryText)
-    private let now = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
-    private let low = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
-    private let high = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
-    private let range = SensorStyle.field(font: SensorStyle.metadata, color: .secondaryText)
+    // The column titles, at the rows' size.
+    private let name = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
+    private let now = SensorStyle.field(font: SensorStyle.label, alignment: .right, color: .secondaryText)
+    private let low = SensorStyle.field(font: SensorStyle.label, alignment: .right, color: .secondaryText)
+    private let high = SensorStyle.field(font: SensorStyle.label, alignment: .right, color: .secondaryText)
+    private let range = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
     private let rangeInfo = NSImageView()
     private let rule = SensorRuleView()
 
@@ -470,7 +471,7 @@ private final class SensorRangeKey: NSView {
     private static let gap: CGFloat = 6
 
     private let bar = SensorRangeBar()
-    private let text = SensorStyle.field(font: SensorStyle.metadata, color: .secondaryText)
+    private let text = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
 
     override var isFlipped: Bool { true }
 

@@ -126,6 +126,12 @@ public struct DiskSample: Sendable, Codable, Identifiable {
     public let isInternal: Bool?
     public let isSolidState: Bool?
     public let size: UInt64?
+    /// What people call the disk (`DiskNaming`): the startup volume's name
+    /// ("Macintosh HD"), its other volumes', or a disk image's. Nil when
+    /// nothing names it better than `bsdName`.
+    public let name: String?
+    /// The file a disk image was attached from; nil for a drive.
+    public let imagePath: String?
     public let readBytesPerSecond: Double
     public let writeBytesPerSecond: Double
     public let readOperationsPerSecond: Double
@@ -134,6 +140,9 @@ public struct DiskSample: Sendable, Codable, Identifiable {
     public let totalWritten: UInt64
     /// Share of the interval the device spent servicing I/O, clamped to 0...1.
     public let activeFraction: Double
+
+    /// Attached from a disk image file rather than a drive.
+    public var isDiskImage: Bool { imagePath != nil || model == "Disk Image" }
 }
 
 public struct VolumeInfo: Sendable, Codable, Identifiable, Hashable {

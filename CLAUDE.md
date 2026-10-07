@@ -35,7 +35,8 @@ Manager OG or any other proprietary task manager.
   System/NetworkQuality (parses `networkQuality -c`) and System/DiskSpeedTest (one
   unlinked temp file, F_NOCACHE reads, verified, cancellable) back the user-started
   speed tests on Performance's network and disk details (`SpeedTestStores`; nothing
-  runs per tick; `-openSpeedTest start` starts one for screenshots) and `otm
+  runs per tick; `-openSpeedTest start` starts the `-openResource` detail's for
+  screenshots, `LaunchArgument.startsTest(on:)`) and `otm
   netquality` / `otm diskspeed`, with the last few results per interface or volume
   in Application Support/OpenTaskManager/SpeedTests (System/SpeedTestHistory);
   System/CPUBenchmark (versioned workloads in CPUBenchmarkKernels, every unit
@@ -112,10 +113,10 @@ Manager OG or any other proprietary task manager.
   hovering never redraws the charts. Playback moves the scrubber's playhead,
   apart from a pin or a preview, and gaps (`HistoryGap` in OTMKit) are drawn
   with the charts, so neither does replay. Until a live graph's window fills, the
-  stretch before its first sample is a neutral wash with a faint hatch in the
-  scroller (paths built once per size, only moved per sample), its "Not
-  recorded yet" label a `CATextLayer` that glides in the render server, and its
-  "45 s collected" caption a `CATextLayer` reset only when the rounded figure
+  stretch before its first sample is a light neutral wash with a faint hatch in
+  the scroller (`UnrecordedLook`, which History's gaps share; paths built once
+  per size, only moved per sample), labelled only by its footer caption, "40 s
+  collected · 5 min window", a `CATextLayer` reset only when the rounded figure
   from `GraphCoverage` changes.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
@@ -214,7 +215,10 @@ build, `-sensorFixture <file>` loads a recording from
   list is an `HStack` column sized from the page width, not an `HSplitView`,
   whose minimum widths pushed the page past both window edges; where the detail
   would get under 560 points beside it, the list gives way to a row of resource
-  chips over the detail. Below 760 points History moves its moment panel into
+  chips over the detail. Disks there go by volume or image-file name, diskN
+  second (`DiskNaming` in OTMKit, read by `DiskNameReader` only when the disk
+  or mount list changes), with disk images under a folding "Disk images"
+  heading or chip. Below 760 points History moves its moment panel into
   a summary over the charts.
 - The CPU graphs (Performance's, per core type, per core, by app, and History's
   CPU chart) share one Auto / 100% setting, `CPUGraphScale` (`cpuGraphScale`).

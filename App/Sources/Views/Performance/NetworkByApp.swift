@@ -41,7 +41,7 @@ struct NetworkAppsSection: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(byProcess ? "Processes using the network" : "Apps using the network").font(.headline)
                 Text("Received and sent on every interface · updates every \(Format.timeSpan(NetworkActivityStore.refreshSeconds))")
-                    .font(.subheadline)
+                    .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -66,7 +66,7 @@ struct NetworkAppsSection: View {
             Text(byProcess ? "No process is using the network" : "No app is using the network")
                 .font(.callout.weight(.medium))
             Text("Nothing sent or received in the last \(Format.roughDuration(seconds)).")
-                .font(.subheadline)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -117,7 +117,7 @@ struct NetworkAppsSection: View {
             Text("Receive").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
             Text("Send").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
         }
-        .font(.subheadline)
+        .font(.tableText)
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 6)
     }

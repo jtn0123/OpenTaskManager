@@ -14,6 +14,8 @@ struct PerformanceView: View {
     @State private var opened = false
     /// The page's width, which sets the resource list's.
     @State private var width: CGFloat = 0
+    /// Whether the disk images under their heading in the list are shown.
+    @AppStorage("performanceShowsDiskImages") private var showsDiskImages = false
 
     /// The narrowest the detail gets beside the resource list. Below it, as
     /// in the narrowest window, the list gives way to a picker over the
@@ -29,13 +31,14 @@ struct PerformanceView: View {
             // them keeps its scroll position.
             HStack(spacing: 0) {
                 if !compact {
-                    ResourceRail(resources: resources, snapshot: snapshot, selection: $selected, compactRows: listWidth < 220)
+                    ResourceRail(resources: resources, snapshot: snapshot, selection: $selected, showsImages: $showsDiskImages,
+                                 compactRows: listWidth < 220)
                         .frame(width: listWidth)
                     Divider()
                 }
                 VStack(spacing: 0) {
                     if compact {
-                        ResourcePicker(resources: resources, snapshot: snapshot, selection: $selected)
+                        ResourcePicker(resources: resources, snapshot: snapshot, selection: $selected, showsImages: $showsDiskImages)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 10)
                         Divider()
@@ -93,10 +96,13 @@ struct PerformanceView: View {
         if let match { selected = match }
     }
 
+    /// The drives, then the disk images, which the list shows under a
+    /// heading of their own.
     private func resources(_ snapshot: SystemSnapshot) -> [Resource] {
         var list: [Resource] = [.cpu, .memory]
         list += snapshot.gpus.map { .gpu($0.id) }
-        list += snapshot.disks.map { .disk($0.id) }
+        list += snapshot.disks.filter { !$0.isDiskImage }.map { .disk($0.id) }
+        list += snapshot.disks.filter(\.isDiskImage).map { .disk($0.id) }
         list += snapshot.network.filter(\.isPrimary).map { .network($0.id) }
         if snapshot.power.systemWatts != nil || snapshot.power.battery != nil { list.append(.power) }
         // Always listed: thermal pressure comes from macOS on every Mac, and
@@ -128,22 +134,32 @@ struct PerformanceView: View {
 /// the selected row takes a narrow accent marker, a light accent fill and a
 /// bold name, so it reads clearly on the plain rail and stays a step under
 /// the main sidebar's solid selection. Clicking a row picks it and gives the
-/// rail the keyboard, where the up and down arrows move through it.
+/// rail the keyboard, where the up and down arrows move through the rows it
+/// shows. Disk images follow the drives under a heading that shows or hides
+/// them, so a mounted installer doesn't line up with the startup disk.
 private struct ResourceRail: View {
     var resources: [Resource]
     var snapshot: SystemSnapshot
     @Binding var selection: Resource
+    @Binding var showsImages: Bool
     /// In a narrow list the sparkline gives the text more room.
     var compactRows: Bool
     @FocusState private var focused: Bool
 
     var body: some View {
+        let images = resources.filter { $0.isDiskImage(in: snapshot) }
         ScrollView {
             VStack(spacing: 2) {
                 ForEach(resources, id: \.self) { resource in
-                    ResourceRow(resource: resource, snapshot: snapshot, compact: compactRows, selected: resource == selection) {
-                        selection = resource
-                        focused = true
+                    if resource == images.first {
+                        DiskImagesHeading(count: images.count, shown: $showsImages,
+                                          holdsSelection: !showsImages && images.contains(selection))
+                    }
+                    if showsImages || !images.contains(resource) {
+                        ResourceRow(resource: resource, snapshot: snapshot, compact: compactRows, selected: resource == selection) {
+                            selection = resource
+                            focused = true
+                        }
                     }
                 }
             }
@@ -156,53 +172,62 @@ private struct ResourceRail: View {
         .onMoveCommand(perform: move)
     }
 
+    /// Moves to the next row shown either way, past hidden disk images.
     private func move(_ direction: MoveCommandDirection) {
         guard let index = resources.firstIndex(of: selection) else { return }
+        let shown = { (resource: Resource) in showsImages || !resource.isDiskImage(in: snapshot) }
         switch direction {
-        case .up where index > 0: selection = resources[index - 1]
-        case .down where index < resources.count - 1: selection = resources[index + 1]
+        case .up: if let previous = resources[..<index].last(where: shown) { selection = previous }
+        case .down: if let next = resources[(index + 1)...].first(where: shown) { selection = next }
         default: break
         }
     }
 }
 
-private struct ResourceRow: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.colorScheme) private var colorScheme
-    var resource: Resource
-    var snapshot: SystemSnapshot
-    /// In a narrow list the sparkline gives the text more room.
-    var compact = false
-    var selected = false
-    var select: () -> Void
+/// The heading the disk images are listed under, with how many there are.
+/// Clicking it shows or hides them; while they're hidden, it takes the
+/// selection's marker when one of them is selected.
+private struct DiskImagesHeading: View {
+    var count: Int
+    @Binding var shown: Bool
+    var holdsSelection: Bool
     @State private var hovering = false
 
     var body: some View {
-        let text = ResourceText(resource, snapshot: snapshot, sensors: model.sensors)
-        HStack(spacing: 10) {
-            sparkline
-                .frame(width: compact ? 48 : 64, height: 40)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(text.title).font(.headline.weight(selected ? .bold : .medium))
-                Text(text.subtitle).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(3)
-            }
-            Spacer(minLength: 0)
+        HStack(spacing: 6) {
+            Image(systemName: shown ? "chevron.down" : "chevron.right")
+                .font(.caption.weight(.semibold))
+                .frame(width: 12)
+            Text("Disk images").font(.callout.weight(holdsSelection ? .bold : .semibold))
+            Spacer(minLength: 4)
+            Text(count, format: .number).font(.callout).monospacedDigit()
         }
+        .foregroundStyle(.secondaryText)
         .padding(.vertical, 6)
         .padding(.leading, 12)
-        .padding(.trailing, 6)
-        .background { highlight }
+        .padding(.trailing, 12)
+        .background { RailHighlight(selected: holdsSelection, hovering: hovering) }
+        .padding(.top, 4)
         .contentShape(Rectangle())
-        .onTapGesture(perform: select)
+        .onTapGesture { shown.toggle() }
         .onHover { hovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction(.default, select)
+        .help(shown ? "Hide the disk images" : "Show the disk images")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Disk images, \(count)")
+        .accessibilityValue(shown ? "Shown" : "Hidden")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(.default) { shown.toggle() }
     }
+}
 
-    /// The selection: an accent fill, stronger in dark mode where a light
-    /// tint washes out, with a marker down its leading edge.
-    @ViewBuilder private var highlight: some View {
+/// The selection behind a rail row: an accent fill, stronger in dark mode
+/// where a light tint washes out, with a marker down its leading edge.
+private struct RailHighlight: View {
+    @Environment(\.colorScheme) private var colorScheme
+    var selected: Bool
+    var hovering: Bool
+
+    var body: some View {
         let shape = RoundedRectangle(cornerRadius: 8)
         if selected {
             shape
@@ -217,6 +242,43 @@ private struct ResourceRow: View {
         } else if hovering {
             shape.fill(Color.primary.opacity(0.05))
         }
+    }
+}
+
+private struct ResourceRow: View {
+    @Environment(AppModel.self) private var model
+    var resource: Resource
+    var snapshot: SystemSnapshot
+    /// In a narrow list the sparkline gives the text more room.
+    var compact = false
+    var selected = false
+    var select: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let text = ResourceText(resource, snapshot: snapshot, sensors: model.sensors)
+        HStack(spacing: 10) {
+            sparkline
+                .frame(width: compact ? 48 : 64, height: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                // A volume's or an image's name can be long, often one unbroken
+                // word ("UC_SIRI_…_Cryptex"): cut in the middle, whole in the tooltip.
+                Text(text.title).font(.headline.weight(selected ? .bold : .medium)).lineLimit(1).truncationMode(.middle)
+                Text(text.subtitle).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(3)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 6)
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .background { RailHighlight(selected: selected, hovering: hovering) }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .onHover { hovering = $0 }
+        .help(text.help ?? "")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, select)
     }
 
     @ViewBuilder private var sparkline: some View {
@@ -245,19 +307,28 @@ private struct ResourceRow: View {
 /// page is too narrow for both: each with its colour, name and current
 /// figure, in as few rows as fit, filled edge to edge like a segmented
 /// control. The selected chip takes the accent and a bold name; one click
-/// switches.
+/// switches. Disk images follow the drives behind a chip that shows or
+/// hides them, as under the list's heading.
 private struct ResourcePicker: View {
     @Environment(AppModel.self) private var model
     var resources: [Resource]
     var snapshot: SystemSnapshot
     @Binding var selection: Resource
+    @Binding var showsImages: Bool
 
     var body: some View {
+        let images = resources.filter { $0.isDiskImage(in: snapshot) }
         ChipRows(spacing: 6, lineSpacing: 6) {
             ForEach(resources, id: \.self) { resource in
-                ResourceChip(text: ResourceText(resource, snapshot: snapshot, sensors: model.sensors),
-                             color: resource.color, selected: resource == selection) {
-                    selection = resource
+                if resource == images.first {
+                    DiskImagesChip(count: images.count, shown: $showsImages,
+                                   holdsSelection: !showsImages && images.contains(selection))
+                }
+                if showsImages || !images.contains(resource) {
+                    ResourceChip(text: ResourceText(resource, snapshot: snapshot, sensors: model.sensors),
+                                 color: resource.color, selected: resource == selection) {
+                        selection = resource
+                    }
                 }
             }
         }
@@ -265,7 +336,6 @@ private struct ResourcePicker: View {
 }
 
 private struct ResourceChip: View {
-    @Environment(\.colorScheme) private var colorScheme
     var text: ResourceText
     var color: Color
     var selected: Bool
@@ -273,14 +343,58 @@ private struct ResourceChip: View {
     @State private var hovering = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 7)
-        let dark = colorScheme == .dark
         Button(action: action) {
             HStack(spacing: 6) {
                 Circle().fill(color).frame(width: 7, height: 7)
-                Text(text.title).fontWeight(selected ? .bold : .medium)
+                // A long volume or image name is cut in the middle when the row is short of room, the whole of it in the tooltip.
+                Text(text.title).fontWeight(selected ? .bold : .medium).truncationMode(.middle)
                 Text(text.figure).foregroundStyle(.secondaryText).monospacedDigit()
             }
+            .modifier(ChipLook(selected: selected, hovering: hovering))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(text.help ?? text.subtitle.replacingOccurrences(of: "\n", with: " · "))
+        .accessibilityLabel("\(text.title), \(text.subtitle)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// The chip that shows or hides the disk images' chips, with how many
+/// there are. While they're hidden, it looks selected when one of them is.
+private struct DiskImagesChip: View {
+    var count: Int
+    @Binding var shown: Bool
+    var holdsSelection: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        Button { shown.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: shown ? "chevron.down" : "chevron.right").font(.caption.weight(.semibold))
+                Text("Disk images").fontWeight(holdsSelection ? .bold : .medium)
+                Text(count, format: .number).foregroundStyle(.secondaryText).monospacedDigit()
+            }
+            .modifier(ChipLook(selected: holdsSelection, hovering: hovering))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(shown ? "Hide the disk images" : "Show the disk images")
+        .accessibilityLabel("Disk images, \(count)")
+        .accessibilityValue(shown ? "Shown" : "Hidden")
+    }
+}
+
+/// A chip's text, size, fill and border: the accent when selected.
+private struct ChipLook: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var selected: Bool
+    var hovering: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 7)
+        let dark = colorScheme == .dark
+        content
             .font(.callout)
             .lineLimit(1)
             .padding(.horizontal, 10)
@@ -290,12 +404,6 @@ private struct ResourceChip: View {
             .overlay(shape.strokeBorder(selected ? Color.accentColor.opacity(0.75) : Color.primary.opacity(0.10),
                                         lineWidth: selected ? 1.5 : 1))
             .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(text.subtitle.replacingOccurrences(of: "\n", with: " · "))
-        .accessibilityLabel("\(text.title), \(text.subtitle)")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -341,6 +449,8 @@ private struct ResourceText {
     var subtitle: String
     /// The picker's one short figure.
     var figure: String
+    /// A disk's names in full, as a tooltip: nothing in it changes per tick.
+    var help: String?
 
     init(_ resource: Resource, snapshot: SystemSnapshot, sensors: SensorSample?) {
         switch resource {
@@ -377,9 +487,10 @@ private struct ResourceText {
             figure = usage ?? "—"
         case let .disk(id):
             let disk = snapshot.disks.first { $0.id == id }
-            title = "Disk \(id.replacingOccurrences(of: "disk", with: ""))"
-            subtitle = disk.map { "\($0.model ?? ($0.isSolidState == true ? "SSD" : "Disk"))\n\(Format.percent($0.activeFraction)) active" } ?? ""
+            title = disk.map(DiskText.title) ?? id
+            subtitle = disk.map { "\(DiskText.identity($0))\n\(Format.percent($0.activeFraction)) active" } ?? ""
             figure = disk.map { "\(Format.percent($0.activeFraction)) active" } ?? "—"
+            help = disk.map(DiskText.help)
         case let .network(id):
             let link = snapshot.network.first { $0.id == id }
             title = link?.displayName ?? id
@@ -398,6 +509,12 @@ private struct ResourceText {
 }
 
 private extension Resource {
+    /// A disk attached from an image file, which the list puts under its own heading.
+    func isDiskImage(in snapshot: SystemSnapshot) -> Bool {
+        guard case let .disk(id) = self else { return false }
+        return snapshot.disks.first { $0.id == id }?.isDiskImage == true
+    }
+
     /// The resource's data colour, as its graphs draw it.
     var color: Color {
         switch self {
