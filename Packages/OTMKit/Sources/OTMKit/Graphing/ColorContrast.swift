@@ -40,6 +40,24 @@ public enum ColorContrast {
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
+    /// Text over a coloured fill: dark ink or light.
+    public enum Ink: Sendable, Equatable {
+        case dark
+        case light
+    }
+
+    /// The ink that reads best over all of `backgrounds` (the colours under a
+    /// label, such as the top and bottom of the stretch of gradient it
+    /// spans): black or white, whichever's lowest contrast across them is
+    /// higher. Over one colour that's dark ink from a relative luminance of
+    /// about 0.18 up, where the two contrasts cross.
+    public static func ink(over backgrounds: [RGB]) -> Ink {
+        guard !backgrounds.isEmpty else { return .dark }
+        let dark = backgrounds.map { ratio($0, .black) }.min() ?? 1
+        let light = backgrounds.map { ratio($0, .white) }.min() ?? 1
+        return dark >= light ? .dark : .light
+    }
+
     /// `color` laid over `background` at `opacity`: what the eye sees of a
     /// translucent wash or ink.
     public static func composite(_ color: RGB, opacity: Double, over background: RGB) -> RGB {

@@ -36,11 +36,16 @@ struct ConnectionsView: View {
         let shown = store.rows.filter { filter.matches($0.connection) && $0.matches(search) }.sorted(using: sortOrder)
         let selected = selection.flatMap { id in store.rows.first { $0.id == id } }
         return VStack(spacing: 0) {
+            // Whose sockets the counts are, so a 0 doesn't read as the whole Mac's.
+            ScopeHeader(hidden: store.hiddenProcesses)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
             // The five counts and the traffic card share one grid: a single row
             // in the default window, two even rows in the narrowest.
             SummaryCards(summary: store.summary)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding([.horizontal, .top], 16)
+                .padding(.horizontal, 16)
             filterBar
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
@@ -94,28 +99,17 @@ struct ConnectionsView: View {
         selection = store.rows.sorted(using: sortOrder).first { $0.matches(query) }?.id
     }
 
-    /// The filters, and beside them, right under the counts, how many sockets
-    /// the counts and the table cover, and that other users' processes are
-    /// left out. In a window too narrow for both, the note takes a line of
-    /// its own under the filters.
+    /// The filters. Whose sockets they filter, and how many processes are
+    /// left out, is the header's over the counts.
     private var filterBar: some View {
-        FilterBarLayout {
-            Picker("Show", selection: $filter) {
-                ForEach(ConnectionFilter.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
-            if store.hiddenProcesses > 0 {
-                let (visible, hidden) = (store.rows.count, store.hiddenProcesses)
-                ViewThatFits(in: .horizontal) {
-                    ScopeBadge(visible: visible, hidden: hidden, length: .long)
-                    ScopeBadge(visible: visible, hidden: hidden, length: .short)
-                    ScopeBadge(visible: visible, hidden: hidden, length: .shortest)
-                }
-            }
+        Picker("Show", selection: $filter) {
+            ForEach(ConnectionFilter.allCases) { Text($0.rawValue).tag($0) }
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Right under the last row: how many sockets show, and how often they're
@@ -166,91 +160,88 @@ struct ConnectionsView: View {
 
 // MARK: - Summary
 
-/// The filters at the leading edge and the scope badge at the trailing one,
-/// or under the filters when the row has no room for even its short form.
-/// A layout rather than a `ViewThatFits` of whole rows: that measured the
-/// segmented control once per row on every layout pass, which here come
-/// every tick, and cost about 1.5% of a core.
-private struct FilterBarLayout: Layout {
-    var spacing: CGFloat = 12
-    var lineSpacing: CGFloat = 8
+/// Over the counts: whose sockets they are, and how many processes macOS
+/// keeps out of them, so "0 connected sockets" reads as none of yours
+/// rather than none on the Mac. The hidden count opens why. One plain row,
+/// no `ViewThatFits`: layout passes here come every tick (the traffic card).
+private struct ScopeHeader: View {
+    var hidden: Int
+    @State private var explains = false
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let filters = subviews.first?.sizeThatFits(.unspecified) else { return .zero }
-        let ideal = filters.width + (subviews.count > 1 ? spacing + subviews[1].sizeThatFits(.unspecified).width : 0)
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? ideal
-        guard subviews.count > 1 else { return CGSize(width: width, height: filters.height) }
-        let badge = subviews[1]
-        if let room = room(beside: filters, in: width, badge: badge) {
-            let size = badge.sizeThatFits(ProposedViewSize(width: room, height: nil))
-            return CGSize(width: width, height: max(filters.height, size.height))
+    var body: some View {
+        HStack(spacing: 10) {
+            Label(hidden > 0 ? "Your account's sockets" : "Every process's sockets",
+                  systemImage: hidden > 0 ? "person.crop.circle" : "desktopcomputer")
+                .font(.metadata.weight(.semibold))
+                .foregroundStyle(.secondaryText)
+                .lineLimit(1)
+                .help(hidden > 0
+                    ? "The counts and the table cover the sockets of processes running as \(NSUserName())."
+                    : "Every process's sockets could be read, so the counts cover the whole Mac.")
+            Spacer(minLength: 8)
+            if hidden > 0 {
+                Button {
+                    explains.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "eye.slash")
+                        Text("\(hidden.formatted()) \(hidden == 1 ? "process" : "processes") hidden")
+                        Image(systemName: "info.circle").imageScale(.small)
+                    }
+                    .font(.explanation.weight(.medium))
+                    .foregroundStyle(.secondaryText)
+                    .lineLimit(1)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(explains ? 0.11 : 0.06), in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help("Why other processes' sockets aren't counted")
+                .accessibilityHint("Explains why")
+                .popover(isPresented: $explains, arrowEdge: .bottom) {
+                    HiddenProcessesNote(hidden: hidden)
+                        .padding(16)
+                        .frame(width: 330)
+                }
+            }
         }
-        let size = badge.sizeThatFits(ProposedViewSize(width: width, height: nil))
-        return CGSize(width: width, height: filters.height + lineSpacing + size.height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard let picker = subviews.first else { return }
-        let filters = picker.sizeThatFits(.unspecified)
-        guard subviews.count > 1 else {
-            picker.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: .unspecified)
-            return
-        }
-        let badge = subviews[1]
-        if let room = room(beside: filters, in: bounds.width, badge: badge) {
-            picker.place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: .unspecified)
-            badge.place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
-                        proposal: ProposedViewSize(width: room, height: nil))
-        } else {
-            picker.place(at: bounds.origin, anchor: .topLeading, proposal: .unspecified)
-            badge.place(at: CGPoint(x: bounds.minX, y: bounds.minY + filters.height + lineSpacing), anchor: .topLeading,
-                        proposal: ProposedViewSize(width: bounds.width, height: nil))
-        }
-    }
-
-    /// The width beside the filters, when the badge's narrowest form fits there.
-    private func room(beside filters: CGSize, in width: CGFloat, badge: LayoutSubview) -> CGFloat? {
-        let room = width - filters.width - spacing
-        return badge.sizeThatFits(ProposedViewSize(width: 0, height: nil)).width <= room ? room : nil
     }
 }
 
-/// Says how many sockets the counts and the table cover, and how many
-/// processes they leave out, in a capsule so it reads with the counts above
-/// it rather than as a footnote. So a 0 above a socket in the table reads as
-/// a count of something else, not a missing row.
-private struct ScopeBadge: View {
-    var visible: Int
+/// Why some processes' sockets are missing, and what shows them.
+private struct HiddenProcessesNote: View {
     var hidden: Int
-    var length: Length
-
-    /// Longest first. The shortest keeps the badge beside the filters in a
-    /// narrow window; the footer under the table still counts the sockets.
-    enum Length {
-        case long, short, shortest
-    }
 
     var body: some View {
-        let sockets = visible == 1 ? "socket" : "sockets"
-        let text = switch length {
-        case .long: "\(visible.formatted()) visible \(sockets) · \(hidden.formatted()) processes hidden"
-        case .short: "\(visible.formatted()) \(sockets) · \(hidden.formatted()) hidden"
-        case .shortest: "\(hidden.formatted()) hidden"
-        }
-        Label(text, systemImage: "eye.slash")
-            .font(.explanation.weight(.medium))
-            .foregroundStyle(.secondaryText)
-            .lineLimit(1)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 3)
-            .background(Color.primary.opacity(0.06), in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
-            .fixedSize()
-            .help("""
-            The counts above and the table cover the \(visible.formatted()) \(sockets) your own processes hold. macOS only \
-            lets an app list its own user's sockets, so \(hidden.formatted()) processes are left out: sockets held by root \
-            and other users, such as system daemons, aren't shown. A privileged helper that lifts this is planned.
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Why \(hidden.formatted()) \(hidden == 1 ? "process is" : "processes are") hidden")
+                .font(.headline)
+            Text("""
+            macOS lets an app read the sockets of processes running under your own account, and no others. These run \
+            as root or as another user (system daemons, and the apps of anyone else logged in), so their sockets aren't \
+            in the counts or the table.
             """)
+            Text("""
+            An administrator account doesn't change this: the apps you open still run as you, not as root. Running \
+            OpenTaskManager itself as root isn't supported.
+            """)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("To list every socket now, run this in Terminal:")
+                Text("sudo lsof -i -n -P")
+                    .font(.explanation.monospaced())
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
+            }
+            Text("A privileged helper that adds them here is planned.")
+                .foregroundStyle(.secondaryText)
+        }
+        .font(.explanation)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

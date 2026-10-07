@@ -298,14 +298,11 @@ private struct ChangeRow: View {
         }
     }
 
-    /// The folder holding it, below the open folder; nil when that's the open folder.
+    /// The folder holding it, as a trail below the open folder ("Projects ›
+    /// webapp", as the treemap's tag writes it); nil when that's the open folder.
     private var location: String? {
-        var parent = change.parentPath
-        if !under.isEmpty {
-            guard parent.hasPrefix(under) else { return parent }
-            parent = String(parent.dropFirst(under.count).drop { $0 == "/" })
-        }
-        return parent.isEmpty ? nil : parent
+        let trail = Format.trail(change.parentPath, under: under)
+        return trail.isEmpty ? nil : trail
     }
 }
 
