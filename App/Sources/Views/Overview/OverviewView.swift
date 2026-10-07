@@ -11,7 +11,7 @@ struct OverviewView: View {
             let groups = model.appGroups
             // Unknown until the first samples say; until then the card stays.
             let measuresEnergy = model.measuresProcessEnergy != false
-            let networkRanks = TopNetworkStrip.hasRanking(model.networkActivity)
+            let networkRanks = TopNetworkCard.hasRanking(model.networkActivity)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     FillGrid(minimum: 210) {
@@ -279,18 +279,10 @@ private struct FollowsEnd: ViewModifier {
 
 /// Top Network as a strip while there's nothing to rank: still measuring,
 /// nettop unavailable, or no app moving data lately. The card comes back
-/// as soon as an app sends or receives anything.
+/// as soon as an app sends or receives anything, and keeps its rows through
+/// a pause (`TopNetworkCard.holdReadings`), so it never shows empty.
 private struct TopNetworkStrip: View {
     @Environment(AppModel.self) private var model
-
-    /// Quiet readings the card stays for before it gives way to the strip,
-    /// so a pause in the traffic doesn't move the cards around.
-    private static let holdReadings = 10
-
-    /// Whether the card has rows to show, or had some within the hold.
-    static func hasRanking(_ store: NetworkActivityStore) -> Bool {
-        store.hasMeasured && store.apps.hasMoved(inLast: holdReadings)
-    }
 
     var body: some View {
         let store = model.networkActivity
@@ -301,7 +293,8 @@ private struct TopNetworkStrip: View {
             NoticeStrip(title: "Top Network", symbol: "network", color: Theme.network, text: "Measuring which apps use the network…",
                         help: cadence, isMissing: false)
         } else {
-            let span = Format.roughDuration(Double(min(store.apps.length, Self.holdReadings)) * NetworkActivityStore.refreshSeconds)
+            let hold = TopNetworkCard.holdReadings
+            let span = Format.roughDuration(Double(min(store.apps.length, hold)) * NetworkActivityStore.refreshSeconds)
             NoticeStrip(title: "Top Network", symbol: "network", color: Theme.network, text: "Nothing sent or received in the last \(span)",
                         help: "\(cadence) The ranking comes back when an app sends or receives something.", isMissing: false)
         }
@@ -319,7 +312,7 @@ private struct CoreMap: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Cores").font(.headline)
                 Spacer()
-                Text("\(topology.brand) · load by core type").font(.metadata).foregroundStyle(.secondaryText)
+                Text("\(topology.brand) · load by core type").font(.explanation).foregroundStyle(.secondaryText)
             }
             HStack(alignment: .top, spacing: 24) {
                 VStack(alignment: .leading, spacing: 12) {

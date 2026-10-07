@@ -151,7 +151,9 @@ locked or the window is on another Space.
   Connections) use `InspectorSplit`: the pane appears beside the table once
   something is selected, its width is draggable and remembered, and in a
   window too narrow for both it covers the table under a Back button (Esc).
-  Double-click opens it. Give it the table's real minimum width.
+  Double-click opens it. Give it the table's real minimum width. A covered
+  table is moved out of the window, not just hidden: AppKit still shows the
+  tooltips of a transparent view, over the details.
 - In a details pane beside a table, wrapping text outside the pane's scroll
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
@@ -175,7 +177,9 @@ locked or the window is on another Space.
   again every tick (about half a percent of a core for the CPU graph's two),
   so that caption row is a small `Layout` instead.
 - Secondary text (labels, captions, units, footnotes) takes
-  `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt), and table
+  `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt);
+  explanations meant to be read (what a reading means, why it's missing, what
+  a button does) `.font(.explanation)` (12 pt); and table
   and list rows `.font(.tableText)` (12 pt), all from `Graphs.swift`. The
   system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`

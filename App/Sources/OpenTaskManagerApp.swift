@@ -31,6 +31,9 @@ struct OpenTaskManagerApp: App {
                 Button("Open Recording…") { HistoryRecordingStore.shared.chooseRecording() }
                     .keyboardShortcut("o")
             }
+            // View > Hide Sidebar (⌃⌘S), the quickest way to give a narrow
+            // window the sidebar's width.
+            SidebarCommands()
             CommandGroup(after: .toolbar) {
                 Button(model.isPaused ? "Resume Updates" : "Pause Updates") { model.isPaused.toggle() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
@@ -99,7 +102,10 @@ struct ContentView: View {
             List(Page.allCases, selection: Binding(get: { page }, set: { if let new = $0 { page = new } })) { page in
                 Label(page.rawValue, systemImage: page.symbol).tag(page)
             }
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 240)
+            // As narrow as the longest name ("Connections") allows, and no
+            // narrower: an icon-only sidebar had no room for the system's
+            // toggle, which then went to the toolbar's overflow menu.
+            .navigationSplitViewColumnWidth(min: 150, ideal: 160, max: 240)
         } detail: {
             switch page {
             case .overview: OverviewView()

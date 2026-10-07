@@ -156,9 +156,13 @@ extension NSColor {
 }
 
 extension Font {
-    /// Metadata: labels, captions, units and footnotes. 11 pt at the default
-    /// text size, the smallest text the app draws.
+    /// Metadata: labels, units, short facts and status bars. 11 pt at the
+    /// default text size, the smallest text the app draws.
     static let metadata = Font.subheadline
+    /// Explanatory captions and notes: what something means, why a reading
+    /// is missing, what a button will do. 12 pt, a size up from `metadata`,
+    /// since these are read rather than scanned.
+    static let explanation = Font.callout
     /// Rows of tables and lists: 12 pt.
     static let tableText = Font.callout
 }

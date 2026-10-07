@@ -112,6 +112,26 @@ struct NetworkActivityTests {
         #expect(history.ranking(bands: 9, rows: 9).bands.count == 5)
     }
 
+    @Test func aHeldRankingKeepsWhatMovedLatelyAfterItGoesQuiet() {
+        var history = NetworkActivityHistory<Int32>(capacity: 10)
+        history.append([1: usage(500), 2: usage(50)])
+        history.append([2: usage(20)])
+        history.append([:])
+        // Nothing is moving now, so an unheld list is empty...
+        #expect(history.ranking(bands: 0, rows: 6).rows.isEmpty)
+        // ...while a held one keeps both, busiest over the window first.
+        #expect(history.ranking(bands: 0, rows: 6, holding: 3).rows == [1, 2])
+        // App 1 last moved three readings ago, outside a hold of two.
+        #expect(history.ranking(bands: 0, rows: 6, holding: 2).rows == [2])
+        // Whatever moves now still leads.
+        history.append([3: usage(1)])
+        #expect(history.ranking(bands: 0, rows: 6, holding: 4).rows == [3, 1, 2])
+        // A list shown whenever something moved within the hold is never empty.
+        for hold in 1...5 {
+            #expect(history.hasMoved(inLast: hold) == !history.ranking(bands: 0, rows: 6, holding: hold).rows.isEmpty)
+        }
+    }
+
     @Test func remainderSumsEverythingOutsideTheBands() {
         var history = NetworkActivityHistory<Int32>(capacity: 4)
         history.append([1: usage(10), 2: usage(3)])
