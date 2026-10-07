@@ -105,7 +105,7 @@ struct HistoryTimelineControls: View {
                 sessionControls(recorder)
             } else {
                 Label("Read-only recording", systemImage: "lock")
-                    .font(.metadata)
+                    .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
             }
@@ -123,7 +123,7 @@ struct HistoryTimelineControls: View {
         if let draft = scrubber.draft {
             if let end = draft.end {
                 Text(HistorySessionStyle.span(draft.start, end))
-                    .font(.metadata.monospacedDigit())
+                    .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondaryText)
                     .fixedSize()
                 TextField("Note (optional)", text: $note)
@@ -137,7 +137,7 @@ struct HistoryTimelineControls: View {
                 Button("Cancel", action: cancel).fixedSize()
             } else {
                 Text("Session from \(HistoryMoment.label(draft.from, bucket: bucket))")
-                    .font(.metadata.monospacedDigit())
+                    .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
                 Button("Mark End") { scrubber.draft?.to = scrubber.picked ?? .now }
@@ -180,7 +180,7 @@ struct HistoryTimelineControls: View {
                 Text("or Shift-drag the timeline")
                 Color.clear.frame(width: 0, height: 0)
             }
-            .font(.metadata)
+            .font(.explanation)
             .foregroundStyle(.secondaryText)
         }
     }
@@ -211,7 +211,7 @@ private struct HistoryTransport: View {
         HStack(spacing: 8) {
             if let gap = player.gap {
                 Text("Jumping \(Format.roughDuration(gap)) not recorded")
-                    .font(.metadata)
+                    .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
             }

@@ -70,6 +70,7 @@ struct AppsView: View {
     @State private var showsFullDetail = false
     /// The app whose removal review is open.
     @State private var removing: InstalledApp?
+    @FocusState private var tableFocused: Bool
 
     var body: some View {
         Group {
@@ -82,13 +83,10 @@ struct AppsView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button {
+                InventoryRefresh(readAt: store.scannedAt, isReading: store.isScanning,
+                                 help: "Look for apps again and measure their sizes again") {
                     refreshes += 1
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(store.isScanning)
-                .help("Look for apps again and measure their sizes again")
             }
             ToolbarItem {
                 Button(action: toggleDetails) {
@@ -102,7 +100,7 @@ struct AppsView: View {
         .task(id: refreshes) {
             await store.scan(refresh: refreshes > 0)
             guard !Task.isCancelled, let apps = store.apps else { return }
-            select(in: apps)
+            await select(in: apps)
             await store.measureSizes()
         }
         .task { await store.followRunningApps() }
@@ -154,8 +152,8 @@ struct AppsView: View {
                 backTitle: "Apps"
             ) {
                 AppsTable(rows: rows, isMeasuring: store.sizesLeft > 0, selection: $selection, sortOrder: $sortOrder,
-                          scrollTarget: $scrollTarget, showInStartup: showInStartup, moveToTrash: { removing = $0 },
-                          open: openDetails)
+                          scrollTarget: $scrollTarget, focus: $tableFocused, showInStartup: showInStartup,
+                          moveToTrash: { removing = $0 }, open: openDetails)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } detail: {
                 if let row = all.first(where: { $0.id == selection }) {
@@ -179,10 +177,11 @@ struct AppsView: View {
 
     /// Drops a selection a refresh no longer finds, and picks the app
     /// `-openApp` names once (for screenshots).
-    private func select(in apps: [InstalledApp]) {
+    private func select(in apps: [InstalledApp]) async {
         if let selection, !apps.contains(where: { $0.id == selection }) { self.selection = nil }
         guard !openedRequest, let query = LaunchArgument.string("openApp") else { return }
         openedRequest = true
+        await LaunchArgument.afterTableLayout()
         guard let app = InstalledApps.find(query, in: apps) else { return }
         let row = AppRow(app: app, size: nil, pids: store.running[app.id] ?? [])
         if !filter.includes(row) { filter = .all }
@@ -190,6 +189,9 @@ struct AppsView: View {
         selection = app.id
         scrollTarget = app.id
         openDetails()
+        // As a click would: the row shows the selection's colour, not the
+        // grey of a table without the focus.
+        Task { tableFocused = true }
         // `-openAppRemoval YES` opens its removal review too.
         if LaunchArgument.string("openAppRemoval") != nil, AppActions.offersRemoval(app) { removing = app }
     }
@@ -268,7 +270,7 @@ private struct AppsCard<Content: View>: View {
                 content
                 // Two lines in the narrowest window; the grid keeps the cards level.
                 Text(detail)
-                    .font(.subheadline)
+                    .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(2)
             }
@@ -322,6 +324,7 @@ private struct AppsTable: View {
     @Binding var selection: InstalledApp.ID?
     @Binding var sortOrder: [KeyPathComparator<AppRow>]
     @Binding var scrollTarget: InstalledApp.ID?
+    var focus: FocusState<Bool>.Binding
     var showInStartup: (InstalledApp) -> Void
     var moveToTrash: (InstalledApp) -> Void
     var open: () -> Void
@@ -362,6 +365,7 @@ private struct AppsTable: View {
             sizeColumn
             lastOpenedColumn
         }
+        .focused(focus)
         .contextMenu(forSelectionType: InstalledApp.ID.self) { ids in
             if let id = ids.first, let app = rows.first(where: { $0.id == id })?.app {
                 Button("Open") { AppActions.open(app) }
@@ -401,7 +405,7 @@ private struct AppsTable: View {
     private var kindColumn: some Column {
         TableColumn("Kind", value: \.kind) { row in
             Text(row.app.kind.title)
-                .foregroundStyle(row.app.kind == .apple ? .secondary : .primary)
+                .foregroundStyle(row.app.kind == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
         .width(min: Minimum.kind, ideal: 80, max: 110)
         .customizationID(Self.kindID)
@@ -422,7 +426,7 @@ private struct AppsTable: View {
         TableColumn("Size", value: \.sizeOrder) { row in
             Text(row.size.map(Format.bytes) ?? (isMeasuring ? "…" : "—"))
                 .monospacedDigit()
-                .foregroundStyle(row.size == nil ? .secondary : .primary)
+                .foregroundStyle(row.size == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .width(min: Minimum.size, ideal: 65, max: 90)
@@ -431,7 +435,7 @@ private struct AppsTable: View {
     private var lastOpenedColumn: some Column {
         TableColumn("Last opened", value: \.lastOpenedOrder) { row in
             Text(AppText.lastOpened(row.app.lastOpened))
-                .foregroundStyle(row.app.lastOpened == nil ? .secondary : .primary)
+                .foregroundStyle(row.app.lastOpened == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
                 .help(row.app.lastOpened.map { $0.formatted(date: .complete, time: .shortened) } ?? "Spotlight has no record of it being opened")
         }
         .width(min: Minimum.lastOpened, ideal: 75, max: 110)
@@ -563,7 +567,7 @@ private struct AppsStatusBar: View {
                 .help("Spotlight notes when an app is opened from Finder, the Dock or Launchpad. Apps opened other "
                     + "ways, or on a volume Spotlight doesn't index, show a dash.")
         }
-        .font(.subheadline)
+        .font(.metadata)
         .monospacedDigit()
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 12)

@@ -59,7 +59,7 @@ struct AppDetail: View {
                 Text(app.name).font(.headline).lineLimit(2)
                 if let identifier = app.bundleIdentifier {
                     Text(identifier)
-                        .font(.subheadline.monospaced()).foregroundStyle(.secondaryText)
+                        .font(.callout.monospaced()).foregroundStyle(.secondaryText)
                         .lineLimit(1).truncationMode(.middle)
                         .textSelection(.enabled)
                         .help(identifier)
@@ -88,7 +88,7 @@ struct AppDetail: View {
     private var signature: some View {
         let signature = app.signature
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Signature").font(.subheadline.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Signature").font(.callout.weight(.semibold)).foregroundStyle(.secondaryText)
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                 FactRow(label: "Signed by", value: signature.signer.title)
                 if let developer = signature.developerName {
@@ -102,7 +102,7 @@ struct AppDetail: View {
                     FactRow(label: "Hardened runtime", value: signature.hardenedRuntime ? "Yes" : "No")
                 }
             }
-            Text(signature.signer.explanation).font(.subheadline).foregroundStyle(.secondaryText)
+            Text(signature.signer.explanation).font(.explanation).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             if let identifier = signature.identifier, identifier != app.bundleIdentifier {
                 labelled("Signing identifier", identifier)
@@ -114,7 +114,7 @@ struct AppDetail: View {
                 }
             }
             Text("Notarization isn't shown: checking it means validating the whole bundle with Gatekeeper.")
-                .font(.subheadline).foregroundStyle(.secondaryText)
+                .font(.explanation).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -129,7 +129,7 @@ struct AppDetail: View {
                             .imageScale(.small)
                             .foregroundStyle(.secondaryText)
                     }
-                    Text(authority).font(.subheadline).textSelection(.enabled)
+                    Text(authority).font(.callout).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.leading, CGFloat(max(depth - 1, 0)) * 12)
@@ -139,10 +139,10 @@ struct AppDetail: View {
 
     private var launchItems: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Launch items").font(.subheadline.weight(.semibold)).foregroundStyle(.secondaryText)
+            Text("Launch items").font(.callout.weight(.semibold)).foregroundStyle(.secondaryText)
             if app.launchItems.isEmpty {
                 Text("None: nothing in the LaunchAgents or LaunchDaemons folders runs from this app or carries its bundle ID.")
-                    .font(.subheadline).foregroundStyle(.secondaryText)
+                    .font(.explanation).foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(app.launchItems) { item in
@@ -152,12 +152,12 @@ struct AppDetail: View {
                             Text(item.name).font(.callout).lineLimit(1).truncationMode(.middle)
                                 .help(item.label)
                             Text("\(item.scope.title) · \(item.launchSummary) · \(item.state.title)")
-                                .font(.subheadline).foregroundStyle(.secondaryText)
+                                .font(.callout).foregroundStyle(.secondaryText)
                                 .lineLimit(1)
                         }
                     }
                 }
-                Text(startsItselfNote).font(.subheadline).foregroundStyle(.secondaryText)
+                Text(startsItselfNote).font(.explanation).foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -223,8 +223,8 @@ struct AppDetail: View {
     /// whole of it in a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
-            CopyableText(value: value, truncatesMiddle: true).font(.subheadline)
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            CopyableText(value: value, truncatesMiddle: true).font(.callout)
         }
     }
 }
@@ -260,7 +260,7 @@ private struct ArchitectureWarning: View {
                 // details' scroll view, a fixed-height text here made the split
                 // view size the page from the pane and push the status bar out
                 // of the window.
-                Text(detail).font(.subheadline).foregroundStyle(.secondaryText)
+                Text(detail).font(.explanation).foregroundStyle(.secondaryText)
             }
         }
         .padding(8)

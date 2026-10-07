@@ -275,7 +275,7 @@ struct HistoryChartCard: View {
                     .foregroundStyle(.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
                     .annotation(position: .overlay, alignment: .center) {
                         if earliest.timeIntervalSince(domain.lowerBound) > domain.upperBound.timeIntervalSince(domain.lowerBound) / 5 {
-                            Text("Not recorded yet").font(.subheadline).foregroundStyle(.tertiary)
+                            Text("Not recorded yet").font(.metadata).foregroundStyle(.secondaryText)
                         }
                     }
             }
@@ -342,7 +342,7 @@ struct HistoryChartCard: View {
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
                 // Centred under its line, as `GraphMath.timeTicks` spaces them: a
                 // label hanging right of its tick ran past the plot's end and was cut.
-                AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 10.5)).foregroundStyle(.secondaryText)
+                AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 11)).foregroundStyle(.secondaryText)
             }
         }
         .chartPlotStyle { plot in
@@ -412,7 +412,7 @@ private struct HistoryPlotOverlay: View {
         ZStack(alignment: .topLeading) {
             ForEach(labels.indices, id: \.self) { index in
                 Text(labels[index])
-                    .font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(.secondaryText)
                     .offset(x: plot.minX + 6, y: plot.minY + 3 + plot.height / 2 * CGFloat(index))
             }

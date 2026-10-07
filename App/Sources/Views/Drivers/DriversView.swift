@@ -39,10 +39,13 @@ struct DriversView: View {
     @State private var search = ""
     @State private var selection: ExtensionItem.ID?
     @State private var openedRequest = false
+    /// A row to bring into view once, for `-openDriver`.
+    @State private var scrollTarget: ExtensionItem.ID?
     /// The window is too narrow for the table and the details side by side.
     @State private var isNarrow = false
     /// In a narrow window, the details cover the table.
     @State private var showsFullDetail = false
+    @FocusState private var tableFocused: Bool
     @State private var sortOrder = [
         KeyPathComparator(\ExtensionItem.publisher), KeyPathComparator(\ExtensionItem.category), KeyPathComparator(\ExtensionItem.name),
     ]
@@ -58,13 +61,9 @@ struct DriversView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button {
+                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Ask the kernel and systemextensionsctl again") {
                     Task { await rescan() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(isScanning)
-                .help("Ask the kernel and systemextensionsctl again")
             }
             ToolbarItem {
                 Button(action: toggleDetails) {
@@ -129,7 +128,7 @@ struct DriversView: View {
             backTitle: "Drivers"
         ) {
             DriverTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,
-                        open: openDetails)
+                        scrollTarget: $scrollTarget, focus: $tableFocused, open: openDetails)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } detail: {
             if let selected {
@@ -194,9 +193,15 @@ struct DriversView: View {
         if let requested = scanned.items.sorted(using: sortOrder).first(where: {
             $0.name.localizedCaseInsensitiveContains(query) || $0.bundleID.localizedCaseInsensitiveContains(query)
         }) {
+            // The filter first, since it can swap tables.
             if !filter.includes(requested) { filter = requested.publisher == .apple ? .apple : .thirdParty }
+            await LaunchArgument.afterTableLayout()
             selection = requested.id
+            scrollTarget = requested.id
             openDetails()
+            // As a click would: the row shows the selection's colour, not
+            // the grey of a table without the focus.
+            Task { tableFocused = true }
         }
     }
 }
@@ -269,13 +274,13 @@ private struct DriverSummaryCard: View {
             } icon: {
                 Image(systemName: symbol).foregroundStyle(tint)
             }
-            .font(.caption.weight(.medium))
+            .font(.metadata.weight(.medium))
             .foregroundStyle(.secondaryText)
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 1) {
                 AnimatedNumber(value: Double(value), format: { Format.fixed($0, 0) }, font: Self.valueFont)
                 Text(detail)
-                    .font(.subheadline)
+                    .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)
             }
@@ -322,6 +327,9 @@ private struct DriverTable: View {
     var showsPublisher: Bool
     @Binding var selection: ExtensionItem.ID?
     @Binding var sortOrder: [KeyPathComparator<ExtensionItem>]
+    /// A row to bring into view (`-openDriver`), cleared once it's scrolled to.
+    @Binding var scrollTarget: ExtensionItem.ID?
+    var focus: FocusState<Bool>.Binding
     var open: () -> Void
 
     /// Narrowest each column gets: room for its usual values (a version
@@ -343,11 +351,15 @@ private struct DriverTable: View {
     }
 
     var body: some View {
-        // Brings a row picked before the table appeared (`-openDriver`) into view.
         ScrollViewReader { proxy in
-            table.onAppear {
-                if let selection { proxy.scrollTo(selection, anchor: .center) }
-            }
+            table
+                .onChange(of: scrollTarget, initial: true) { _, target in
+                    guard let target else { return }
+                    // Leading, not centre: centring also scrolled the columns
+                    // sideways, cutting off the names in a narrow window.
+                    proxy.scrollTo(target, anchor: .leading)
+                    scrollTarget = nil
+                }
         }
     }
 
@@ -373,6 +385,7 @@ private struct DriverTable: View {
                 }
             }
         }
+        .focused(focus)
         .contextMenu(forSelectionType: ExtensionItem.ID.self) { ids in
             if let id = ids.first, let item = rows.first(where: { $0.id == id }) {
                 if let path = DriverActions.revealablePath(item) {
@@ -418,7 +431,7 @@ private struct DriverTable: View {
     private var publisherColumn: some Column {
         TableColumn("Publisher", value: \.publisher) { item in
             Text(item.publisher.title)
-                .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
+                .foregroundStyle(item.publisher == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
         .width(min: Minimum.publisher, ideal: 75, max: 100)
     }
@@ -530,7 +543,7 @@ private struct DriversStatusBar: View {
                     .help("Neither the kernel nor kmutil answered, so kernel extensions are unknown rather than absent.")
             }
         }
-        .font(.subheadline)
+        .font(.metadata)
         .monospacedDigit()
         .foregroundStyle(.secondaryText)
         .lineLimit(1)

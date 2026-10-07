@@ -31,9 +31,10 @@ struct OpenTaskManagerApp: App {
                 Button("Open Recording…") { HistoryRecordingStore.shared.chooseRecording() }
                     .keyboardShortcut("o")
             }
-            // View > Hide Sidebar (⌃⌘S), the quickest way to give a narrow
-            // window the sidebar's width.
+            // View > Hide Sidebar and Show Sidebar (⌃⌘S). A window under
+            // 900 points hides it by itself (`SidebarVisibility`).
             SidebarCommands()
+            PageCommands()
             CommandGroup(after: .toolbar) {
                 Button(model.isPaused ? "Resume Updates" : "Pause Updates") { model.isPaused.toggle() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
@@ -92,19 +93,51 @@ enum Page: String, CaseIterable, Identifiable {
     }
 }
 
+/// The pages in the View menu, the current one ticked, with ⌘1 to ⌘9 for the
+/// first nine: a way between pages that doesn't need the sidebar, which a
+/// window under 900 points hides.
+private struct PageCommands: Commands {
+    @AppStorage("page") private var page: Page = .overview
+
+    var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Section {
+                ForEach(Array(Page.allCases.enumerated()), id: \.element) { index, item in
+                    Toggle(item.rawValue, isOn: Binding(get: { page == item }, set: { if $0 { page = item } }))
+                        .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)"))) : nil)
+                }
+            }
+        }
+    }
+}
+
 struct ContentView: View {
+    /// Where the user's own hiding of the sidebar, in a wide window, is kept.
+    private static let sidebarHiddenKey = "sidebarHidden"
+
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @AppStorage("page") private var page: Page = .overview
+    /// In a window under 900 points the sidebar steps aside, so the page gets
+    /// the fifth of the width it took, and comes back when the window
+    /// widens; the user's own show or hide wins (`SidebarVisibility` in OTMKit).
+    @State private var sidebar = SidebarVisibility(hiddenByUser: UserDefaults.standard.bool(forKey: Self.sidebarHiddenKey))
+    @FocusState private var sidebarFocused: Bool
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: Binding(
+            get: { sidebar.isShown ? .all : .detailOnly },
+            // The toolbar's sidebar button and View > Hide Sidebar.
+            set: { sidebar.userSets(shown: $0 != .detailOnly) }
+        )) {
             List(Page.allCases, selection: Binding(get: { page }, set: { if let new = $0 { page = new } })) { page in
                 Label(page.rawValue, systemImage: page.symbol).tag(page)
             }
+            .focused($sidebarFocused)
             // As narrow as the longest name ("Connections") allows, and no
             // narrower: an icon-only sidebar had no room for the system's
-            // toggle, which then went to the toolbar's overflow menu.
+            // toggle, which then went to the toolbar's overflow menu. A
+            // narrow window hides the whole column instead.
             .navigationSplitViewColumnWidth(min: 150, ideal: 160, max: 240)
         } detail: {
             switch page {
@@ -121,6 +154,17 @@ struct ContentView: View {
             case .storage: StorageView()
             }
         }
+        // Only crossing the breakpoint matters, not every step of a resize.
+        .onGeometryChange(for: Bool.self) { SidebarVisibility.isNarrow(width: $0.size.width) } action: { narrow in
+            sidebar.window(isNarrow: narrow)
+            // The list lets the keyboard focus go as it leaves, rather than
+            // pass it to the toolbar's first button, which then showed a
+            // focus ring with keyboard navigation on.
+            if !sidebar.isShown { sidebarFocused = false }
+        }
+        .onChange(of: sidebar.hiddenByUser) { UserDefaults.standard.set(sidebar.hiddenByUser, forKey: Self.sidebarHiddenKey) }
+        // With the sidebar hidden, the title still names the page, and the
+        // View menu (⌘1 to ⌘9, `PageCommands`) changes it.
         .navigationTitle(page.rawValue)
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -147,13 +191,15 @@ struct ContentView: View {
     }
 }
 
-/// Says whether the numbers are moving and how often they update. Clicking
-/// it opens a popover to change the update speed. While the History page
-/// shows a recording file, the badge answers only for this Mac's own
-/// figures: "Collecting · 1 s", or "Collecting paused" in grey, so orange
-/// is the replay's alone, and the replay's badge follows it in that tint.
-/// The recording's name stays in the page's banner, which leaves the
-/// page's toolbar items room at 820 points.
+/// Says whether the metrics are moving and how often they update: "Live
+/// metrics · 1 s". It speaks for the sampled figures alone; the inventory
+/// pages (Startup, Apps, Drivers) say when their lists were read beside
+/// their own Refresh. Clicking it opens a popover to change the update
+/// speed. While the History page shows a recording file, the badge answers
+/// only for this Mac's own figures: "Collecting · 1 s", or "Collecting
+/// paused" in grey, so orange is the replay's alone, and the replay's badge
+/// follows it in that tint. The recording's name stays in the page's
+/// banner, which leaves the page's toolbar items room at 820 points.
 private struct LiveBadge: View {
     @Environment(AppModel.self) private var model
     @State private var isChoosing = false
@@ -171,19 +217,19 @@ private struct LiveBadge: View {
                     Circle()
                         .fill(tint)
                         .frame(width: 7, height: 7)
-                    Text(replaying ? (isPaused ? "Collecting paused" : "Collecting") : isPaused ? "Paused" : "Live")
+                    Text(replaying ? (isPaused ? "Collecting paused" : "Collecting") : isPaused ? "Metrics paused" : "Live metrics")
                         .fontWeight(.semibold)
                         .foregroundStyle(isPaused && !replaying ? Color.orange : Color.primary)
-                    if !(replaying && isPaused) {
-                        Text((replaying ? "· " : "every ") + Format.timeSpan(model.updateSpeed.rawValue))
-                            .foregroundStyle(.secondary)
+                    if !isPaused {
+                        Text("· " + Format.timeSpan(model.updateSpeed.rawValue))
+                            .foregroundStyle(.secondaryText)
                             .monospacedDigit()
                     }
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondaryText)
                 }
-                .font(.subheadline)
+                .font(.callout)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 4)
                 .background(tint.opacity(0.13), in: Capsule())
@@ -204,13 +250,22 @@ private struct LiveBadge: View {
     private func help(replaying: Bool) -> String {
         let every = Format.timeSpan(model.updateSpeed.rawValue)
         guard replaying else {
-            return model.isPaused ? "Updates are frozen. Press ⇧⌘P to resume." : "Updating every \(every). Click to change."
+            let lists = "Startup, Apps and Drivers are lists read when their page opens and on Refresh, which says when."
+            return model.isPaused
+                ? "Metrics are frozen. Press ⇧⌘P to resume. \(lists)"
+                : "Metrics (CPU, memory, GPU, disk, network, power) update \(Self.every(model.updateSpeed.rawValue)). "
+                    + "\(lists) Click to change the speed."
         }
         return model.isPaused
             ? "Collecting this Mac's own figures is paused, so its history gains nothing; the recording replays on its own. "
                 + "Press ⇧⌘P to resume."
             : "This Mac's own figures are still collected every \(every), and its history kept, while the recording replays. "
                 + "Click to change the speed. Pause stops collecting, not the replay."
+    }
+
+    /// "every second", "every 2 s".
+    private static func every(_ seconds: Double) -> String {
+        seconds == 1 ? "every second" : "every \(Format.timeSpan(seconds))"
     }
 }
 
@@ -221,15 +276,15 @@ private struct UpdateSpeedPicker: View {
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 10) {
-            Text("Update every").font(.headline)
-            Picker("Update every", selection: $model.updateSpeed) {
+            Text("Update metrics every").font(.headline)
+            Picker("Update metrics every", selection: $model.updateSpeed) {
                 ForEach(UpdateSpeed.allCases) { Text(Format.timeSpan($0.rawValue)).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             Text("Graphs hold the last \(AppModel.graphSpan) updates, so slower speeds show a longer stretch and use less CPU.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
             Toggle("Pause updates", isOn: $model.isPaused)

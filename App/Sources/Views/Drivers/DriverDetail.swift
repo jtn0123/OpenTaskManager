@@ -10,15 +10,21 @@ struct DriverDetail: View {
     var item: ExtensionItem
     var scan: ExtensionScan
 
+    /// Like the Startup and Apps panes: the extension, with the row's icon
+    /// and name, pinned at the top, the action in a footer, and everything
+    /// read about it scrolling between them, edge to edge.
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: 0) {
             header
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if item.status.needsAttention { approvalNote }
                     facts
                     Text(about)
-                        .font(.subheadline)
+                        .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                     labelled("Bundle ID", item.bundleID)
@@ -26,10 +32,15 @@ struct DriverDetail: View {
                     if let kext = item.kernelExtension { kernelDetails(kext) }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
             }
-            buttons
+            if hasAction {
+                Divider()
+                buttons
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(12)
     }
 
     // MARK: Sections
@@ -39,7 +50,7 @@ struct DriverDetail: View {
             ExtensionIcon(item: item, size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.headline).lineLimit(2)
-                Text(item.kind).font(.subheadline).foregroundStyle(.secondaryText).lineLimit(1)
+                Text(item.kind).font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
             }
         }
     }
@@ -85,7 +96,7 @@ struct DriverDetail: View {
         if let team = system.teamID { labelled("Team ID", team) }
         if let app = system.appPath {
             VStack(alignment: .leading, spacing: 4) {
-                labelled("Installed by", app)
+                labelled("Installed by", app, oneLine: true)
                 if let path = DriverActions.revealablePath(item) {
                     Button("Reveal in Finder") { DriverActions.reveal(path) }
                         .controlSize(.small)
@@ -93,15 +104,15 @@ struct DriverDetail: View {
             }
         }
         VStack(alignment: .leading, spacing: 2) {
-            Text("Reported as").font(.subheadline).foregroundStyle(.secondaryText)
+            Text("Reported as").font(.callout).foregroundStyle(.secondaryText)
             Text(verbatim: system.state)
-                .font(.subheadline.monospaced())
+                .font(.callout.monospaced())
                 .textSelection(.enabled)
         }
         .help("systemextensionsctl's own words for this extension's state")
         if let location = system.settingsLocation {
             Text("Change it in \(location).")
-                .font(.subheadline)
+                .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -109,13 +120,18 @@ struct DriverDetail: View {
 
     @ViewBuilder
     private func kernelDetails(_ kext: KernelExtension) -> some View {
-        if let uuid = kext.uuid { labelled("UUID", uuid) }
-        if let path = kext.path { labelled("Path", path) }
+        if let uuid = kext.uuid { labelled("UUID", uuid, oneLine: true) }
+        if let path = kext.path { labelled("Path", path, oneLine: true) }
         if let address = kext.loadAddress {
             labelled("Load address", "0x" + String(address, radix: 16))
         }
         links("Links against", scan.linkedAgainst(kext))
         links("Used by", scan.linkedBy(kext))
+    }
+
+    /// Whether the footer has a button: a kext no longer on disk has none.
+    private var hasAction: Bool {
+        item.systemExtension != nil || DriverActions.revealablePath(item) != nil
     }
 
     /// One button, so it always fits the pane: System Settings for a system
@@ -174,10 +190,10 @@ struct DriverDetail: View {
     private func links(_ title: String, _ bundleIDs: [String]) -> some View {
         if !bundleIDs.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(title) (\(bundleIDs.count))").font(.subheadline).foregroundStyle(.secondaryText)
+                Text("\(title) (\(bundleIDs.count))").font(.callout).foregroundStyle(.secondaryText)
                 ForEach(bundleIDs.prefix(Self.linkLimit), id: \.self) { bundleID in
                     Text(bundleID)
-                        .font(.subheadline.monospaced())
+                        .font(.callout.monospaced())
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .textSelection(.enabled)
@@ -185,17 +201,20 @@ struct DriverDetail: View {
                 }
                 if bundleIDs.count > Self.linkLimit {
                     Text("and \(bundleIDs.count - Self.linkLimit) more")
-                        .font(.subheadline)
+                        .font(.callout)
                         .foregroundStyle(.secondaryText)
                 }
             }
         }
     }
 
-    private func labelled(_ label: String, _ value: String) -> some View {
+    /// `oneLine` for paths and the UUID: cut in the middle, whole in the
+    /// tooltip and when copied, where wrapping left a lone character on a
+    /// line of its own in a narrow pane.
+    private func labelled(_ label: String, _ value: String, oneLine: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
-            CopyableText(value: value).font(.subheadline)
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            CopyableText(value: value, truncatesMiddle: oneLine).font(.callout)
         }
     }
 }

@@ -53,6 +53,7 @@ struct StartupView: View {
     /// In a narrow window, the details cover the table.
     @State private var showsFullDetail = false
     @State private var openedRequest = false
+    @FocusState private var tableFocused: Bool
 
     var body: some View {
         Group {
@@ -65,13 +66,9 @@ struct StartupView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button {
+                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Read the launchd folders and ask launchd again") {
                     Task { await scan() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(isScanning)
-                .help("Read the launchd folders and ask launchd again")
             }
             ToolbarItem {
                 Button(action: toggleDetails) {
@@ -140,7 +137,7 @@ struct StartupView: View {
             ) {
                 StartupTable(rows: rows, showsPublisher: filter.showsPublisher && !besideTable,
                              badgesThirdParty: filter.showsPublisher && besideTable,
-                             selection: $selection, sortOrder: $sortOrder, toggle: toggle, open: openDetails)
+                             selection: $selection, sortOrder: $sortOrder, focus: $tableFocused, toggle: toggle, open: openDetails)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } detail: {
                 if let item = items.first(where: { $0.id == selection }) {
@@ -235,10 +232,14 @@ struct StartupView: View {
         // `--args -openStartupItem <text>` picks the first item whose label or name contains it, once, for screenshots.
         if !openedRequest, let query = LaunchArgument.string("openStartupItem") {
             openedRequest = true
+            await LaunchArgument.afterTableLayout()
             selection = visibleRows(scanned).first {
                 $0.label.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query)
             }?.id
             openDetails()
+            // As a click would: the row shows the selection's colour, not
+            // the grey of a table without the focus.
+            Task { tableFocused = true }
         }
     }
 }
@@ -263,9 +264,11 @@ private struct StartupTable: View {
     typealias Column = TableColumnContent<LaunchItem, KeyPathComparator<LaunchItem>>
 
     /// Narrowest each column gets: room for its usual values, so Name is
-    /// the one that gives way. All five fit the narrowest window.
+    /// the one that gives way. All five fit the narrowest window, and the
+    /// four beside the details fit it without the sidebar, which a window
+    /// that narrow hides (at 150, Name missed by a point).
     private enum Minimum {
-        static let name: CGFloat = 150
+        static let name: CGFloat = 140
         static let kind: CGFloat = 90
         static let status: CGFloat = 120
         static let launches: CGFloat = 80
@@ -287,6 +290,7 @@ private struct StartupTable: View {
     var badgesThirdParty: Bool
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<LaunchItem>]
+    var focus: FocusState<Bool>.Binding
     var toggle: (LaunchItem) -> Void
     var open: () -> Void
     /// Hides Publisher in place, rather than swapping tables (a conditional
@@ -303,6 +307,7 @@ private struct StartupTable: View {
             launchesColumn
             publisherColumn
         }
+        .focused(focus)
         .onAppear(perform: showPublisher)
         .onChange(of: showsPublisher, showPublisher)
         .contextMenu(forSelectionType: LaunchItem.ID.self) { ids in
@@ -443,7 +448,7 @@ private struct StartupStatusBar: View {
             }
             Spacer()
         }
-        .font(.subheadline)
+        .font(.metadata)
         .monospacedDigit()
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 12)
