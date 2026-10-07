@@ -56,6 +56,28 @@ struct EndpointFormatTests {
         #expect(Endpoint(address: "192.168.1.2", port: 0).port == nil)
     }
 
+    @Test(arguments: [
+        ("127.0.0.1", 54321, "127.0.0.1", ":54321"),
+        ("fe80::1%en0", 5353, "[fe80::1%en0]", ":5353"),
+        ("0.0.0.0", 22, "*", ":22"),
+        ("::", 5353, "*", ":5353"),
+    ])
+    func splitsTheHostFromThePort(address: String, port: Int, host: String, suffix: String) {
+        let parts = Endpoint(address: address, port: port).formattedParts
+        #expect(parts.host == host)
+        #expect(parts.port == suffix)
+        // The pieces put back together are the endpoint as printed.
+        #expect(parts.host + suffix == Endpoint(address: address, port: port).formatted)
+    }
+
+    @Test func anUnboundEndpointHasNoPortPiece() {
+        let parts = Endpoint(address: "10.0.0.1", port: 0).formattedParts
+        #expect(parts.host == "10.0.0.1")
+        #expect(parts.port == nil)
+        #expect(Endpoint.formatParts(address: nil, port: nil).host == "*")
+        #expect(Endpoint.formatParts(address: nil, port: nil).port == nil)
+    }
+
     @Test func describesInspectorSockets() {
         let wildcard = SocketInfo(proto: .tcp, localAddress: "0.0.0.0", localPort: 8080,
                                   remoteAddress: nil, remotePort: nil, state: "LISTEN")

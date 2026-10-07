@@ -96,17 +96,28 @@ public struct Endpoint: Sendable, Hashable, Codable {
     /// `127.0.0.1:3000`, `[::1]:443`, `*:22`.
     public var formatted: String { Self.format(address: address, port: port) }
 
+    /// `formatted` in two pieces, so a narrow column can cut the host in the
+    /// middle and keep the port whole: `("[::1]", ":443")`, `("*", ":22")`,
+    /// and no port for an unbound socket.
+    public var formattedParts: (host: String, port: String?) { Self.formatParts(address: address, port: port) }
+
     /// Wildcards print as `*`, and IPv6 addresses go in brackets so the port
     /// can't be mistaken for part of the address.
     public static func format(address: String?, port: Int?) -> String {
+        let parts = formatParts(address: address, port: port)
+        return parts.host + (parts.port ?? "")
+    }
+
+    /// See `formattedParts`. The port keeps its colon.
+    public static func formatParts(address: String?, port: Int?) -> (host: String, port: String?) {
         let host: String
         if let address, !address.isEmpty, AddressScope(address: address) != .allInterfaces {
             host = address.contains(":") ? "[\(address)]" : address
         } else {
             host = "*"
         }
-        guard let port, port != 0 else { return host }
-        return "\(host):\(port)"
+        guard let port, port != 0 else { return (host, nil) }
+        return (host, ":\(port)")
     }
 }
 

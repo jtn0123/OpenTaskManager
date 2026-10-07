@@ -16,6 +16,13 @@ struct ConnectionsView: View {
     /// In a narrow window, the details cover the table.
     @State private var showsFullDetail = false
     @State private var sortOrder = [KeyPathComparator(\ConnectionRow.processName)]
+    @AppStorage("hiddenConnectionColumns") private var hiddenColumns = HiddenConnectionColumns()
+    /// Columns that are on but hidden because the table is too narrow. All
+    /// that can give way do until the table has measured its room, so it
+    /// never starts out wider than that.
+    @State private var hiddenToFit = ConnectionColumn.givingWay
+    /// Back from the details, the table shows the row they ended on.
+    @State private var scrollTarget: Connection.ID?
 
     var body: some View {
         Group {
@@ -27,6 +34,11 @@ struct ConnectionsView: View {
             }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Process, address or port")
+        .toolbar {
+            ToolbarItem {
+                columnsMenu
+            }
+        }
         // Runs only while the page is on screen; SwiftUI cancels it when the
         // page goes away, and restarts it when updates are paused or resumed.
         .task(id: model.isPaused) { await store.run(model: model) }
@@ -35,6 +47,7 @@ struct ConnectionsView: View {
     private var content: some View {
         let shown = store.rows.filter { filter.matches($0.connection) && $0.matches(search) }.sorted(using: sortOrder)
         let selected = selection.flatMap { id in store.rows.first { $0.id == id } }
+        let covered = isNarrow && showsFullDetail
         return VStack(spacing: 0) {
             // Whose sockets the counts are, so a 0 doesn't read as the whole Mac's.
             ScopeHeader(hidden: store.hiddenProcesses)
@@ -52,17 +65,24 @@ struct ConnectionsView: View {
             // Like the Processes inspector, details only take room once
             // there's something to show, so the table gets the full width.
             InspectorSplit(
-                listMinimum: ConnectionTable.minimumWidth,
+                listMinimum: ConnectionColumn.tableMinimum(userHidden: hiddenColumns.columns),
                 wantsInspector: selected != nil,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
                 widthKey: "connectionInspectorWidth",
-                backTitle: "Connections"
+                backTitle: "Connections",
+                // Over a narrow window's table, step through its rows without going back.
+                backAccessory: covered ? AnyView(SocketStepper(
+                    position: selection.flatMap { ListPosition(of: $0, in: shown.map(\.id)) },
+                    select: { selection = $0 }
+                )) : nil
             ) {
                 VStack(spacing: 0) {
                     // Only as tall as its rows, so no empty stripes follow the
                     // last socket; with more rows than room it fills and scrolls.
-                    ConnectionTable(rows: shown, selection: $selection, sortOrder: $sortOrder)
+                    ConnectionTable(rows: shown, selection: $selection, sortOrder: $sortOrder,
+                                    userHidden: hiddenColumns.columns, hiddenToFit: $hiddenToFit,
+                                    scrollTarget: $scrollTarget, showProcess: showProcess, open: openDetails)
                         .fitsTableToRows(shown.count)
                         .layoutPriority(1)
                     Divider()
@@ -71,24 +91,63 @@ struct ConnectionsView: View {
                 }
             } detail: {
                 if let selected {
-                    ScrollView {
-                        ConnectionDetail(row: selected, showProcess: { showProcess(selected.pid) },
-                                         close: { selection = nil })
-                            .padding(12)
-                    }
+                    ConnectionDetail(row: selected, showProcess: { showProcess(selected.pid) },
+                                     close: covered ? nil : { selection = nil })
+                } else if covered {
+                    ContentUnavailableView("Socket closed", systemImage: "xmark.circle", description: Text("""
+                    It closed after it was picked, by its process or the other end. Go back to the list, or step \
+                    to another socket.
+                    """))
                 }
             }
         }
+        // The split view sizes the page by asking for its smallest size with
+        // no width to offer. Laid out at the table's narrowest instead, the
+        // counts make two rows there, not a column of six too tall for the window.
+        .frame(minWidth: ConnectionColumn.tableMinimum(userHidden: hiddenColumns.columns))
         .onAppear(perform: selectRequestedConnection)
         // The details come with a selection here, so in a narrow window
         // picking a socket opens them, and Back returns to the table.
         .onChange(of: selection) {
             if isNarrow { showsFullDetail = selection != nil }
         }
-        // Back clears the selection, so picking the same socket opens it again.
+        // Back keeps the selection, the filter, the sort and the scroll
+        // position; the table scrolls only if Previous and Next moved the
+        // selection out of view. Double-click opens the same socket again.
         .onChange(of: showsFullDetail) {
-            if isNarrow, !showsFullDetail { selection = nil }
+            if isNarrow, !showsFullDetail { scrollTarget = selection }
         }
+    }
+
+    /// Double-click: the pane beside a wide window's table opens with the
+    /// selection; a narrow window's covers the table.
+    private func openDetails() {
+        if isNarrow, selection != nil { showsFullDetail = true }
+    }
+
+    /// Optional columns, as on the Processes page. Hiding one makes room for
+    /// the others; one that's on but hidden to fit the width stays ticked and says so.
+    private var columnsMenu: some View {
+        Menu {
+            ForEach(ConnectionColumn.allCases.filter { $0 != .process }, id: \.self) { column in
+                Toggle(column.menuTitle(hiddenToFit: hiddenToFit.contains(column)), isOn: Binding(
+                    get: { hiddenColumns.isOn(column) },
+                    set: { isOn in
+                        if isOn != hiddenColumns.isOn(column) { hiddenColumns.toggle(column) }
+                    }
+                ))
+            }
+            if !hiddenToFit.isEmpty {
+                Divider()
+                Text(ProcessColumn.hiddenToFitNote)
+            }
+            Divider()
+            Button("Default Columns") { hiddenColumns = HiddenConnectionColumns() }
+        } label: {
+            Label("Columns", systemImage: "tablecells")
+        }
+        .help(hiddenToFit.isEmpty ? "Columns: choose what the table shows"
+            : "Columns: choose what the table shows. Some are hidden until there's room for them")
     }
 
     /// `--args -openConnection 443` selects the first socket matching that
@@ -124,7 +183,8 @@ struct ConnectionsView: View {
             footerLine(count: count, processes: nil, showsCadence: true)
             footerLine(count: count, processes: nil, showsCadence: false)
         }
-        .font(.metadata)
+        // The counts are read, not scanned: 12 points, like the rows' captions elsewhere.
+        .font(.explanation)
         .foregroundStyle(.secondaryText)
         .monospacedDigit()
         .padding(.horizontal, 12)
@@ -172,7 +232,7 @@ private struct ScopeHeader: View {
         HStack(spacing: 10) {
             Label(hidden > 0 ? "Your account's sockets" : "Every process's sockets",
                   systemImage: hidden > 0 ? "person.crop.circle" : "desktopcomputer")
-                .font(.metadata.weight(.semibold))
+                .font(.explanation.weight(.semibold))
                 .foregroundStyle(.secondaryText)
                 .lineLimit(1)
                 .help(hidden > 0
@@ -231,7 +291,7 @@ private struct HiddenProcessesNote: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("To list every socket now, run this in Terminal:")
                 Text("sudo lsof -i -n -P")
-                    .font(.explanation.monospaced())
+                    .font(.body.monospaced())
                     .textSelection(.enabled)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 3)
@@ -240,7 +300,7 @@ private struct HiddenProcessesNote: View {
             Text("A privileged helper that adds them here is planned.")
                 .foregroundStyle(.secondaryText)
         }
-        .font(.explanation)
+        .font(.body)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -310,7 +370,7 @@ private struct SummaryCard: View {
             } icon: {
                 Image(systemName: symbol).foregroundStyle(tint)
             }
-            .font(.metadata.weight(.medium))
+            .font(.explanation.weight(.medium))
             .foregroundStyle(.secondaryText)
             // A title that wraps to two lines makes its card the row's
             // height; the numbers stay on one line across the row.
@@ -327,5 +387,50 @@ private struct SummaryCard: View {
             }
         }
         .help(explanation)
+    }
+}
+
+// MARK: - Narrow window
+
+/// Previous and Next on the Back bar while the details cover a narrow
+/// window's table, and where the socket sits in the table as filtered and
+/// sorted. Moving the selection here moves the table's with it.
+private struct SocketStepper: View {
+    /// Nil when the table doesn't show the socket: a filter or search hides
+    /// it, or it closed.
+    var position: ListPosition<Connection.ID>?
+    var select: (Connection.ID) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let position {
+                Text("Socket \(position.number.formatted()) of \(position.count.formatted())")
+                    .font(.explanation)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondaryText)
+                    .lineLimit(1)
+            }
+            ControlGroup {
+                Button {
+                    position?.previous.map(select)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .disabled(position?.previous == nil)
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .help("Previous socket in the table (⌘↑)")
+                .accessibilityLabel("Previous socket")
+                Button {
+                    position?.next.map(select)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .disabled(position?.next == nil)
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .help("Next socket in the table (⌘↓)")
+                .accessibilityLabel("Next socket")
+            }
+            .fixedSize()
+        }
     }
 }
