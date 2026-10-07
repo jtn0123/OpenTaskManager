@@ -356,3 +356,34 @@ struct LaunchItemsLiveTests {
         }
     }
 }
+
+struct LaunchControlTests {
+    private let label = "<key>Label</key><string>com.vendor.updater</string><key>Program</key><string>/opt/vendor/updater</string>"
+
+    @Test func switchesOnlyThirdPartyAgents() {
+        let agent = item(label, path: "/Library/LaunchAgents/com.vendor.updater.plist")
+        let mine = item(label, path: "/Users/me/Library/LaunchAgents/com.vendor.updater.plist", scope: .userAgent)
+        let daemon = item(label, path: "/Library/LaunchDaemons/com.vendor.updater.plist", scope: .daemon)
+        let apple = item("<key>Label</key><string>com.apple.Safari.agent</string>",
+                         path: "/System/Library/LaunchAgents/com.apple.Safari.agent.plist")
+        let broken = item("", path: "/Library/LaunchAgents/com.vendor.broken.plist")
+        #expect(LaunchControl.restriction(for: agent) == nil)
+        #expect(LaunchControl.restriction(for: mine) == nil)
+        #expect(LaunchControl.restriction(for: daemon)?.contains("administrator") == true)
+        #expect(LaunchControl.restriction(for: apple)?.contains("Apple") == true)
+        #expect(LaunchControl.restriction(for: broken) != nil)
+    }
+
+    @Test func disablingUnloadsAndEnablingLoadsInYourSession() {
+        let agent = item(label, path: "/Library/LaunchAgents/com.vendor.updater.plist")
+        #expect(LaunchControl.commands(.disable, for: agent, uid: 501)
+            == [["disable", "gui/501/com.vendor.updater"], ["bootout", "gui/501/com.vendor.updater"]])
+        #expect(LaunchControl.commands(.enable, for: agent, uid: 501)
+            == [["enable", "gui/501/com.vendor.updater"], ["bootstrap", "gui/501", "/Library/LaunchAgents/com.vendor.updater.plist"]])
+    }
+
+    @Test func refusesRestrictedItemsWithoutRunningLaunchctl() {
+        let daemon = item(label, path: "/Library/LaunchDaemons/com.vendor.updater.plist", scope: .daemon)
+        #expect(throws: LaunchControlError.self) { try LaunchControl.perform(.disable, for: daemon) }
+    }
+}

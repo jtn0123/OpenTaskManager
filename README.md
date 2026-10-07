@@ -72,7 +72,9 @@ a daemon, whether it's running (with its PID), loaded, disabled or not loaded,
 what starts it (login or boot, a timer or schedule, a file change, or another
 process asking for it), and whether Apple or a third party installed it.
 Filter, sort and search, then check an item's full command line and triggers,
-reveal its property list in Finder or open it. macOS keeps Login Items where
+reveal its property list in Finder or open it. Third-party agents can be
+disabled (after a confirmation, it stops now and at every login) and enabled
+again, for your account only; daemons and Apple's own agents are left alone. macOS keeps Login Items where
 only an administrator can read them, so the page links to their pane in System
 Settings instead.
 

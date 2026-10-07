@@ -19,7 +19,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Always-available shortcut (⌃⇧⎋) | ✅ | |
 | App history (resource use per app over days) | 🚧 | The flight recorder keeps each stretch's five busiest apps by CPU and memory; full per-app graphs over days are planned |
 | Startup apps | 🚧 | LaunchAgents and LaunchDaemons with status, PID, triggers and publisher are done. Login Items and the background items apps register need root to read, so they wait for the privileged helper; for now the page opens their System Settings pane |
-| Enable and disable startup items | ⬜ | TODO: `launchctl enable`/`disable` with `bootstrap`/`bootout`, a confirmation step and a way to undo. Daemons need an administrator password. Left out until then because it's destructive |
+| Enable and disable startup items | 🚧 | Third-party agents switch in your own session with `launchctl disable`/`enable` plus `bootout`/`bootstrap`, after a confirmation, and Enable undoes it. Daemons wait for an administrator prompt; Apple's agents are left alone |
 | Users tab | 🚧 | Per-user totals, history, sessions and top processes are done; logging off other sessions is planned |
 | Services tab | ⬜ | launchd services: state, start/stop, open plist. The Startup page already reads each job's state and opens its plist |
 | "Details" tab extras: priority, affinity-style tier pinning | 🚧 | Priority is done; QoS and tier pinning are planned |

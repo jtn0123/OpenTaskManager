@@ -161,6 +161,24 @@ public enum Launchctl {
         if jobs[job.label]?.pid == nil { jobs[job.label] = job }
     }
 
+    /// Runs `launchctl` for its exit status and error text, for calls that change something.
+    static func execute(_ arguments: [String]) -> (status: Int32, error: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = arguments
+        let pipe = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            return (-1, error.localizedDescription)
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+    }
+
     private static func run(_ arguments: [String]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/launchctl")

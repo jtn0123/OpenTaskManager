@@ -5,6 +5,8 @@ import SwiftUI
 /// where its property list lives.
 struct StartupItemDetail: View {
     var item: LaunchItem
+    /// Disables or enables the item, for third-party agents.
+    var toggle: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -18,6 +20,16 @@ struct StartupItemDetail: View {
                     labelled("Property list", item.plistPath)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if LaunchControl.restriction(for: item) == nil {
+                HStack(alignment: .firstTextBaseline) {
+                    Button(item.isDisabled ? "Enable" : "Disable…", action: toggle)
+                    Text(item.isDisabled ? "Loads it now and at every login." : "Stops it now and at every login, for your account.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } else if item.publisher == .thirdParty, let reason = LaunchControl.restriction(for: item) {
+                Text(reason).font(.subheadline).foregroundStyle(.secondary)
             }
             HStack {
                 Button("Reveal in Finder") { StartupActions.reveal(item) }

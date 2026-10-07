@@ -39,6 +39,9 @@ struct StartupView: View {
     @State private var search = ""
     @State private var selection: LaunchItem.ID?
     @State private var sortOrder = [KeyPathComparator(\LaunchItem.publisher), KeyPathComparator(\LaunchItem.name)]
+    /// The item waiting on the Disable confirmation.
+    @State private var disabling: LaunchItem?
+    @State private var switchError: String?
 
     var body: some View {
         Group {
@@ -72,6 +75,20 @@ struct StartupView: View {
         .task {
             if items == nil { await scan() }
         }
+        .confirmationDialog("Disable \(disabling?.name ?? "this item")?", isPresented: Binding(
+            get: { disabling != nil }, set: { if !$0 { disabling = nil } }
+        ), presenting: disabling) { item in
+            Button("Disable") { Task { await perform(.disable, on: item) } }
+        } message: { _ in
+            Text("It stops now and won't start at login until you enable it again. Only your account is affected.")
+        }
+        .alert("Couldn't switch this item", isPresented: Binding(
+            get: { switchError != nil }, set: { if !$0 { switchError = nil } }
+        )) {
+            Button("OK") { switchError = nil }
+        } message: {
+            Text(switchError ?? "")
+        }
     }
 
     private func page(_ items: [LaunchItem]) -> some View {
@@ -94,13 +111,13 @@ struct StartupView: View {
             // an inspector column: with the toolbar's search field, an inspector
             // pushed the window's content past both of its edges.
             HStack(spacing: 0) {
-                StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder)
+                StartupTable(rows: rows, selection: $selection, sortOrder: $sortOrder, toggle: toggle)
                     .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
                 if showInspector {
                     Divider()
                     Group {
                         if let item = items.first(where: { $0.id == selection }) {
-                            StartupItemDetail(item: item)
+                            StartupItemDetail(item: item) { toggle(item) }
                         } else {
                             ContentUnavailableView("No item selected", systemImage: "info.circle",
                                                    description: Text("Select an item to see what it runs and when."))
@@ -135,6 +152,28 @@ struct StartupView: View {
             })
         }
         .sorted(using: sortOrder)
+    }
+
+    /// Enables an item straight away; disabling asks first, since it stops the job.
+    private func toggle(_ item: LaunchItem) {
+        if item.isDisabled {
+            Task { await perform(.enable, on: item) }
+        } else {
+            disabling = item
+        }
+    }
+
+    private func perform(_ action: LaunchControl.Action, on item: LaunchItem) async {
+        let result = await Task.detached(priority: .userInitiated) { () -> LaunchControlError? in
+            do throws(LaunchControlError) {
+                try LaunchControl.perform(action, for: item)
+                return nil
+            } catch {
+                return error
+            }
+        }.value
+        switchError = result?.message
+        await scan()
     }
 
     private func scan() async {
@@ -174,6 +213,7 @@ private struct StartupTable: View {
     var rows: [LaunchItem]
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<LaunchItem>]
+    var toggle: (LaunchItem) -> Void
 
     var body: some View {
         Table(rows, selection: $selection, sortOrder: $sortOrder) {
@@ -207,6 +247,10 @@ private struct StartupTable: View {
         }
         .contextMenu(forSelectionType: LaunchItem.ID.self) { ids in
             if let id = ids.first, let item = rows.first(where: { $0.id == id }) {
+                if LaunchControl.restriction(for: item) == nil {
+                    Button(item.isDisabled ? "Enable" : "Disable…") { toggle(item) }
+                    Divider()
+                }
                 Button("Reveal in Finder") { StartupActions.reveal(item) }
                 Button("Show plist") { StartupActions.openPlist(item) }
                 Divider()
