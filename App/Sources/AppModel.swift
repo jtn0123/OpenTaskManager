@@ -251,7 +251,9 @@ final class AppModel {
     private(set) var diskWriteHistory: [String: History<Double>] = [:]
     private(set) var networkInHistory: [String: History<Double>] = [:]
     private(set) var networkOutHistory: [String: History<Double>] = [:]
-    private(set) var processHistory: [Int32: History<ProcessPoint>] = [:]
+    /// By PID and start time, so a PID macOS gives to a later process starts
+    /// a graph of its own rather than carrying on the ended one's.
+    private(set) var processHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
     /// Each user's processes summed, for the Users page.
     private(set) var users: [UserUsage] = []
     private(set) var userHistory: [UInt32: UserHistory] = [:]
@@ -443,7 +445,7 @@ final class AppModel {
             networkOutHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.sentBytesPerSecond)
         }
 
-        var processes: [Int32: History<ProcessPoint>] = [:]
+        var processes: [ProcessIdentity: History<ProcessPoint>] = [:]
         processes.reserveCapacity(snapshot.processes.count)
         var totalGPU = 0.0
         var totalPower = 0.0
@@ -452,11 +454,12 @@ final class AppModel {
         var anyGPU = false
         var anyNeural = false
         for process in snapshot.processes {
-            var history = processHistory[process.pid] ?? History(capacity: Self.processHistoryCapacity)
+            let identity = process.identity
+            var history = processHistory[identity] ?? History(capacity: Self.processHistoryCapacity)
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
                                      gpuFraction: process.gpuFraction ?? 0, powerWatts: process.powerWatts ?? 0)
             history.append(point)
-            processes[process.pid] = history
+            processes[identity] = history
             totalGPU += point.gpuFraction
             totalPower += point.powerWatts
             totalMemory += Double(point.memory)
@@ -565,13 +568,13 @@ final class AppModel {
         var ranked: [(score: Double, series: AppSeries)] = []
         for group in appGroups {
             guard let process = group.process else { continue }
-            var pids: [Int32] = []
+            var members: [ProcessIdentity] = []
             func collect(_ node: ProcessNode) {
-                if let pid = node.process?.pid { pids.append(pid) }
+                if let process = node.process { members.append(process.identity) }
                 node.children.forEach(collect)
             }
             collect(group)
-            let values = Self.tailSum(pids.compactMap { processHistory[$0]?.values.suffix(window).map(metric) })
+            let values = Self.tailSum(members.compactMap { processHistory[$0]?.values.suffix(window).map(metric) })
             let score = values.reduce(0, +)
             guard score > 0 else { continue }
             let series = AppSeries(id: group.id, name: displayName(for: process),
@@ -685,12 +688,14 @@ final class AppModel {
         NSWorkspace.shared.open(url)
     }
 
-    /// Runs `/usr/bin/sample` for three seconds and opens the report.
-    func sampleProcess(_ pid: Int32) {
-        guard let process = process(pid) else { return }
+    /// Runs `/usr/bin/sample` for three seconds and opens the report. The
+    /// task ends once the report is open or the run failed, so a button can
+    /// say it's sampling until then.
+    @discardableResult func sampleProcess(_ pid: Int32) -> Task<Void, Never>? {
+        guard let process = process(pid) else { return nil }
         let output = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(process.name)-\(pid)-sample.txt")
-        Task.detached {
+        return Task.detached {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
             task.arguments = [String(pid), "3", "-file", output.path]

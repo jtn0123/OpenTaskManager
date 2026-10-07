@@ -43,7 +43,13 @@ USAGE:
                                  MAC addresses, and to --json (which leaves
                                  them out, like a saved report) addresses,
                                  routers, DNS servers and proxy hosts
-  otm inspect PID [--json]       Arguments, environment and open files
+  otm inspect PID [--json]       Arguments, environment, open files, memory
+                                 (footprint, peak, resident), faults,
+                                 scheduling and the processes that started it
+  otm threads PID [--sort cpu|time|name|id|state|priority] [--interval SECONDS] [--json]
+                                 Each thread's CPU over the interval, CPU time,
+                                 state and priority (your own processes, or
+                                 any with sudo)
   otm du [PATH] [--depth N] [-n COUNT] [--changes] [--json]
                                  What's using the space under PATH (default: the
                                  current folder): biggest folders and files,
@@ -320,13 +326,6 @@ func appTable(_ apps: [InstalledApp], sizes: [String: UInt64]?) -> String {
         )
     }
     return lines.joined(separator: "\n")
-}
-
-struct Inspection: Encodable {
-    let process: ProcessSample?
-    let arguments: ProcessArguments?
-    let currentDirectory: String?
-    let openFiles: [OpenFile]?
 }
 
 /// `otm du --json`: the scanned folder, its biggest children to `--depth`,
@@ -773,39 +772,7 @@ case "drivers":
     }
 
 case "inspect":
-    guard let pid = options.positional.first.flatMap(Int32.init) else { fail("inspect needs a PID") }
-    let snapshot = await monitor.sample()
-    let inspection = Inspection(
-        process: snapshot.processes.first { $0.pid == pid },
-        arguments: ProcessInspector.arguments(of: pid),
-        currentDirectory: ProcessInspector.currentDirectory(of: pid),
-        openFiles: ProcessInspector.openFiles(of: pid)
-    )
-    guard inspection.process != nil else { fail("no process with PID \(pid)") }
-    if options.json {
-        printJSON(inspection)
-    } else {
-        let process = inspection.process!
-        print("\(process.name) (PID \(process.pid), parent \(process.parentPID), user \(process.userName))")
-        print("Path:       \(process.executablePath ?? "unknown")")
-        print("Directory:  \(inspection.currentDirectory ?? "unavailable")")
-        print("Command:    \(inspection.arguments?.commandLine ?? "unavailable (another user's process)")")
-        if process.hasHeldNeuralMemory {
-            let now = Format.bytes(process.neuralMemory ?? 0), peak = Format.bytes(process.neuralMemoryPeak ?? 0)
-            print("ANE memory: \(now) now, \(peak) at most (held for the Neural Engine, apart from the footprint)")
-        }
-        if let environment = inspection.arguments?.environment, !environment.isEmpty {
-            print("Environment (\(environment.count)):")
-            for variable in environment { print("  \(variable.name)=\(variable.value)") }
-        }
-        if let files = inspection.openFiles {
-            print("Open files (\(files.count)):")
-            for file in files {
-                let kind = file.kind.rawValue.padding(toLength: 10, withPad: " ", startingAt: 0)
-                print("  \(pad(String(file.descriptor), 5, right: true))  \(kind)\(file.detail)")
-            }
-        }
-    }
+    await inspectCommand(options, monitor: monitor)
 
 case "du":
     let path = ((options.positional.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
@@ -859,6 +826,9 @@ case "gpubench":
 
 case "bench":
     benchCommand(options)
+
+case "threads":
+    try await threadsCommand(options)
 
 case "kill":
     guard let pid = options.positional.first.flatMap(Int32.init) else { fail("kill needs a PID") }

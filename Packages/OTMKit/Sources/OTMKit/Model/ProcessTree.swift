@@ -208,21 +208,47 @@ public enum ProcessTreeBuilder {
 
     /// Sorts siblings at every level. Sections keep their fixed order; rows
     /// inside them sort by their group totals so busy apps rise together.
-    public static func sort(_ nodes: [ProcessNode], by key: ProcessSortKey, ascending: Bool) -> [ProcessNode] {
+    ///
+    /// Figures compare as the table shows them (`ShownFigure`), with
+    /// `cpuStep` the smallest CPU difference it shows (0 compares exactly),
+    /// so rows that read the same keep a steady order, by PID, rather than
+    /// trading places every tick over differences too small to see. Moving
+    /// rows is most of what a tick costs the table.
+    public static func sort(_ nodes: [ProcessNode], by key: ProcessSortKey, ascending: Bool, cpuStep: Double = 0) -> [ProcessNode] {
         let sortedChildren = nodes.map { node -> ProcessNode in
             var node = node
-            node.children = sort(node.children, by: key, ascending: ascending)
+            node.children = sort(node.children, by: key, ascending: ascending, cpuStep: cpuStep)
             return node
         }
         guard sortedChildren.allSatisfy({ $0.section == nil }) else { return sortedChildren }
-        return sortedChildren.sorted { lhs, rhs in
-            let order = compare(lhs, rhs, by: key)
-            if order == .orderedSame { return lhs.id < rhs.id }
+        // Each row's figure is worked out once, not in every comparison.
+        let figures = sortedChildren.map { figure($0, by: key, cpuStep: cpuStep) }
+        return sortedChildren.indices.sorted { lhs, rhs in
+            let order = compare(sortedChildren[lhs], sortedChildren[rhs], figures[lhs], figures[rhs], by: key)
+            if order == .orderedSame { return sortedChildren[lhs].id < sortedChildren[rhs].id }
             return ascending ? order == .orderedAscending : order == .orderedDescending
+        }
+        .map { sortedChildren[$0] }
+    }
+
+    /// The number a key compares, as shown; 0 for the keys compared otherwise.
+    private static func figure(_ node: ProcessNode, by key: ProcessSortKey, cpuStep: Double) -> Double {
+        let totals = node.totals, process = node.process
+        switch key {
+        case .cpu: return ShownFigure.steps(totals.cpuPercent, step: cpuStep)
+        case .memory: return ShownFigure.bytes(Double(totals.memory))
+        case .power: return ShownFigure.watts(totals.powerWatts)
+        case .gpu: return ShownFigure.steps(totals.gpuFraction, step: 0.001)
+        case .neuralMemory: return ShownFigure.bytes(Double(totals.neuralMemory))
+        case .disk: return ShownFigure.bytes(totals.diskRate)
+        case .topTier: return process?.topTierShare.map { ShownFigure.steps($0, step: 0.01) } ?? -1
+        case .wakeups: return process?.wakeupsPerSecond.map { $0.rounded() } ?? -1
+        case .name, .pid, .threads, .user: return 0
         }
     }
 
-    private static func compare(_ lhs: ProcessNode, _ rhs: ProcessNode, by key: ProcessSortKey) -> ComparisonResult {
+    private static func compare(_ lhs: ProcessNode, _ rhs: ProcessNode, _ lhsFigure: Double, _ rhsFigure: Double,
+                                by key: ProcessSortKey) -> ComparisonResult {
         func order<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult {
             a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame
         }
@@ -230,20 +256,48 @@ public enum ProcessTreeBuilder {
         switch key {
         case .name: return (a?.name ?? "").localizedCaseInsensitiveCompare(b?.name ?? "")
         case .pid: return order(lhs.id, rhs.id)
-        case .cpu: return order(lhs.totals.cpuPercent, rhs.totals.cpuPercent)
-        case .memory: return order(lhs.totals.memory, rhs.totals.memory)
-        case .power: return order(lhs.totals.powerWatts, rhs.totals.powerWatts)
-        case .gpu: return order(lhs.totals.gpuFraction, rhs.totals.gpuFraction)
-        case .neuralMemory:
-            // Among rows holding the same now (usually none), ones that have held some rank higher.
-            let now = order(lhs.totals.neuralMemory, rhs.totals.neuralMemory)
-            guard now == .orderedSame else { return now }
-            return order(lhs.totals.hasHeldNeuralMemory ? 1 : 0, rhs.totals.hasHeldNeuralMemory ? 1 : 0)
-        case .disk: return order(lhs.totals.diskRate, rhs.totals.diskRate)
         case .threads: return order(lhs.totals.threads, rhs.totals.threads)
         case .user: return (a?.userName ?? "").localizedCaseInsensitiveCompare(b?.userName ?? "")
-        case .topTier: return order(a?.topTierShare ?? -1, b?.topTierShare ?? -1)
-        case .wakeups: return order(a?.wakeupsPerSecond ?? -1, b?.wakeupsPerSecond ?? -1)
+        case .neuralMemory:
+            // Among rows holding the same now (usually none), ones that have held some rank higher.
+            let now = order(lhsFigure, rhsFigure)
+            guard now == .orderedSame else { return now }
+            return order(lhs.totals.hasHeldNeuralMemory ? 1 : 0, rhs.totals.hasHeldNeuralMemory ? 1 : 0)
+        case .cpu, .memory, .power, .gpu, .disk, .topTier, .wakeups: return order(lhsFigure, rhsFigure)
         }
+    }
+}
+
+/// A figure rounded as the table shows it, for sorting: two figures that
+/// read the same compare equal.
+public enum ShownFigure {
+    /// `value` in whole `step`s; a `step` of 0 leaves it exact.
+    public static func steps(_ value: Double, step: Double) -> Double {
+        guard step > 0 else { return value }
+        return (value / step).rounded()
+    }
+
+    /// Bytes as `Format.bytes` rounds them: three figures in the largest
+    /// binary unit, whole bytes under a kilobyte.
+    public static func bytes(_ value: Double) -> Double {
+        guard value.isFinite, value > 0 else { return 0 }
+        var scaled = value
+        var unit = 1.0
+        while scaled >= 1024, unit < 1_125_899_906_842_624 {
+            scaled /= 1024
+            unit *= 1024
+        }
+        guard unit > 1 else { return scaled.rounded(.down) }
+        let places = scaled >= 100 ? 1.0 : scaled >= 10 ? 10 : 100
+        return (scaled * places).rounded() / places * unit
+    }
+
+    /// Watts as `Format.watts` rounds them: whole milliwatts under 1 W, then
+    /// hundredths, and tenths from 10 W.
+    public static func watts(_ value: Double) -> Double {
+        guard value.isFinite, value >= 0.0005 else { return 0 }
+        if value < 1 { return (value * 1000).rounded() / 1000 }
+        let places = value >= 10 ? 10.0 : 100
+        return (value * places).rounded() / places
     }
 }

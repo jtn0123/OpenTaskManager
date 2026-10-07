@@ -103,7 +103,8 @@ Manager OG or any other proprietary task manager.
   with wide translucent strokes, or use CALayer shadows with a `shadowPath`.
 - The process table updates rows in place: `OrderedDiff` moves, inserts and
   removes rows, and visible cells are restyled. Don't go back to calling
-  `reloadData()` every tick.
+  `reloadData()` every tick. It sorts by each figure as shown (`ShownFigure`),
+  so rows that read the same keep PID order rather than swapping every tick.
 - The Thermals table (`SensorTableView`) is AppKit rows made only when the set
   of rows changes; a tick sets just the figures that changed. Its rows and
   ranges are `SensorTable` and `SensorExtremes` in OTMKit. Its header (the
@@ -202,6 +203,16 @@ build, `-sensorFixture <file>` loads a recording from
   says so with the row's figures and a Show Helpers button that expands it. Its
   memory graph and facts name their measure (footprint, as in the Memory
   column, beside real memory), defined in `MemoryMeasure`.
+- A process is its PID and start time (`ProcessIdentity` in OTMKit): the
+  table's selection, the inspector and `AppModel.processHistory` go by it, so
+  a PID macOS reuses never inherits another process's graphs, selection or
+  End Task. The inspector's Overview adds counters read for that one process
+  each tick (`ProcessDetailReader`: peak footprint, faults, page-ins, context
+  switches, QoS; per field "Needs admin rights" for others' processes) and its
+  ancestry (`ProcessAncestry`), each step selecting that process; its Threads
+  tab reads the threads off the main actor once per tick, only while shown
+  (`ThreadActivityTracker`), as does `otm threads`. `-openProcessTab
+  threads|files` opens a tab with `-openProcess`.
 - Pages with a table and details (Processes, Startup, Apps, Drivers,
   Connections) use `InspectorSplit`: the pane appears beside the table once
   something is selected, its width is draggable and remembered, and in a

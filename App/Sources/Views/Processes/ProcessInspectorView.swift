@@ -45,33 +45,56 @@ struct ProcessRowGroup {
     }
 }
 
+/// One process, by PID and start time: a PID macOS gives to a later process
+/// never shows here as this one.
 struct ProcessInspectorView: View {
     @Environment(AppModel.self) private var model
-    let pid: Int32
+    let identity: ProcessIdentity
     /// Set when the selected row has processes nested under it.
     var group: ProcessRowGroup?
+    /// Selects another process in the table: an ancestor, or the responsible one.
+    var onSelect: (ProcessIdentity) -> Void
 
-    @State private var details = Details()
-    @State private var tab: Tab = .overview
+    @State private var details: Details?
+    @State private var openFiles: OpenFiles?
+    @State private var tab: Tab = .requestedAtLaunch
     @State private var socketsOnly = false
     @State private var confirmingForceQuit = false
-    @State private var showsMemoryHelp = false
+    @State private var showsCommandLine = false
+    @State private var showsEnvironment = false
 
-    struct Details {
+    /// Read every few seconds while the Overview shows.
+    struct Details: Equatable {
+        var identity: ProcessIdentity
         var arguments: ProcessArguments?
         var directory: String?
-        var openFiles: [OpenFile]?
-        var loaded = false
+    }
+
+    /// Read every few seconds while Files & Ports shows.
+    struct OpenFiles: Equatable {
+        var identity: ProcessIdentity
+        var files: [OpenFile]?
     }
 
     enum Tab: String, CaseIterable {
         case overview = "Overview"
-        case environment = "Environment"
+        case threads = "Threads"
         case files = "Files & Ports"
+
+        /// `-openProcessTab threads|files`, with `-openProcess`, for screenshots.
+        static var requestedAtLaunch: Tab {
+            switch LaunchArgument.string("openProcessTab") {
+            case "threads": .threads
+            case "files": .files
+            default: .overview
+            }
+        }
     }
 
+    private var pid: Int32 { identity.pid }
+
     var body: some View {
-        if let process = model.process(pid) {
+        if let process = model.process(identity) {
             VStack(alignment: .leading, spacing: 12) {
                 header(process)
                 if let group {
@@ -88,14 +111,15 @@ struct ProcessInspectorView: View {
                 ScrollView {
                     switch tab {
                     case .overview: overview(process)
-                    case .environment: environment
+                    case .threads: ProcessThreadsView(process: process)
                     case .files: files
                     }
                 }
                 actions(process)
             }
             .padding(12)
-            .task(id: pid) { await loadDetails() }
+            .task(id: tab == .overview ? identity : nil) { await loadDetails() }
+            .task(id: tab == .files ? identity : nil) { await loadOpenFiles() }
         }
     }
 
@@ -108,14 +132,14 @@ struct ProcessInspectorView: View {
                 .frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.displayName(for: process)).font(.headline).lineLimit(1)
-                Text("PID \(process.pid) · \(process.userName) · \(process.state.rawValue)")
+                Text("PID \(String(process.pid)) · \(process.userName) · \(process.state.rawValue)")
                     .font(.callout).foregroundStyle(.secondaryText)
             }
         }
     }
 
     private func graphs(_ process: ProcessSample) -> some View {
-        let history = model.processHistory[pid]?.values ?? []
+        let history = model.processHistory[identity]?.values ?? []
         return VStack(alignment: .leading, spacing: 12) {
             GraphPanel(
                 title: "CPU",
@@ -179,138 +203,124 @@ struct ProcessInspectorView: View {
     }
 
     private func overview(_ process: ProcessSample) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             graphs(process)
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-                FactRow(label: "CPU time", value: Format.cpuTime(process.cpuTime))
-                FactRow(label: "Threads", value: process.threadCount > 0 ? String(process.threadCount) : "—")
-                if !process.isRestricted {
-                    memoryRows(process)
-                    if process.hasHeldNeuralMemory { neuralMemoryRow(process) }
-                    if measuresPower {
-                        FactRow(label: "Power", value: process.powerWatts.map(Format.watts) ?? "—")
-                    }
-                    FactRow(label: "Disk read",
-                            value: "\(Format.bytesPerSecond(process.diskReadRate)) · \(Format.bytes(process.diskReadTotal)) total")
-                    FactRow(label: "Disk written",
-                            value: "\(Format.bytesPerSecond(process.diskWriteRate)) · \(Format.bytes(process.diskWriteTotal)) total")
-                    FactRow(label: "Wakeups", value: process.wakeupsPerSecond.map { Format.fixed($0, 0) + "/s" } ?? "—")
-                    if let share = process.topTierShare {
-                        FactRow(label: "On \(model.topology.tiers.first?.name ?? "fast") cores", value: Format.percent(share))
-                    }
-                }
-                if let gpu = process.gpuTime {
-                    FactRow(label: "GPU", value: "\(Format.percent(process.gpuFraction ?? 0, digits: 1)) · \(Format.cpuTime(gpu)) total")
-                }
-                FactRow(label: "Priority", value: "nice \(process.nice)")
-                FactRow(label: "Kind", value: process.isTranslated ? "Intel (Rosetta)" : "Apple silicon")
-                if let start = process.startTime {
-                    FactRow(label: "Started", value: start.formatted(date: .abbreviated, time: .standard))
-                }
-                FactRow(label: "Parent", value: parentDescription(process))
-                if process.responsiblePID != process.pid {
-                    FactRow(label: "Responsible", value: describe(process.responsiblePID))
-                }
-            }
-
-            if let path = process.executablePath {
-                labelled("Executable", path)
-            }
-            if let directory = details.directory {
-                labelled("Working directory", directory)
-            }
-            if let command = details.arguments?.commandLine {
-                labelled("Command line", command)
-            } else if details.loaded {
-                Text("Command line and environment are only visible for your own processes.")
+            if process.isRestricted {
+                Text("macOS shows other users' and system processes' CPU, memory and a few facts. "
+                    + "The rest needs admin rights, and says so below.")
                     .font(.explanation).foregroundStyle(.secondaryText)
             }
-        }
-    }
-
-    /// The two memory figures side by side, each with its definition on
-    /// hover, and both in a popover from the info button.
-    @ViewBuilder private func memoryRows(_ process: ProcessSample) -> some View {
-        GridRow {
-            Text("Memory footprint").foregroundStyle(.secondaryText).help(MemoryMeasure.footprint)
-            Text(Format.bytes(process.memory)).textSelection(.enabled).help(MemoryMeasure.footprint)
-        }
-        .font(.callout)
-        GridRow {
-            Text("Real memory").foregroundStyle(.secondaryText).help(MemoryMeasure.resident)
-            HStack(spacing: 4) {
-                Text(Format.bytes(process.residentMemory)).textSelection(.enabled)
-                Button {
-                    showsMemoryHelp.toggle()
-                } label: {
-                    Image(systemName: "info.circle").foregroundStyle(.secondaryText)
-                }
-                .buttonStyle(.borderless)
-                .help("Why real memory differs from the footprint")
-                .accessibilityLabel("About the memory figures")
-                .popover(isPresented: $showsMemoryHelp, arrowEdge: .bottom) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(MemoryMeasure.footprint)
-                        Text(MemoryMeasure.resident)
-                    }
-                    .font(.explanation)
-                    .frame(width: 300, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(12)
-                }
-            }
-        }
-        .font(.callout)
-    }
-
-    /// Memory held for the Neural Engine now and at most, apart from the
-    /// footprint above. Named as memory: it isn't how busy the Neural Engine is.
-    private func neuralMemoryRow(_ process: ProcessSample) -> some View {
-        GridRow {
-            Text("Neural Engine memory").foregroundStyle(.secondaryText)
-            Text("\(Format.bytes(process.neuralMemory ?? 0)) · \(Format.bytes(process.neuralMemoryPeak ?? 0)) at most")
-                .textSelection(.enabled)
-        }
-        .font(.callout)
-        .help(MemoryMeasure.neural)
-    }
-
-    private var environment: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let variables = details.arguments?.environment, !variables.isEmpty {
-                ForEach(variables) { variable in
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(variable.name).font(.callout.weight(.semibold))
-                        Text(variable.value).font(.callout.monospaced()).textSelection(.enabled).lineLimit(4)
-                    }
-                    .padding(.vertical, 2)
-                }
-            } else {
-                unavailable("No environment available", "macOS only reveals the environment of your own processes.")
-            }
+            activity(process)
+            ProcessDiagnosticsSections(process: process)
+            ProcessAncestryList(process: process, onSelect: onSelect)
+            command(process)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func activity(_ process: ProcessSample) -> some View {
+        let restricted = process.isRestricted
+        func own(_ value: @autoclosure () -> String) -> ProcessField<String> {
+            restricted ? .denied : .value(value())
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            InspectorHeading("Activity")
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                ProcessFieldRow("CPU time", Format.cpuTime(process.cpuTime),
+                                help: "CPU time: how long its threads have run on a core since it started, all cores together")
+                if measuresPower {
+                    ProcessFieldRow("Power", restricted ? .denied : .value(process.powerWatts.map(Format.watts) ?? "—"))
+                }
+                ProcessFieldRow("Disk read", own("\(Format.bytesPerSecond(process.diskReadRate)) · \(Format.bytes(process.diskReadTotal)) total"))
+                ProcessFieldRow("Disk written",
+                                own("\(Format.bytesPerSecond(process.diskWriteRate)) · \(Format.bytes(process.diskWriteTotal)) total"))
+                ProcessFieldRow("Wakeups", restricted ? .denied : .value(process.wakeupsPerSecond.map { Format.fixed($0, 0) + "/s" } ?? "—"),
+                                help: "Wakeups: times a second its threads woke from waiting. Each costs energy, so fewer is better.")
+                if let share = process.topTierShare {
+                    ProcessFieldRow("On \(model.topology.tiers.first?.name ?? "fast") cores", Format.percent(share))
+                }
+                if let gpu = process.gpuTime {
+                    ProcessFieldRow("GPU", "\(Format.percent(process.gpuFraction ?? 0, digits: 1)) · \(Format.cpuTime(gpu)) total")
+                }
+                ProcessFieldRow("Kind", process.isTranslated ? "Intel (Rosetta)" : "Apple silicon")
+                if let start = process.startTime {
+                    ProcessFieldRow("Started", start.formatted(date: .abbreviated, time: .standard))
+                }
+            }
+        }
+    }
+
+    /// Where it runs from and how it was started. Long values fold away;
+    /// paths keep to one line, cut in the middle.
+    private func command(_ process: ProcessSample) -> some View {
+        let details = details?.identity == identity ? details : nil
+        return VStack(alignment: .leading, spacing: 8) {
+            InspectorHeading("Command")
+            if let path = process.executablePath {
+                labelled("Executable") { CopyableText(value: path, truncatesMiddle: true).font(.callout) }
+            }
+            if let directory = details?.directory {
+                labelled("Working directory") { CopyableText(value: directory, truncatesMiddle: true).font(.callout) }
+            } else if details != nil, process.isRestricted {
+                deniedRow("Working directory")
+            }
+            if let arguments = details?.arguments {
+                DetailDisclosure("Command line", preview: arguments.commandLine, isExpanded: $showsCommandLine) {
+                    CopyableText(value: arguments.commandLine).font(.callout)
+                }
+                environment(arguments.environment)
+            } else if details != nil {
+                // Read for your own processes only.
+                deniedRow("Command line")
+                deniedRow("Environment")
+            }
+        }
+    }
+
+    @ViewBuilder private func environment(_ variables: [EnvironmentVariable]) -> some View {
+        if variables.isEmpty {
+            HStack(spacing: 4) {
+                Text("Environment").foregroundStyle(.secondaryText)
+                Text("None shown")
+            }
+            .font(.callout)
+            .help("macOS gave no environment variables for it. It keeps them back for some processes, Apple's own among them.")
+        } else {
+            DetailDisclosure("Environment", preview: "\(variables.count) variables", isExpanded: $showsEnvironment) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(variables) { variable in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(variable.name).font(.callout.weight(.semibold))
+                            Text(variable.value).font(.callout.monospaced()).textSelection(.enabled).lineLimit(4)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
     }
 
     private var files: some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle("Sockets only", isOn: $socketsOnly).toggleStyle(.checkbox).font(.callout)
-            if let files = details.openFiles {
-                let shown = socketsOnly ? files.filter { $0.socket != nil } : files
-                ForEach(shown) { file in
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: symbol(for: file))
-                            .foregroundStyle(file.socket?.isListening == true ? .green : .secondary)
-                            .frame(width: 14)
-                        Text(file.detail).font(.callout.monospaced()).textSelection(.enabled).lineLimit(2)
+            if let state = openFiles, state.identity == identity {
+                if let files = state.files {
+                    let shown = socketsOnly ? files.filter { $0.socket != nil } : files
+                    ForEach(shown) { file in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: symbol(for: file))
+                                .foregroundStyle(file.socket?.isListening == true ? .green : .secondary)
+                                .frame(width: 14)
+                            Text(file.detail).font(.callout.monospaced()).textSelection(.enabled).lineLimit(2)
+                        }
                     }
+                    if shown.isEmpty {
+                        Text("Nothing open.").font(.explanation).foregroundStyle(.secondaryText)
+                    }
+                } else {
+                    unavailable("Open files not readable without admin rights",
+                                "macOS lists open files and sockets only for your own processes, or to an administrator (root).")
                 }
-                if shown.isEmpty {
-                    Text("Nothing open.").font(.explanation).foregroundStyle(.secondaryText)
-                }
-            } else {
-                unavailable("Open files unavailable", "macOS only lists open files for your own processes.")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -359,29 +369,48 @@ struct ProcessInspectorView: View {
         model.measuresProcessEnergy != false
     }
 
+    /// Arguments and working directory, every few seconds while the Overview
+    /// shows; state changes only when they do.
     private func loadDetails() async {
-        details = Details()
-        // Re-read open files every few seconds while this process is selected.
+        guard tab == .overview else { return }
+        let identity = identity
         while !Task.isCancelled {
-            let pid = pid
             let loaded = await Task.detached(priority: .utility) {
-                Details(
-                    arguments: ProcessInspector.arguments(of: pid),
-                    directory: ProcessInspector.currentDirectory(of: pid),
-                    openFiles: ProcessInspector.openFiles(of: pid),
-                    loaded: true
-                )
+                Details(identity: identity, arguments: ProcessInspector.arguments(of: identity.pid),
+                        directory: ProcessInspector.currentDirectory(of: identity.pid))
             }.value
-            details = loaded
+            if !Task.isCancelled, loaded != details { details = loaded }
             try? await Task.sleep(for: .seconds(3))
         }
     }
 
-    private func labelled(_ label: String, _ value: String) -> some View {
+    /// Open files and sockets, every few seconds while Files & Ports shows.
+    private func loadOpenFiles() async {
+        guard tab == .files else { return }
+        let identity = identity
+        while !Task.isCancelled {
+            let loaded = await Task.detached(priority: .utility) {
+                OpenFiles(identity: identity, files: ProcessInspector.openFiles(of: identity.pid))
+            }.value
+            if !Task.isCancelled, loaded != openFiles { openFiles = loaded }
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
+
+    private func labelled<Value: View>(_ label: String, @ViewBuilder value: () -> Value) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
-            Text(value).font(.callout.monospaced()).textSelection(.enabled)
+            value()
         }
+    }
+
+    private func deniedRow(_ label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label).foregroundStyle(.secondaryText)
+            Text(ProcessAccess.denied).foregroundStyle(.secondaryText)
+        }
+        .font(.callout)
+        .help(ProcessAccess.deniedHelp)
     }
 
     private func unavailable(_ title: String, _ detail: String) -> some View {
@@ -389,15 +418,6 @@ struct ProcessInspectorView: View {
             Text(title).font(.callout)
             Text(detail).font(.explanation).foregroundStyle(.secondaryText)
         }
-    }
-
-    private func parentDescription(_ process: ProcessSample) -> String {
-        describe(process.parentPID)
-    }
-
-    private func describe(_ pid: Int32) -> String {
-        guard let other = model.process(pid) else { return String(pid) }
-        return "\(model.displayName(for: other)) (\(pid))"
     }
 
     private func symbol(for file: OpenFile) -> String {

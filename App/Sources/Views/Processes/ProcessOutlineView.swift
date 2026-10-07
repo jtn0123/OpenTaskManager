@@ -25,12 +25,21 @@ final class ProcessTableLink {
     func showNested(_ pid: Int32) {
         coordinator?.showNested(pid)
     }
+
+    /// Opens whatever row holds `process` (a group, a section, a parent in
+    /// Tree) and scrolls it into view, now or once the table shows again:
+    /// for the inspector's ancestry, whose processes may sit anywhere.
+    func reveal(_ process: ProcessIdentity) {
+        coordinator?.reveal(process)
+    }
 }
 
 struct ProcessOutlineView: NSViewRepresentable {
     /// Nil while the inspector covers the table: it's hidden and not updated.
     var configuration: ProcessTableConfiguration?
-    @Binding var selection: Set<Int32>
+    /// By PID and start time: a selected process that ends stays selected as
+    /// itself, never as a later process macOS gives its PID.
+    @Binding var selection: Set<ProcessIdentity>
     @Binding var sortKey: ProcessSortKey
     @Binding var ascending: Bool
     var model: AppModel
@@ -143,7 +152,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         private var isRestoring = false
         /// The selection as last agreed between the table and SwiftUI. If
         /// SwiftUI's binding differs, something outside the table changed it.
-        private var syncedSelection: Set<Int32> = []
+        private var syncedSelection: Set<ProcessIdentity> = []
         /// Each row's children in display order; top-level rows sit under
         /// `rootKey`. Compared between refreshes to update rows in place.
         private var layout: [Int64: [Int64]] = [:]
@@ -153,6 +162,8 @@ struct ProcessOutlineView: NSViewRepresentable {
         private var reportedMinimumWidth: CGFloat = 0
         /// A row whose nested rows to scroll into view once the table shows.
         private var revealing: Int64?
+        /// A process to open the rows above and scroll to, once it's in the table.
+        private var pendingReveal: ProcessIdentity?
 
         struct Peaks {
             var memory: Double = 0
@@ -178,6 +189,9 @@ struct ProcessOutlineView: NSViewRepresentable {
             }
 
             var pid: Int32? { node.process?.pid }
+            /// Rows are kept by PID, so after a PID is reused the same row
+            /// holds the later process; selection goes by this instead.
+            var identity: ProcessIdentity? { node.process?.identity }
         }
 
         func apply(_ configuration: ProcessTableConfiguration) {
@@ -188,6 +202,9 @@ struct ProcessOutlineView: NSViewRepresentable {
             syncSortDescriptor(outline)
             updateColumns(outline, configuration: configuration)
 
+            // Read before the rows take this refresh's processes: a selected
+            // process whose PID now belongs to another stays selected as itself.
+            let tableSelection = Set(outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? Item)?.identity })
             var live: [Int64: Item] = [:]
             func materialize(_ node: ProcessNode) -> Item {
                 let item = items[node.id] ?? Item(node: node)
@@ -215,7 +232,6 @@ struct ProcessOutlineView: NSViewRepresentable {
             let oldLayout = layout
             layout = newLayout
 
-            let tableSelection = Set(outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? Item)?.pid })
             isRestoring = true
             // Rebuilding every row view costs far more than moving a few rows
             // and restyling the ones on screen, so reload only as a fallback.
@@ -226,6 +242,7 @@ struct ProcessOutlineView: NSViewRepresentable {
             refreshVisibleCells(in: outline)
             restoreSelection(in: outline, keeping: tableSelection)
             isRestoring = false
+            if pendingReveal != nil { finishReveal() }
             if revealing != nil {
                 // Back from the full-width inspector: once the table is laid out again.
                 DispatchQueue.main.async { [weak self] in self?.scrollToReveal() }
@@ -236,14 +253,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         /// the rows under it into view, now or once the table shows again.
         func showNested(_ pid: Int32) {
             guard let outline, let item = items[Int64(pid)], !item.children.isEmpty else { return }
-            var ancestors: [Any] = []
-            var ancestor = outline.parent(forItem: item)
-            while let current = ancestor {
-                ancestors.insert(current, at: 0)
-                ancestor = outline.parent(forItem: current)
-            }
-            // Through the delegate, which records each as expanded by the user.
-            ancestors.forEach { outline.expandItem($0) }
+            expandParents(of: item, in: outline)
             outline.expandItem(item)
             revealing = item.id
             if outline.enclosingScrollView?.isHidden == false { scrollToReveal() }
@@ -405,11 +415,12 @@ struct ProcessOutlineView: NSViewRepresentable {
             }
         }
 
-        private func restoreSelection(in outline: NSOutlineView, keeping tableSelection: Set<Int32>) {
+        private func restoreSelection(in outline: NSOutlineView, keeping tableSelection: Set<ProcessIdentity>) {
             let wanted = parent.selection != syncedSelection ? parent.selection : tableSelection
             syncedSelection = wanted
-            let rows = IndexSet(wanted.compactMap { pid -> Int? in
-                guard let item = items[Int64(pid)] else { return nil }
+            let rows = IndexSet(wanted.compactMap { process -> Int? in
+                // A row whose PID now belongs to a later process isn't this one.
+                guard let item = items[Int64(process.pid)], item.identity == process else { return nil }
                 let row = outline.row(forItem: item)
                 return row >= 0 ? row : nil
             })
@@ -495,10 +506,9 @@ struct ProcessOutlineView: NSViewRepresentable {
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !isRestoring, let outline else { return }
-            let pids = Set(outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? Item)?.pid })
-            syncedSelection = pids
-            parent.selection = pids
-
+            let processes = Set(outline.selectedRowIndexes.compactMap { (outline.item(atRow: $0) as? Item)?.identity })
+            syncedSelection = processes
+            parent.selection = processes
         }
 
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
@@ -601,7 +611,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         }
 
         func endSelected() {
-            let pids = Array(parent.selection)
+            let pids = parent.model.livePIDs(parent.selection)
             guard !pids.isEmpty else { return }
             parent.model.endTask(pids)
         }
@@ -619,7 +629,7 @@ extension ProcessOutlineView.Coordinator {
         if clicked >= 0, !outline.selectedRowIndexes.contains(clicked) {
             return [(outline.item(atRow: clicked) as? Item)?.pid].compactMap { $0 }
         }
-        return Array(parent.selection)
+        return parent.model.livePIDs(parent.selection)
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -672,7 +682,7 @@ extension ProcessOutlineView.Coordinator {
         menu.addItem(.separator())
         if let single {
             menu.addItem(ActionItem("Get Info") { [weak self] in
-                self?.parent.selection = [single.pid]
+                self?.parent.selection = [single.identity]
                 self?.parent.onShowInspector()
             })
             menu.addItem(ActionItem("Sample Process") { model.sampleProcess(single.pid) })
@@ -734,161 +744,61 @@ extension ProcessOutlineView.Coordinator {
     }
 }
 
-// MARK: - Supporting views
+// MARK: - Revealing a process
 
-/// NSMenuItem that runs a closure.
-final class ActionItem: NSMenuItem {
-    private let handler: () -> Void
-
-    init(_ title: String, handler: @escaping () -> Void) {
-        self.handler = handler
-        super.init(title: title, action: #selector(run), keyEquivalent: "")
-        target = self
+extension ProcessOutlineView.Coordinator {
+    func reveal(_ process: ProcessIdentity) {
+        pendingReveal = process
+        finishReveal()
     }
 
-    @available(*, unavailable)
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @objc private func run() {
-        handler()
-    }
-}
-
-final class SectionCell: NSTableCellView {
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 12, weight: .semibold)
-        label.textColor = .secondaryLabelColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        textField = label
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-}
-
-final class NameCell: NSTableCellView {
-    private let badge = NSTextField(labelWithString: "")
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        let icon = NSImageView()
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.imageScaling = .scaleProportionallyUpOrDown
-        let label = NSTextField(labelWithString: "")
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        badge.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        badge.textColor = .secondaryLabelColor
-        badge.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(icon)
-        addSubview(label)
-        addSubview(badge)
-        imageView = icon
-        textField = label
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            badge.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
-            badge.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -4),
-            badge.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @MainActor
-    func configure(process: ProcessSample, app: NSRunningApplication?, childCount: Int, isExpanded: Bool) {
-        // Skip unchanged values: the table restyles visible rows every tick and
-        // re-setting an image or string forces a redraw.
-        let icon = IconCache.icon(for: process, app: app)
-        if imageView?.image !== icon { imageView?.image = icon }
-        let name = app?.localizedName ?? process.name
-        if textField?.stringValue != name { textField?.stringValue = name }
-        let color: NSColor = process.state == .stopped ? .secondaryLabelColor : .labelColor
-        if textField?.textColor != color { textField?.textColor = color }
-        var notes: [String] = []
-        if childCount > 0, !isExpanded { notes.append("(\(childCount + 1))") }
-        if process.state == .stopped { notes.append("Suspended") }
-        if process.state == .zombie { notes.append("Zombie") }
-        if process.isTranslated { notes.append("Rosetta") }
-        let badgeText = notes.joined(separator: " · ")
-        if badge.stringValue != badgeText { badge.stringValue = badgeText }
-        if toolTip != process.executablePath { toolTip = process.executablePath }
-    }
-}
-
-/// Value cell with an optional meter bar behind busy values.
-final class ValueCell: NSTableCellView {
-    private let bar = CALayer()
-    private var fraction: Double = 0
-
-    func setMeter(_ fraction: Double, color: NSColor?) {
-        let shown = color == nil || fraction < 0.01 ? 0 : min(fraction, 1)
-        // Busier rows get a deeper colour as well as a longer bar.
-        let fill = color?.withAlphaComponent(0.20 + 0.40 * shown).cgColor
-        if bar.backgroundColor != fill {
-            // A standalone layer animates every change unless told not to.
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            bar.backgroundColor = fill
-            CATransaction.commit()
+    /// Expands the rows above the pending process's, through the delegate
+    /// so they stay open, then selects and scrolls to it. Waits while the
+    /// table is covered or the row isn't there yet (a search just cleared).
+    func finishReveal() {
+        guard let process = pendingReveal, let outline else { return }
+        // Something else was selected since: drop it.
+        guard parent.selection == [process] else {
+            pendingReveal = nil
+            return
         }
-        guard shown != self.fraction else { return }
-        self.fraction = shown
-        needsLayout = true
+        guard outline.enclosingScrollView?.isHidden == false, let item = items[Int64(process.pid)],
+              item.identity == process else { return }
+        pendingReveal = nil
+        expandParents(of: item, in: outline)
+        let row = outline.row(forItem: item)
+        guard row >= 0 else { return }
+        isRestoring = true
+        outline.selectRowIndexes([row], byExtendingSelection: false)
+        isRestoring = false
+        syncedSelection = [process]
+        // Once the table has its size: at launch it's still being laid out.
+        let id = item.id
+        DispatchQueue.main.async { [weak self] in self?.center(id) }
     }
 
-    override func layout() {
-        super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        let track = bounds.insetBy(dx: 2, dy: 3)
-        bar.frame = CGRect(x: track.minX, y: track.minY, width: track.width * fraction, height: track.height)
-        bar.isHidden = fraction == 0
-        CATransaction.commit()
+    /// Expands the sections and rows above `item`, outermost first, through
+    /// the delegate, which records each as expanded by the user.
+    func expandParents(of item: Item, in outline: NSOutlineView) {
+        var ancestors: [Any] = []
+        var ancestor = outline.parent(forItem: item)
+        while let current = ancestor {
+            ancestors.insert(current, at: 0)
+            ancestor = outline.parent(forItem: current)
+        }
+        ancestors.forEach { outline.expandItem($0) }
     }
 
-    init(alignment: NSTextAlignment) {
-        super.init(frame: .zero)
-        wantsLayer = true
-        bar.cornerRadius = 3
-        bar.isHidden = true
-        layer?.addSublayer(bar)
-        let label = NSTextField(labelWithString: "")
-        label.alignment = alignment
-        label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        textField = label
-        NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
+    /// Scrolls the row to the middle of the table, unless it's in view
+    /// already, clear of a section title floating over the top row.
+    private func center(_ id: Int64) {
+        guard let outline, let item = items[id] else { return }
+        let row = outline.row(forItem: item)
+        guard row >= 0 else { return }
+        let rect = outline.rect(ofRow: row)
+        let visible = outline.visibleRect
+        if rect.minY >= visible.minY + outline.rowHeight * 1.5, rect.maxY <= visible.maxY { return }
+        let top = min(max(rect.midY - visible.height / 2, 0), max(outline.bounds.height - visible.height, 0))
+        outline.scroll(NSPoint(x: visible.minX, y: top))
     }
 }
