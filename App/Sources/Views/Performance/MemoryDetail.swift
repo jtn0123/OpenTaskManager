@@ -57,12 +57,16 @@ struct MemoryDetail: View {
         }
     }
 
+    /// The pressure level and the plotted figure. Available memory is the
+    /// strip's to show: beside "Pressure 21%" a "79% available" reads as the
+    /// same measure twice.
     private func pressure(_ memory: MemorySample) -> some View {
         let history = model.memoryDetail.pressure
         let color = Self.color(memory.pressure)
-        let available = memory.availablePercent.map { " · \($0)% available" } ?? ""
-        return ChartCard(title: "Pressure", trailing: memory.pressure.rawValue.capitalized + available, tint: color, legend: [
-            LegendItem(name: "Pressure", color: color, value: history.values.last.map { Format.percent($0) } ?? "—"),
+        let now = history.values.last.map { Format.percent($0) }
+        return ChartCard(title: "Pressure", trailing: memory.pressure.rawValue.capitalized + (now.map { " · pressure \($0)" } ?? ""),
+                         tint: color, legend: [
+            LegendItem(name: "Pressure", color: color, value: now ?? "—"),
         ]) {
             GraphView(series: [GraphSeries(values: history.values, color: color)], maxValue: 1, glows: true,
                       axis: { Format.percent($0) }, cornerRadius: 8)
@@ -147,7 +151,8 @@ struct MemoryDetail: View {
     private func stats(_ memory: MemorySample) -> some View {
         MetricStrip(tint: Theme.memory) {
             Stat(label: "In use", number: Double(memory.used), color: Theme.memory, format: Self.bytesAxis)
-            Stat(label: "Available", number: Double(memory.free + memory.cached), format: Self.bytesAxis)
+            Stat(label: "Available, incl. cache", number: Double(memory.free + memory.cached), format: Self.bytesAxis)
+                .help("Free memory plus cached files. macOS drops cached files as soon as apps need the room, so they count as available.")
             Stat(label: "Pressure", value: memory.pressure.rawValue.capitalized, color: Self.color(memory.pressure))
             Stat(label: "Swap used", number: Double(memory.swapUsed), format: Self.bytesAxis)
             Stat(label: "Page-ins since boot", value: memory.pageIns.formatted())

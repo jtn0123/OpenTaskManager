@@ -63,6 +63,11 @@ final class HistoryScrubber {
     /// What the side panel shows: the previewed moment, else the pinned one,
     /// else (nil) the latest.
     var time: Date? { hovered ?? pinned }
+
+    /// The point the moment panel shows, among `points`.
+    func point(in points: [HistoryPoint]) -> HistoryPoint? {
+        time.flatMap { HistoryPoint.nearest(to: $0, in: points) } ?? points.last
+    }
 }
 
 /// The flight recorder's history: what the Mac was doing over the last hour
@@ -70,10 +75,19 @@ final class HistoryScrubber {
 ///
 /// The page reads the recording when it opens, when the range changes and
 /// once per graph point after that. It never follows the sampling tick.
+///
+/// Below `compactWidth` the moment panel leaves the side: a summary of it
+/// rides over the charts with the rail, its details a click away, and the
+/// charts take the whole width.
 struct HistoryView: View {
+    static let compactWidth: CGFloat = 760
+    private static let panelWidth: CGFloat = 310
+    /// The time axis labels' font, for measuring them.
+    private static let axisFont = NSFont.systemFont(ofSize: 10.5)
+
     @Environment(AppModel.self) private var model
     @AppStorage("historyRange") private var range: HistoryRange = .hour
-    /// Spread the graphs over just the recorded part of a range the recording doesn't fill.
+    /// Spread the graphs from the first record in the range to the last.
     @AppStorage("historyFitsRecording") private var fitsRecording = false
     @State private var scrubber = HistoryScrubber()
     @State private var points: [HistoryPoint]?
@@ -81,16 +95,22 @@ struct HistoryView: View {
     /// Seconds each graph point averages.
     @State private var bucket = FlightRecorder.span
     @State private var earliest: Date?
+    /// The first and last records within the range; nil while it has none.
+    @State private var recordedSpan: ClosedRange<Date>?
+    /// Whether those records begin well inside the range, after an empty stretch.
+    @State private var startsLate = false
     /// Seconds recorded within the range, gaps left out.
     @State private var recorded: TimeInterval = 0
-    /// Whether the recording began inside the range, so fitting would change the graphs.
-    @State private var canFit = false
     @State private var fileSize: Int64 = 0
+    /// The page's width: it picks the layout and how often the axes are labelled.
+    @State private var width: CGFloat = 0
 
     private struct LoadKey: Equatable {
         let range: HistoryRange
         let fits: Bool
     }
+
+    private var compact: Bool { width > 0 && width < Self.compactWidth }
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -106,13 +126,16 @@ struct HistoryView: View {
                 }
                 .padding(20)
             }
-            // In a scroll view of its own, so it sits under the toolbar like the charts.
-            ScrollView {
-                HistoryMomentPanel(scrubber: scrubber, points: points ?? [], bucket: bucket)
-                    .padding([.top, .bottom, .trailing], 20)
+            if !compact {
+                // In a scroll view of its own, so it sits under the toolbar like the charts.
+                ScrollView {
+                    HistoryMomentPanel(scrubber: scrubber, points: points ?? [], bucket: bucket)
+                        .padding([.top, .bottom, .trailing], 20)
+                }
+                .frame(width: Self.panelWidth)
             }
-            .frame(width: 310)
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .toolbar {
             ToolbarItem {
                 Button {
@@ -156,9 +179,18 @@ struct HistoryView: View {
                     fitToggle
                 }
             }
-            (Text(recordedLabel).foregroundStyle(.primary).fontWeight(.medium) + Text(status).foregroundStyle(.secondary))
-                .font(.callout)
+            // One line: in a narrow window the cadence and retention move to the tooltip.
+            ViewThatFits(in: .horizontal) {
+                recording(status).fixedSize()
+                recording(shortStatus)
+            }
+            .font(.callout)
+            .help(recordedLabel + status)
         }
+    }
+
+    private func recording(_ status: String) -> Text {
+        Text(recordedLabel).foregroundStyle(.primary).fontWeight(.medium) + Text(status).foregroundStyle(.secondary)
     }
 
     private var title: some View {
@@ -174,17 +206,31 @@ struct HistoryView: View {
         .fixedSize()
     }
 
-    /// Spreads the graphs over the recorded stretch only. Offered only while
-    /// the recording began inside the range; it never stretches the data.
+    /// Spreads the graphs from the first record in the range to the last.
+    /// A checkbox, so whether it's on reads at a glance; it's offered
+    /// whenever the range has records, and never stretches the data.
     private var fitToggle: some View {
-        Toggle(isOn: Binding(get: { fitsRecording && canFit }, set: { fitsRecording = $0 })) {
-            Label("Fit recorded data", systemImage: "arrow.left.and.right")
+        Toggle("Fit to recorded data", isOn: Binding(get: { fitsRecording && recordedSpan != nil }, set: { fitsRecording = $0 }))
+            .toggleStyle(.checkbox)
+            .fixedSize()
+            .disabled(recordedSpan == nil)
+            .help(fitHelp)
+    }
+
+    /// What fitting does here, or why it can't.
+    private var fitHelp: String {
+        guard model.recorder != nil else { return "There's no recording to fit: it couldn't be opened." }
+        guard let recordedSpan else { return "Nothing is recorded in \(range.phrase) yet, so there's nothing to fit the graphs to." }
+        guard startsLate else {
+            return "Spread the graphs from the first record to the last. The recording already spans \(range.phrase), so this changes little."
         }
-        .toggleStyle(.button)
-        .fixedSize()
-        .disabled(!canFit)
-        .help(canFit ? "Spread the graphs over the recorded time only, instead of all of \(range.phrase)"
-            : "The recording already covers \(range.phrase)")
+        return "Spread the graphs from the first record in \(range.phrase), at \(Self.clock(recordedSpan.lowerBound)), "
+            + "to the latest, instead of over all of \(range.phrase)."
+    }
+
+    /// "6:51 AM", or "Mon 6:51 AM" before today.
+    private static func clock(_ time: Date) -> String {
+        time.formatted(Calendar.current.isDateInToday(time) ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute())
     }
 
     @ViewBuilder private var content: some View {
@@ -199,41 +245,53 @@ struct HistoryView: View {
             let axis = timeAxis
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, domain: domain, earliest: earliest,
-                                 ticks: GraphMath.timeTicks(in: domain, step: axis.step, margin: 0.08),
-                                 timeLabels: axis.labels, scrubber: scrubber)
+                                 ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
             }
         }
     }
 
-    /// The timeline over the charts, once there's something to pick from.
+    /// The timeline over the charts, once there's something to pick from,
+    /// and in a narrow window the moment's summary above it.
     @ViewBuilder private var rail: some View {
         if let points, !points.isEmpty, model.recorder != nil {
-            HistoryRail(scrubber: scrubber, points: points, domain: domain, bucket: bucket)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
-                // Covers the charts as they scroll under the pinned rail.
-                .background(.background)
+            VStack(alignment: .leading, spacing: 10) {
+                if compact {
+                    HistoryMomentSummary(scrubber: scrubber, points: points, bucket: bucket)
+                }
+                HistoryRail(scrubber: scrubber, points: points, domain: domain, bucket: bucket)
+            }
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+            // Covers the charts as they scroll under the pinned rail.
+            .background(.background)
         }
     }
 
     /// Where the time axis is labelled: the range's own steps, or round
-    /// steps for a fitted span.
-    private var timeAxis: (step: TimeInterval, labels: Date.FormatStyle) {
+    /// steps for a fitted span, spread out further when the plots are too
+    /// narrow for that many labels.
+    private var timeAxis: (ticks: [Date], labels: Date.FormatStyle) {
         let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
-        guard span < range.seconds - 1 else { return (range.tickStep, range.timeLabels) }
-        let step = GraphMath.timeTickStep(for: span)
-        let labels: Date.FormatStyle = step < 60 ? .dateTime.hour().minute().second()
-            : step >= 86_400 ? .dateTime.weekday(.abbreviated).day() : .dateTime.hour().minute()
-        return (step, labels)
+        var step = range.tickStep
+        var labels = range.timeLabels
+        if span < range.seconds - 1 {
+            step = GraphMath.timeTickStep(for: span)
+            labels = step < 60 ? .dateTime.hour().minute().second()
+                : step >= 86_400 ? .dateTime.weekday(.abbreviated).day() : .dateTime.hour().minute()
+        }
+        // The charts' column, less the page's and the cards' padding and a scroll bar.
+        let plot = (compact ? width : width - Self.panelWidth) - 40 - 28 - 16
+        let widest = GraphMath.timeTicks(in: domain, step: step).map {
+            ($0.formatted(labels) as NSString).size(withAttributes: [.font: Self.axisFont]).width
+        }.max() ?? 0
+        return (GraphMath.timeTicks(in: domain, step: step, width: Double(plot), labelWidth: Double(ceil(widest))), labels)
     }
 
     /// How much of the range is recorded: "17 min recorded since 6:51 AM".
     private var recordedLabel: String {
-        guard let earliest, recorded > 0 else { return "" }
-        guard canFit else { return "\(Format.roughDuration(recorded)) recorded in \(range.phrase)" }
-        let style: Date.FormatStyle = Calendar.current.isDateInToday(earliest)
-            ? .dateTime.hour().minute() : .dateTime.weekday(.abbreviated).hour().minute()
-        return "\(Format.roughDuration(recorded)) recorded since \(earliest.formatted(style))"
+        guard let recordedSpan, recorded > 0 else { return "" }
+        guard startsLate else { return "\(Format.roughDuration(recorded)) recorded in \(range.phrase)" }
+        return "\(Format.roughDuration(recorded)) recorded since \(Self.clock(recordedSpan.lowerBound))"
     }
 
     /// The rest of the line under the title, after `recordedLabel`.
@@ -242,6 +300,13 @@ struct HistoryView: View {
         if fileSize > 0 { parts.append(Format.bytes(UInt64(fileSize)) + " on disk") }
         let text = parts.joined(separator: " · ")
         return recordedLabel.isEmpty ? "Recorded " + text : " · " + text
+    }
+
+    /// `status` for a narrow window: just the size on disk.
+    private var shortStatus: String {
+        guard fileSize > 0 else { return "" }
+        let size = Format.bytes(UInt64(fileSize)) + " on disk"
+        return recordedLabel.isEmpty ? size : " · " + size
     }
 
     /// Saves the records in the range shown, at full resolution, as CSV.
@@ -262,18 +327,19 @@ struct HistoryView: View {
     private func load() async {
         guard let recorder = model.recorder else { return }
         let end = Date.now
+        let start = end.addingTimeInterval(-range.seconds)
         let first = try? await recorder.earliest()
-        let age = first.map { end.timeIntervalSince($0) }
-        let span = GraphMath.historySpan(range: range.seconds, recorded: age, fit: fitsRecording)
-        let step = FlightRecorder.bucket(for: span)
-        let start = end.addingTimeInterval(-span)
-        let loaded = (try? await recorder.points(from: start, to: end, bucket: step)) ?? []
-        recorded = (try? await recorder.recordedSeconds(from: end.addingTimeInterval(-range.seconds), to: end)) ?? 0
+        let span = try? await recorder.recordedSpan(from: start, to: end)
+        let shown = GraphMath.historyDomain(range: range.seconds, end: end, recorded: span, fit: fitsRecording, record: FlightRecorder.span)
+        let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound))
+        let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
+        recorded = (try? await recorder.recordedSeconds(from: start, to: end)) ?? 0
         earliest = first
-        canFit = GraphMath.canFit(range: range.seconds, recorded: age)
+        recordedSpan = span
+        startsLate = span.map { GraphMath.recordingStartsLate(range: range.seconds, end: end, recorded: $0) } ?? false
         fileSize = recorder.fileSize
         bucket = step
-        domain = start...end
+        domain = shown
         points = loaded
         // A pinned moment that has slid out of the range goes back to the latest.
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }

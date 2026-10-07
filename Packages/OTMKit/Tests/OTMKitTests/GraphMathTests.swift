@@ -126,20 +126,56 @@ struct GraphMathTests {
         #expect(GraphMath.timeTickStep(for: 3_600, maximumTicks: 0) == 10)
     }
 
-    @Test func fittingOnlyShortensARangeTheRecordingDoesNotFill() {
+    @Test func fittingSpansTheFirstAndLastRecordsInTheRange() {
         let hour = 3_600.0
-        // Ten minutes recorded: fitted, the axis spans ten minutes.
-        #expect(GraphMath.canFit(range: hour, recorded: 600))
-        #expect(GraphMath.historySpan(range: hour, recorded: 600, fit: true) == 600)
-        #expect(GraphMath.historySpan(range: hour, recorded: 600, fit: false) == hour)
-        // A recording that fills the range (or nearly) leaves it alone.
-        #expect(!GraphMath.canFit(range: hour, recorded: 5 * hour))
-        #expect(!GraphMath.canFit(range: hour, recorded: 0.97 * hour))
-        #expect(GraphMath.historySpan(range: hour, recorded: 5 * hour, fit: true) == hour)
-        // Nothing recorded yet: nothing to fit.
-        #expect(!GraphMath.canFit(range: hour, recorded: nil))
-        #expect(GraphMath.historySpan(range: hour, recorded: nil, fit: true) == hour)
-        // A recording seconds old still gets a readable minute.
-        #expect(GraphMath.historySpan(range: hour, recorded: 12, fit: true) == 60)
+        let end = Date(timeIntervalSince1970: 2_000_000)
+        let start = end.addingTimeInterval(-hour)
+        // Records from 40 minutes before the end to 5 s before it.
+        let recorded = end.addingTimeInterval(-2_400)...end.addingTimeInterval(-5)
+        #expect(GraphMath.historyDomain(range: hour, end: end, recorded: recorded, fit: false) == start...end)
+        // Fitted, the axis starts where the first record's ten seconds began and ends at the last record.
+        #expect(GraphMath.historyDomain(range: hour, end: end, recorded: recorded, fit: true)
+            == end.addingTimeInterval(-2_410)...end.addingTimeInterval(-5))
+        // Records that cover the range leave it as it is.
+        let full = start.addingTimeInterval(4)...end
+        #expect(GraphMath.historyDomain(range: hour, end: end, recorded: full, fit: true) == start...end)
+        // Nothing recorded: nothing to fit.
+        #expect(GraphMath.historyDomain(range: hour, end: end, recorded: nil, fit: true) == start...end)
+        // A record seconds old still gets a readable minute.
+        let fresh = end.addingTimeInterval(-2)...end.addingTimeInterval(-2)
+        #expect(GraphMath.historyDomain(range: hour, end: end, recorded: fresh, fit: true)
+            == end.addingTimeInterval(-62)...end.addingTimeInterval(-2))
+    }
+
+    @Test func aRecordingStartsLateWhenItLeavesTheRangeOpeningEmpty() {
+        let hour = 3_600.0
+        let end = Date(timeIntervalSince1970: 2_000_000)
+        #expect(GraphMath.recordingStartsLate(range: hour, end: end, recorded: end.addingTimeInterval(-1_140)...end))
+        // Within the first 5% (three minutes) of the hour isn't late.
+        #expect(!GraphMath.recordingStartsLate(range: hour, end: end, recorded: end.addingTimeInterval(-3_500)...end))
+    }
+
+    @Test func timeTicksThinOutBeforeTheirLabelsCrowd() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let start = Date(timeIntervalSince1970: 6 * 3_600 + 11 * 60 + 23)
+        let hour = start...start.addingTimeInterval(3_600)
+        func clock(_ ticks: [Date]) -> [Int] { ticks.map { Int($0.timeIntervalSince1970) % 86_400 / 60 } }
+        // Wide enough for every quarter hour.
+        let wide = GraphMath.timeTicks(in: hour, step: 900, width: 640, labelWidth: 46, calendar: calendar)
+        #expect(clock(wide) == [6 * 60 + 15, 6 * 60 + 30, 6 * 60 + 45, 7 * 60])
+        // Room for three 46-point labels: half-hourly instead, never more than fit.
+        let narrow = GraphMath.timeTicks(in: hour, step: 900, width: 180, labelWidth: 46, calendar: calendar)
+        #expect(clock(narrow) == [6 * 60 + 30, 7 * 60])
+        for width in stride(from: 60.0, through: 900, by: 7) {
+            let ticks = GraphMath.timeTicks(in: hour, step: 900, width: width, labelWidth: 46, calendar: calendar)
+            let positions = ticks.map { $0.timeIntervalSince(hour.lowerBound) / 3_600 * width }
+            // Each label clears the ends and its neighbour.
+            #expect(positions.allSatisfy { $0 >= 23 && $0 <= width - 23 }, "\(width) pt: \(positions)")
+            #expect(zip(positions, positions.dropFirst()).allSatisfy { $1 - $0 >= 46 }, "\(width) pt: \(positions)")
+        }
+        // Until the width is known, it keeps the old 8% margins.
+        #expect(GraphMath.timeTicks(in: hour, step: 900, width: 0, labelWidth: 46, calendar: calendar)
+            == GraphMath.timeTicks(in: hour, step: 900, margin: 0.08, calendar: calendar))
     }
 }

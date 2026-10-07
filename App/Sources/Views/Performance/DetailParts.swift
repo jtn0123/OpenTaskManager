@@ -19,9 +19,10 @@ struct DetailHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.largeTitle.weight(.semibold))
+            // In a narrow pane the subtitle gives way, not the title.
+            Text(title).font(.largeTitle.weight(.semibold)).lineLimit(1).layoutPriority(1)
             Spacer()
-            Text(subtitle).font(.title3).foregroundStyle(.secondary).lineLimit(1)
+            Text(subtitle).font(.title3).foregroundStyle(.secondary).lineLimit(1).help(subtitle)
         }
     }
 }
@@ -102,9 +103,34 @@ struct UnavailableNote: View {
     }
 }
 
+/// A reading this Mac doesn't measure, as an item in a `MetricStrip`: its
+/// label, and in place of a figure a short note, with the reason on hover.
+/// It takes a line of the strip where a whole card would say less.
+struct CapabilityNote: View {
+    /// A `Stat` figure's line, so the note sits level with the figures beside it.
+    private static let figureHeight = NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .title3))
+
+    var label: String
+    var text: String
+    var detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.subheadline).foregroundStyle(.secondary)
+            Label(text, systemImage: "info.circle")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(minHeight: Self.figureHeight)
+        }
+        .help(detail)
+    }
+}
+
 /// What to say where a reading isn't measured on this Mac.
 enum Unavailable {
     static let gpuUtilization = "Utilization not reported"
+    static let gpuUtilizationShort = "Not reported by this GPU"
     static let gpuUtilizationDetail = "This GPU's driver doesn't report how busy it is."
     static let energy = "This Mac doesn't report energy use per app."
     static let processNetwork = "Traffic per app isn't available: nettop couldn't run."

@@ -169,6 +169,19 @@ struct FlightRecorderTests {
         #expect(try await recorder.recordedSeconds(from: start.addingTimeInterval(1_000), to: start.addingTimeInterval(2_000)) == 0)
     }
 
+    @Test func findsTheFirstAndLastRecordsInARange() async throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let recorder = try FlightRecorder(url: url)
+        for seconds in [10.0, 20, 600, 610] {
+            try await recorder.append(record(at: 1_400_000 + seconds, cpu: 0.1))
+        }
+        let start = Date(timeIntervalSince1970: 1_400_000)
+        let span = try await recorder.recordedSpan(from: start.addingTimeInterval(15), to: start.addingTimeInterval(605))
+        #expect(span == start.addingTimeInterval(20)...start.addingTimeInterval(600))
+        #expect(try await recorder.recordedSpan(from: start.addingTimeInterval(30), to: start.addingTimeInterval(500)) == nil)
+    }
+
     @Test func bucketsHoldWholeRecords() {
         // About 360 points across, each a whole number of ten-second records.
         #expect(FlightRecorder.bucket(for: 3_600) == 10)
