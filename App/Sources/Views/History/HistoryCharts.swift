@@ -109,21 +109,43 @@ struct HistoryChartCard: View {
     let scrubber: HistoryScrubber
     @Environment(\.colorScheme) private var colorScheme
 
+    private var title: some View {
+        Label(spec.title, systemImage: spec.symbol)
+            .font(.headline)
+            .foregroundStyle(spec.tint)
+            .fixedSize()
+    }
+
+    private var legend: some View {
+        ForEach(spec.lines) { line in
+            HStack(spacing: 5) {
+                RoundedRectangle(cornerRadius: 2).fill(line.color).frame(width: 9, height: 9)
+                Text(line.name).foregroundStyle(.secondary)
+                Text(spec.summary(of: line, in: points)).monospacedDigit()
+            }
+            .font(.callout)
+            .fixedSize()
+        }
+    }
+
     var body: some View {
         let top = spec.top(for: points)
         Card(tint: spec.tint) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Label(spec.title, systemImage: spec.symbol)
-                    .font(.headline)
-                    .foregroundStyle(spec.tint)
-                Spacer()
-                ForEach(spec.lines) { line in
-                    HStack(spacing: 5) {
-                        RoundedRectangle(cornerRadius: 2).fill(line.color).frame(width: 9, height: 9)
-                        Text(line.name).foregroundStyle(.secondary)
-                        Text(spec.summary(of: line, in: points)).monospacedDigit()
-                    }
-                    .font(.callout)
+            // The legend sits beside the title while it fits, then under it,
+            // then one line per series in a narrow window: never squeezed.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 14) {
+                    title
+                    Spacer(minLength: 0)
+                    legend
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    title
+                    HStack(spacing: 14) { legend }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    title
+                    legend
                 }
             }
             chart(top: top)

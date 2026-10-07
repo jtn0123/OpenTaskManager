@@ -134,20 +134,44 @@ struct HistoryView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 12) {
-                Text("History").font(.largeTitle.weight(.semibold))
-                Spacer()
-                fitToggle
-                Picker("Range", selection: $range) {
-                    ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
+            // The controls move under the title, then the toggle under the
+            // range, as the window narrows.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 12) {
+                    title
+                    Spacer(minLength: 0)
+                    fitToggle
+                    rangePicker
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 300)
+                VStack(alignment: .leading, spacing: 10) {
+                    title
+                    HStack(spacing: 12) {
+                        rangePicker
+                        fitToggle
+                    }
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    title
+                    rangePicker
+                    fitToggle
+                }
             }
             (Text(recordedLabel).foregroundStyle(.primary).fontWeight(.medium) + Text(status).foregroundStyle(.secondary))
                 .font(.callout)
         }
+    }
+
+    private var title: some View {
+        Text("History").font(.largeTitle.weight(.semibold)).fixedSize()
+    }
+
+    private var rangePicker: some View {
+        Picker("Range", selection: $range) {
+            ForEach(HistoryRange.allCases) { Text($0.label).tag($0) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
     }
 
     /// Spreads the graphs over the recorded stretch only. Offered only while
@@ -157,6 +181,7 @@ struct HistoryView: View {
             Label("Fit recorded data", systemImage: "arrow.left.and.right")
         }
         .toggleStyle(.button)
+        .fixedSize()
         .disabled(!canFit)
         .help(canFit ? "Spread the graphs over the recorded time only, instead of all of \(range.phrase)"
             : "The recording already covers \(range.phrase)")
