@@ -63,6 +63,7 @@ final class GPUBenchmarkStore {
                 if let fixture { throw fixture }
                 let result = try await GPUBenchmark.measure(appVersion: appVersion, progress: report)
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.gpuBenchmark.append(result) }.value
+                BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 history = (saved ?? [result] + history).filter { $0.historyKey == device.key }
             } catch {
@@ -76,6 +77,11 @@ final class GPUBenchmarkStore {
     func cancel() {
         task?.cancel()
         finish(generation)
+    }
+
+    /// Returns once the run in progress, if any, has ended, for Run all.
+    func waitForRun() async {
+        await task?.value
     }
 
     private func finish(_ generation: Int) {

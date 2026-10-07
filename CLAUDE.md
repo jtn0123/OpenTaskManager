@@ -48,6 +48,12 @@ Manager OG or any other proprietary task manager.
   the GPU, every result checked, cancellable) backs the GPU detail's Benchmark card
   (`GPUBenchmarkStore`; debug `-gpuBenchmarkFixture nodevice|unsupported|notiming`)
   and `otm gpubench`, the last 10 per Mac in SpeedTests/gpu-benchmark.json;
+  Model/BenchmarkRun adapts those four histories on read to one envelope (never
+  rewritten), Model/BenchmarkComparison holds the compatibility rules and change
+  against both runs' spread, and Format/BenchmarkExport the versioned JSON and
+  Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`,
+  `BenchmarkWorkspace`: Run all through the tests' own stores, picks and ticks in
+  UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
@@ -143,7 +149,7 @@ screencapture -x -o -l <windowID> out.png
 ```
 
 `-openPage Overview|Processes|Performance|History|Connections|Startup|Apps|Users|System|Drivers|Storage` sets the starting page, and
-`-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
+`-openResource cpu|memory|gpu|disk|network|power|sensors|benchmarks` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,

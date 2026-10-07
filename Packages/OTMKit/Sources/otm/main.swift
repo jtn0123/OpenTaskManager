@@ -66,6 +66,11 @@ USAGE:
                                  shows the chip's core types, clusters and caches
   otm gpubench [--json]          FP32 compute, memory bandwidth and fill rate on
                                  the GPU (Metal), timed by the GPU, about 10 s
+  otm bench [list|compare A B] [--json]
+                                 Every saved CPU, GPU, disk and Internet result,
+                                 numbered newest first; compare shows each
+                                 figure's change between runs A and B of one
+                                 test, and refuses runs that don't compare
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -851,6 +856,9 @@ case "cpubench":
 
 case "gpubench":
     gpuBenchCommand(options)
+
+case "bench":
+    benchCommand(options)
 
 case "kill":
     guard let pid = options.positional.first.flatMap(Int32.init) else { fail("kill needs a PID") }

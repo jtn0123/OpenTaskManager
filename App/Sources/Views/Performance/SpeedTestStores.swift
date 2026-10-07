@@ -50,6 +50,7 @@ final class NetworkQualityStore {
             do throws(NetworkQualityError) {
                 let result = try await NetworkQuality.run(interface: interface)
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.networkQuality.append(result) }.value
+                BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 history = saved ?? [result] + history
             } catch {
@@ -63,6 +64,11 @@ final class NetworkQualityStore {
     func cancel() {
         task?.cancel()
         finish(generation)
+    }
+
+    /// Returns once the test in progress, if any, has ended, for Run all.
+    func waitForRun() async {
+        await task?.value
     }
 
     private func finish(_ generation: Int) {
@@ -224,6 +230,7 @@ final class DiskSpeedStore {
             do throws(DiskSpeedError) {
                 let result = try await DiskSpeedTest.measure(in: target.path, progress: report)
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.diskSpeed.append(result) }.value
+                BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 volumeKeys[target.path] = result.historyKey
                 history = saved ?? [result] + history
@@ -238,6 +245,11 @@ final class DiskSpeedStore {
     func cancel() {
         task?.cancel()
         finish(generation)
+    }
+
+    /// Returns once the test in progress, if any, has ended, for Run all.
+    func waitForRun() async {
+        await task?.value
     }
 
     private func finish(_ generation: Int) {

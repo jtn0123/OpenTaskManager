@@ -3,6 +3,8 @@ import SwiftUI
 
 enum Resource: Hashable {
     case cpu, memory, power, sensors
+    /// The workspace over the CPU, GPU, disk and Internet tests, last in the list.
+    case benchmarks
     case gpu(String)
     case disk(String)
     case network(String)
@@ -53,6 +55,7 @@ struct PerformanceView: View {
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onAppear { openRequestedResource(snapshot) }
+            .task { await BenchmarkWorkspace.shared.loadSummary() }
         } else {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -71,7 +74,7 @@ struct PerformanceView: View {
 
     /// Opens the interface another page asked for ("Show traffic" on the
     /// System page). Otherwise `--args -openResource memory` (cpu, memory,
-    /// gpu, disk, network, power, sensors) picks the first matching resource
+    /// gpu, disk, network, power, sensors, benchmarks) picks the first matching resource
     /// once, for screenshots. With `-openScroll bottom` the detail starts
     /// scrolled to the end.
     private func openRequestedResource(_ snapshot: SystemSnapshot) {
@@ -88,6 +91,7 @@ struct PerformanceView: View {
             case .memory: name == "memory"
             case .power: name == "power"
             case .sensors: name == "sensors"
+            case .benchmarks: name == "benchmarks"
             case .gpu: name == "gpu"
             case .disk: name == "disk"
             case .network: name == "network"
@@ -108,6 +112,7 @@ struct PerformanceView: View {
         // Always listed: thermal pressure comes from macOS on every Mac, and
         // the page says so where there are no sensors.
         list.append(.sensors)
+        list.append(.benchmarks)
         return list
     }
 
@@ -118,6 +123,12 @@ struct PerformanceView: View {
         case .memory: MemoryDetail(snapshot: snapshot)
         case .power: PowerDetail(snapshot: snapshot)
         case .sensors: SensorsDetail(sensors: model.sensors, snapshot: snapshot)
+        case .benchmarks:
+            let root = snapshot.volumes.first(where: \.isRoot)
+            let link = snapshot.network.first(where: \.isPrimary)
+            BenchmarksDetail(homeVolume: root?.name ?? "the startup volume", homeDisk: root?.physicalDisk, interface: link?.name,
+                             interfaceName: link?.displayName)
+                .equatable()
         case let .gpu(id):
             if let gpu = snapshot.gpus.first(where: { $0.id == id }) { GPUDetail(gpu: gpu, snapshot: snapshot) }
         case let .disk(id):
@@ -160,6 +171,8 @@ private struct ResourceRail: View {
                             selection = resource
                             focused = true
                         }
+                        // Set a little apart: saved test results, not a live resource.
+                        .padding(.top, resource == .benchmarks ? 10 : 0)
                     }
                 }
             }
@@ -287,6 +300,13 @@ private struct ResourceRow: View {
         case .memory: Sparkline(values: model.memoryHistory.values, color: Theme.memory, maxValue: 1)
         case .power: Sparkline(values: model.powerHistory.values, color: Theme.power)
         case .sensors: Sparkline(values: model.sensorHistory.hottest[.chip]?.values ?? [], color: Theme.thermal)
+        case .benchmarks:
+            // Nothing to graph: a still glyph in the sparkline's frame.
+            Image(systemName: "stopwatch")
+                .font(.title2)
+                .foregroundStyle(.secondaryText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .plotFrame(tint: Theme.other, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
         case let .gpu(id): Sparkline(values: model.gpuHistory[id]?.values ?? [], color: Theme.gpu, maxValue: 1)
         case let .disk(id):
             Sparkline(values: zipSum(model.diskReadHistory[id]?.values, model.diskWriteHistory[id]?.values), color: Theme.disk)
@@ -452,6 +472,7 @@ private struct ResourceText {
     /// A disk's names in full, as a tooltip: nothing in it changes per tick.
     var help: String?
 
+    @MainActor
     init(_ resource: Resource, snapshot: SystemSnapshot, sensors: SensorSample?) {
         switch resource {
         case .cpu:
@@ -479,6 +500,12 @@ private struct ResourceText {
             // With no sensors (a VM), macOS's thermal pressure is all there is.
             if subtitle.isEmpty { subtitle = "Pressure \(pressure.rawValue)" }
             figure = chip ?? fans.first ?? pressure.title
+        case .benchmarks:
+            let age = BenchmarkWorkspace.shared.newest.map { Format.ago(Date().timeIntervalSince($0)) }
+            title = "Benchmarks"
+            subtitle = age.map { "Newest \($0)" } ?? "No runs yet"
+            figure = age ?? "No runs yet"
+            help = "The CPU, GPU, disk and Internet tests' saved runs, to compare and run together"
         case let .gpu(id):
             let gpu = snapshot.gpus.first { $0.id == id }
             let usage = gpu?.deviceUtilization.map { Format.percent($0) }
@@ -522,6 +549,7 @@ private extension Resource {
         case .memory: Theme.memory
         case .power: Theme.power
         case .sensors: Theme.thermal
+        case .benchmarks: Theme.other
         case .gpu: Theme.gpu
         case .disk: Theme.disk
         case .network: Theme.network
