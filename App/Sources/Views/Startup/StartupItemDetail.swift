@@ -18,6 +18,8 @@ struct StartupItemDetail: View {
     /// Starts, restarts or stops the job, for third-party agents.
     var control: (LaunchControl.Action) -> Void
     var showProcess: (Int32) -> Void
+    /// Brings the item's row into view in the table.
+    var showInList: () -> Void
 
     /// launchd's view of the job, read when the item is shown, after a
     /// rescan, and when its process or last exit changes, never per tick.
@@ -96,13 +98,22 @@ struct StartupItemDetail: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topHeight = $0 }
     }
 
+    /// The name shares its line with Show in List, so the label below keeps
+    /// the pane's width.
     private var header: some View {
         HStack(spacing: 10) {
             Image(nsImage: IconCache.icon(forBundle: item.appBundlePath))
                 .resizable()
                 .frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name).font(.headline).lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.name).font(.headline).lineLimit(2)
+                    Spacer(minLength: 0)
+                    Button("Show in List", action: showInList)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .help("Scroll the table to this item. A filter or search that hides it is cleared.")
+                }
                 Text(item.label)
                     .font(.callout.monospaced()).foregroundStyle(.secondaryText)
                     .lineLimit(1).truncationMode(.middle)
@@ -135,8 +146,8 @@ struct StartupItemDetail: View {
     }
 
     /// launchd's figures for the job, then what the property list says. The
-    /// arguments fold away and paths keep to one line, so nothing here needs
-    /// a scroll view of its own.
+    /// arguments fold away and paths are a name over a folder, so nothing
+    /// here needs a scroll view of its own.
     private var details: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let headline = health.headline {
@@ -164,10 +175,12 @@ struct StartupItemDetail: View {
             } else if item.publisher == .thirdParty, let restriction {
                 Text(restriction).font(.explanation).foregroundStyle(.secondaryText)
             }
-            HStack {
+            // Wrapping onto a second line in a narrow pane.
+            FlowRow(spacing: 8, lineSpacing: 8, spreads: false) {
                 Button("Reveal in Finder") { StartupActions.reveal(item) }
+                Button("Copy Path") { StartupActions.copyPath(item) }
+                    .help("Copy the property list's whole path")
                 Button("Show plist") { StartupActions.openPlist(item) }
-                Spacer()
             }
         }
         .padding(12)
@@ -391,12 +404,12 @@ struct StartupItemDetail: View {
         return nil
     }
 
-    /// A path keeps to one line, cut in the middle, with the whole of it in
-    /// a tooltip and a copy button.
+    /// A path shows its name over its folder, which wraps, with the whole of
+    /// it in a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String, isCode: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
-            CopyableText(value: value, monospaced: isCode, truncatesMiddle: isCode).font(.callout)
+            CopyableText(value: value, monospaced: isCode, splitsPath: isCode).font(.callout)
         }
     }
 }

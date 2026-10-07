@@ -96,11 +96,15 @@ struct DriverDetail: View {
         if let team = system.teamID { labelled("Team ID", team) }
         if let app = system.appPath {
             VStack(alignment: .leading, spacing: 4) {
-                labelled("Installed by", app, oneLine: true)
-                if let path = DriverActions.revealablePath(item) {
-                    Button("Reveal in Finder") { DriverActions.reveal(path) }
-                        .controlSize(.small)
+                pathField("Installed by", app)
+                HStack(spacing: 8) {
+                    if let path = DriverActions.revealablePath(item) {
+                        Button("Reveal in Finder") { DriverActions.reveal(path) }
+                    }
+                    Button("Copy Path") { DriverActions.copy(app) }
+                        .help("Copy the installing app's whole path")
                 }
+                .controlSize(.small)
             }
         }
         VStack(alignment: .leading, spacing: 2) {
@@ -121,7 +125,7 @@ struct DriverDetail: View {
     @ViewBuilder
     private func kernelDetails(_ kext: KernelExtension) -> some View {
         if let uuid = kext.uuid { labelled("UUID", uuid, oneLine: true) }
-        if let path = kext.path { labelled("Path", path, oneLine: true) }
+        if let path = kext.path { pathField("Path", path) }
         if let address = kext.loadAddress {
             labelled("Load address", "0x" + String(address, radix: 16))
         }
@@ -134,15 +138,19 @@ struct DriverDetail: View {
         item.systemExtension != nil || DriverActions.revealablePath(item) != nil
     }
 
-    /// One button, so it always fits the pane: System Settings for a system
-    /// extension (its app is revealed beside its path), Finder for a kext.
+    /// What fits the pane: System Settings for a system extension (its app
+    /// is revealed and copied beside its path), Finder and the path for a kext.
     @ViewBuilder
     private var buttons: some View {
         if item.systemExtension != nil {
             Button("Open Login Items & Extensions Settings") { DriverActions.openSettings() }
                 .help("System Settings > General > Login Items & Extensions, where system extensions are allowed and turned off")
         } else if let path = DriverActions.revealablePath(item) {
-            Button("Reveal in Finder") { DriverActions.reveal(path) }
+            HStack(spacing: 8) {
+                Button("Reveal in Finder") { DriverActions.reveal(path) }
+                Button("Copy Path") { DriverActions.copy(path) }
+                    .help("Copy the extension's whole path")
+            }
         }
     }
 
@@ -208,13 +216,22 @@ struct DriverDetail: View {
         }
     }
 
-    /// `oneLine` for paths and the UUID: cut in the middle, whole in the
-    /// tooltip and when copied, where wrapping left a lone character on a
-    /// line of its own in a narrow pane.
+    /// `oneLine` for the UUID: cut in the middle, whole in the tooltip and
+    /// when copied, where wrapping left a lone character on a line of its
+    /// own in a narrow pane.
     private func labelled(_ label: String, _ value: String, oneLine: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
             CopyableText(value: value, truncatesMiddle: oneLine).font(.callout)
+        }
+    }
+
+    /// A path's name over its folder, which wraps, so the folders that tell
+    /// two copies apart are never cut out.
+    private func pathField(_ label: String, _ path: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            CopyableText(value: path, splitsPath: true).font(.callout)
         }
     }
 }

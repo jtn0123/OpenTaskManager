@@ -73,6 +73,23 @@ struct FormatTests {
         #expect(Format.trail("/other/file.bin", under: "/demo") == "other › file.bin")
         #expect(Format.trail("/demo", under: "/demo/Projects") == "demo")
     }
+
+    @Test func pathPartsPutTheNameOverItsFolder() {
+        let kext = PathParts("/System/Library/Extensions/apfs.kext")
+        #expect(kext.name == "apfs.kext")
+        #expect(kext.folder == "/System/Library/Extensions")
+        #expect(PathParts("/Applications/Safari.app/") == PathParts("/Applications/Safari.app"), "trailing slashes don't count")
+        #expect(PathParts("/Applications/Safari.app//").name == "Safari.app")
+        #expect(PathParts("/bin").folder == "/", "a name at the root is in /")
+        #expect(PathParts("Projects/webapp").folder == "Projects", "a relative path keeps its folder")
+    }
+
+    @Test(arguments: [("sleep", "sleep"), ("/", "/"), ("//", "/"), ("", "")])
+    func pathPartsWithoutAFolder(path: String, name: String) {
+        let parts = PathParts(path)
+        #expect(parts.name == name)
+        #expect(parts.folder == nil)
+    }
 }
 
 struct HistoryTests {
