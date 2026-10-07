@@ -31,6 +31,16 @@ USAGE:
                                  space by category; --changes saves the scan
                                  (as the Storage page does) and shows what grew
                                  and shrank since the last saved one
+  otm netquality [INTERFACE] [--json]
+                                 Internet download and upload capacity and
+                                 responsiveness (macOS's networkQuality); fills
+                                 the connection for about 20 s
+  otm diskspeed [PATH] [--size MB] [--json]
+                                 Sequential and 4K random read/write speed where
+                                 PATH is (default: a temporary folder on your
+                                 home volume), on a test file it always deletes:
+                                 1024 MB unless --size, never over a tenth of
+                                 the free space
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -735,6 +745,12 @@ case "du":
             print("\nNo earlier scan of this folder was saved. This one is, so the next `otm du --changes` can compare with it.")
         }
     }
+
+case "netquality":
+    await netQualityCommand(options)
+
+case "diskspeed":
+    diskSpeedCommand(options)
 
 case "kill":
     guard let pid = options.positional.first.flatMap(Int32.init) else { fail("kill needs a PID") }
