@@ -110,8 +110,8 @@ enum WindowOpener {
         } else if let openMainWindow {
             openMainWindow()
         } else if let menu = NSApp.windowsMenu, let index = menu.items.firstIndex(where: { $0.title == "OpenTaskManager" }) {
-            // The window hasn't shown this run, so SwiftUI hasn't handed over
-            // its opener; the Window menu still lists it.
+            // Neither the window nor the menu bar item has shown this run, so
+            // SwiftUI hasn't handed over its opener; the Window menu still lists it.
             menu.performActionForItem(at: index)
         }
     }
@@ -158,7 +158,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         updateHotKey()
-        StatusItemController.shared.start()
         HistoryRecordingStore.shared.handleLaunchArguments()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateHotKey() }
