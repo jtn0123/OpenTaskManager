@@ -35,7 +35,7 @@ struct HistoryMomentPanel: View {
                 HistoryMomentBadge(scrubber: scrubber)
                 Spacer()
                 if scrubber.pinned != nil {
-                    HistoryReturnButton(scrubber: scrubber, title: "Return to latest")
+                    HistoryReturnButton(scrubber: scrubber, title: "Return to \(scrubber.endName.lowercased())")
                 }
             }
             Text(HistoryMoment.label(point.time, bucket: bucket))
@@ -91,7 +91,7 @@ struct HistoryMomentSummary: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if scrubber.pinned != nil {
-                    HistoryReturnButton(scrubber: scrubber, title: "Latest")
+                    HistoryReturnButton(scrubber: scrubber, title: scrubber.endName)
                 }
                 Button {
                     showsDetails.toggle()
@@ -249,15 +249,15 @@ struct HistoryMomentDetails: View {
     }
 }
 
-/// "Latest", "Pinned", "Replay" or "Preview": whether the moment shown
-/// follows the recording, a click, playback, or the pointer.
+/// "Latest" (or a file's "End"), "Pinned", "Replay" or "Preview": whether
+/// the moment shown follows the recording, a click, playback, or the pointer.
 private struct HistoryMomentBadge: View {
     let scrubber: HistoryScrubber
 
     var body: some View {
         let (state, color): (String, Color) = scrubber.hovered != nil ? ("Preview", .secondary)
             : scrubber.isPlaying ? ("Replay", HistorySessionStyle.tint)
-            : scrubber.pinned != nil ? ("Pinned", .accentColor) : ("Latest", .green)
+            : scrubber.pinned != nil ? ("Pinned", .accentColor) : (scrubber.endName, .green)
         Text(state.uppercased())
             .font(.caption.weight(.bold))
             .foregroundStyle(color)
@@ -282,7 +282,8 @@ private struct HistoryReturnButton: View {
         .controlSize(.small)
         .fixedSize()
         .keyboardShortcut(.cancelAction)
-        .help("Unpin the moment and follow the latest again (Esc)")
+        .help(scrubber.showsFile ? "Unpin the moment and go back to the recording's end (Esc)"
+            : "Unpin the moment and follow the latest again (Esc)")
     }
 }
 

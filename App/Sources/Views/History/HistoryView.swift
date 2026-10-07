@@ -67,6 +67,11 @@ final class HistoryScrubber {
     var session: RecordingSession?
     /// Set while playback moves the pinned moment.
     var isPlaying = false
+    /// Showing a recording file, whose last moment is its end rather than the latest.
+    var showsFile = false
+
+    /// What the moment shown is called when nothing is pinned.
+    var endName: String { showsFile ? "End" : "Latest" }
 
     /// What the side panel shows: the previewed moment, else the pinned one,
     /// else (nil) the latest.
@@ -207,6 +212,7 @@ struct HistoryView: View {
             }
         }
         .task(id: LoadKey(range: range, fits: fitsRecording, recording: opened?.id)) {
+            scrubber.showsFile = opened != nil
             await load()
             // A recording file never changes; the live history gains a point every `bucket` seconds.
             guard opened == nil else { return }

@@ -291,8 +291,8 @@ private struct HistoryCoverage: View {
     }
 }
 
-/// The rail's handle, a pill with the pinned moment's time or "Latest" at
-/// the right end, and a thin line where the pointer previews a moment.
+/// The rail's handle, a pill with the pinned moment's time or "Latest" (a
+/// file's "End") at the right end, and a thin line where the pointer previews a moment.
 private struct HistoryRailHandle: View {
     let scrubber: HistoryScrubber
     let domain: ClosedRange<Date>
@@ -310,7 +310,7 @@ private struct HistoryRailHandle: View {
         if let pinned = scrubber.pinned, domain.contains(pinned) {
             pill(HistoryMoment.label(pinned, bucket: bucket), at: HistoryMoment.x(of: pinned, width: width, domain: domain), pinned: true)
         } else {
-            pill("Latest", at: width, pinned: false)
+            pill(scrubber.endName, at: width, pinned: false)
         }
     }
 
