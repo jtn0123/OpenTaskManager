@@ -26,6 +26,17 @@ public struct LaunchServiceInfo: Sendable, Hashable {
 
     public var isRunning: Bool { pid != nil }
 
+    /// `runs` in words. launchd counts from when the job's domain was set up:
+    /// your login for an agent, startup for a daemon.
+    public static func describe(runs: Int, scope: LaunchItemScope) -> String {
+        let since = scope == .daemon ? "since startup" : "since login"
+        return switch runs {
+        case ...0: "Not \(since)"
+        case 1: "Once \(since)"
+        default: "\(runs) times \(since)"
+        }
+    }
+
     /// What started the current run, in words; launchd's own term otherwise.
     public static func describe(startReason: String) -> String {
         switch startReason {

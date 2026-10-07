@@ -334,6 +334,27 @@ struct LaunchctlTests {
         #expect(items[2].state == .loaded)
     }
 
+    @Test func saysWhetherALoadedJobIsRunning() {
+        let agent = item("<key>Label</key><string>com.example.otm-demo</string>", scope: .userAgent)
+        #expect(agent.statusSummary == "Not loaded")
+        #expect(agent.stateDetail == nil)
+
+        var idle = agent
+        idle.job = LaunchJobStatus(label: "com.example.otm-demo", pid: nil, lastExit: .code(0))
+        #expect(idle.statusSummary == "Loaded · Not running")
+
+        var running = agent
+        running.job = LaunchJobStatus(label: "com.example.otm-demo", pid: 12345, lastExit: nil)
+        // The PID isn't grouped like a quantity.
+        #expect(running.statusSummary == "Running · PID 12345")
+
+        var disabled = agent
+        disabled.disabledOverride = true
+        #expect(disabled.statusSummary == "Disabled · Not loaded")
+        disabled.job = idle.job
+        #expect(disabled.statusSummary == "Disabled · Not running")
+    }
+
     @Test func statesSortRunningFirst() {
         let states: [LaunchItemState] = [.notLoaded, .disabled, .running(pid: 9), .loaded, .running(pid: 2)]
         #expect(states.sorted() == [.running(pid: 2), .running(pid: 9), .loaded, .disabled, .notLoaded])
@@ -457,6 +478,13 @@ struct LaunchServiceTests {
         #expect(info.priority == .standard)
         #expect(info.startReason == nil)
         #expect(info.properties.isEmpty)
+    }
+
+    @Test func countsRunsSinceLoginOrStartup() {
+        #expect(LaunchServiceInfo.describe(runs: 0, scope: .userAgent) == "Not since login")
+        #expect(LaunchServiceInfo.describe(runs: 1, scope: .systemAgent) == "Once since login")
+        #expect(LaunchServiceInfo.describe(runs: 3, scope: .userAgent) == "3 times since login")
+        #expect(LaunchServiceInfo.describe(runs: 12, scope: .daemon) == "12 times since startup")
     }
 
     @Test func describesStartReasons() {

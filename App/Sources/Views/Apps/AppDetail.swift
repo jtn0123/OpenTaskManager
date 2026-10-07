@@ -13,30 +13,42 @@ struct AppDetail: View {
     /// Opens the removal review; nil for apps it isn't offered for.
     var moveToTrash: (() -> Void)?
 
+    /// Folded at first, and left as it is while the selection moves.
+    @State private var showsCertificates = false
+
+    /// Who the app is stays at the top and what can be done with it in a
+    /// footer, and everything read about it scrolls between them, in the
+    /// pane's only scroll view. Paths keep to one line and the certificate
+    /// chain folds away, so nothing needs a scroll view of its own.
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(spacing: 0) {
             header
-            if let warning = ArchitectureWarning(app.architecture) { warning }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    facts
-                    labelled("Location", app.path)
-                    if AppDetail.differs(app.resolvedPath, from: app.path) {
-                        labelled("Links to", app.resolvedPath)
-                    }
-                    Divider()
-                    launchItems
-                    Divider()
-                    signature
-                }
+                .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            actions
+            Divider()
+            ScrollView { details.padding(12) }
+            Divider()
+            actions.padding(12)
         }
-        .padding(12)
     }
 
     // MARK: Sections
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let warning = ArchitectureWarning(app.architecture) { warning }
+            facts
+            labelled("Location", app.path)
+            if AppDetail.differs(app.resolvedPath, from: app.path) {
+                labelled("Links to", app.resolvedPath)
+            }
+            Divider()
+            launchItems
+            Divider()
+            signature
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -96,25 +108,32 @@ struct AppDetail: View {
                 labelled("Signing identifier", identifier)
             }
             if !signature.authorities.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Certificate chain").font(.subheadline).foregroundStyle(.secondaryText)
-                    ForEach(Array(signature.authorities.enumerated()), id: \.offset) { depth, authority in
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            if depth > 0 {
-                                Image(systemName: "arrow.turn.down.right")
-                                    .imageScale(.small)
-                                    .foregroundStyle(.secondaryText)
-                            }
-                            Text(authority).font(.subheadline).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.leading, CGFloat(max(depth - 1, 0)) * 12)
-                    }
+                DetailDisclosure("Certificate chain", preview: signature.authorities.joined(separator: " › "),
+                                 isExpanded: $showsCertificates) {
+                    certificateChain(signature.authorities)
                 }
             }
             Text("Notarization isn't shown: checking it means validating the whole bundle with Gatekeeper.")
                 .font(.subheadline).foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Signing certificate first, each issuer indented under the one it signed.
+    private func certificateChain(_ authorities: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(authorities.enumerated()), id: \.offset) { depth, authority in
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    if depth > 0 {
+                        Image(systemName: "arrow.turn.down.right")
+                            .imageScale(.small)
+                            .foregroundStyle(.secondaryText)
+                    }
+                    Text(authority).font(.subheadline).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.leading, CGFloat(max(depth - 1, 0)) * 12)
+            }
         }
     }
 
@@ -200,10 +219,12 @@ struct AppDetail: View {
         InstalledApps.normalized(resolved) != InstalledApps.normalized(path)
     }
 
+    /// A path or identifier keeps to one line, cut in the middle, with the
+    /// whole of it in a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.subheadline).foregroundStyle(.secondaryText)
-            CopyableText(value: value).font(.subheadline)
+            CopyableText(value: value, truncatesMiddle: true).font(.subheadline)
         }
     }
 }
@@ -235,9 +256,10 @@ private struct ArchitectureWarning: View {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(color)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.callout.weight(.semibold))
-                // Wraps without `fixedSize`: a fixed-height text here made the
-                // split view size the page from the pane and push the status bar
-                // out of the window.
+                // Wraps without `fixedSize`: when the banner sat above the
+                // details' scroll view, a fixed-height text here made the split
+                // view size the page from the pane and push the status bar out
+                // of the window.
                 Text(detail).font(.subheadline).foregroundStyle(.secondaryText)
             }
         }

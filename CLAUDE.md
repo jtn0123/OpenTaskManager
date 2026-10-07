@@ -177,8 +177,15 @@ build, `-sensorFixture <file>` loads a recording from
   the window's split view it made the page take the pane's height and pushed
   the status bar out of a 730-point window. Plain wrapping text is enough.
   The pane's minimum height also sets the page's, so a tall pinned part
-  (Startup's status and Restart/Stop) goes in `ViewThatFits(in: .vertical)`
-  with a fallback that scrolls it with the rest (see `StartupItemDetail`).
+  (Startup's state and Start Now or Restart/Stop) goes in `ViewThatFits(in: .vertical)`
+  with a fallback that scrolls it, name and all, with the rest (see
+  `StartupItemDetail`; a fallback that kept the name pinned still pushed the
+  status bar out of a 560-point window).
+- A details pane has one scroll view, edge to edge between a pinned header and
+  a pinned footer of actions, with dividers at both ends. Long technical values
+  fold away in a `DetailDisclosure` (Startup's arguments, an app's certificate
+  chain) and paths keep to one line (`CopyableText(truncatesMiddle: true)`:
+  cut in the middle, the whole path in a tooltip), never a scroll view of their own.
 - Performance and History fit the narrowest window (820 points with the
   sidebar shown) without clipping or scrolling sideways. Performance's resource
   list is an `HStack` column sized from the page width, not an `HSplitView`,
