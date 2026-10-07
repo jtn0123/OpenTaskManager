@@ -48,5 +48,8 @@ struct ProcessNetworkTests {
         let traffic = try #require(ProcessNetwork.read())
         #expect(!traffic.isEmpty)
         #expect(traffic.values.allSatisfy { !$0.name.isEmpty })
+        // Real interfaces only: on a quiet machine that may be no process at all, but nettop still answers.
+        let external = try #require(ProcessNetwork.read(excludingLoopback: true))
+        #expect(external.values.allSatisfy { !$0.name.isEmpty })
     }
 }

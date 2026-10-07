@@ -217,6 +217,8 @@ final class AppModel {
     let sensorMonitor = SensorMonitor()
     /// The on-disk history behind the History page. Nil if it can't be opened.
     let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
+    /// Network traffic by app, read with nettop only while a view shows it.
+    let networkActivity = NetworkActivityStore()
     private var recording = HistoryAccumulator(span: FlightRecorder.span)
     let topology: CPUTopology
 

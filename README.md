@@ -39,6 +39,9 @@ samples and scale their axes to round numbers.
 - Power: where the power goes (CPU, GPU, Neural Engine, DRAM and the rest of
   the system), energy since launch, adapter and battery flow, and power by app.
 - Each disk and network interface.
+- Apps using the network: what each app (or process) receives and sends, stacked
+  over the last three minutes and read with `nettop` every 3 s while shown. The
+  Overview's Top Network card lists the busiest.
 - Thermals: chip, SSD and battery temperatures over time, each fan's speed
   within its range, and every die sensor's lowest and highest reading since
   launch.

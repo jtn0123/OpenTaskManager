@@ -42,11 +42,14 @@ public struct ProcessNetworkRate: Sendable, Codable, Hashable, Identifiable {
 /// costs about 20 ms of CPU, so callers sample it every few seconds, not per tick.
 public enum ProcessNetwork {
     /// One reading of every process with sockets, keyed by PID. Nil when nettop can't run.
-    public static func read() -> [Int32: ProcessTraffic]? {
+    /// With `excludingLoopback`, only sockets on real interfaces count, so a
+    /// local server talking to a browser on the same Mac isn't network traffic.
+    public static func read(excludingLoopback: Bool = false) -> [Int32: ProcessTraffic]? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/nettop")
-        // Per process (-P), one CSV sample (-L 1), raw numbers (-x), two columns (-J).
-        process.arguments = ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"]
+        // Per process (-P), one CSV sample (-L 1), raw numbers (-x), two columns (-J);
+        // `-t external` keeps every interface but loopback.
+        process.arguments = ["-P", "-L", "1", "-x", "-J", "bytes_in,bytes_out"] + (excludingLoopback ? ["-t", "external"] : [])
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice

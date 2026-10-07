@@ -31,6 +31,7 @@ struct OverviewView: View {
                         TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
                                 metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01,
                                 unavailable: snapshot.measuresProcessEnergy == false ? Unavailable.energy : nil)
+                        TopNetworkCard()
                     }
                     StorageCard(volumes: snapshot.volumes)
                 }

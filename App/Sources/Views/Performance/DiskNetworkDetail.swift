@@ -85,6 +85,7 @@ struct NetworkDetail: View {
                            GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),
                        ],
                        height: DetailGraph.primary, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits)
+            NetworkAppsSection()
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                 FactRow(label: "Connection", value: link.kind.rawValue.capitalized)
                 if let speed = link.linkSpeed { FactRow(label: "Link speed", value: Format.bitsPerSecond(Double(speed) / 8)) }
