@@ -581,8 +581,9 @@ private struct HistoryMarkers: View {
                 .foregroundStyle(.black)
                 .frame(width: 14, height: 14)
                 .background(RoundedRectangle(cornerRadius: 3).fill(tint))
-                // At the top, where the plots are mostly empty.
-                .offset(x: min(lower + 2, plot.maxX - 16), y: plot.minY + 2)
+                // At the top, where the plots are mostly empty, and at the
+                // stretch's end, clear of the axis labels down the left.
+                .offset(x: min(max(upper - 16, lower + 2), plot.maxX - 16), y: plot.minY + 2)
         }
     }
 

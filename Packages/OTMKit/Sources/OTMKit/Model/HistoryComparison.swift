@@ -103,6 +103,65 @@ public enum HistoryMetric: String, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// The four figures a comparison leads with: CPU, memory, and disk and
+/// network throughput with both directions added together.
+public enum HistoryHeadline: String, Sendable, CaseIterable, Identifiable {
+    case cpu
+    case memory
+    case disk
+    case network
+
+    public var id: String { rawValue }
+
+    /// The figures it adds up.
+    public var metrics: [HistoryMetric] {
+        switch self {
+        case .cpu: [.cpu]
+        case .memory: [.memory]
+        case .disk: [.diskRead, .diskWrite]
+        case .network: [.networkIn, .networkOut]
+        }
+    }
+
+    /// Its value in a record: its figures added up; nil when the record has none of them.
+    public func value(_ values: HistoryValues) -> Double? {
+        let parts = metrics.compactMap { $0.value(values) }
+        return parts.isEmpty ? nil : parts.reduce(0, +)
+    }
+
+    /// Its peak in a record: CPU's busiest single update; the rest, their value.
+    public func peak(_ values: HistoryValues) -> Double? {
+        self == .cpu ? values.cpuPeak : value(values)
+    }
+
+    /// A share from 0 to 1, whose change is in percentage points.
+    public var isFraction: Bool { metrics.allSatisfy(\.isFraction) }
+
+    public var name: String {
+        switch self {
+        case .cpu: "CPU"
+        case .memory: "Memory"
+        case .disk: "Disk"
+        case .network: "Network"
+        }
+    }
+
+    /// What it adds up, when that's more than one figure: "read and write".
+    public var parts: String? {
+        switch self {
+        case .cpu, .memory: nil
+        case .disk: "read and write"
+        case .network: "received and sent"
+        }
+    }
+
+    /// A figure as the History page writes it: a share as a percentage,
+    /// disk in bytes and network in bits per second.
+    public func format(_ value: Double) -> String {
+        metrics[0].format(value, .average)
+    }
+}
+
 /// How an interval's figure is summed up.
 public enum HistoryStatistic: String, Sendable, CaseIterable {
     /// The mean over the recorded stretches.
@@ -147,6 +206,10 @@ public struct HistoryIntervalStats: Sendable, Equatable {
     /// The figures the recording has in the interval; one the Mac never
     /// reported (GPU in a VM) is missing.
     public let figures: [HistoryMetric: Figure]
+    /// The headline figures (`HistoryHeadline`), summed up the same way:
+    /// disk's and network's peak is the busiest stretch for both directions
+    /// together, not the two peaks added.
+    public let headlines: [HistoryHeadline: Figure]
 
     public var duration: TimeInterval { end.timeIntervalSince(start) }
     /// Seconds of the interval nothing was recorded: its gaps.
@@ -168,21 +231,37 @@ public struct HistoryIntervalStats: Sendable, Equatable {
         let ordered = stretches.sorted { $0.key < $1.key }.map(\.value)
         var figures: [HistoryMetric: Figure] = [:]
         for metric in HistoryMetric.allCases {
-            var sum = 0.0
-            var count = 0
-            var peak = -Double.infinity
-            for copies in ordered {
-                let values = copies.compactMap { metric.value($0) }.filter(\.isFinite)
-                guard !values.isEmpty else { continue }
-                sum += values.reduce(0, +) / Double(values.count)
-                count += 1
-                peak = max(peak, copies.compactMap { metric.peak($0) }.filter(\.isFinite).max() ?? -.infinity)
-            }
-            guard count > 0 else { continue }
-            figures[metric] = Figure(average: sum / Double(count), peak: peak.isFinite ? peak : sum / Double(count),
-                                     total: metric.accumulates ? sum * span : nil)
+            figures[metric] = Self.figure(over: ordered, span: span, accumulates: metric.accumulates,
+                                          value: metric.value, peak: metric.peak)
         }
         self.figures = figures
+        var headlines: [HistoryHeadline: Figure] = [:]
+        for headline in HistoryHeadline.allCases {
+            headlines[headline] = Self.figure(over: ordered, span: span, accumulates: !headline.isFraction,
+                                              value: headline.value, peak: headline.peak)
+        }
+        self.headlines = headlines
+    }
+
+    /// One figure over `stretches` (each the records of one `span`, oldest
+    /// first): the mean of each stretch's average, the highest peak, and for
+    /// a rate that `accumulates`, the total over the recorded time. Nil
+    /// when no stretch has it.
+    private static func figure(over stretches: [[HistoryValues]], span: TimeInterval, accumulates: Bool,
+                               value: (HistoryValues) -> Double?, peak: (HistoryValues) -> Double?) -> Figure? {
+        var sum = 0.0
+        var count = 0
+        var highest = -Double.infinity
+        for copies in stretches {
+            let values = copies.compactMap(value).filter(\.isFinite)
+            guard !values.isEmpty else { continue }
+            sum += values.reduce(0, +) / Double(values.count)
+            count += 1
+            highest = max(highest, copies.compactMap(peak).filter(\.isFinite).max() ?? -.infinity)
+        }
+        guard count > 0 else { return nil }
+        let average = sum / Double(count)
+        return Figure(average: average, peak: highest.isFinite ? highest : average, total: accumulates ? sum * span : nil)
     }
 }
 
@@ -248,10 +327,38 @@ public struct HistoryComparison: Sendable, Equatable {
         public let b: Double
     }
 
+    /// A headline figure's average and peak in both intervals, for the
+    /// summary a comparison leads with.
+    public struct Headline: Sendable, Equatable, Identifiable {
+        public var id: String { headline.rawValue }
+        public let headline: HistoryHeadline
+        /// Nil where the interval has no record of it.
+        public let a: HistoryIntervalStats.Figure?
+        public let b: HistoryIntervalStats.Figure?
+
+        /// A's figure against B's, for `.average` or `.peak`; nil unless both have it.
+        public func change(_ statistic: HistoryStatistic) -> Change? {
+            guard let first = a?.value(statistic), let second = b?.value(statistic) else { return nil }
+            return Change(a: first, b: second)
+        }
+
+        /// A figure as written, or "—" where the interval has none.
+        public func text(_ figure: HistoryIntervalStats.Figure?, _ statistic: HistoryStatistic) -> String {
+            figure?.value(statistic).map(headline.format) ?? "—"
+        }
+
+        /// How A differs from B, as `Change.label` puts it, or "—".
+        public func changeText(_ statistic: HistoryStatistic) -> String {
+            change(statistic)?.label(isFraction: headline.isFraction) ?? "—"
+        }
+    }
+
     public let a: HistoryIntervalStats
     public let b: HistoryIntervalStats
     /// Each figure either interval has, in `HistoryMetric` order.
     public let rows: [Row]
+    /// CPU, memory, disk and network, those either interval has, in `HistoryHeadline` order.
+    public let headlines: [Headline]
 
     public init(a: HistoryIntervalStats, b: HistoryIntervalStats) {
         self.a = a
@@ -263,6 +370,12 @@ public struct HistoryComparison: Sendable, Equatable {
             return metric.statistics.map { statistic in
                 Row(metric: metric, statistic: statistic, a: first?.value(statistic), b: second?.value(statistic))
             }
+        }
+        headlines = HistoryHeadline.allCases.compactMap { headline in
+            let first = a.headlines[headline]
+            let second = b.headlines[headline]
+            guard first != nil || second != nil else { return nil }
+            return Headline(headline: headline, a: first, b: second)
         }
     }
 
@@ -327,5 +440,48 @@ public enum HistoryInterval {
     /// of it the recorder holds.
     public static func coverage(span: TimeInterval, sampled: TimeInterval) -> String {
         "\(Format.roughDuration(span)) span · \(Format.roughDuration(min(sampled, span))) sampled"
+    }
+
+    /// What an interval's figures leave out: "9 min of gaps left out", "no
+    /// gaps", or "nothing recorded". Less than a gap's worth unrecorded
+    /// (`HistoryGap.spacing` records, which the graphs don't break for
+    /// either) is a record's timing, not a gap.
+    public static func leftOut(span: TimeInterval, sampled: TimeInterval, recordSeconds: TimeInterval = FlightRecorder.span) -> String {
+        guard sampled > 0 else { return "nothing recorded" }
+        let missing = max(span - sampled, 0)
+        return missing < recordSeconds * HistoryGap.spacing ? "no gaps" : "\(Format.roughDuration(missing)) of gaps left out"
+    }
+}
+
+/// Two intervals to compare as the History page opens, from
+/// `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`:
+/// each starts that many minutes before the end of what the page shows (now,
+/// or a recording file's end) and lasts its length, cut off at that end.
+/// Without B, A is compared with the same length just before it.
+public struct HistoryCompareRequest: Sendable, Equatable {
+    public struct Interval: Sendable, Equatable {
+        public let minutesAgo: Double
+        public let minutes: Double
+
+        /// The interval before `end`.
+        public func range(before end: Date) -> ClosedRange<Date> {
+            let start = end.addingTimeInterval(-minutesAgo * 60)
+            return start...min(start.addingTimeInterval(minutes * 60), end)
+        }
+    }
+
+    public let a: Interval
+    /// Nil compares A with the same length before it.
+    public let b: Interval?
+
+    /// Reads "15,15" or "15,15,45,15"; nil for anything else, or a start or
+    /// length that isn't a positive number of minutes.
+    public init?(_ text: String) {
+        let numbers = text.split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard numbers.count == 2 || numbers.count == 4 else { return nil }
+        let values = numbers.compactMap { $0 }
+        guard values.count == numbers.count, values.allSatisfy({ $0.isFinite && $0 > 0 }) else { return nil }
+        a = Interval(minutesAgo: values[0], minutes: values[1])
+        b = values.count == 4 ? Interval(minutesAgo: values[2], minutes: values[3]) : nil
     }
 }

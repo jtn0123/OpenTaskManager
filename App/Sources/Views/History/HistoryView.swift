@@ -90,7 +90,15 @@ final class HistoryScrubber {
     /// The event picked on the rail or from the events menu.
     var selectedEvent: HistoryEvent?
     /// Two stretches being compared.
-    var compare: HistoryCompareDraft?
+    var compare: HistoryCompareDraft? {
+        didSet {
+            if (compare != nil) != comparing { comparing = compare != nil }
+        }
+    }
+    /// Whether a comparison is open, apart from `compare`, which a drag
+    /// picking A or B changes many times: the rail's selected look and the
+    /// Compare button read only this.
+    private(set) var comparing = false
     /// Showing a recording file, whose last moment is its end rather than the latest.
     var showsFile = false
 
@@ -557,10 +565,21 @@ struct HistoryView: View {
         gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown)
         if events != happened { events = happened }
         player.points = loaded
+        openLaunchComparison()
         if let speed = store.takeLaunchSpeed() {
             player.speed = speed
             player.play(scrubber)
         }
+    }
+
+    /// Opens the comparison `-openHistoryCompare` asks for, once, its
+    /// stretches counted back from the end of what's shown.
+    private func openLaunchComparison() {
+        guard let request = store.takeLaunchComparison(showingFile: opened != nil) else { return }
+        var draft = HistoryCompareDraft(selection: request.a.range(before: domain.upperBound))
+        draft.b = request.b?.range(before: domain.upperBound)
+        scrubber.draft = nil
+        scrubber.compare = draft
     }
 
     /// The range shown of the live recording, and its saved sessions.
@@ -589,6 +608,7 @@ struct HistoryView: View {
         gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown, since: first)
         player.points = loaded
         store.update(sessions)
+        openLaunchComparison()
         // A pinned moment or playhead that has slid out of the range goes back to the latest.
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }
         if let playhead = scrubber.playhead, !domain.contains(playhead) { player.stop(scrubber) }

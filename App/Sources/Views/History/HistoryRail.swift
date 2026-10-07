@@ -45,7 +45,9 @@ extension HistoryMoment {
 /// Clicking or dragging along it moves playback while there is any, and
 /// otherwise pins a moment, like the charts; hovering previews one, and a
 /// Shift-drag marks a session. While comparing, a drag picks A or B
-/// instead. Saved sessions, the stretches compared and the events ride
+/// instead, and the card is tinted. A key over it names what the track and
+/// the lanes show; saved sessions, the events (in a thin lane of their own)
+/// and the stretches compared (as labelled brackets on the track) ride
 /// above the track, and the controls to mark, compare, export and play
 /// back sit under it.
 ///
@@ -82,16 +84,24 @@ struct HistoryRail: View {
     @State private var drag: Drag?
 
     var body: some View {
-        Card {
+        let hasEvents = events.contains { domain.contains($0.time) }
+        let hasSessions = recorder != nil && store.sessions.contains { $0.end >= domain.lowerBound && $0.start <= domain.upperBound }
+        // Tinted while comparing, so the mode reads at a glance.
+        Card(tint: scrubber.comparing ? HistoryCompareDraft.tintA : nil) {
             VStack(alignment: .leading, spacing: 3) {
+                HistoryRailKey(hasEvents: hasEvents, hasSessions: hasSessions)
+                    .padding(.bottom, 3)
                 if recorder != nil {
                     HistorySessionLane(scrubber: scrubber, store: store, domain: domain)
                 }
-                HistoryCompareLaneSlot(scrubber: scrubber, domain: domain)
-                if let first = events.first, let last = events.last, first.time <= domain.upperBound, last.time >= domain.lowerBound {
+                if hasEvents {
                     HistoryEventLane(scrubber: scrubber, player: player, events: events, points: points, domain: domain, bucket: bucket)
                 }
-                track
+                // The brackets sit right on the track, their sides running on through it.
+                VStack(alignment: .leading, spacing: 0) {
+                    HistoryCompareLaneSlot(scrubber: scrubber, domain: domain)
+                    track
+                }
                 HistoryRailLabels(domain: domain)
             }
             HistoryTimelineControls(scrubber: scrubber, player: player, store: store, recorder: recorder, bucket: bucket)
@@ -102,6 +112,7 @@ struct HistoryRail: View {
         GeometryReader { geometry in
             let width = geometry.size.width
             ZStack(alignment: .leading) {
+                HistoryCompareTrackBands(scrubber: scrubber, domain: domain, width: width)
                 HistoryCoverage(points: points, gaps: gaps, domain: domain, bucket: bucket, width: width)
                 HistoryRailGapOutline(scrubber: scrubber, domain: domain, width: width)
                 HistoryRailHandle(scrubber: scrubber, domain: domain, bucket: bucket, width: width)
@@ -176,6 +187,75 @@ struct HistoryRail: View {
 
     private func moment(at x: CGFloat, width: CGFloat) -> Date? {
         HistoryMoment.at(x: x, width: width, domain: domain, points: points)
+    }
+}
+
+/// The rail's key, always over it: a sample of each thing the track and the
+/// lanes draw, as they draw it, and its name. Recorded time, gaps and
+/// events always; saved sessions while the range has any. Where there's
+/// room, it ends with a word that hovering tells more.
+private struct HistoryRailKey: View {
+    /// Whether the event lane has markers.
+    let hasEvents: Bool
+    /// Whether the session lane has brackets.
+    let hasSessions: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(hint: true)
+            row(hint: false)
+        }
+        .font(.callout)
+        .foregroundStyle(.secondaryText)
+    }
+
+    private func row(hint: Bool) -> some View {
+        HStack(spacing: 14) {
+            item("Recorded", help: "Stretches with records, in colour along the track") {
+                Canvas { context, size in
+                    HistoryCoverage.drawRecorded(CGRect(x: 0, y: (size.height - HistoryCoverage.bar) / 2, width: size.width,
+                                                        height: HistoryCoverage.bar), in: context)
+                }
+                .frame(width: 18, height: 12)
+            }
+            item("Not recorded", help: "Gaps, hatched between dashed edges: the app wasn't running, the Mac slept, or updates were "
+                + "paused. Every figure leaves them out; hover one on the track for when it was.") {
+                Canvas { context, size in
+                    HistoryCoverage.drawGaps([CGRect(x: 0.5, y: (size.height - HistoryCoverage.band) / 2, width: size.width - 1,
+                                                     height: HistoryCoverage.band)], in: context, dark: colorScheme == .dark)
+                }
+                .frame(width: 18, height: 12)
+            }
+            item(hasEvents ? "Events" : "No events", help: hasEvents
+                ? "Apps launched and quit, busy background processes, network changes, sleep and wake, in the lane over the "
+                    + "track. Hover a marker for what happened; click it to move playback there."
+                : "Nothing happened in this range that History notes: apps launching and quitting, busy background processes, "
+                    + "network changes, sleep and wake.") {
+                HistoryEventMarker(symbol: HistoryEventStyle.symbol(.appLaunched), count: 1, picked: false)
+                    .opacity(hasEvents ? 1 : 0.45)
+            }
+            if hasSessions {
+                item("Session", help: "Saved sessions, bracketed over the track; click one to pick it") {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(HistorySessionStyle.tint.opacity(0.14))
+                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(HistorySessionStyle.tint.opacity(0.6)))
+                        .frame(width: 18, height: 11)
+                }
+            }
+            if hint {
+                Spacer(minLength: 0)
+                Text("Hover the timeline for details").fixedSize()
+            }
+        }
+    }
+
+    private func item(_ name: String, help: String, @ViewBuilder sample: () -> some View) -> some View {
+        HStack(spacing: 5) {
+            sample()
+            Text(name).fixedSize()
+        }
+        .help(help)
     }
 }
 
@@ -315,50 +395,66 @@ private struct HistoryCoverage: View {
     let width: CGFloat
     @Environment(\.colorScheme) private var colorScheme
 
+    /// The recorded bar's height, and a gap's hatched band's.
+    static let bar: CGFloat = 8
+    static let band: CGFloat = 12
+
     var body: some View {
         let dark = colorScheme == .dark
-        let ink = Color(nsColor: .labelColor)
         Canvas { context, size in
             let middle = size.height / 2
-            context.fill(Path(roundedRect: CGRect(x: 0, y: middle - 3, width: size.width, height: 6), cornerRadius: 3),
+            context.fill(Path(roundedRect: CGRect(x: 0, y: middle - Self.bar / 2, width: size.width, height: Self.bar), cornerRadius: Self.bar / 2),
                          with: .color(Color.primary.opacity(0.09)))
-            var hatch = Path()
-            var edges = Path()
-            var clip = Path()
-            for gap in gaps {
+            Self.drawGaps(gaps.map { gap in
                 let start = x(gap.start)
-                let end = max(x(gap.end), start + 2)
-                let band = CGRect(x: start, y: middle - 5, width: end - start, height: 10)
-                clip.addRect(band)
-                for edge in [start, end] {
-                    edges.move(to: CGPoint(x: edge, y: band.minY))
-                    edges.addLine(to: CGPoint(x: edge, y: band.maxY))
-                }
-            }
-            if !clip.isEmpty {
-                context.fill(clip, with: .color(HistoryGapStyle.wash(dark: dark)))
-                var lines = context
-                lines.clip(to: clip)
-                var position = -size.height
-                while position < size.width + 4 {
-                    hatch.move(to: CGPoint(x: position, y: middle + 5))
-                    hatch.addLine(to: CGPoint(x: position + 10, y: middle - 5))
-                    position += 4
-                }
-                lines.stroke(hatch, with: .color(ink.opacity(dark ? 0.32 : 0.26)), lineWidth: 1)
-                context.stroke(edges, with: .color(ink.opacity(dark ? 0.5 : 0.42)), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-            }
-            let fill = GraphicsContext.Shading.linearGradient(
-                Gradient(colors: [Color.accentColor.opacity(0.8), Color.accentColor.opacity(0.5)]),
-                startPoint: CGPoint(x: 0, y: middle - 3), endPoint: CGPoint(x: 0, y: middle + 3))
+                return CGRect(x: start, y: middle - Self.band / 2, width: max(x(gap.end), start + 2) - start, height: Self.band)
+            }, in: context, dark: dark)
             for stretch in stretches {
                 let start = x(stretch.lowerBound)
-                let length = max(x(stretch.upperBound) - start, 3)
-                context.fill(Path(roundedRect: CGRect(x: start, y: middle - 3, width: length, height: 6), cornerRadius: 3), with: fill)
+                Self.drawRecorded(CGRect(x: start, y: middle - Self.bar / 2, width: max(x(stretch.upperBound) - start, 3), height: Self.bar),
+                                  in: context)
             }
         }
         .frame(width: width)
         .accessibilityLabel(gaps.isEmpty ? "Recorded throughout" : "\(gaps.count) gaps not recorded")
+    }
+
+    /// A recorded stretch: a bar in the accent colour.
+    static func drawRecorded(_ rect: CGRect, in context: GraphicsContext) {
+        let fill = GraphicsContext.Shading.linearGradient(
+            Gradient(colors: [Color.accentColor.opacity(0.8), Color.accentColor.opacity(0.5)]),
+            startPoint: CGPoint(x: 0, y: rect.minY), endPoint: CGPoint(x: 0, y: rect.maxY))
+        context.fill(Path(roundedRect: rect, cornerRadius: rect.height / 2), with: fill)
+    }
+
+    /// Gaps: each band washed and hatched between dashed edges, as the track
+    /// and the rail's key draw them.
+    static func drawGaps(_ bands: [CGRect], in context: GraphicsContext, dark: Bool) {
+        guard let first = bands.first else { return }
+        let ink = Color(nsColor: .labelColor)
+        var clip = Path()
+        var edges = Path()
+        var reach = first
+        for band in bands {
+            clip.addRect(band)
+            reach = reach.union(band)
+            for edge in [band.minX, band.maxX] {
+                edges.move(to: CGPoint(x: edge, y: band.minY))
+                edges.addLine(to: CGPoint(x: edge, y: band.maxY))
+            }
+        }
+        context.fill(clip, with: .color(HistoryGapStyle.wash(dark: dark)))
+        var lines = context
+        lines.clip(to: clip)
+        var hatch = Path()
+        var position = reach.minX - reach.height
+        while position < reach.maxX + 4 {
+            hatch.move(to: CGPoint(x: position, y: reach.maxY))
+            hatch.addLine(to: CGPoint(x: position + reach.height, y: reach.minY))
+            position += 4
+        }
+        lines.stroke(hatch, with: .color(ink.opacity(dark ? 0.32 : 0.26)), lineWidth: 1)
+        context.stroke(edges, with: .color(ink.opacity(dark ? 0.5 : 0.42)), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
     }
 
     private func x(_ time: Date) -> CGFloat {
