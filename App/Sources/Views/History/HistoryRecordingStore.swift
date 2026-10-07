@@ -295,9 +295,10 @@ struct HistoryReplayStatus: Equatable {
     /// How many times the recording's own pace.
     let speed: Double
 
-    /// "Recording · Replay 10×", or "Recording · Replay paused".
+    /// "Replay · 10×", or "Replay paused": the recording's name is the
+    /// page banner's to give.
     var label: String {
-        "Recording · Replay " + (isPlaying ? "\(Int(speed))×" : "paused")
+        isPlaying ? "Replay · \(Int(speed))×" : "Replay paused"
     }
 }
 
@@ -318,9 +319,10 @@ struct HistoryReplayReporter: View {
     }
 }
 
-/// The toolbar's word on a recording file's replay, after the live badge
-/// while the History page shows one, in the replay's tint: so replay never
-/// reads as this Mac's live figures.
+/// The toolbar's word on a recording file's replay, after the collecting
+/// badge while the History page shows one, in the replay's tint: so replay
+/// never reads as this Mac's live figures. Which recording, and that it's
+/// read-only, is the page banner's to say.
 struct HistoryReplayBadge: View {
     let status: HistoryReplayStatus
 
@@ -339,7 +341,7 @@ struct HistoryReplayBadge: View {
         .padding(.vertical, 4)
         .background(HistorySessionStyle.tint.opacity(0.15), in: Capsule())
         .fixedSize()
-        .help(status.isPlaying ? "The recording file on the History page is playing back at \(Int(status.speed))× its own pace"
-            : "The recording file on the History page is open, its replay paused. Play it from the timeline.")
+        .help(status.isPlaying ? "The History page is replaying the recording named in its banner at \(Int(status.speed))× its own pace"
+            : "The History page shows the recording named in its banner, its replay paused. Play it from the timeline.")
     }
 }

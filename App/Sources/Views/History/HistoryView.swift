@@ -366,7 +366,7 @@ struct HistoryView: View {
             let axis = timeAxis
             let gapMarks = HistoryGapMarks(gaps: gaps, points: points, bucket: bucket, domain: domain, plotWidth: plotWidth)
             ForEach(HistoryChartSpec.all(for: points)) { spec in
-                HistoryChartCard(spec: spec, points: points, domain: domain, earliest: earliest, gaps: gapMarks,
+                HistoryChartCard(spec: spec, points: points, bucket: bucket, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
             }
         }

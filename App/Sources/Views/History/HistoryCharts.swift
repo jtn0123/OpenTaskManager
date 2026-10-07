@@ -9,14 +9,36 @@ struct HistoryLine: Identifiable {
         case maximum
     }
 
+    /// How the line is stroked, on the chart and in its legend's sample, so
+    /// two lines on a chart differ by more than their colour.
+    enum Stroke {
+        case solid
+        case dashed
+        case dotted
+
+        var style: StrokeStyle {
+            switch self {
+            case .solid: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+            case .dashed: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round, dash: [4, 3])
+            // Zero-length dashes with round caps draw as dots.
+            case .dotted: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: [0, 3.6])
+            }
+        }
+    }
+
     var id: String { name }
     let name: String
     let color: Color
     let value: (HistoryValues) -> Double?
     var fill = true
-    var dashed = false
+    var stroke = Stroke.solid
     /// How the legend sums the line up over the range.
     var summary = Summary.average
+    /// What the line plots, for the legend's tooltip: "the share of the
+    /// whole CPU in use", which it follows with the stretch each point covers.
+    let meaning: String
+    /// A sentence more for the tooltip, after the stretch.
+    var note: String?
 }
 
 /// A history chart: its lines and how its axis is scaled and labelled.
@@ -42,38 +64,45 @@ struct HistoryChartSpec: Identifiable {
         func has(_ value: (HistoryValues) -> Double?) -> Bool { points.contains { value($0.values) != nil } }
         var specs = [
             HistoryChartSpec(title: "CPU", symbol: "cpu", tint: Theme.cpu, lines: [
-                HistoryLine(name: "Average", color: Theme.cpu, value: { $0.cpu }),
-                HistoryLine(name: "Busiest moment", color: Theme.cpu.opacity(0.7), value: { $0.cpuPeak },
-                            fill: false, dashed: true, summary: .maximum),
+                HistoryLine(name: "Average", color: Theme.cpu, value: { $0.cpu }, meaning: "the share of the whole CPU in use"),
+                HistoryLine(name: "Peak", color: Theme.cpu.opacity(0.7), value: { $0.cpuPeak }, fill: false, stroke: .dashed,
+                            summary: .maximum, meaning: "the share of the whole CPU in use at the busiest single update"),
             ], format: { Format.percent($0) }, ceiling: 1, followsCPUScale: true),
             HistoryChartSpec(title: "Memory", symbol: "memorychip", tint: Theme.memory, lines: [
-                HistoryLine(name: "Used", color: Theme.memory, value: { $0.memory }),
-                HistoryLine(name: "Pressure", color: Theme.wired, value: { $0.memoryPressure }, fill: false),
+                HistoryLine(name: "Used", color: Theme.memory, value: { $0.memory },
+                            meaning: "memory used by apps, wired down or compressed, as a share of all memory"),
+                HistoryLine(name: "Pressure", color: Theme.wired, value: { $0.memoryPressure }, fill: false, stroke: .dotted,
+                            meaning: "the share of memory macOS doesn't count as available",
+                            note: "As it climbs, macOS compresses and swaps more."),
             ], format: { Format.percent($0) }, ceiling: 1),
         ]
         if has({ $0.gpu }) {
             specs.append(HistoryChartSpec(title: "GPU", symbol: "square.stack.3d.up", tint: Theme.gpu, lines: [
-                HistoryLine(name: "Busiest GPU", color: Theme.gpu, value: { $0.gpu }),
+                HistoryLine(name: "Load", color: Theme.gpu, value: { $0.gpu }, meaning: "the busiest GPU's load"),
             ], format: { Format.percent($0) }, ceiling: 1))
         }
         if has({ $0.systemWatts }) {
             specs.append(HistoryChartSpec(title: "Power", symbol: "bolt.fill", tint: Theme.power, lines: [
-                HistoryLine(name: "System", color: Theme.power, value: { $0.systemWatts }),
-                HistoryLine(name: "CPU", color: Theme.cpu, value: { $0.cpuWatts }, fill: false),
-                HistoryLine(name: "GPU", color: Theme.gpu, value: { $0.gpuWatts }, fill: false),
+                HistoryLine(name: "System", color: Theme.power, value: { $0.systemWatts }, meaning: "the whole Mac's power draw"),
+                HistoryLine(name: "CPU", color: Theme.cpu, value: { $0.cpuWatts }, fill: false, meaning: "the CPU's part of that draw"),
+                HistoryLine(name: "GPU", color: Theme.gpu, value: { $0.gpuWatts }, fill: false, stroke: .dotted,
+                            meaning: "the GPU's part of that draw"),
             ], format: Format.watts, floor: 10))
         }
         specs.append(HistoryChartSpec(title: "Disk", symbol: "internaldrive", tint: Theme.disk, lines: [
-            HistoryLine(name: "Read", color: Theme.disk, value: { $0.diskRead }),
-            HistoryLine(name: "Write", color: Theme.diskSecondary, value: { $0.diskWrite }, fill: false),
+            HistoryLine(name: "Read", color: Theme.disk, value: { $0.diskRead }, meaning: "data read from every disk per second"),
+            HistoryLine(name: "Write", color: Theme.diskSecondary, value: { $0.diskWrite }, fill: false,
+                        meaning: "data written to every disk per second"),
         ], format: Format.bytesPerSecond, floor: 1_048_576, units: .binaryBytes))
         specs.append(HistoryChartSpec(title: "Network", symbol: "network", tint: Theme.network, lines: [
-            HistoryLine(name: "Received", color: Theme.network, value: { $0.networkIn }),
-            HistoryLine(name: "Sent", color: Theme.networkSecondary, value: { $0.networkOut }, fill: false),
+            HistoryLine(name: "Received", color: Theme.network, value: { $0.networkIn },
+                        meaning: "data received per second over the network links that are up"),
+            HistoryLine(name: "Sent", color: Theme.networkSecondary, value: { $0.networkOut }, fill: false,
+                        meaning: "data sent per second over the network links that are up"),
         ], format: Format.bitsPerSecond, floor: 125_000, units: .bits))
         if has({ $0.chipCelsius }) {
             specs.append(HistoryChartSpec(title: "Temperature", symbol: "thermometer.medium", tint: Theme.thermal, lines: [
-                HistoryLine(name: "Chip, hottest die", color: Theme.thermal, value: { $0.chipCelsius }),
+                HistoryLine(name: "Chip", color: Theme.thermal, value: { $0.chipCelsius }, meaning: "the hottest sensor on the chip's die"),
             ], format: Format.celsius, floor: 60))
         }
         return specs
@@ -99,13 +128,61 @@ struct HistoryChartSpec: Identifiable {
         }
     }
 
+    /// The legend's figure for a line over the time shown: its average, or
+    /// for a peak its highest.
     func summary(of line: HistoryLine, in points: [HistoryPoint]) -> String {
         let values = points.compactMap { line.value($0.values) }
         guard !values.isEmpty else { return "—" }
         switch line.summary {
-        case .average: return "avg " + format(values.reduce(0, +) / Double(values.count))
-        case .maximum: return "max " + format(values.max() ?? 0)
+        case .average: return format(values.reduce(0, +) / Double(values.count))
+        case .maximum: return format(values.max() ?? 0)
         }
+    }
+
+    /// The legend's tooltip for a line, whose points each cover `bucket`
+    /// seconds: what it plots, and what the figure beside it sums up.
+    /// "Peak: the share of the whole CPU in use at the busiest single update
+    /// within each 10-second record. The figure is the highest over the time shown."
+    static func definition(of line: HistoryLine, bucket: TimeInterval) -> String {
+        let stretch = bucket <= FlightRecorder.span ? "each \(Int(FlightRecorder.span))-second record"
+            : "each point's \(Format.timeSpan(bucket))"
+        let plotted = switch line.summary {
+        case .average: "\(line.name): \(line.meaning), averaged over \(stretch)."
+        case .maximum: "\(line.name): \(line.meaning) within \(stretch)."
+        }
+        let figure = switch line.summary {
+        case .average: "The figure is its average over the time shown."
+        case .maximum: "The figure is the highest over the time shown."
+        }
+        return [plotted, line.note, figure].compactMap { $0 }.joined(separator: " ")
+    }
+}
+
+/// A legend's sample of a line as its chart draws it: the stroke, solid
+/// with its glow, dashed or dotted, over a sliver of the fill when the line
+/// has one.
+private struct HistoryLineSample: View {
+    let line: HistoryLine
+
+    var body: some View {
+        Canvas { context, size in
+            let y = line.fill ? 3.5 : size.height / 2
+            if line.fill {
+                let area = CGRect(x: 0, y: y, width: size.width, height: size.height - y)
+                context.fill(Path(roundedRect: area, cornerRadius: 1.5),
+                             with: .linearGradient(Gradient(colors: [line.color.opacity(0.42), line.color.opacity(0.03)]),
+                                                   startPoint: CGPoint(x: 0, y: y), endPoint: CGPoint(x: 0, y: size.height)))
+            }
+            var path = Path()
+            path.move(to: CGPoint(x: 1.5, y: y))
+            path.addLine(to: CGPoint(x: size.width - 1.5, y: y))
+            if line.stroke == .solid {
+                context.stroke(path, with: .color(line.color.opacity(0.22)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+            }
+            context.stroke(path, with: .color(line.color), style: line.stroke.style)
+        }
+        .frame(width: 18, height: 11)
+        .accessibilityHidden(true)
     }
 }
 
@@ -114,6 +191,8 @@ struct HistoryChartSpec: Identifiable {
 struct HistoryChartCard: View {
     let spec: HistoryChartSpec
     let points: [HistoryPoint]
+    /// Seconds each point covers, for the legend's tooltips.
+    let bucket: TimeInterval
     let domain: ClosedRange<Date>
     /// When the recording began; the chart dims the time before it.
     let earliest: Date?
@@ -133,15 +212,19 @@ struct HistoryChartCard: View {
             .fixedSize()
     }
 
+    /// Each line's sample, stroked as it's drawn, its name and its figure
+    /// over the time shown ("Peak 48%"); what both mean is in the tooltip.
     private var legend: some View {
         ForEach(spec.lines) { line in
             HStack(spacing: 5) {
-                RoundedRectangle(cornerRadius: 2).fill(line.color).frame(width: 9, height: 9)
+                HistoryLineSample(line: line)
                 Text(line.name).foregroundStyle(.secondaryText)
                 Text(spec.summary(of: line, in: points)).monospacedDigit()
             }
             .font(.callout)
             .fixedSize()
+            .contentShape(Rectangle())
+            .help(HistoryChartSpec.definition(of: line, bucket: bucket))
         }
     }
 
@@ -219,24 +302,25 @@ struct HistoryChartCard: View {
                 ForEach(points) { point in
                     if let value = line.value(point.values) {
                         let series = "\(line.name) \(point.segment)"
-                        // A wide faint stroke under the line, for the glow.
-                        LineMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
-                                 series: .value("Series", series + " glow"))
-                            .foregroundStyle(line.color.opacity(line.dashed ? 0 : 0.22))
-                            .lineStyle(StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
-                            .interpolationMethod(.monotone)
+                        // A wide faint stroke under a solid line, for the glow.
+                        if line.stroke == .solid {
+                            LineMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
+                                     series: .value("Series", series + " glow"))
+                                .foregroundStyle(line.color.opacity(0.22))
+                                .lineStyle(StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                                .interpolationMethod(.monotone)
+                        }
                         LineMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
                                  series: .value("Series", series))
                             .foregroundStyle(line.color)
-                            .lineStyle(StrokeStyle(lineWidth: line.dashed ? 1.1 : 1.6, lineCap: .round, lineJoin: .round,
-                                                   dash: line.dashed ? [4, 3] : []))
+                            .lineStyle(line.stroke.style)
                             .interpolationMethod(.monotone)
                     }
                 }
             }
             // A dot where each line breaks off at a gap and where it picks up,
             // so the break reads as a pause, and a lone point between gaps shows.
-            ForEach(spec.lines.filter { !$0.dashed }) { line in
+            ForEach(spec.lines.filter { $0.stroke != .dashed }) { line in
                 ForEach(gaps.borders, id: \.self) { index in
                     if index < points.count, let value = line.value(points[index].values) {
                         PointMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)))

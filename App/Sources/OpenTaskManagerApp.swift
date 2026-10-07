@@ -149,10 +149,11 @@ struct ContentView: View {
 
 /// Says whether the numbers are moving and how often they update. Clicking
 /// it opens a popover to change the update speed. While the History page
-/// shows a recording file, the replay's badge follows it, in the replay's
-/// tint, so "Pause · Live" stays this Mac's own; it drops the cadence to
-/// leave the page's toolbar items room at 820 points, and a pause there
-/// reads "Live paused", never just "Paused".
+/// shows a recording file, the badge answers only for this Mac's own
+/// figures: "Collecting · 1 s", or "Collecting paused" in grey, so orange
+/// is the replay's alone, and the replay's badge follows it in that tint.
+/// The recording's name stays in the page's banner, which leaves the
+/// page's toolbar items room at 820 points.
 private struct LiveBadge: View {
     @Environment(AppModel.self) private var model
     @State private var isChoosing = false
@@ -160,19 +161,21 @@ private struct LiveBadge: View {
     var body: some View {
         let isPaused = model.isPaused
         let replay = HistoryRecordingStore.shared.replay
+        let replaying = replay != nil
+        let tint = !isPaused ? Color.green : replaying ? Color.secondary : Color.orange
         HStack(spacing: 6) {
             Button {
                 isChoosing.toggle()
             } label: {
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(isPaused ? Color.orange : Color.green)
+                        .fill(tint)
                         .frame(width: 7, height: 7)
-                    Text(replay != nil && isPaused ? "Live paused" : isPaused ? "Paused" : "Live")
+                    Text(replaying ? (isPaused ? "Collecting paused" : "Collecting") : isPaused ? "Paused" : "Live")
                         .fontWeight(.semibold)
-                        .foregroundStyle(isPaused ? Color.orange : Color.primary)
-                    if replay == nil {
-                        Text("every \(Format.timeSpan(model.updateSpeed.rawValue))")
+                        .foregroundStyle(isPaused && !replaying ? Color.orange : Color.primary)
+                    if !(replaying && isPaused) {
+                        Text((replaying ? "· " : "every ") + Format.timeSpan(model.updateSpeed.rawValue))
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
@@ -183,11 +186,11 @@ private struct LiveBadge: View {
                 .font(.subheadline)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 4)
-                .background((isPaused ? Color.orange : Color.green).opacity(0.13), in: Capsule())
+                .background(tint.opacity(0.13), in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .help(help(replaying: replay != nil))
+            .help(help(replaying: replaying))
             .popover(isPresented: $isChoosing, arrowEdge: .bottom) {
                 UpdateSpeedPicker()
                     .environment(model)
@@ -203,8 +206,11 @@ private struct LiveBadge: View {
         guard replaying else {
             return model.isPaused ? "Updates are frozen. Press ⇧⌘P to resume." : "Updating every \(every). Click to change."
         }
-        return model.isPaused ? "This Mac's live updates are frozen; the recording replays on its own. Press ⇧⌘P to resume them."
-            : "This Mac's live updates carry on every \(every) while the recording replays. Pause stops them, not the replay."
+        return model.isPaused
+            ? "Collecting this Mac's own figures is paused, so its history gains nothing; the recording replays on its own. "
+                + "Press ⇧⌘P to resume."
+            : "This Mac's own figures are still collected every \(every), and its history kept, while the recording replays. "
+                + "Click to change the speed. Pause stops collecting, not the replay."
     }
 }
 
