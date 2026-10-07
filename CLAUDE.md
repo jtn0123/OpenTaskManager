@@ -176,9 +176,12 @@ build, `-sensorFixture <file>` loads a recording from
   apart from the user's Columns choices, and shows them again when there's room.
   A column this Mac can't fill (Power, when `AppModel.measuresProcessEnergy`
   is false; GPU, when `reportsProcessGPU` is, because no process had any GPU
-  time for a few samples, `ProcessGPUReporting` in OTMKit) starts hidden the
+  time for a few samples; ANE memory, likewise from `reportsProcessNeuralMemory`,
+  both settled by `ProcessFigureReporting` in OTMKit) starts hidden the
   same way; the Columns menu says why, and the user can still turn it on. An
-  idle GPU still reports (0%); a VM's paravirtual GPU does too.
+  idle GPU still reports (0%); a VM's paravirtual GPU does too. ANE memory is
+  `rusage_info_v6`'s neural footprint (macOS 15+, read in the same rusage
+  call): memory held for the Neural Engine, never shown as how busy it is.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its

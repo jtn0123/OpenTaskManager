@@ -133,6 +133,12 @@ struct LiveSystemTests {
         #expect(launchd.isRestricted)
         #expect(launchd.memory > 0)
         #expect(launchd.cpuTime > 0)
+
+        // Neural Engine memory comes with the same read as the footprint, from
+        // macOS 15; it's unknown, not 0, where macOS doesn't say.
+        #expect((me.neuralMemory != nil) == ProcessSample.systemReportsNeuralMemory)
+        #expect((me.neuralMemoryPeak ?? 0) >= (me.neuralMemory ?? 0), "now can't be above the peak")
+        #expect(launchd.neuralMemory == nil, "restricted processes have no figure")
     }
 
     @Test func cpuPercentTracksBusyWork() async throws {

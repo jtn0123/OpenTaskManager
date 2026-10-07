@@ -5,7 +5,7 @@ import SwiftUI
 /// Columns of the process table. The raw value doubles as the column
 /// identifier and, where sortable, the `ProcessSortKey`.
 enum ProcessColumn: String, CaseIterable {
-    case name, pid, cpu, memory, power, gpu, disk, threads, topTier, wakeups, user, kind
+    case name, pid, cpu, memory, power, gpu, neuralMemory, disk, threads, topTier, wakeups, user, kind
 
     var title: String {
         switch self {
@@ -15,6 +15,7 @@ enum ProcessColumn: String, CaseIterable {
         case .memory: "Memory"
         case .power: "Power"
         case .gpu: "GPU"
+        case .neuralMemory: "ANE memory"
         case .disk: "Disk"
         case .threads: "Threads"
         case .topTier: "Fast cores"
@@ -35,6 +36,7 @@ enum ProcessColumn: String, CaseIterable {
         case .memory, .threads: 72
         case .power: 64
         case .gpu: 58
+        case .neuralMemory: 86
         case .disk: 80
         case .topTier: 70
         case .wakeups: 76
@@ -58,14 +60,16 @@ enum ProcessColumn: String, CaseIterable {
     /// When the table runs short of room, columns give way lowest priority
     /// first (`ColumnFit`), so the ones that say which process a row is and
     /// what it costs stay. Nil for Name, PID, CPU and Memory, which always stay.
-    /// User ranks low: on most Macs it says the same thing on every row.
+    /// User ranks low: on most Macs it says the same thing on every row. ANE
+    /// memory is lower still: most rows have none.
     var priority: Int? {
         switch self {
         case .name, .pid, .cpu, .memory: nil
-        case .disk: 8
-        case .power: 7
-        case .gpu: 6
-        case .user: 5
+        case .disk: 9
+        case .power: 8
+        case .gpu: 7
+        case .user: 6
+        case .neuralMemory: 5
         case .threads: 4
         case .wakeups: 3
         case .topTier: 2
@@ -83,18 +87,27 @@ enum ProcessColumn: String, CaseIterable {
     /// the user didn't hide it: this Mac doesn't report it, or it's on but
     /// hidden for now because the table is too narrow.
     func menuTitle(hiddenToFit: Bool, unreported: Bool = false) -> String {
-        if unreported { return "\(title) (not reported on this Mac)" }
+        if unreported { return "\(title) (\(unreportedReason))" }
         return hiddenToFit ? "\(title) (hidden to fit)" : title
     }
 
+    /// Why an unreported column has nothing to show. macOS 15 and later
+    /// report Neural Engine memory for every process, so when none has any,
+    /// nothing is using it (a virtual machine has no Neural Engine).
+    private var unreportedReason: String {
+        self == .neuralMemory && ProcessSample.systemReportsNeuralMemory ? "none in use" : "not reported on this Mac"
+    }
+
     /// Columns this Mac has no figures for, which start hidden: Power when
-    /// it doesn't measure energy per process (a virtual machine), and GPU
-    /// when no process has any GPU time (`ProcessGPUReporting`), where every
-    /// row would read "—". nil is unknown yet, and counts as reported.
-    static func unreported(measuresEnergy: Bool?, reportsGPU: Bool?) -> Set<ProcessColumn> {
+    /// it doesn't measure energy per process (a virtual machine), GPU when no
+    /// process has any GPU time, and ANE memory when no process has held any
+    /// (both `ProcessFigureReporting`), where every row would read "—". nil
+    /// is unknown yet, and counts as reported.
+    static func unreported(measuresEnergy: Bool?, reportsGPU: Bool?, reportsNeuralMemory: Bool?) -> Set<ProcessColumn> {
         var columns: Set<ProcessColumn> = []
         if measuresEnergy == false { columns.insert(.power) }
         if reportsGPU == false { columns.insert(.gpu) }
+        if reportsNeuralMemory == false { columns.insert(.neuralMemory) }
         return columns
     }
 
@@ -103,6 +116,7 @@ enum ProcessColumn: String, CaseIterable {
         switch self {
         case .memory: MemoryMeasure.column
         case .gpu: "GPU: the share of the GPU's time each process used. \"—\" for a process that hasn't used the GPU."
+        case .neuralMemory: MemoryMeasure.neuralColumn
         default: nil
         }
     }
@@ -164,6 +178,12 @@ enum MemoryMeasure {
         + "this of other users' and system processes, so the table shows it for them too."
     static let column = "Memory: each process's footprint, what macOS charges to it, as in Activity Monitor. A collapsed "
         + "row adds up the processes under it. System processes show their resident size, the most macOS reveals of them."
+    static let neuralColumn = "ANE memory: what each process holds for the Neural Engine (ANE) now, such as models it has "
+        + "loaded. macOS keeps it apart from the footprint in the Memory column. It's memory, not how busy the Neural Engine "
+        + "is. \"—\" for a process that hasn't used the Neural Engine, and for system processes, which macOS doesn't reveal."
+    static let neural = "Neural Engine memory: what this process holds for the Neural Engine now, such as models it has "
+        + "loaded, and the most it has held. macOS keeps it apart from the footprint. It's memory, not how busy the Neural "
+        + "Engine is."
 }
 
 /// The columns switched off in the Columns menu, and the ones this Mac can't

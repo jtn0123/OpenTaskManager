@@ -9,7 +9,10 @@ let usage = """
 otm \(version): OpenTaskManager from the terminal
 
 USAGE:
-  otm ps [-n COUNT] [--sort cpu|mem|power|gpu|disk|pid|name] [--json]
+  otm ps [-n COUNT] [--sort cpu|mem|power|gpu|ane|disk|pid|name] [--json]
+                                 Top processes; ANE MEM, the memory each holds
+                                 for the Neural Engine (not how busy it is),
+                                 shows once any process has held some
   otm top [-n COUNT] [--sort KEY] [--interval SECONDS]
   otm system [--json]
   otm system report [--all] [--json]
@@ -128,40 +131,6 @@ func pad(_ text: String, _ width: Int, right: Bool = false) -> String {
     return right ? fill + clipped : clipped + fill
 }
 
-func sorted(_ processes: [ProcessSample], by key: String) -> [ProcessSample] {
-    switch key {
-    case "mem", "memory": processes.sorted { $0.memory > $1.memory }
-    case "power", "energy": processes.sorted { ($0.powerWatts ?? 0) > ($1.powerWatts ?? 0) }
-    case "gpu": processes.sorted { ($0.gpuFraction ?? 0) > ($1.gpuFraction ?? 0) }
-    case "disk": processes.sorted { $0.diskReadRate + $0.diskWriteRate > $1.diskReadRate + $1.diskWriteRate }
-    case "pid": processes.sorted { $0.pid < $1.pid }
-    case "name": processes.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    default: processes.sorted { $0.cpuPercent > $1.cpuPercent }
-    }
-}
-
-func processTable(_ snapshot: SystemSnapshot, options: Options) -> String {
-    var lines = [
-        pad("PID", 7, right: true) + "  " + pad("NAME", 28) + pad("CPU%", 7, right: true)
-            + pad("MEM", 10, right: true) + pad("POWER", 9, right: true) + pad("GPU%", 6, right: true)
-            + pad("THR", 5, right: true) + pad("DISK/s", 11, right: true) + "  USER",
-    ]
-    for process in sorted(snapshot.processes, by: options.sort).prefix(options.count) {
-        let marker = process.isRestricted ? "*" : " "
-        lines.append(
-            pad(String(process.pid), 7, right: true) + " " + marker + pad(process.name, 28)
-                + pad(Format.fixed(process.cpuPercent, 1), 7, right: true)
-                + pad(Format.bytes(process.memory), 10, right: true)
-                + pad(process.powerWatts.map(Format.watts) ?? "-", 9, right: true)
-                + pad(process.gpuFraction.map { Format.fixed($0 * 100, 0) } ?? "-", 6, right: true)
-                + pad(process.threadCount > 0 ? String(process.threadCount) : "-", 5, right: true)
-                + pad(Format.bytes(process.diskReadRate + process.diskWriteRate), 11, right: true)
-                + "  " + process.userName
-        )
-    }
-    return lines.joined(separator: "\n")
-}
-
 func systemSummary(_ snapshot: SystemSnapshot, topology: CPUTopology) -> String {
     var lines: [String] = []
     let tiers = topology.tiers.map { "\($0.logicalCPUs) \($0.name)" }.joined(separator: " + ")
@@ -255,9 +224,11 @@ func powerSummary(_ snapshot: SystemSnapshot) -> String {
     if let components = power.components {
         lines.append("Components (measured total \(Format.watts(components.total)))")
         let names: [(PowerComponent, String)] = [(.cpu, "CPU"), (.gpu, "GPU"), (.ane, "ANE"), (.dram, "DRAM")]
+        // The ANE and DRAM have no figure but the power manager's counters.
+        let why = components.energyCountersStalled ? ": this Mac's energy counters aren't updating live" : ""
         for (component, name) in names {
             guard let watts = components.watts(component) else {
-                lines.append("  \(pad(name, 6))—  not measured")
+                lines.append("  \(pad(name, 6))—  not measured\(why)")
                 continue
             }
             let note = components.sources[component] == .smc ? "  (SMC)" : ""
@@ -812,6 +783,10 @@ case "inspect":
         print("Path:       \(process.executablePath ?? "unknown")")
         print("Directory:  \(inspection.currentDirectory ?? "unavailable")")
         print("Command:    \(inspection.arguments?.commandLine ?? "unavailable (another user's process)")")
+        if process.hasHeldNeuralMemory {
+            let now = Format.bytes(process.neuralMemory ?? 0), peak = Format.bytes(process.neuralMemoryPeak ?? 0)
+            print("ANE memory: \(now) now, \(peak) at most (held for the Neural Engine, apart from the footprint)")
+        }
         if let environment = inspection.arguments?.environment, !environment.isEmpty {
             print("Environment (\(environment.count)):")
             for variable in environment { print("  \(variable.name)=\(variable.value)") }

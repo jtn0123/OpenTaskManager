@@ -168,7 +168,8 @@ struct ProcessesView: View {
     /// Columns with nothing to show on this Mac, such as Power in a VM.
     /// Changes at most a few times per launch, so the table refits only then.
     private var unreportedColumns: Set<ProcessColumn> {
-        ProcessColumn.unreported(measuresEnergy: model.measuresProcessEnergy, reportsGPU: model.reportsProcessGPU)
+        ProcessColumn.unreported(measuresEnergy: model.measuresProcessEnergy, reportsGPU: model.reportsProcessGPU,
+                                 reportsNeuralMemory: model.reportsProcessNeuralMemory)
     }
 
     /// What the selected row counts besides its process, when it has rows
