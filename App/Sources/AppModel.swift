@@ -2,97 +2,6 @@ import AppKit
 import Observation
 import OTMKit
 
-/// Per-process values kept for the inspector's graphs and the "by app" charts.
-/// There's one per process per sample across a whole graph window, so they're
-/// held as `Float`, half the size of `Double`, which no graph can tell apart:
-/// a window of 300 costs about what 120 did before.
-struct ProcessPoint: Sendable {
-    private let cpu: Float
-    private let footprint: Float
-    private let gpu: Float
-    private let power: Float
-
-    init(cpuPercent: Double, memory: UInt64, gpuFraction: Double, powerWatts: Double) {
-        cpu = Float(cpuPercent)
-        footprint = Float(memory)
-        gpu = Float(gpuFraction)
-        power = Float(powerWatts)
-    }
-
-    /// 100 = one core, as `ProcessSample.cpuPercent`.
-    var cpuPercent: Double { Double(cpu) }
-    /// Bytes, as `ProcessSample.memory`.
-    var memory: UInt64 { UInt64(max(footprint, 0)) }
-    var gpuFraction: Double { Double(gpu) }
-    var powerWatts: Double { Double(power) }
-
-    subscript(figure: ProcessFigure) -> Double {
-        switch figure {
-        case .cpu: Double(cpu)
-        case .memory: Double(footprint)
-        case .gpu: Double(gpu)
-        case .power: Double(power)
-        }
-    }
-}
-
-/// A figure a process's history keeps, to rank and graph apps by.
-enum ProcessFigure {
-    /// Activity Monitor-style percent: 100 = one core.
-    case cpu
-    /// Footprint in bytes.
-    case memory
-    /// Share of the GPU's time.
-    case gpu
-    /// Watts.
-    case power
-}
-
-/// A process's figures added up over its history, kept as samples come and
-/// go, so ranking apps over the window reads one total per process instead
-/// of walking every history every tick.
-struct ProcessTotal: Sendable {
-    private var cpu = RunningSum()
-    private var memory = RunningSum()
-    private var gpu = RunningSum()
-    private var power = RunningSum()
-
-    subscript(figure: ProcessFigure) -> Double {
-        switch figure {
-        case .cpu: cpu.value
-        case .memory: memory.value
-        case .gpu: gpu.value
-        case .power: power.value
-        }
-    }
-
-    /// Counts `point` in as its history takes it.
-    mutating func add(_ point: ProcessPoint) {
-        cpu.add(point[.cpu])
-        memory.add(point[.memory])
-        gpu.add(point[.gpu])
-        power.add(point[.power])
-    }
-
-    /// Takes `point` out as its history drops it.
-    mutating func remove(_ point: ProcessPoint) {
-        cpu.remove(point[.cpu])
-        memory.remove(point[.memory])
-        gpu.remove(point[.gpu])
-        power.remove(point[.power])
-    }
-}
-
-/// One app's use of a resource over time, for the stacked "by app" graphs.
-struct AppSeries: Identifiable {
-    let id: Int64
-    let name: String
-    let icon: NSImage
-    let values: [Double]
-
-    var current: Double { values.last ?? 0 }
-}
-
 /// Memory composition over time, one history per kind of page.
 struct MemoryHistory {
     var app = History<Double>(capacity: AppModel.historyCapacity)
@@ -356,8 +265,10 @@ final class AppModel {
     @ObservationIgnored private var accounts: [UInt32: UserAccount?] = [:]
     /// Regular (Dock) apps by PID, for grouping and icons.
     private(set) var regularApps: [Int32: NSRunningApplication] = [:]
-    /// The running apps `regularApps` was last built from, and when.
-    @ObservationIgnored private var runningAppPIDs: [Int32] = []
+    /// Set when NSWorkspace reports an app launching or quitting, so
+    /// `regularApps` is rebuilt on the next tick; and when it last was.
+    @ObservationIgnored private var runningAppsChanged = true
+    @ObservationIgnored private var runningAppsObservation: NSKeyValueObservation?
     @ObservationIgnored private var regularAppsRead = Date.distantPast
     private(set) var lastError: String?
     /// A process another page asked the Processes page to select, such as
@@ -431,6 +342,9 @@ final class AppModel {
         includeSystemProcesses = defaults.object(forKey: "includeSystemProcesses") as? Bool ?? true
         cpuRelativeToSystem = defaults.object(forKey: "cpuRelativeToSystem") as? Bool ?? true
         applyMonitorOptions()
+        runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
+            Task { @MainActor in self?.runningAppsChanged = true }
+        }
         start()
     }
 
@@ -480,18 +394,17 @@ final class AppModel {
         Task { [monitor] in await monitor.setOptions(options) }
     }
 
-    /// Asking every app for its activation policy costs more than the rest
-    /// of a tick's bookkeeping, so the list is rebuilt when apps launch or
-    /// quit, and every 10 s for an app that changes policy.
+    /// Asking every app for its activation policy, or even its PID, can wait
+    /// on a LaunchServices round trip per app, more than the rest of a tick's
+    /// bookkeeping, so the list is rebuilt only when NSWorkspace reports apps
+    /// launching or quitting, and every 10 s for an app that changes policy.
     private func refreshRegularApps() {
-        let running = NSWorkspace.shared.runningApplications
-        let pids = running.map(\.processIdentifier)
         let now = Date()
-        guard pids != runningAppPIDs || now.timeIntervalSince(regularAppsRead) >= 10 else { return }
-        runningAppPIDs = pids
+        guard runningAppsChanged || now.timeIntervalSince(regularAppsRead) >= 10 else { return }
+        runningAppsChanged = false
         regularAppsRead = now
         let apps = Dictionary(
-            running.filter { $0.activationPolicy == .regular }.map { ($0.processIdentifier, $0) },
+            NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map { ($0.processIdentifier, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         if apps != regularApps { regularApps = apps }
