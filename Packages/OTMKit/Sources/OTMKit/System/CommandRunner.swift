@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// Runs a system tool and returns what it printed, giving up after a timeout.
 /// Every tool the app runs goes through here: a tool that hangs would
@@ -17,9 +18,10 @@ enum CommandRunner {
     }
 
     /// Runs a tool to completion. Nil when it couldn't start, was killed by a
-    /// signal, or ran past `timeout` seconds (it's then terminated). Blocks
-    /// the calling thread; see `output(of:_:timeout:)`.
-    static func execute(_ executable: String, _ arguments: [String], capture: Capture = .both, timeout: TimeInterval) -> Result? {
+    /// signal, was stopped through `stopper`, or ran past `timeout` seconds
+    /// (it's then terminated). Blocks the calling thread; see `output(of:_:timeout:)`.
+    static func execute(_ executable: String, _ arguments: [String], capture: Capture = .both, timeout: TimeInterval,
+                        stopper: Stopper? = nil) -> Result? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -32,6 +34,8 @@ enum CommandRunner {
         } catch {
             return nil
         }
+        stopper?.attach(process)
+        defer { stopper?.detach() }
 
         // Ask politely at the deadline, then insist a second later. A
         // stopped tool closes its end of the pipe, which ends the read below.
@@ -65,6 +69,61 @@ enum CommandRunner {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(returning: run(executable, arguments, timeout: timeout))
+            }
+        }
+    }
+
+    /// `execute` on a background queue for a long-running tool the user can
+    /// stop: cancelling the calling task terminates it, and the result is then nil.
+    static func cancellableExecute(_ executable: String, _ arguments: [String], capture: Capture = .both,
+                                   timeout: TimeInterval) async -> Result? {
+        let stopper = Stopper()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    continuation.resume(returning: execute(executable, arguments, capture: capture, timeout: timeout, stopper: stopper))
+                }
+            }
+        } onCancel: {
+            stopper.stop()
+        }
+    }
+
+    /// Stops a running tool from another thread. A stop that comes before
+    /// the tool starts takes effect as soon as it does.
+    final class Stopper: Sendable {
+        private struct State {
+            var process: Process?
+            var stopped = false
+        }
+
+        private let state = OSAllocatedUnfairLock(initialState: State())
+
+        func attach(_ process: Process) {
+            let stopped = state.withLock { state in
+                state.process = process
+                return state.stopped
+            }
+            if stopped { Self.halt(process) }
+        }
+
+        func detach() {
+            state.withLock { $0.process = nil }
+        }
+
+        func stop() {
+            let process = state.withLock { state in
+                state.stopped = true
+                return state.process
+            }
+            if let process { Self.halt(process) }
+        }
+
+        /// Asks the tool to quit, then insists a second later, as at a timeout.
+        private static func halt(_ process: Process) {
+            if process.isRunning { process.terminate() }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) {
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             }
         }
     }

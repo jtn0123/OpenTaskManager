@@ -32,6 +32,12 @@ struct DiskDetail: View {
             if !volumes.isEmpty {
                 volumeList(volumes)
             }
+            // Only the volumes' names go in, not their free space, so the
+            // card isn't redrawn every tick.
+            DiskSpeedCard(disk: disk.bsdName, volumes: volumes.map {
+                DiskSpeedVolumeChoice(name: $0.name, mountPoint: $0.mountPoint, isRoot: $0.isRoot)
+            })
+            .equatable()
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                 if let size = disk.size { FactRow(label: "Capacity", value: Format.bytes(size)) }
                 FactRow(label: "Type", value: disk.isSolidState == true ? "SSD" : disk.isSolidState == false ? "Rotational" : "Unknown")
@@ -86,6 +92,7 @@ struct NetworkDetail: View {
                        ],
                        height: DetailGraph.primary, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits)
             NetworkAppsSection()
+            InternetQualityCard(interface: link.name, name: link.displayName).equatable()
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                 FactRow(label: "Connection", value: link.kind.rawValue.capitalized)
                 if let speed = link.linkSpeed { FactRow(label: "Link speed", value: Format.bitsPerSecond(Double(speed) / 8)) }

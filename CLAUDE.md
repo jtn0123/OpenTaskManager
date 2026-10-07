@@ -32,6 +32,12 @@ Manager OG or any other proprietary task manager.
   your Library for its Move to Trash review (tests use a fake home, never
   yours; items go through `NSWorkspace.recycle`, never rm); Layout/ holds the width maths for the details
   pane, `SplitMath`, and the process table's columns, `ColumnFit`;
+  System/NetworkQuality (parses `networkQuality -c`) and System/DiskSpeedTest (one
+  unlinked temp file, F_NOCACHE reads, verified, cancellable) back the user-started
+  speed tests on Performance's network and disk details (`SpeedTestStores`; nothing
+  runs per tick; `-openSpeedTest start` starts one for screenshots) and `otm
+  netquality` / `otm diskspeed`, with the last few results per interface or volume
+  in Application Support/OpenTaskManager/SpeedTests (System/SpeedTestHistory);
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
