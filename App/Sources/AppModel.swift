@@ -575,6 +575,17 @@ final class AppModel {
         sensorRows = sensorExtremes.rows(readings)
     }
 
+    /// Whether a debug build's `-sensorFixture` stands in for this Mac's
+    /// sensors. Its readings were some other Mac's, so the run records
+    /// nothing to History, which it still shows.
+    private var showsSensorFixture: Bool {
+        #if DEBUG
+        sensorFixture != nil
+        #else
+        false
+        #endif
+    }
+
     /// The sensors to show: this Mac's, or in a debug build the fixture's.
     private func fixture(or sensors: SensorSample?) -> SensorSample? {
         #if DEBUG
@@ -602,7 +613,7 @@ final class AppModel {
     /// `sensorsRead` is false when this tick didn't read the temperature
     /// sensors and fans, so their last readings aren't recorded again.
     private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool) {
-        guard let recorder else { return }
+        guard let recorder, !showsSensorFixture else { return }
         // The apps NSWorkspace reports launching and quitting; background agents are left to the tracker.
         historyEvents?.update(snapshot.processes, apps: Set(regularApps.keys), at: snapshot.timestamp)
         let apps = appGroups.compactMap { group in

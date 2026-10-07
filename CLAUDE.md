@@ -249,6 +249,7 @@ locked or the window is on another Space.
 A Mac or VM with no sensors can still show a full Thermals page: in a debug
 build, `-sensorFixture <file>` loads a recording from
 `otm sensors --extremes 20 --json` in place of the sensors (`SensorFixture`).
+Such a run records nothing to History, since the readings aren't that Mac's.
 
 ## Conventions
 
