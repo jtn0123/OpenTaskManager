@@ -43,6 +43,10 @@ Manager OG or any other proprietary task manager.
   card (`CPUBenchmarkStore`) and `otm cpubench`, the last 10 per Mac kept beside
   the speed tests; System/ChipLayoutReader (hw.perflevelN, device-tree clusters,
   I/O Registry core counts) backs its Chip layout card and `otm cpubench layout`;
+  System/GPUBenchmark (Metal shaders from source in GPUBenchmarkKernels, timed by
+  the GPU, every result checked, cancellable) backs the GPU detail's Benchmark card
+  (`GPUBenchmarkStore`; debug `-gpuBenchmarkFixture nodevice|unsupported|notiming`)
+  and `otm gpubench`, the last 10 per Mac in SpeedTests/gpu-benchmark.json;
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
   tested.
