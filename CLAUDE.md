@@ -25,7 +25,9 @@ Manager OG or any other proprietary task manager.
   parse `launchctl` output; System/DiskUsageScanner walks a folder for the
   Storage page and `otm du`, with the category rules in Model/DiskCategoryRules;
   System/InstalledApps, MachO and CodeSigning find and read app bundles for the
-  Apps page and `otm apps`; Layout/ holds the width maths for the details
+  Apps page and `otm apps`, and System/AppRemoval finds what an app keeps in
+  your Library for its Move to Trash review (tests use a fake home, never
+  yours; items go through `NSWorkspace.recycle`, never rm); Layout/ holds the width maths for the details
   pane, `SplitMath`, and the process table's columns, `ColumnFit`;
   System/CommandRunner runs every system tool with a timeout),
   the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
@@ -103,7 +105,8 @@ screencapture -x -o -l <windowID> out.png
 selects a process so its inspector shows, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show,
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
-`-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page,
+`-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
+(add `-openAppRemoval YES` to open its Move to Trash review),
 `-openDriver <text>` selects the first extension on the Drivers page whose name
 or bundle ID contains it (switching the Third party/Apple filter if it hides it),
 `-openUser <name>` opens that user's top processes on the Users page (and
