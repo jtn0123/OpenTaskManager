@@ -15,6 +15,8 @@ struct ProcessThreadsView: View {
     @State private var failure: ProcessReadFailure?
     @State private var isReading = false
     @State private var isSampling = false
+    /// The thread clicked, by ID, shown in full: its whole name and more.
+    @State private var selected: UInt64?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -34,6 +36,7 @@ struct ProcessThreadsView: View {
         .onChange(of: process.identity) {
             rows = []
             failure = nil
+            selected = nil
             read()
         }
     }
@@ -51,10 +54,18 @@ struct ProcessThreadsView: View {
                 // Lazy: a busy app can have hundreds of threads.
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(sorted) { row in
-                        ThreadRow(row: row, cpu: row.cpuPercent.map(model.cpuScale.format) ?? "—")
+                        let isSelected = row.id == selected
+                        ThreadRow(row: row, cpu: row.cpuPercent.map(model.cpuScale.format) ?? "—", isSelected: isSelected)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selected = isSelected ? nil : row.id }
+                            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityAction { selected = isSelected ? nil : row.id }
                     }
                 }
             }
+            // In from the pane's edge as far as the tabs and Sort, so the
+            // Priority column doesn't crowd it.
+            .padding(.trailing, 4)
         }
     }
 
@@ -83,19 +94,24 @@ struct ProcessThreadsView: View {
         }
     }
 
+    /// Over the row's first line. Priority's title is wider than its figures,
+    /// so it reaches left into State's room, which its short words leave free.
     private var header: some View {
         HStack(spacing: ThreadRow.spacing) {
             Text("Thread").frame(maxWidth: .infinity, alignment: .leading)
+                .help("Each thread's name, or Unnamed, over its ID and the CPU time it has used. Click one for its "
+                    + "whole name, base priority and scheduling.")
             Text("CPU").frame(width: ThreadRow.cpuWidth, alignment: .trailing)
                 .help("Each thread's share of the CPU since the last reading, on the same scale as the process's")
             Text("State").frame(width: ThreadRow.stateWidth, alignment: .leading)
                 .help("Running: on a core now. Waiting: for a lock, a message, a timer or work. Blocked: for something "
                     + "it can't be interrupted from, usually the disk.")
-            Text("Pri").frame(width: ThreadRow.priorityWidth, alignment: .trailing)
-                .help("Priority: the thread's scheduling priority now, 0 to 127; higher runs first")
+            Text("Priority").fixedSize().frame(width: ThreadRow.priorityWidth, alignment: .trailing)
+                .help("The thread's scheduling priority now, 0 to 127; higher runs first")
         }
         .font(.callout)
         .foregroundStyle(.secondaryText)
+        .lineLimit(1)
         .padding(.bottom, 3)
     }
 
@@ -161,41 +177,68 @@ struct ProcessThreadsView: View {
     }
 }
 
-/// A thread: its name (or "Unnamed") over its ID and CPU time, then its CPU,
-/// state and priority in columns.
+/// A thread: its name (or "Unnamed") in the one flexible column, then its
+/// CPU, state and priority at fixed widths, and under them, across the
+/// whole row, its ID and the CPU time it has used. Selected, the name shows
+/// whole, wrapping, with its base priority and scheduling below, and its
+/// text can be selected; otherwise a click selects it.
 private struct ThreadRow: View, Equatable {
     var row: ThreadActivity
     var cpu: String
+    var isSelected: Bool
 
     static let spacing: CGFloat = 8
-    static let cpuWidth: CGFloat = 50
-    static let stateWidth: CGFloat = 62
-    static let priorityWidth: CGFloat = 26
+    /// "100.0%" in the table's type.
+    static let cpuWidth: CGFloat = 44
+    /// The longest states, "Stopped" and "Unknown".
+    static let stateWidth: CGFloat = 54
+    /// Three digits; the title reaches into State's room.
+    static let priorityWidth: CGFloat = 28
 
     var body: some View {
         let thread = row.thread
-        HStack(alignment: .firstTextBaseline, spacing: Self.spacing) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(thread.name ?? "Unnamed")
-                    .foregroundStyle(thread.name == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(thread.name ?? "macOS keeps a name only for threads that gave themselves one")
-                // Hexadecimal, as `sample` and spindump print thread IDs.
-                Text("0x\(String(thread.id, radix: 16)) · \(Format.cpuTime(thread.cpuTime))")
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-                    .help("Thread ID, and the CPU time it has used since it started")
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(alignment: .firstTextBaseline, spacing: Self.spacing) {
+                name(thread).frame(maxWidth: .infinity, alignment: .leading)
+                Text(cpu).frame(width: Self.cpuWidth, alignment: .trailing)
+                Text(thread.state.title).lineLimit(1).frame(width: Self.stateWidth, alignment: .leading)
+                Text(String(thread.priority)).frame(width: Self.priorityWidth, alignment: .trailing)
+                    .help("Priority \(String(thread.priority)), from a base of \(String(thread.basePriority)); "
+                        + thread.policy.title.lowercased())
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Text(cpu).frame(width: Self.cpuWidth, alignment: .trailing)
-            Text(thread.state.title).frame(width: Self.stateWidth, alignment: .leading)
-            Text(String(thread.priority)).frame(width: Self.priorityWidth, alignment: .trailing)
-                .help("Priority \(String(thread.priority)), from a base of \(String(thread.basePriority)); \(thread.policy.title.lowercased())")
+            // Hexadecimal, as `sample` and spindump print thread IDs.
+            secondary("0x\(String(thread.id, radix: 16)) · CPU time \(Format.cpuTime(thread.cpuTime))")
+                .help("Thread ID, and the CPU time it has used since it started")
+            if isSelected {
+                secondary("Base priority \(String(thread.basePriority)) · \(thread.policy.title)")
+                    .help("The priority it returns to, and how the scheduler shares the CPU with it")
+            }
         }
         .font(.tableText)
         .monospacedDigit()
         .padding(.vertical, 3)
-        .textSelection(.enabled)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.14)).padding(.horizontal, -4)
+            }
+        }
+    }
+
+    @ViewBuilder private func name(_ thread: ThreadSample) -> some View {
+        let name = Text(thread.name ?? "Unnamed")
+            .foregroundStyle(thread.name == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
+        if isSelected {
+            name.textSelection(.enabled)
+        } else {
+            name.lineLimit(1)
+                .truncationMode(.middle)
+                .help(thread.name.map { "\($0)\nClick for the whole name" }
+                    ?? "macOS keeps a name only for threads that gave themselves one")
+        }
+    }
+
+    @ViewBuilder private func secondary(_ text: String) -> some View {
+        let line = Text(text).foregroundStyle(.secondaryText).lineLimit(1)
+        if isSelected { line.textSelection(.enabled) } else { line }
     }
 }

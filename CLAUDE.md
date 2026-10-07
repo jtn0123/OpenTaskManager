@@ -287,8 +287,16 @@ build, `-sensorFixture <file>` loads a recording from
 - A details pane has one scroll view, edge to edge between a pinned header and
   a pinned footer of actions, with dividers at both ends. Long technical values
   fold away in a `DetailDisclosure` (Startup's arguments, an app's certificate
-  chain) and paths keep to one line (`CopyableText(truncatesMiddle: true)`:
-  cut in the middle, the whole path in a tooltip), never a scroll view of their own.
+  chain). A path shows its name over its folder, which wraps and can be
+  selected (`CopyableText(splitsPath: true)`, `PathParts` in OTMKit), the whole
+  path in its tooltip and copied whole, with Copy Path beside Reveal in Finder:
+  one control, never a scroll view of its own. Identifiers too long for their
+  line (a UUID) keep to one, cut in the middle (`truncatesMiddle`).
+- A row picked outside its table (a launch argument, another page, Show in
+  List) or moved by the user's filter, search or sort is brought into view
+  once; a tick or a background re-read never scrolls a table. SwiftUI's
+  `ScrollViewProxy` didn't move the Startup table once it was on screen, so it
+  uses `TableRowReveal`, which asks the AppKit table.
 - Performance and History fit the narrowest window (820 points with the
   sidebar shown) without clipping or scrolling sideways. Performance's resource
   list is an `HStack` column sized from the page width, not an `HSplitView`,

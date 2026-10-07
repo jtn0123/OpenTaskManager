@@ -1,4 +1,5 @@
 import AppKit
+import OTMKit
 import SwiftUI
 
 /// A value someone may want to paste elsewhere (a path, an address, an
@@ -9,10 +10,14 @@ import SwiftUI
 struct CopyableText: View {
     var value: String
     var monospaced = true
-    /// One line, cut in the middle so the start and the file name both show,
-    /// with the whole value in a tooltip: for paths in a details pane, where
-    /// wrapped paths made the details too long to take in.
+    /// One line, cut in the middle, with the whole value in a tooltip: for
+    /// identifiers too long for their line (a UUID) and paths in lists.
     var truncatesMiddle = false
+    /// A file path as its name, prominent, over the folder that holds it
+    /// (`PathParts`), which wraps: for paths in a details pane, where a cut
+    /// in the middle hid the folders that tell two places apart. Still one
+    /// control, the whole path in its tooltip and copied whole.
+    var splitsPath = false
     /// The value broken over more and more lines where it reads best (an
     /// address between its groups, never before its prefix; see
     /// `AddressBreaks`), for when it doesn't fit on its own lines. The first
@@ -38,8 +43,8 @@ struct CopyableText: View {
                     .foregroundStyle(copied ? Color.green : Color.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Copy")
-            .accessibilityLabel("Copy")
+            .help(splitsPath ? "Copy Path" : "Copy")
+            .accessibilityLabel(splitsPath ? "Copy Path" : "Copy")
             // Hidden rather than removed, so the text doesn't reflow on hover.
             .opacity(isHovering || copied ? 1 : 0)
         }
@@ -47,7 +52,21 @@ struct CopyableText: View {
     }
 
     @ViewBuilder private var text: some View {
-        if truncatesMiddle {
+        if splitsPath {
+            let parts = PathParts(value)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(parts.name)
+                    .fontWeight(.medium)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let folder = parts.folder {
+                    styled(folder)
+                        .foregroundStyle(.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .help(value)
+        } else if truncatesMiddle {
             styled(value).lineLimit(1).truncationMode(.middle).help(value)
         } else if let last = forms.last {
             ViewThatFits(in: .horizontal) {

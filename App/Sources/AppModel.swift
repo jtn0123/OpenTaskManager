@@ -360,6 +360,9 @@ final class AppModel {
     /// A search the Apps page asked the Startup page to run ("Show in
     /// Startup" for an app's launch items). Cleared once applied.
     var requestedStartupSearch: String?
+    /// One of those items to select there, by ID (its property list's
+    /// path), from the app's details. Cleared once shown.
+    var requestedStartupItem: String?
     /// A network interface ("en0") another page asked Performance to open
     /// ("Show traffic" on the System page). Cleared once shown.
     var requestedNetworkInterface: String?

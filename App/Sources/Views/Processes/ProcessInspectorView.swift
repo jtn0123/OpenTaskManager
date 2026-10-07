@@ -108,13 +108,20 @@ struct ProcessInspectorView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
+                // Edge to edge, so the scroller runs down the pane's margin
+                // rather than over the content's right edge (the Threads
+                // tab's Priority column).
                 ScrollView {
-                    switch tab {
-                    case .overview: overview(process)
-                    case .threads: ProcessThreadsView(process: process)
-                    case .files: files
+                    Group {
+                        switch tab {
+                        case .overview: overview(process)
+                        case .threads: ProcessThreadsView(process: process)
+                        case .files: files
+                        }
                     }
+                    .padding(.horizontal, 12)
                 }
+                .padding(.horizontal, -12)
                 actions(process)
             }
             .padding(12)
@@ -251,16 +258,16 @@ struct ProcessInspectorView: View {
     }
 
     /// Where it runs from and how it was started. Long values fold away;
-    /// paths keep to one line, cut in the middle.
+    /// paths show their name over their folder.
     private func command(_ process: ProcessSample) -> some View {
         let details = details?.identity == identity ? details : nil
         return VStack(alignment: .leading, spacing: 8) {
             InspectorHeading("Command")
             if let path = process.executablePath {
-                labelled("Executable") { CopyableText(value: path, truncatesMiddle: true).font(.callout) }
+                labelled("Executable") { CopyableText(value: path, splitsPath: true).font(.callout) }
             }
             if let directory = details?.directory {
-                labelled("Working directory") { CopyableText(value: directory, truncatesMiddle: true).font(.callout) }
+                labelled("Working directory") { CopyableText(value: directory, splitsPath: true).font(.callout) }
             } else if details != nil, process.isRestricted {
                 deniedRow("Working directory")
             }
@@ -339,6 +346,8 @@ struct ProcessInspectorView: View {
                 }
                 Button("Sample Process") { model.sampleProcess(pid) }
                 Button("Reveal in Finder") { model.revealInFinder(pid) }
+                Button("Copy Path") { copy(process.executablePath ?? "") }
+                    .disabled(process.executablePath == nil)
                 Button("Search Online") { model.searchOnline(pid) }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -395,6 +404,11 @@ struct ProcessInspectorView: View {
             if !Task.isCancelled, loaded != openFiles { openFiles = loaded }
             try? await Task.sleep(for: .seconds(3))
         }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func labelled<Value: View>(_ label: String, @ViewBuilder value: () -> Value) -> some View {
