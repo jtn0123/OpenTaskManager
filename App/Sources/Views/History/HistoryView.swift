@@ -24,8 +24,18 @@ enum HistoryRange: Int, CaseIterable, Identifiable {
     /// Seconds per graph point: about 360 across the page, never finer than a record.
     var bucket: TimeInterval { max(FlightRecorder.span, seconds / 360) }
 
+    /// Seconds between labelled times on the axis.
+    var tickStep: TimeInterval {
+        switch self {
+        case .hour: 15 * 60
+        case .sixHours: 60 * 60
+        case .day: 4 * 60 * 60
+        case .week: 24 * 60 * 60
+        }
+    }
+
     var timeLabels: Date.FormatStyle {
-        self == .week ? .dateTime.weekday(.abbreviated).hour() : .dateTime.hour().minute()
+        self == .week ? .dateTime.weekday(.abbreviated).day() : .dateTime.hour().minute()
     }
 }
 
@@ -102,6 +112,7 @@ struct HistoryView: View {
         } else if let points {
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, domain: domain, earliest: earliest,
+                                 ticks: GraphMath.timeTicks(in: domain, step: range.tickStep),
                                  timeLabels: range.timeLabels, scrubber: scrubber)
             }
         }

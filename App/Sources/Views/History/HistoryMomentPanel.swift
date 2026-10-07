@@ -96,7 +96,9 @@ struct HistoryMomentPanel: View {
     private var apps: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Busiest apps").font(.headline)
-            AppBars(title: "CPU", apps: topCPU, color: Theme.cpu, format: model.cpuScale.format)
+            // Leave out apps whose share would read 0.0%.
+            AppBars(title: "CPU", apps: topCPU.filter { model.cpuScale.value($0.value) >= 0.05 }, color: Theme.cpu,
+                    format: model.cpuScale.format)
             AppBars(title: "Memory", apps: topMemory, color: Theme.memory) { Format.bytes($0) }
         }
     }

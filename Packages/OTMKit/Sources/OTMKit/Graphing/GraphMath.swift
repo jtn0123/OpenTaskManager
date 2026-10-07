@@ -107,4 +107,24 @@ public enum GraphMath {
             return running
         }
     }
+
+    /// Times to label on a time axis: every `step` seconds counted from local
+    /// midnight, so they land on round clock times, leaving out any within
+    /// `margin` (a share of the range) of either end, where a centred label
+    /// would be cut off.
+    public static func timeTicks(in range: ClosedRange<Date>, step: TimeInterval, margin: Double = 0.05,
+                                 calendar: Calendar = .current) -> [Date] {
+        let span = range.upperBound.timeIntervalSince(range.lowerBound)
+        guard span > 0, step > 0 else { return [] }
+        let low = range.lowerBound.addingTimeInterval(span * margin)
+        let high = range.upperBound.addingTimeInterval(-span * margin)
+        let midnight = calendar.startOfDay(for: range.lowerBound)
+        var tick = midnight.addingTimeInterval((low.timeIntervalSince(midnight) / step).rounded(.up) * step)
+        var ticks: [Date] = []
+        while tick <= high {
+            ticks.append(tick)
+            tick = tick.addingTimeInterval(step)
+        }
+        return ticks
+    }
 }

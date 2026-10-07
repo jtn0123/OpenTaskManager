@@ -76,4 +76,19 @@ struct GraphMathTests {
         // Negative values don't pull a band below the one beneath it.
         #expect(stacked[2] == [1, 12, 123])
     }
+
+    @Test func timeTicksLandOnRoundTimesAwayFromTheEnds() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let start = Date(timeIntervalSince1970: 6 * 3_600 + 11 * 60 + 23)
+        let ticks = GraphMath.timeTicks(in: start...start.addingTimeInterval(3_600), step: 900, calendar: calendar)
+        let clock = ticks.map { Int($0.timeIntervalSince1970) % 86_400 / 60 }
+        // From 6:11:23 to 7:11:23, keeping 3 minutes (5%) clear of each end.
+        #expect(clock == [6 * 60 + 15, 6 * 60 + 30, 6 * 60 + 45, 7 * 60])
+        // From 6:14 the 6:15 tick falls inside the margin, where its label would be cut off.
+        let late = Date(timeIntervalSince1970: 6 * 3_600 + 14 * 60)
+        let lateTicks = GraphMath.timeTicks(in: late...late.addingTimeInterval(3_600), step: 900, calendar: calendar)
+        #expect(lateTicks.map { Int($0.timeIntervalSince1970) % 86_400 / 60 } == [6 * 60 + 30, 6 * 60 + 45, 7 * 60])
+        #expect(GraphMath.timeTicks(in: start...start, step: 900).isEmpty)
+    }
 }

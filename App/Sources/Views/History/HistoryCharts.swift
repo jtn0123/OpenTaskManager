@@ -103,8 +103,11 @@ struct HistoryChartCard: View {
     let domain: ClosedRange<Date>
     /// When the recording began; the chart dims the time before it.
     let earliest: Date?
+    /// Where the time axis is labelled.
+    let ticks: [Date]
     let timeLabels: Date.FormatStyle
     let scrubber: HistoryScrubber
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let top = spec.top(for: points)
@@ -140,7 +143,7 @@ struct HistoryChartCard: View {
         Chart {
             if let earliest, earliest > domain.lowerBound {
                 RectangleMark(xStart: .value("Time", domain.lowerBound), xEnd: .value("Time", min(earliest, domain.upperBound)))
-                    .foregroundStyle(.black.opacity(0.22))
+                    .foregroundStyle(.black.opacity(colorScheme == .dark ? 0.22 : 0.05))
                     .annotation(position: .overlay, alignment: .center) {
                         if earliest.timeIntervalSince(domain.lowerBound) > domain.upperBound.timeIntervalSince(domain.lowerBound) / 5 {
                             Text("Not recorded yet").font(.caption).foregroundStyle(.tertiary)
@@ -178,12 +181,12 @@ struct HistoryChartCard: View {
         .chartYScale(domain: 0...top)
         .chartYAxis {
             AxisMarks(values: [0, top / 2, top]) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(.white.opacity(0.10))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.10))
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 7)) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(.white.opacity(0.07))
+            AxisMarks(values: ticks) { _ in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
                 AxisValueLabel(format: timeLabels).font(.caption2).foregroundStyle(.secondary)
             }
         }
