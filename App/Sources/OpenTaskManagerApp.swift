@@ -57,6 +57,7 @@ enum Page: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case processes = "Processes"
     case performance = "Performance"
+    case history = "History"
     case connections = "Connections"
     case startup = "Startup"
     case users = "Users"
@@ -69,6 +70,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .overview: "gauge.with.dots.needle.67percent"
         case .processes: "list.bullet.rectangle"
         case .performance: "waveform.path.ecg"
+        case .history: "clock.arrow.circlepath"
         case .connections: "point.3.connected.trianglepath.dotted"
         case .startup: "sunrise"
         case .users: "person.2"
@@ -93,6 +95,7 @@ struct ContentView: View {
             case .overview: OverviewView()
             case .processes: ProcessesView()
             case .performance: PerformanceView()
+            case .history: HistoryView()
             case .connections: ConnectionsView()
             case .startup: StartupView()
             case .users: UsersView()

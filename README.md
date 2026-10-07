@@ -43,6 +43,13 @@ samples and scale their axes to round numbers.
   within its range, and every die sensor's lowest and highest reading since
   launch.
 
+**History**: a flight recorder. Every 10 seconds the app writes CPU (average
+and busiest moment), memory and pressure, GPU, power, disk, network, chip
+temperature and the busiest apps to a small SQLite file, kept for 7 days.
+Graphs cover the last hour, 6 hours, 24 hours or week; hovering over any of
+them shows that moment's figures and which apps were using the most CPU and
+memory then.
+
 **Connections**: every TCP and UDP socket on the Mac, by process.
 - Counts of open connections, listening ports, ports exposed to the network,
   remote hosts and processes with sockets, beside a live network traffic graph.

@@ -215,6 +215,9 @@ final class AppModel {
 
     let monitor = SystemMonitor()
     let sensorMonitor = SensorMonitor()
+    /// The on-disk history behind the History page. Nil if it can't be opened.
+    let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
+    private var recording = HistoryAccumulator(span: FlightRecorder.span)
     let topology: CPUTopology
 
     private(set) var snapshot: SystemSnapshot?
@@ -410,6 +413,20 @@ final class AppModel {
         processMemoryHistory.append(totalMemory)
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
+        record(snapshot)
+    }
+
+    /// Feeds the flight recorder, which writes a record every few seconds.
+    private func record(_ snapshot: SystemSnapshot) {
+        guard let recorder else { return }
+        let apps = appGroups.compactMap { group in
+            group.process.map { AppUsage(name: displayName(for: $0), cpuPercent: group.totals.cpuPercent, memory: Double(group.totals.memory)) }
+        }
+        let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))
+        guard let record = recording.add(values, apps: apps, interval: snapshot.interval, at: snapshot.timestamp) else { return }
+        Task.detached(priority: .utility) {
+            try? await recorder.append(record)
+        }
     }
 
     // MARK: - Queries

@@ -26,6 +26,8 @@ Manager OG or any other proprietary task manager.
   tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
   Views/Processes (NSOutlineView table in `ProcessOutlineView`), Views/Performance,
+  Views/History (the flight recorder's graphs; `FlightRecorder` in OTMKit writes
+  a `HistoryRecord` every 10 s to ~/Library/Application Support/OpenTaskManager),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick),
@@ -49,7 +51,10 @@ Manager OG or any other proprietary task manager.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
   per sample and a Core Animation scroll slides them between samples. Changing
   numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
-  Don't swap either for SwiftUI `Path` or `Text` animations.
+  Don't swap either for SwiftUI `Path` or `Text` animations. The History page
+  is the exception: its graphs are static Swift Charts, reloaded once per graph
+  point, and its scrubber line is an overlay that alone reads the pointer, so
+  hovering never redraws the charts.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.
@@ -71,7 +76,7 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance|Connections|Startup|Users|System` sets the starting page, and
+`-openPage Overview|Processes|Performance|History|Connections|Startup|Users|System` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
 selects a process so its inspector shows, `-openConnection <port or text>`

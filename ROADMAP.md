@@ -17,7 +17,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Per-core CPU graphs | ✅ | Grouped by core type |
 | Status bar summary | ✅ | |
 | Always-available shortcut (⌃⇧⎋) | ✅ | |
-| App history (resource use per app over days) | ⬜ | Needs the history database below |
+| App history (resource use per app over days) | 🚧 | The flight recorder keeps each stretch's five busiest apps by CPU and memory; full per-app graphs over days are planned |
 | Startup apps | 🚧 | LaunchAgents and LaunchDaemons with status, PID, triggers and publisher are done. Login Items and the background items apps register need root to read, so they wait for the privileged helper; for now the page opens their System Settings pane |
 | Enable and disable startup items | ⬜ | TODO: `launchctl enable`/`disable` with `bootstrap`/`bootout`, a confirmation step and a way to undo. Daemons need an administrator password. Left out until then because it's destructive |
 | Users tab | 🚧 | Per-user totals, history, sessions and top processes are done; logging off other sessions is planned |
@@ -43,7 +43,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | GPU and power by app over time | ✅ | Stacked, with the rest as "Everything else" |
 | System information page | ✅ | Hardware, displays, storage, network, battery health, software and security state; identifiers hidden until shown; Copy Summary |
 | Privileged helper | ⬜ | Full details for root processes, including their sockets. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
-| Flight recorder | ⬜ | SQLite history with a timeline scrubber: "what was hogging the CPU at 3 a.m.?" |
+| Flight recorder | ✅ | SQLite history every 10 s, kept 7 days, with a scrubber that shows the busiest apps at any moment: "what was hogging the CPU at 3 a.m.?" |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
 | Per-process network throughput | ⬜ | Per-socket byte counters |
 | Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. Your own processes only until the privileged helper |
@@ -59,5 +59,5 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 
 - **0.1**: what's above marked ✅, plus README screenshots. The repository goes
   public, CI runs on every push, and releases are ad-hoc signed.
-- **0.2**: startup items, services, the flight recorder and alerts.
+- **0.2**: startup items, services and alerts.
 - **0.3**: privileged helper and the exporter.
