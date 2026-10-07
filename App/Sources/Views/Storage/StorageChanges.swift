@@ -270,23 +270,39 @@ private struct ChangeRow: View {
                 .frame(width: 22, height: 22)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(change.name).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 4)
                     if let amount {
-                        Text(amount).foregroundStyle(StorageChangeStyle.textStyle(direction)).monospacedDigit().fixedSize()
+                        Text(amount)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(StorageChangeStyle.textStyle(direction))
+                            .monospacedDigit()
+                            .fixedSize()
                     }
                 }
-                .font(.callout)
-                Text(location.map { "\($0) · \(detail)" } ?? detail)
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .truncationMode(.head)
+                .font(.body)
+                // Where it is on the left, wrapping rather than cut short in a
+                // narrow window; its sizes on the right, under the change.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if amount == nil {
+                        Text(location.map { "\($0) · \(detail)" } ?? detail)
+                            .lineLimit(2)
+                            .truncationMode(.head)
+                    } else {
+                        if let location {
+                            Text(location).lineLimit(2).truncationMode(.head)
+                        }
+                        Spacer(minLength: 0)
+                        Text(detail).monospacedDigit().fixedSize()
+                    }
+                }
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 5)
+        .padding(.vertical, 6)
         .padding(.horizontal, 6)
         .background(ChangeHighlight(id: change.id, isHovering: isHovering, hover: hover))
         .contentShape(Rectangle())

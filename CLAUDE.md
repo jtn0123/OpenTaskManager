@@ -175,6 +175,9 @@ Manager OG or any other proprietary task manager.
   Cards whose lengths differ a lot (the System page's, which depend on the
   Mac and what's plugged in) go through `ColumnGrid` instead: columns that
   each run their own length (`GridMath.packColumns`), one in a narrow window.
+  The System page's jump bar and search (`SystemNavigator`; the matching is
+  `SystemReportSearch` in OTMKit) scroll to stable ids (`SystemTarget`) through
+  a `ScrollViewReader`, and follow the scrolling from the clip view's bounds.
 - The Connections page's socket walk (`ConnectionSampler`, every process's
   descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
   runs it off the main actor every 3 s, only while the page is on screen.
@@ -217,7 +220,9 @@ selects the first matching socket on the Connections page so its details show
 `-openDriver <text>` selects the first extension on the Drivers page whose name
 or bundle ID contains it (switching the Third party/Apple filter if it hides it),
 `-openUser <name>` opens that user's top processes on the Users page (and
-the system accounts, for root or a service account), and
+the system accounts, for root or a service account), `-openSystemSearch <text>`
+searches the System page and `-openSystemCategory network` (or another group
+in its jump bar) scrolls it to that group, and
 `-openStorageScope <path>` scans that folder or volume when the Storage page
 opens, with `-openStorageFolder <path inside it>` opening a folder in the
 results and `-openStorageList largest|changes` showing the largest files or
@@ -359,6 +364,8 @@ build, `-sensorFixture <file>` loads a recording from
   explanations meant to be read (what a reading means, why it's missing, what
   a button does) `.font(.explanation)` (12 pt); and table
   and list rows `.font(.tableText)` (12 pt), all from `Graphs.swift`. The
+  Thermals table's rows are a step up (13 pt, body), since its readings are
+  what the page is for, with its supporting text at 12 pt. The
   system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`
   (`TableFit.swift`), so no empty striped rows follow the last one.
