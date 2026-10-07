@@ -49,6 +49,18 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: "Copyright © 2026 OpenTaskManager contributors. Licensed under GPL-3.0."
         NSAppleEventsUsageDescription: "OpenTaskManager asks for administrator rights only when you end or reprioritize a system process."
+        # Recording files exported from the History page (OTMKit's RecordingFile): JSON, opened read-only.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: OpenTaskManager Recording
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes: [io.github.jtn0123.OpenTaskManager.recording]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: io.github.jtn0123.OpenTaskManager.recording
+            UTTypeDescription: OpenTaskManager Recording
+            UTTypeConformsTo: [public.json]
+            UTTypeTagSpecification:
+              public.filename-extension: [otmrecording]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.jtn0123.OpenTaskManager

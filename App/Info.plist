@@ -6,6 +6,21 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>OpenTaskManager</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>OpenTaskManager Recording</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.github.jtn0123.OpenTaskManager.recording</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -28,5 +43,25 @@
 	<string>OpenTaskManager asks for administrator rights only when you end or reprioritize a system process.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 OpenTaskManager contributors. Licensed under GPL-3.0.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>OpenTaskManager Recording</string>
+			<key>UTTypeIdentifier</key>
+			<string>io.github.jtn0123.OpenTaskManager.recording</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>otmrecording</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 </dict>
 </plist>

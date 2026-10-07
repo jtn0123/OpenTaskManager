@@ -140,6 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         updateHotKey()
+        HistoryRecordingStore.shared.handleLaunchArguments()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateHotKey() }
         }
@@ -148,6 +149,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { WindowOpener.showMainWindow() }
         return true
+    }
+
+    /// A recording file double-clicked in the Finder, or dropped on the
+    /// app's icon, opens on the History page.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let url = urls.first(where: { $0.pathExtension == RecordingFile.fileExtension }) else { return }
+        HistoryRecordingStore.shared.open(url)
+        WindowOpener.showMainWindow()
     }
 
     /// ⌃⇧⎋, the shortcut Windows users already have in their fingers.

@@ -51,7 +51,10 @@ and busiest moment), memory and pressure, GPU, power, disk, network, chip
 temperature and the busiest apps to a small SQLite file, kept for 7 days.
 Graphs cover the last hour, 6 hours, 24 hours or week; hovering over any of
 them shows that moment's figures and which apps were using the most CPU and
-memory then. Export CSV saves every record in the range shown.
+memory then. Export CSV saves every record in the range shown. Mark a
+session on the timeline (Mark Start and Mark End, or Shift-drag) to export it
+as an `.otmrecording` file, which opens read-only on the same page, with the
+Mac it came from, and plays back at 1×, 10× or 60×.
 
 **Connections**: every TCP and UDP socket on the Mac, by process.
 - Counts of open connections, listening ports, ports exposed to the network,

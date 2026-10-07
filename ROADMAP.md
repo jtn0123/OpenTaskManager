@@ -48,7 +48,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Disk space analysis (Storage page) | ✅ | Scan Home, a volume or any folder: drill-down treemap, ranked contents, the 50 largest files and space by category, with Reveal in Finder and Copy Path. Allocated sizes, hard links counted once, bounded memory. Also `otm du` |
 | Move to Trash from the Storage page | ⬜ | TODO: Move to Trash (never delete outright) for items picked on the Storage page, with a confirmation that shows the size and an Undo, then update the totals without a rescan. Left out until then because it's destructive |
 | Privileged helper | ⬜ | Full details for root processes, including their sockets. SMAppService needs a signed build, and until then an on-demand helper is the fallback |
-| Flight recorder | ✅ | SQLite history every 10 s, kept 7 days, with a scrubber that shows the busiest apps at any moment: "what was hogging the CPU at 3 a.m.?" |
+| Flight recorder | ✅ | SQLite history every 10 s, kept 7 days, with a scrubber that shows the busiest apps at any moment: "what was hogging the CPU at 3 a.m.?" Sessions marked on the timeline export as `.otmrecording` files that open read-only and play back at 1×, 10× or 60× |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
 | Per-process network throughput | ✅ | By app or process from `nettop` every 3 s, only while shown: stacked on Performance → Network and as Top Network on the Overview. Also `otm net` |
 | Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. Your own processes only until the privileged helper |
