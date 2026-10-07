@@ -244,7 +244,8 @@ struct SystemReportTests {
         #expect(rows.filter(\.isHeading).map(\.label) == ["Wi-Fi", "bridge100"])
         // The BSD name follows a friendly name, but isn't repeated when it's all there is.
         #expect(rows.filter(\.isHeading).map(\.value) == ["en0", ""])
-        #expect(rows.contains(InfoRow("IPv4", "192.168.1.9", isCode: true)))
+        // Flagged as an address, so a saved report leaves it out unless asked.
+        #expect(rows.contains(InfoRow("IPv4", "192.168.1.9", isCode: true, isAddress: true)))
         // Link-local addresses are left out, and each address gets its own line.
         #expect(rows.first { $0.label == "IPv6" }?.value == "2001:db8::5\n2001:db8::6")
         #expect(rows.contains(InfoRow("Link speed", "1.2 Gbps")))

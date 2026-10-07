@@ -142,8 +142,8 @@ struct PeripheralParsingTests {
         let chained = try #require(parse(json).thunderbolt.value)
         #expect(chained.ports == [.init(speed: "Up to 40 Gb/s", isInUse: true)])
         #expect(chained.devices == [
-            .init(name: "TS4", vendor: "CalDigit, Inc.", speed: "Up to 40 Gb/s x1", upstream: nil),
-            .init(name: "Studio Display", vendor: "Apple Inc.", speed: nil, upstream: "TS4"),
+            .init(name: "TS4", vendor: "CalDigit, Inc.", speed: "Up to 40 Gb/s x1", upstream: nil, depth: 0),
+            .init(name: "Studio Display", vendor: "Apple Inc.", speed: nil, upstream: "TS4", depth: 1),
         ])
     }
 
@@ -210,10 +210,14 @@ struct DeviceReportTests {
             thunderbolt: .read(ThunderboltReport(ports: [], devices: [])), bluetooth: .unavailable, audio: .read([]), cameras: .read([])
         )
         let usb = rows(.usb, inventory)
-        #expect(usb.filter(\.isHeading).map(\.label) == ["Hub", "Drive"])
-        #expect(usb.contains(InfoRow("Connected to", "USB 3.1 Bus")))
-        #expect(usb.contains(InfoRow("Connected to", "Hub")))
-        #expect(usb.contains(InfoRow("Vendor:product", "0781:55fd", isCode: true)))
+        // Each device is one compact row: its name, speed and depth behind hubs.
+        #expect(usb.filter(\.isHeading) == [InfoRow("Hub", "5 Gb/s", isHeading: true), InfoRow("Drive", "", isHeading: true, depth: 1)])
+        // The rest waits behind its disclosure.
+        #expect(usb.filter { !$0.isHeading }.allSatisfy { $0.isDetail })
+        #expect(usb.contains(InfoRow("Connected to", "USB 3.1 Bus", isDetail: true)))
+        #expect(usb.contains(InfoRow("Connected to", "Hub", isDetail: true)))
+        #expect(usb.contains(InfoRow("Power", "4.48 W (896 mA)", isDetail: true)))
+        #expect(usb.contains(InfoRow("Vendor:product", "0781:55fd", isCode: true, isDetail: true)))
         #expect(usb.first { $0.label == "Serial number" }?.isSensitive == true)
 
         // No Thunderbolt hardware, no card; a failed report says so rather than "None".
@@ -241,22 +245,63 @@ struct DeviceReportTests {
         #expect(rows(.usb, inventory) == [InfoRow("Devices", "None connected")])
         let thunderbolt = rows(.thunderbolt, inventory)
         #expect(thunderbolt.prefix(2) == [InfoRow("Ports", "2, up to 120 Gb/s each"), InfoRow("In use", "1 of 2")])
-        #expect(thunderbolt.contains(InfoRow("Connected to", "This Mac")))
+        #expect(thunderbolt.contains(InfoRow("Dock", "Up to 40 Gb/s", isHeading: true)))
+        #expect(thunderbolt.contains(InfoRow("Maker", "CalDigit", isDetail: true)))
+        #expect(thunderbolt.contains(InfoRow("Connected to", "This Mac", isDetail: true)))
         let bluetooth = rows(.bluetooth, inventory)
         #expect(bluetooth.contains(InfoRow("Chipset", "Apple N1 · firmware 26.216.0.0")))
-        #expect(bluetooth.contains(InfoRow("AirPods", "connected", isHeading: true)))
-        #expect(bluetooth.contains(InfoRow("Battery", "Left 80% · 50%")))
+        // The battery is the status worth seeing without opening the device.
+        #expect(bluetooth.contains(InfoRow("AirPods", "connected", isHeading: true, state: "battery Left 80% · 50%")))
+        #expect(bluetooth.contains(InfoRow("Kind", "Headphones", isDetail: true)))
+        #expect(!bluetooth.contains { $0.label == "Battery" })
         let audio = rows(.audio, inventory)
-        #expect(audio.contains(InfoRow("Speakers", "built-in", isHeading: true)))
-        #expect(audio.contains(InfoRow("Channels", "2 out")))
-        #expect(audio.contains(InfoRow("Sample rate", "44.1 kHz")))
-        #expect(audio.contains(InfoRow("Default for", "Output, alerts")))
+        #expect(audio.contains(InfoRow("Speakers", "built-in", isHeading: true, state: "default for output and alerts")))
+        #expect(audio.contains(InfoRow("Channels", "2 out", isDetail: true)))
+        #expect(audio.contains(InfoRow("Sample rate", "44.1 kHz", isDetail: true)))
+        #expect(audio.contains(InfoRow("Maker", "Apple Inc.", isDetail: true)))
         #expect(audio.last == InfoRow("Cameras", "Couldn't read", status: .unknown))
 
+        // The text keeps every fact, the heading's status included.
         let text = SystemReport.deviceText(inventory, includeIdentifiers: false)
         #expect(text.hasPrefix("USB\n  Devices: None connected\n\nThunderbolt and USB4\n"))
+        #expect(text.contains("  AirPods (connected, battery Left 80% · 50%)\n    Kind: Headphones\n"))
+        #expect(text.contains("  Speakers (built-in, default for output and alerts)\n    Channels: 2 out\n    Sample rate: 44.1 kHz\n"))
+        #expect(text.contains("  Dock (Up to 40 Gb/s)\n    Maker: CalDigit\n    Connected to: This Mac\n"))
         #expect(!text.contains("AA:BB"))
         #expect(SystemReport.deviceText(inventory, includeIdentifiers: true).contains("    Address: AA:BB"))
+    }
+
+    @Test func groupsEachDeviceWithItsDetails() throws {
+        let inventory = PeripheralInventory(
+            usb: .read(USBReport(buses: 1, devices: [])), thunderbolt: .unavailable,
+            bluetooth: .read(BluetoothReport(isOn: true, chipset: "Apple N1", firmware: nil, devices: [
+                BluetoothDevice(name: "Mouse", kind: "Mouse", isConnected: true),
+                BluetoothDevice(name: "Keyboard", isConnected: false),
+            ])),
+            audio: .read([]), cameras: .read([])
+        )
+        let sections = SystemReport.deviceSections(inventory)
+        let bluetooth = try #require(sections.first { $0.kind == .bluetooth })
+        #expect(bluetooth.hasDetails)
+        #expect(bluetooth.blocks == [
+            .rows([InfoRow("Status", "On"), InfoRow("Chipset", "Apple N1")]),
+            .device(InfoRow("Mouse", "connected", isHeading: true), details: [InfoRow("Kind", "Mouse", isDetail: true)]),
+            // Nothing more to show: a row with no disclosure.
+            .device(InfoRow("Keyboard", "not connected", isHeading: true), details: []),
+        ])
+        let usb = try #require(sections.first { $0.kind == .usb })
+        #expect(!usb.hasDetails)
+        #expect(usb.blocks == [.rows([InfoRow("Devices", "None connected")])])
+
+        #expect(sections.allSatisfy { $0.kind.isAttachedDevice })
+        #expect(InfoSection.Kind.allCases.filter(\.isAttachedDevice) == [.usb, .thunderbolt, .bluetooth, .audio])
+    }
+
+    @Test func headingNoteJoinsValueAndState() {
+        #expect(InfoRow("Drive", "5 Gb/s", isHeading: true, state: "built-in").headingNote == "5 Gb/s, built-in")
+        #expect(InfoRow("Drive", "", isHeading: true, state: "built-in").headingNote == "built-in")
+        #expect(InfoRow("Drive", "5 Gb/s", isHeading: true).headingNote == "5 Gb/s")
+        #expect(InfoRow("Drive", "", isHeading: true).headingNote.isEmpty)
     }
 
     @Test func saysCheckingUntilTheReportArrives() {

@@ -8,6 +8,9 @@ import SwiftUI
 struct FillGrid: Layout {
     var minimum: CGFloat
     var spacing: CGFloat = 16
+    /// Off, each card keeps its own height, top-aligned in its row, for
+    /// cards whose length varies a lot (the System page's attached devices).
+    var evensHeights = true
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? (minimum + spacing) * CGFloat(subviews.count) - spacing
@@ -20,7 +23,8 @@ struct FillGrid: Layout {
         for row in rows(subviews: subviews, width: bounds.width) {
             var x = bounds.minX
             for index in row.items {
-                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: row.itemWidth, height: row.height))
+                let height = evensHeights ? row.height : nil
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: row.itemWidth, height: height))
                 x += row.itemWidth + spacing
             }
             y += row.height + spacing
