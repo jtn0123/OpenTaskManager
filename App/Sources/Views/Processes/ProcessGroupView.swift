@@ -283,7 +283,7 @@ private struct GroupMemberRow: View, Equatable {
             Text("Memory").frame(width: memoryWidth, alignment: .trailing)
                 .help("Each process's footprint, as in the table's Memory column")
         }
-        .font(.callout)
+        .font(.metadata)
         .foregroundStyle(.secondaryText)
         .lineLimit(1)
         .padding(.bottom, 3)
