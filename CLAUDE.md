@@ -194,6 +194,12 @@ build, `-sensorFixture <file>` loads a recording from
   segmented pickers on a live page out of `ViewThatFits`: it measured them
   again every tick (about half a percent of a core for the CPU graph's two),
   so that caption row is a small `Layout` instead.
+- History's chart legends draw a sample of each line as it's stroked
+  (`HistoryLine.Stroke`, solid, dashed or dotted, over its fill when it has
+  one), so two lines on a chart never differ by colour alone, and give what
+  the line and its figure mean in the tooltip. During a replay the toolbar says
+  "Collecting · 1 s" for this Mac and "Replay · 10×" for the file; the
+  recording's name is the page banner's.
 - Secondary text (labels, captions, units, footnotes) takes
   `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (11 pt);
   explanations meant to be read (what a reading means, why it's missing, what
