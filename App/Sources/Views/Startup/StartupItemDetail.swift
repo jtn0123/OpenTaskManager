@@ -4,7 +4,13 @@ import SwiftUI
 /// The inspector for one startup item: what it runs, what starts it, how
 /// launchd is treating it now, and where its property list lives.
 struct StartupItemDetail: View {
+    /// For the job's CPU and memory now, which follow the sampling tick.
+    let model: AppModel
     var item: LaunchItem
+    /// Whether its job looks troubled, from launchd's last exit and the restarts seen.
+    var health: LaunchJobHealth
+    /// What this session has seen of its job; nil until it's been loaded at a read.
+    var record: LaunchJobRecord?
     /// Changes when the page rescans, so launchd's view is read again.
     var refreshID: Date?
     /// Disables or enables the item, for third-party agents.
@@ -13,11 +19,16 @@ struct StartupItemDetail: View {
     var control: (LaunchControl.Action) -> Void
     var showProcess: (Int32) -> Void
 
-    /// launchd's view of the job, read when the item is shown and after a
-    /// rescan, never per tick. Nil while reading, or when it isn't loaded.
+    /// launchd's view of the job, read when the item is shown, after a
+    /// rescan, and when its process or last exit changes, never per tick.
+    /// Nil while reading, or when it isn't loaded.
     @State private var service: LaunchServiceInfo?
     /// Folded at first, and left as it is while the selection moves.
     @State private var showsArguments = false
+    /// The pane's height, and the pinned top's and footer's as laid out.
+    @State private var height: CGFloat?
+    @State private var topHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
 
     /// The item, launchd's view of it in plain words and the action that
     /// fits sit at the top; the lasting change (Disable) and the file itself
@@ -28,51 +39,62 @@ struct StartupItemDetail: View {
     /// window's: laid out alone it pushed the status bar out of a short
     /// window. So in a pane too short for it plus a few lines of details,
     /// the top scrolls with the details, and only the footer stays put.
+    /// Chosen from the measured heights rather than with `ViewThatFits`,
+    /// which would measure both layouts again on every tick of the job's
+    /// CPU and memory (as `ConnectionDetail` found).
     var body: some View {
         let restriction = LaunchControl.restriction(for: item)
-        ViewThatFits(in: .vertical) {
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
-                    state(restriction: restriction)
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        let pinsTop = height.map { $0 >= topHeight + 24 + Self.detailsMinimum + footerHeight + 2 } ?? true
+        VStack(spacing: 0) {
+            if pinsTop {
+                top(restriction: restriction)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
                 ScrollView { details.padding(12) }
-                    .frame(minHeight: Self.detailsMinimum, idealHeight: Self.detailsMinimum, maxHeight: .infinity)
-                Divider()
-                footer(restriction: restriction)
-            }
-            VStack(spacing: 0) {
+            } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        header
-                        state(restriction: restriction)
+                        top(restriction: restriction)
                         details
                     }
                     .padding(12)
                 }
-                Divider()
-                footer(restriction: restriction)
             }
+            Divider()
+            footer(restriction: restriction)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
-        .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID)) {
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID,
+                              pid: item.pid, lastExit: item.job?.lastExit)) {
             let (label, scope) = (item.label, item.scope)
             service = await Task.detached(priority: .userInitiated) { Launchctl.service(label, scope: scope) }.value
         }
     }
 
+    /// What launchd's view is read again for: another item, a rescan, or a
+    /// new process or exit seen by the page's lighter reads in between.
     private struct ServiceRead: Equatable {
         var label: String
         var scope: LaunchItemScope
         var refreshID: Date?
+        var pid: Int32?
+        var lastExit: LaunchExitStatus?
     }
 
     /// Room the details keep under the pinned top before it scrolls too.
     private static let detailsMinimum: CGFloat = 96
 
     // MARK: Sections
+
+    private func top(restriction: String?) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            state(restriction: restriction)
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topHeight = $0 }
+    }
 
     private var header: some View {
         HStack(spacing: 10) {
@@ -96,10 +118,16 @@ struct StartupItemDetail: View {
     private func state(restriction: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Circle().fill(item.state.color).frame(width: 8, height: 8)
+                if health.needsAttention {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .imageScale(.small)
+                        .foregroundStyle(LaunchJobHealth.tint)
+                } else {
+                    Circle().fill(item.state.color).frame(width: 8, height: 8)
+                }
                 Text(item.statusSummary).font(.callout.weight(.medium)).lineLimit(1)
             }
-            .help(stateHelp)
+            .help(health.headline.map { "\(stateHelp) \($0)." } ?? stateHelp)
             if restriction == nil, item.job != nil {
                 controls
             }
@@ -111,6 +139,9 @@ struct StartupItemDetail: View {
     /// a scroll view of its own.
     private var details: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if let headline = health.headline {
+                trouble(headline)
+            }
             facts
             if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
             launches
@@ -153,14 +184,24 @@ struct StartupItemDetail: View {
             if let pid = item.pid {
                 // The state above already shows the PID.
                 GridRow {
-                    Text("Process").foregroundStyle(.secondaryText)
-                    Button("Show in Processes") { showProcess(pid) }
-                        .buttonStyle(.link)
-                        .help("Select PID \(String(pid)) on the Processes page")
+                    Text("Using now").foregroundStyle(.secondaryText)
+                    VStack(alignment: .leading, spacing: 3) {
+                        JobUsageNow(model: model, pid: pid)
+                        Button("Show in Processes") { showProcess(pid) }
+                            .buttonStyle(.link)
+                            .help("Select PID \(String(pid)) on the Processes page")
+                    }
                 }
                 .font(.callout)
             }
             if let service { serviceRows(service) }
+            if let record {
+                GridRow {
+                    Text("Restarts").foregroundStyle(.secondaryText).help(Self.restartsHelp)
+                    Text(record.restartSummary(time: Self.clock)).help(Self.restartsHelp)
+                }
+                .font(.callout)
+            }
             FactRow(label: "Last exit", value: lastExit)
             // A gap rather than a rule, which would read as another region.
             Color.clear.frame(height: 2).gridCellUnsizedAxes(.horizontal)
@@ -266,7 +307,34 @@ struct StartupItemDetail: View {
             .gridColumnAlignment(.leading)
     }
 
+    /// What's wrong, in a sentence or two, first in the details.
+    private func trouble(_ headline: String) -> some View {
+        Label {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(headline).font(.callout.weight(.semibold))
+                if let explanation = health.explanation(for: item, record: record, time: Self.clock) {
+                    Text(explanation).font(.explanation)
+                }
+            }
+            .textSelection(.enabled)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LaunchJobHealth.tint)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LaunchJobHealth.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     // MARK: Text
+
+    /// A clock time, "09:12", for the restarts.
+    private static func clock(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+
+    private static let restartsHelp = "New processes seen for this job since OpenTaskManager first read launchd's list. "
+        + "It looks when the Startup page opens, on Refresh, and every \(Int(LaunchJobStore.readInterval.components.seconds)) "
+        + "seconds while the page is on screen, so a job that restarts faster counts once between looks."
 
     private var stateHelp: String {
         switch item.state {
@@ -329,6 +397,26 @@ struct StartupItemDetail: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
             CopyableText(value: value, monospaced: isCode, truncatesMiddle: isCode).font(.callout)
+        }
+    }
+}
+
+/// The job's CPU and memory in the latest sample, "3.2% CPU · 45 MB", found
+/// by the PID launchd gave. It reads the model itself, so a tick redraws
+/// this line and not the pane.
+private struct JobUsageNow: View {
+    let model: AppModel
+    var pid: Int32
+
+    var body: some View {
+        if let point = model.processHistory[pid]?.last {
+            Text("\(model.cpuScale.format(point.cpuPercent)) CPU · \(Format.bytes(point.memory))")
+                .monospacedDigit()
+                .help("PID \(String(pid)) in the latest sample, as the Processes page shows it")
+        } else {
+            Text("Not in the latest sample")
+                .foregroundStyle(.secondaryText)
+                .help(JobUsageText.notSampled(pid))
         }
     }
 }

@@ -213,6 +213,8 @@ final class AppModel {
     let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
     /// Network traffic by app, read with nettop only while a view shows it.
     let networkActivity = NetworkActivityStore()
+    /// Restarts of launchd's jobs, counted from the Startup page's reads.
+    let launchJobs = LaunchJobStore()
     private var recording = HistoryAccumulator(span: FlightRecorder.span)
     /// Saves what happened beside the history: apps launched and quit, busy
     /// processes, network changes, sleep and wake.
