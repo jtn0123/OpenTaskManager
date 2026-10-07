@@ -31,8 +31,8 @@ struct PowerDetail: View {
             let perApp = snapshot.measuresProcessEnergy != false
             if perApp { byApp() }
             TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: model.appGroups,
-                        metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01,
-                        unavailable: perApp ? nil : Unavailable.energy)
+                        metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, column: .power,
+                        minimum: 0.01, cutoff: "10 mW", unavailable: perApp ? nil : Unavailable.energy)
         }
     }
 
@@ -229,17 +229,16 @@ struct PowerDetail: View {
     /// Apps' estimated draw, stacked. Per-process energy only covers CPU and
     /// GPU work, so this sits below the whole-system figure.
     private func byApp() -> some View {
-        let apps = model.topApps(by: \.powerWatts, count: 5)
+        let apps = model.topApps(by: .power, count: 5)
         let other = AppModel.remainder(of: model.processPowerHistory.values, minus: apps.map(\.values))
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.watts($1.current), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.watts(other.last ?? 0))]
-        return ChartCard(title: "Power by app", trailing: "CPU and GPU work", tint: Theme.power, legend: legend,
-                         span: AppModel.processHistoryCapacity - 2) {
-            GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
-                      minimumCeiling: 1, axis: Format.watts, cornerRadius: 8)
+        // Over the same window as the graphs above, so they line up.
+        return ChartCard(title: "Power by app", trailing: "CPU and GPU work", tint: Theme.power, legend: legend) {
+            GraphView(series: series, glows: true, stacked: true, minimumCeiling: 1, axis: Format.watts, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.power)
         }
     }

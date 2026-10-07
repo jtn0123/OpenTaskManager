@@ -72,7 +72,7 @@ public enum NetworkGrouping {
 /// small as the set of apps actually using the network.
 public struct NetworkActivityHistory<Key: Hashable & Comparable & Sendable>: Sendable {
     /// Readings kept, the oldest dropped first.
-    public let capacity: Int
+    public private(set) var capacity: Int
     /// Readings held so far, up to `capacity`.
     public private(set) var length = 0
     /// Receive plus send per reading, oldest first, for every key that moved
@@ -102,7 +102,8 @@ public struct NetworkActivityHistory<Key: Hashable & Comparable & Sendable>: Sen
         var next: [Key: [Double]] = [:]
         next.reserveCapacity(totals.count + usage.count)
         for key in Set(totals.keys).union(usage.keys) {
-            var values = totals[key] ?? []
+            // Taken out, not copied, so the append doesn't copy the series.
+            var values = totals.removeValue(forKey: key) ?? []
             values.append(max(usage[key]?.total ?? 0, 0))
             if values.count < length {
                 values.insert(contentsOf: repeatElement(0, count: length - values.count), at: 0)
@@ -119,6 +120,22 @@ public struct NetworkActivityHistory<Key: Hashable & Comparable & Sendable>: Sen
         length = 0
         totals = [:]
         latest = [:]
+    }
+
+    /// Keeps `capacity` readings from now on: a window that has to cover as
+    /// many minutes as graphs on another cadence. Shrinking drops the oldest
+    /// readings, and any key that moved nothing in the ones left.
+    public mutating func resize(to capacity: Int) {
+        precondition(capacity > 0, "History capacity must be positive")
+        self.capacity = capacity
+        guard length > capacity else { return }
+        length = capacity
+        var kept: [Key: [Double]] = [:]
+        for (key, values) in totals {
+            let recent = Array(values.suffix(capacity))
+            if recent.contains(where: { $0 > 0 }) { kept[key] = recent }
+        }
+        totals = kept
     }
 
     /// A key's rates summed over the window, for ranking.

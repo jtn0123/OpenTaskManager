@@ -82,6 +82,32 @@ struct NetworkActivityTests {
         #expect(history.isEmpty)
     }
 
+    @Test func resizingKeepsTheNewestReadings() {
+        var history = NetworkActivityHistory<Int32>(capacity: 5)
+        history.append([1: usage(10)])
+        history.append([2: usage(5)])
+        history.append([2: usage(6)])
+        history.append([2: usage(7)])
+        // Shrunk to the last two readings: app 1 moved nothing in them, so it goes.
+        history.resize(to: 2)
+        #expect(history.capacity == 2)
+        #expect(history.length == 2)
+        #expect(history.totals == [2: [6, 7]])
+        #expect(history.latest.keys.sorted() == [2])
+        // Grown, it fills to the new size before dropping anything.
+        history.resize(to: 4)
+        history.append([3: usage(1)])
+        history.append([3: usage(2)])
+        history.append([3: usage(3)])
+        #expect(history.length == 4)
+        #expect(history.totals[2] == [7, 0, 0, 0])
+        #expect(history.totals[3] == [0, 1, 2, 3])
+        // A window already inside the new size is left as it is.
+        history.resize(to: 9)
+        #expect(history.length == 4)
+        #expect(history.totals[3] == [0, 1, 2, 3])
+    }
+
     @Test func hasMovedLooksOnlyAtTheNewestReadings() {
         var history = NetworkActivityHistory<Int32>(capacity: 10)
         #expect(!history.hasMoved(inLast: 3))

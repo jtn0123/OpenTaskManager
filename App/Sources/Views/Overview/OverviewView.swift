@@ -86,12 +86,13 @@ struct OverviewView: View {
         let networkRanks = TopNetworkCard.hasRanking(model.networkActivity)
         FillGrid(minimum: isNarrow ? 260 : 280) {
             TopAppsCard(title: "CPU", symbol: "cpu", color: Theme.cpu, groups: groups,
-                        metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) })
+                        metric: \.cpuPercent, format: { model.cpuScale.format($0.cpuPercent) }, column: .cpu)
             TopAppsCard(title: "Memory", symbol: "memorychip", color: Theme.memory, groups: groups,
-                        metric: { Double($0.memory) }, format: { Format.bytes($0.memory) })
+                        metric: { Double($0.memory) }, format: { Format.bytes($0.memory) }, column: .memory)
             if measuresEnergy {
                 TopAppsCard(title: "Energy", symbol: "bolt.fill", color: Theme.power, groups: groups,
-                            metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, minimum: 0.01)
+                            metric: \.powerWatts, format: { Format.watts($0.powerWatts) }, column: .power,
+                            minimum: 0.01, cutoff: "10 mW")
             }
             if networkRanks { TopNetworkCard() }
         }
@@ -208,8 +209,12 @@ struct OverviewView: View {
                 }
                 HStack(spacing: 18) { cpu; gpu }
             }
-            GraphView(series: series, capacity: 120, showsGrid: false, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts)
-                .frame(height: 72)
+            VStack(spacing: 3) {
+                GraphView(series: series, capacity: AppModel.shortGraphSpan, showsGrid: false, glows: true, stacked: true,
+                          minimumCeiling: 5, axis: Format.watts)
+                    .frame(height: 72)
+                TimeAxis(samples: AppModel.shortGraphSpan)
+            }
         }
     }
 }
@@ -262,9 +267,12 @@ private struct GaugeCard: View {
                     }
                     if !compact {
                         Spacer(minLength: 4)
+                        // The same minutes as the page's other graphs, and says so.
                         GraphView(series: [GraphSeries(values: history, color: color)], maxValue: historyMax,
-                                  capacity: 60, showsGrid: false, lineWidth: 1.4, glows: true)
-                            .frame(height: 30)
+                                  capacity: AppModel.shortGraphSpan, showsGrid: false, lineWidth: 1.4, glows: true)
+                            .frame(height: 24)
+                        TimeAxis(samples: AppModel.shortGraphSpan, showsNow: false)
+                            .padding(.top, 1)
                     }
                 }
             }
@@ -420,7 +428,10 @@ private struct CoreMap: View {
             Text("Cores").font(.headline)
             Spacer(minLength: 8)
             if isOpen {
-                Text("\(topology.brand) · load by core type").font(.explanation).foregroundStyle(.secondaryText).lineLimit(1)
+                // Its graph has no time axis, so the heading names its window.
+                let window = Format.timeSpan(Double(AppModel.shortGraphSpan) * model.updateSpeed.rawValue)
+                Text("\(topology.brand) · load by core type, last \(window)")
+                    .font(.explanation).foregroundStyle(.secondaryText).lineLimit(1)
             } else {
                 HStack(spacing: 12) {
                     ForEach(topology.tiers, id: \.level) { tier in
@@ -452,7 +463,8 @@ private struct CoreMap: View {
         let series = topology.tiers.map { tier in
             GraphSeries(values: model.tierHistory(level: tier.level), color: Theme.tier(tier.level), fill: tier.level == 0)
         }
-        return GraphView(series: series, maxValue: 1, capacity: 120, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
+        return GraphView(series: series, maxValue: 1, capacity: AppModel.shortGraphSpan, glows: true, axis: { Format.percent($0) },
+                         cornerRadius: 8)
             .plotFrame(tint: Theme.cpu, wash: (0.05, 0.05), border: 0.18)
     }
 
@@ -533,8 +545,11 @@ struct ThroughputCard: View {
                     }
                     // Fixed, so the graph doesn't shift as the numbers change width.
                     .frame(width: 112, alignment: .leading)
-                    graph(axis: nil)
-                        .frame(minHeight: 34, maxHeight: .infinity)
+                    VStack(spacing: 2) {
+                        graph(axis: nil)
+                            .frame(minHeight: 34, maxHeight: .infinity)
+                        TimeAxis(samples: AppModel.shortGraphSpan)
+                    }
                 }
             }
         } else {
@@ -544,8 +559,11 @@ struct ThroughputCard: View {
                     Stat(label: labels.0, number: rates.0, color: color, format: format)
                     Stat(label: labels.1, number: rates.1, color: secondaryColor, format: format)
                 }
-                graph(axis: format)
-                    .frame(height: 72)
+                VStack(spacing: 3) {
+                    graph(axis: format)
+                        .frame(height: 72)
+                    TimeAxis(samples: AppModel.shortGraphSpan)
+                }
             }
         }
     }
@@ -556,7 +574,7 @@ struct ThroughputCard: View {
                 GraphSeries(values: histories.0, color: color),
                 GraphSeries(values: histories.1, color: secondaryColor, fill: false, dashed: true),
             ],
-            capacity: 120, showsGrid: false, glows: true, minimumCeiling: minimumScale, axis: axis, axisUnits: units
+            capacity: AppModel.shortGraphSpan, showsGrid: false, glows: true, minimumCeiling: minimumScale, axis: axis, axisUnits: units
         )
     }
 

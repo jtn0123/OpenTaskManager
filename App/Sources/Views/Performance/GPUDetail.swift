@@ -23,7 +23,7 @@ struct GPUDetail: View {
                 if let memory = gpu.memoryInUse { memoryCard(memory) }
             }
             TopAppsCard(title: "GPU", symbol: "cpu.fill", color: Theme.gpu, groups: model.appGroups,
-                        metric: \.gpuFraction, format: { Format.percent($0.gpuFraction, digits: 1) }, minimum: 0.0005)
+                        metric: \.gpuFraction, format: { Format.percent($0.gpuFraction, digits: 1) }, column: .gpu)
             GPUBenchmarkCard()
                 .equatable()
         }
@@ -56,16 +56,16 @@ struct GPUDetail: View {
     }
 
     private func byApp() -> some View {
-        let apps = model.topApps(by: \.gpuFraction, count: 5)
+        let apps = model.topApps(by: .gpu, count: 5)
         let other = AppModel.remainder(of: model.processGPUHistory.values, minus: apps.map(\.values))
         let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
-        return ChartCard(title: "GPU time by app", trailing: "share of GPU time", tint: Theme.gpu, legend: legend,
-                         span: AppModel.processHistoryCapacity - 2) {
-            GraphView(series: series, capacity: AppModel.processHistoryCapacity - 2, glows: true, stacked: true,
+        // Over the same window as the graphs around it, so they line up.
+        return ChartCard(title: "GPU time by app", trailing: "share of GPU time", tint: Theme.gpu, legend: legend) {
+            GraphView(series: series, glows: true, stacked: true,
                       minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.gpu)
         }

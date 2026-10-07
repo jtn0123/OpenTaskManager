@@ -81,14 +81,16 @@ struct NetworkAppsSection: View {
         let series = ranking.bands.enumerated().map { GraphSeries(values: history.totals[$1] ?? [], color: Theme.series($0)) }
             + [GraphSeries(values: other, color: Theme.other)]
         let peak = ranking.rows.compactMap { history.latest[$0]?.total }.max() ?? 0
+        // The throughput graph's window, in the store's readings.
+        let span = NetworkActivityStore.graphSpan(interval: model.updateSpeed.rawValue)
         return VStack(alignment: .leading, spacing: 10) {
             VStack(spacing: 3) {
-                GraphView(series: series, capacity: NetworkActivityStore.graphSpan, glows: true, stacked: true,
+                GraphView(series: series, capacity: span, glows: true, stacked: true,
                           minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits, cornerRadius: 8)
                     .chartFrame(height: DetailGraph.secondary, tint: Theme.network)
                     // Scroll across the store's interval, not the main sampler's.
                     .environment(\.sampleInterval, NetworkActivityStore.refreshSeconds)
-                TimeAxis(samples: NetworkActivityStore.graphSpan, interval: NetworkActivityStore.refreshSeconds)
+                TimeAxis(samples: span, interval: NetworkActivityStore.refreshSeconds)
             }
             VStack(spacing: 4) {
                 columnTitles

@@ -47,47 +47,117 @@ struct MetricStrip<Content: View>: View {
 }
 
 /// The apps using the most of one resource, with bars relative to the leader.
+///
+/// Only apps whose figure reads as more than zero get a row; under them one
+/// line says the rest are idle, and Show all opens Processes sorted by the
+/// same figure. The list keeps room for the most rows it needed lately
+/// (`TopListRoom`), so the card doesn't change height as apps go idle and
+/// busy from one tick to the next.
 struct TopAppsCard: View {
+    private static let limit = 6
+    private static let spacing: CGFloat = 4
+
     @Environment(AppModel.self) private var model
+    @AppStorage("page") private var page: Page = .overview
+    /// The room kept for rows, worked out while the body is, like `AutoScaleBounds`.
+    @State private var room = TopListRoomHolder(limit: TopAppsCard.limit)
     var title: String
     var symbol: String
     var color: Color
     var groups: [ProcessNode]
     var metric: (ProcessTotals) -> Double
     var format: (ProcessTotals) -> String
-    /// Values below this round to zero and aren't worth a row.
+    /// The Processes column Show all sorts by.
+    var column: ProcessSortKey
+    /// Values at or below this aren't worth a row even where they don't read
+    /// as zero, and `cutoff` says so: Energy leaves out apps under 10 mW.
     var minimum: Double = 0
+    var cutoff: String?
     /// Why there's no ranking, when this Mac doesn't measure the metric at
     /// all. Without it, every app would read 0 and the card "quiet".
     var unavailable: String?
 
     var body: some View {
-        let ranked = unavailable == nil ? groups.filter { metric($0.totals) > minimum } : []
-        let top = ranked.sorted { metric($0.totals) > metric($1.totals) }.prefix(6)
+        let ranked = unavailable == nil ? groups.filter { $0.process != nil && metric($0.totals) > minimum } : []
+        let sorted = ranked.sorted { metric($0.totals) > metric($1.totals) }
+        let zero = format(ProcessTotals())
+        let top = sorted.prefix(TopListRoom.listed(sorted.lazy.map { format($0.totals) }, zero: zero, limit: Self.limit))
         let peak = top.first.map { metric($0.totals) } ?? 1
         Card {
+            header
+            if let unavailable {
+                UnavailableNote(text: unavailable)
+            } else {
+                VStack(alignment: .leading, spacing: Self.spacing) {
+                    ForEach(Array(top), id: \.id) { group in
+                        if let process = group.process {
+                            ProcessBarRow(
+                                icon: IconCache.icon(for: process, app: model.regularApps[process.pid]),
+                                name: model.displayName(for: process),
+                                value: format(group.totals),
+                                fraction: metric(group.totals) / max(peak, .leastNonzeroMagnitude),
+                                color: color
+                            )
+                            .frame(height: ProcessBarRow.height)
+                        }
+                    }
+                    if top.count < Self.limit {
+                        Text(top.isEmpty ? "Every app is idle" : "Everything else is idle")
+                            .font(.explanation)
+                            .foregroundStyle(.secondaryText)
+                            .padding(.horizontal, 6)
+                            .frame(height: ProcessBarRow.height)
+                            .help(cutoff.map { "Apps under \($0) aren't listed." } ?? "Apps that would read \(zero) aren't listed.")
+                    }
+                }
+                // With nothing listed, the line sits in the middle of the room
+                // kept, as the card's empty state.
+                .frame(maxWidth: .infinity, minHeight: Self.height(rows: room.rows(listed: top.count)),
+                       alignment: top.isEmpty ? .center : .topLeading)
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
             Label("Top \(title)", systemImage: symbol)
                 .font(.headline)
                 .foregroundStyle(color)
-            if let unavailable {
-                UnavailableNote(text: unavailable)
-            } else if top.isEmpty {
-                Text("Quiet right now.").font(.callout).foregroundStyle(.secondaryText)
-            }
-            VStack(spacing: 4) {
-                ForEach(Array(top), id: \.id) { group in
-                    if let process = group.process {
-                        ProcessBarRow(
-                            icon: IconCache.icon(for: process, app: model.regularApps[process.pid]),
-                            name: model.displayName(for: process),
-                            value: format(group.totals),
-                            fraction: metric(group.totals) / max(peak, .leastNonzeroMagnitude),
-                            color: color
-                        )
-                    }
-                }
+            Spacer(minLength: 8)
+            if unavailable == nil {
+                Button("Show all", action: showAll)
+                    .buttonStyle(.link)
+                    .font(.explanation)
+                    .help("Every app in Processes, sorted by \(title)")
             }
         }
+    }
+
+    private static func height(rows: Int) -> CGFloat {
+        CGFloat(rows) * ProcessBarRow.height + CGFloat(max(rows - 1, 0)) * spacing
+    }
+
+    /// Every app, busiest first, in the Processes table.
+    private func showAll() {
+        UserDefaults.standard.set(column.rawValue, forKey: "processSortKey")
+        UserDefaults.standard.set(false, forKey: "processSortAscending")
+        page = .processes
+    }
+}
+
+/// A `TopListRoom` kept across a card's updates without being observed: the
+/// room is worked out while the card's body is, once per sample, and
+/// changing it mustn't ask for another pass.
+@MainActor
+final class TopListRoomHolder {
+    private var room: TopListRoom
+
+    init(limit: Int) {
+        room = TopListRoom(limit: limit)
+    }
+
+    func rows(listed: Int) -> Int {
+        room.update(listed: listed, at: ProcessInfo.processInfo.systemUptime)
     }
 }
 

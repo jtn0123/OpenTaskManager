@@ -226,19 +226,24 @@ struct GraphPanel: View {
     }
 }
 
-/// "5 min ago … now" under a scrolling graph. The span follows the update
-/// speed, so it stays true when sampling is faster or slower.
+/// "Last 5 min … now" under a scrolling graph: the window it covers, named at
+/// its oldest end, so graphs stacked on a page say outright that they cover
+/// the same minutes. The span follows the update speed, so it stays true
+/// when sampling is faster or slower.
 struct TimeAxis: View {
     @Environment(AppModel.self) private var model
     var samples: Int
     /// Seconds per sample for a graph on its own cadence; nil follows the update speed.
     var interval: TimeInterval?
 
+    /// Off under a graph too narrow for both ends' labels.
+    var showsNow = true
+
     var body: some View {
         HStack {
-            Text("\(Format.timeSpan(Double(samples) * (interval ?? model.updateSpeed.rawValue))) ago")
-            Spacer()
-            Text("now")
+            Text("Last \(Format.timeSpan(Double(samples) * (interval ?? model.updateSpeed.rawValue)))")
+            Spacer(minLength: 0)
+            if showsNow { Text("now") }
         }
         .font(.metadata)
         .foregroundStyle(.secondaryText)
@@ -843,6 +848,10 @@ final class CardSurfaceView: NSView {
 /// A row in a "top processes" list: icon, name, value, and a bar showing
 /// the value relative to the busiest row.
 struct ProcessBarRow: View {
+    /// A row's height: the icon or a line of table text, whichever is
+    /// taller, and the padding, so a list can keep room for rows it isn't showing.
+    static let height = max(16, ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .callout)))) + 6
+
     var icon: NSImage
     var name: String
     var value: String

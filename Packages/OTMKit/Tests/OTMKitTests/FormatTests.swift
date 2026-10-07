@@ -89,6 +89,44 @@ struct HistoryTests {
         #expect(history.last == 7)
     }
 
+    @Test func appendReturnsTheValueItDrops() {
+        var history = History<Int>(capacity: 3)
+        // Nothing is dropped while there's room.
+        #expect((1...3).map { history.append($0) } == [nil, nil, nil])
+        // Then the oldest goes, around the ring and around again.
+        #expect((4...8).map { history.append($0) } == [1, 2, 3, 4, 5])
+        #expect(history.values == [6, 7, 8])
+        history.removeAll()
+        #expect(history.append(9) == nil)
+    }
+
+    @Test func runningSumFollowsTheWindow() {
+        var sum = RunningSum()
+        #expect(sum.value == 0)
+        sum.add(1.5)
+        sum.add(0)
+        sum.add(2.5)
+        #expect(sum.value == 4)
+        sum.remove(1.5)
+        sum.remove(0)
+        #expect(sum.value == 2.5)
+    }
+
+    @Test func runningSumIsExactlyZeroOnceOnlyZerosRemain() {
+        var sum = RunningSum()
+        // 1 is lost beside 1e20, so plain arithmetic ends at -1.
+        sum.add(1e20)
+        sum.add(1)
+        sum.remove(1e20)
+        sum.remove(1)
+        #expect(sum.value == 0)
+        sum.add(0)
+        #expect(sum.value == 0)
+        // And it starts again from nothing.
+        sum.add(0.25)
+        #expect(sum.value == 0.25)
+    }
+
     @Test func removeAllResets() {
         var history = History<Int>(capacity: 2)
         for value in 1...5 { history.append(value) }
