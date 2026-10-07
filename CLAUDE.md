@@ -217,14 +217,14 @@ build, `-sensorFixture <file>` loads a recording from
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
   Scope first, then PID, then Protocol; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
-  The Startup table does too, through the shared `FittingColumn`,
-  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting):
-  Launches first, then Publisher, Kind, Memory and CPU, so Name and Status
-  keep their room; Kind says Agent or Daemon when narrow.
   Its six summary cards fold into a strip of chips (rows from
   `GridMath.stripRows`) when they don't fit one row or the details are open,
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.
+  The Startup table hides columns to fit too, through the shared `FittingColumn`,
+  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting):
+  Launches first, then Publisher, Kind, Memory and CPU, so Name and Status
+  keep their room; Kind says Agent or Daemon when narrow.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its

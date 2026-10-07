@@ -409,7 +409,7 @@ private struct JobUsageNow: View {
     var pid: Int32
 
     var body: some View {
-        if let point = model.processHistory[pid]?.last {
+        if let point = model.latestProcessPoint(pid: pid) {
             Text("\(model.cpuScale.format(point.cpuPercent)) CPU · \(Format.bytes(point.memory))")
                 .monospacedDigit()
                 .help("PID \(String(pid)) in the latest sample, as the Processes page shows it")

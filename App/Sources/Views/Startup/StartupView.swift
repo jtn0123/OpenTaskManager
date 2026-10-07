@@ -223,9 +223,6 @@ struct StartupView: View {
 
     private func visibleRows(_ items: [LaunchItem], watch: LaunchJobWatch) -> [StartupRow] {
         let query = search.trimmingCharacters(in: .whitespaces)
-        // The samples are read only while the table sorts by them; otherwise
-        // a tick would rebuild every row for figures only their cells show.
-        let samples = sortsByUsage ? model.processHistory : [:]
         return items.compactMap { item -> StartupRow? in
             let health = watch.health(of: item)
             guard filter.includes(item, health: health),
@@ -234,7 +231,9 @@ struct StartupView: View {
                   })
             else { return nil }
             var row = StartupRow(item: item, health: health)
-            if let point = item.pid.flatMap({ samples[$0]?.last }) {
+            // The samples are read only while the table sorts by them; otherwise
+            // a tick would rebuild every row for figures only their cells show.
+            if sortsByUsage, let point = item.pid.flatMap(model.latestProcessPoint) {
                 row.cpu = point.cpuPercent
                 row.memory = point.memory
             }
@@ -524,7 +523,7 @@ private struct JobUsage: View {
 
     var body: some View {
         if let pid {
-            if let point = model.processHistory[pid]?.last {
+            if let point = model.latestProcessPoint(pid: pid) {
                 Text(figure == .cpu ? model.cpuScale.format(point.cpuPercent) : Format.bytes(point.memory))
                     .monospacedDigit()
                     .frame(maxWidth: .infinity, alignment: .trailing)

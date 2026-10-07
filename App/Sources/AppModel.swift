@@ -259,6 +259,9 @@ final class AppModel {
     /// By PID and start time, so a PID macOS gives to a later process starts
     /// a graph of its own rather than carrying on the ended one's.
     private(set) var processHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
+    /// The latest tick's processes by PID, for pages that know only a PID
+    /// (launchd's, on Startup).
+    private(set) var processIdentityByPID: [Int32: ProcessIdentity] = [:]
     /// Each user's processes summed, for the Users page.
     private(set) var users: [UserUsage] = []
     private(set) var userHistory: [UInt32: UserHistory] = [:]
@@ -455,6 +458,8 @@ final class AppModel {
 
         var processes: [ProcessIdentity: History<ProcessPoint>] = [:]
         processes.reserveCapacity(snapshot.processes.count)
+        var identities: [Int32: ProcessIdentity] = [:]
+        identities.reserveCapacity(snapshot.processes.count)
         var totalGPU = 0.0
         var totalPower = 0.0
         var totalMemory = 0.0
@@ -463,6 +468,7 @@ final class AppModel {
         var anyNeural = false
         for process in snapshot.processes {
             let identity = process.identity
+            identities[process.pid] = identity
             var history = processHistory[identity] ?? History(capacity: Self.processHistoryCapacity)
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
                                      gpuFraction: process.gpuFraction ?? 0, powerWatts: process.powerWatts ?? 0)
@@ -477,6 +483,7 @@ final class AppModel {
         }
         noteWhatProcessesReport(snapshot, anyPower: anyPower, anyGPU: anyGPU, anyNeural: anyNeural)
         processHistory = processes
+        processIdentityByPID = identities
         processGPUHistory.append(totalGPU)
         processPowerHistory.append(totalPower)
         processMemoryHistory.append(totalMemory)
@@ -559,6 +566,11 @@ final class AppModel {
 
     func process(_ pid: Int32) -> ProcessSample? {
         snapshot?.processes.first { $0.pid == pid }
+    }
+
+    /// The latest figures of the process running now with this PID.
+    func latestProcessPoint(pid: Int32) -> ProcessPoint? {
+        processIdentityByPID[pid].flatMap { processHistory[$0]?.last }
     }
 
     func displayName(for process: ProcessSample) -> String {
