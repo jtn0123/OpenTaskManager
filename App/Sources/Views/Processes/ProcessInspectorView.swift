@@ -89,7 +89,9 @@ struct ProcessInspectorView: View {
                     GraphPanel(
                         title: "Power",
                         trailing: process.powerWatts.map(Format.watts) ?? "—",
-                        series: [GraphSeries(values: history.map(\.powerWatts), color: Theme.power)],
+                        // Unmeasured power is kept as 0 W, so draw nothing (the
+                        // graph's "not recorded" shading) rather than a zero line.
+                        series: [GraphSeries(values: process.powerWatts == nil ? [] : history.map(\.powerWatts), color: Theme.power)],
                         height: 60,
                         minimumCeiling: 0.5,
                         axis: Format.watts,
