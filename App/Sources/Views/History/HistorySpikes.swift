@@ -44,19 +44,14 @@ enum HistorySpikeStyle {
                 named.append((contributor.name, [contributor]))
             }
         }
-        let shown = named.prefix(count)
+        // A figure that reads as zero ("airportd 0%") says nothing, so it's
+        // left out unless nothing else is left.
+        let zero = text(0, measure: measure)
+        let busy = named.filter { text(amount($0.members, measure: measure), measure: measure) != zero }
+        let shown = (busy.isEmpty ? Array(named.prefix(1)) : busy).prefix(count)
         let parts = shown.map { group in
             let name = group.members.count > 1 ? "\(group.members.count) × \(group.name)" : group.name
-            switch measure {
-            case .cpu:
-                let shares = group.members.compactMap(\.share)
-                let figure = shares.count == group.members.count ? shares.reduce(0, +)
-                    : group.members.reduce(0) { $0 + $1.average } / 100
-                return "\(name) \(Format.percent(figure))"
-            // Peaks added up: the most they could have held together.
-            case .memory: return "\(name) \(Format.bytes(group.members.reduce(0) { $0 + $1.peak }))"
-            case .disk: return "\(name) \(Format.bytesPerSecond(group.members.reduce(0) { $0 + $1.average }))"
-            }
+            return "\(name) \(text(amount(group.members, measure: measure), measure: measure))"
         }
         let tail = switch measure {
         case .cpu: shown.allSatisfy { $0.members.allSatisfy { $0.share != nil } } ? " of the CPU time" : " of a core"
@@ -64,6 +59,27 @@ enum HistorySpikeStyle {
         case .disk: " on average"
         }
         return parts.joined(separator: ", ") + tail
+    }
+
+    /// What processes of one name used together: CPU as their share of the
+    /// whole (or of a core, where a share is missing), memory as their peaks
+    /// added up (the most they could have held together), disk on average.
+    private static func amount(_ members: [SpikeContributor], measure: SpikeContributor.Measure) -> Double {
+        switch measure {
+        case .cpu:
+            let shares = members.compactMap(\.share)
+            return shares.count == members.count ? shares.reduce(0, +) : members.reduce(0) { $0 + $1.average } / 100
+        case .memory: return members.reduce(0) { $0 + $1.peak }
+        case .disk: return members.reduce(0) { $0 + $1.average }
+        }
+    }
+
+    private static func text(_ amount: Double, measure: SpikeContributor.Measure) -> String {
+        switch measure {
+        case .cpu: Format.percent(amount)
+        case .memory: Format.bytes(amount)
+        case .disk: Format.bytesPerSecond(amount)
+        }
     }
 
     /// The contributors one a line, with PIDs, for a tooltip.
