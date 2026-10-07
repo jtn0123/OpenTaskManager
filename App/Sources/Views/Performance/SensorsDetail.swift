@@ -73,7 +73,7 @@ struct SensorsDetail: View {
             legend.append(LegendItem(name: kind.title, color: Theme.sensor(kind), value: Format.celsius(celsius)))
         }
         return ChartCard(title: "Temperatures", trailing: sensors.hottest(.chip).map { "chip \(Format.celsius($0))" } ?? "",
-                         tint: Theme.thermal, legend: legend) {
+                         tint: Theme.thermal, legend: legend, offersFit: true) {
             GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.primary, tint: Theme.thermal)
         }

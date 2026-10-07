@@ -7,6 +7,8 @@ import SwiftUI
 /// redraws when nettop is read every 3 s, not on every tick.
 struct NetworkAppsSection: View {
     @Environment(AppModel.self) private var model
+    /// The page's window, in the main sampler's samples (`GraphFit`).
+    @Environment(\.graphWindow) private var window
     @AppStorage("networkByProcess") private var byProcess = false
 
     private static let bands = 5
@@ -82,7 +84,7 @@ struct NetworkAppsSection: View {
             + [GraphSeries(values: other, color: Theme.other)]
         let peak = ranking.rows.compactMap { history.latest[$0]?.total }.max() ?? 0
         // The throughput graph's window, in the store's readings.
-        let span = NetworkActivityStore.graphSpan(interval: model.updateSpeed.rawValue)
+        let span = NetworkActivityStore.graphSpan(interval: model.updateSpeed.rawValue, samples: window)
         return VStack(alignment: .leading, spacing: 10) {
             VStack(spacing: 3) {
                 GraphView(series: series, capacity: span, glows: true, stacked: true,
@@ -90,7 +92,8 @@ struct NetworkAppsSection: View {
                     .chartFrame(height: DetailGraph.secondary, tint: Theme.network)
                     // Scroll across the store's interval, not the main sampler's.
                     .environment(\.sampleInterval, NetworkActivityStore.refreshSeconds)
-                TimeAxis(samples: span, interval: NetworkActivityStore.refreshSeconds)
+                // Named as the page's window: the store's readings round a fitted one to 3 s.
+                TimeAxis()
             }
             VStack(spacing: 4) {
                 columnTitles

@@ -204,6 +204,17 @@ enum Unavailable {
     static let gpuUtilizationDetail = "This GPU's driver doesn't report how busy it is."
     static let energy = "This Mac doesn't report energy use per app."
     static let processNetwork = "Traffic per app isn't available: nettop couldn't run."
+    /// Marks a reading this Mac never gives where a graph or figure would be,
+    /// so it isn't taken for one not recorded yet (`UnrecordedLook`'s hatch).
+    static let symbol = "slash.circle"
+}
+
+extension GPUSample {
+    /// The GPU's name where it says more than the "GPU" beside it: a
+    /// paravirtual GPU's name is just that.
+    var tellingName: String? {
+        name.caseInsensitiveCompare("GPU") == .orderedSame ? nil : name
+    }
 }
 
 /// One entry in a chart legend: swatch, name and the current value.
@@ -245,8 +256,11 @@ struct ChartCard<Chart: View>: View {
     var trailing = ""
     var tint: Color
     var legend: [LegendItem] = []
-    /// Samples across the chart, for its time axis; nil for charts that aren't over time.
-    var span: Int? = AppModel.graphSpan
+    /// A chart over time, with a time axis for the page's window under it.
+    var timed = true
+    /// The detail's main graph, whose time axis holds the page's Fit
+    /// collected data toggle (`GraphFitToggle`).
+    var offersFit = false
     @ViewBuilder var chart: Chart
 
     var body: some View {
@@ -258,7 +272,7 @@ struct ChartCard<Chart: View>: View {
             }
             VStack(spacing: 3) {
                 chart
-                if let span { TimeAxis(samples: span) }
+                if timed { TimeAxis(offersFit: offersFit) }
             }
             if !legend.isEmpty { ChartLegend(items: legend) }
         }

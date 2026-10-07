@@ -5,6 +5,8 @@ struct CPUDetail: View {
     @Environment(AppModel.self) private var model
     @AppStorage("cpuGraphMode") private var mode = "overall"
     @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
+    /// The page's window, which every graph here covers (`GraphFit`).
+    @Environment(\.graphWindow) private var window
     /// The auto-scaled graphs' bounds, held between samples.
     @State private var bounds = AutoScaleBounds()
     var snapshot: SystemSnapshot
@@ -86,7 +88,7 @@ struct CPUDetail: View {
     private func graph(_ topology: CPUTopology) -> some View {
         // Every core's graph shares one scale, so they compare at a glance.
         let cores = mode == "cores" ? model.coreHistory.map(\.values) : []
-        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: AppModel.graphSpan) }.max() ?? 0)
+        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0)
         let title = mode == "cores" ? "Utilization of each core" : mode == "tiers" ? "Utilization by core type" : "Utilization"
         return Card(tint: Theme.cpu) {
             CPUGraphHeader(title: title, note: mode == "cores" ? coreScaleNote(coreTop) : "")
@@ -96,8 +98,8 @@ struct CPUDetail: View {
             default:
                 let values = model.cpuHistory.values
                 GraphPanel(title: "", trailing: "", series: [GraphSeries(values: values, color: Theme.cpu)],
-                           maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: AppModel.graphSpan)),
-                           height: DetailGraph.primary, axis: CPUGraphScale.axisLabel, axisNote: axisNote)
+                           maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: window)),
+                           height: DetailGraph.primary, axis: CPUGraphScale.axisLabel, axisNote: axisNote, offersFit: true)
             }
         }
     }
@@ -154,7 +156,7 @@ struct CPUDetail: View {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
         // The same window as the utilization graph above, so the two line up.
-        let capacity = AppModel.graphSpan
+        let capacity = window
         // The stack's top band is the whole, which the scale has to hold.
         let stackTop = GraphMath.stack(series.map { Array($0.values.suffix(capacity + 1)) }).last ?? []
         return ChartCard(title: "CPU by app", trailing: "share of the whole CPU", tint: Theme.cpu, legend: legend) {
@@ -174,13 +176,15 @@ struct CPUDetail: View {
     /// One graph per core type, on a shared scale.
     private func tierGraphs(_ topology: CPUTopology) -> some View {
         let histories = topology.tiers.map { model.tierHistory(level: $0.level) }
-        let top = top("tiers", peak: histories.map { AutoScaleBounds.peak($0, capacity: AppModel.graphSpan) }.max() ?? 0)
+        let top = top("tiers", peak: histories.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0)
         return VStack(spacing: 10) {
             ForEach(topology.tiers.indices, id: \.self) { index in
                 let tier = topology.tiers[index]
+                // The last graph's axis holds the fit toggle, at the foot of the card as in the other forms.
                 GraphPanel(title: "\(tier.name) cores (\(tier.logicalCPUs))", trailing: Format.percent(tierUsage(tier.level)),
                            series: [GraphSeries(values: histories[index], color: Theme.tier(tier.level))],
-                           maxValue: top, height: DetailGraph.compact, axis: CPUGraphScale.axisLabel, axisNote: axisNote)
+                           maxValue: top, height: DetailGraph.compact, axis: CPUGraphScale.axisLabel, axisNote: axisNote,
+                           offersFit: index == topology.tiers.count - 1)
             }
         }
     }
@@ -198,7 +202,7 @@ struct CPUDetail: View {
                     }
                 }
             }
-            TimeAxis(samples: AppModel.graphSpan)
+            TimeAxis(offersFit: true)
                 .padding(.top, -6)
         }
     }

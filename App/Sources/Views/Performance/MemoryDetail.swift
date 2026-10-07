@@ -42,7 +42,8 @@ struct MemoryDetail: View {
                 LegendItem(name: "Compressed", color: Theme.compressed, value: Format.bytes(memory.compressed)),
                 LegendItem(name: "Cached files", color: Theme.cached, value: Format.bytes(memory.cached)),
                 LegendItem(name: "Free", color: Theme.other.opacity(0.35), value: Format.bytes(memory.free)),
-            ]
+            ],
+            offersFit: true
         ) {
             GraphView(
                 series: [

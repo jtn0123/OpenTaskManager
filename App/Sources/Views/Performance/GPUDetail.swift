@@ -29,8 +29,9 @@ struct GPUDetail: View {
         }
     }
 
+    /// The name and cores; a paravirtual GPU's name, "GPU", would only repeat the title.
     private var subtitle: String {
-        gpu.coreCount.map { "\(gpu.name) · \($0) cores" } ?? gpu.name
+        [gpu.tellingName, gpu.coreCount.map { "\($0) cores" }].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func utilization(_ busy: Double) -> some View {
@@ -42,7 +43,7 @@ struct GPUDetail: View {
         if let tiler = gpu.tilerUtilization {
             legend.append(LegendItem(name: "Tiler (geometry)", color: Self.tiler, value: Format.percent(tiler)))
         }
-        return ChartCard(title: "Utilization", trailing: Format.percent(busy), tint: Theme.gpu, legend: legend) {
+        return ChartCard(title: "Utilization", trailing: Format.percent(busy), tint: Theme.gpu, legend: legend, offersFit: true) {
             GraphView(
                 series: [
                     GraphSeries(values: model.gpuHistory[gpu.id]?.values ?? [], color: Theme.gpu),
@@ -63,8 +64,10 @@ struct GPUDetail: View {
         let legend = apps.enumerated().map {
             LegendItem(name: $1.name, color: Theme.series($0), value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
-        // Over the same window as the graphs around it, so they line up.
-        return ChartCard(title: "GPU time by app", trailing: "share of GPU time", tint: Theme.gpu, legend: legend) {
+        // Over the same window as the graphs around it, so they line up. The
+        // first graph where utilization isn't reported, so it holds the toggle.
+        return ChartCard(title: "GPU time by app", trailing: "share of GPU time", tint: Theme.gpu, legend: legend,
+                         offersFit: gpu.deviceUtilization == nil) {
             GraphView(series: series, glows: true, stacked: true,
                       minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.gpu)

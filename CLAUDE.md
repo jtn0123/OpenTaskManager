@@ -149,6 +149,12 @@ Manager OG or any other proprietary task manager.
   history is as long, `Float`, appended in place, ranked by running totals,
   `ProcessTotal` of OTMKit's `RunningSum`, never re-summed), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
   their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump.
+  Performance's Fit collected data toggle (`GraphFit`, in the main graph's
+  time axis until the window is nearly full) narrows that one window, through
+  the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
+  never per tick, so the graphs keep scrolling. A reading a Mac never gives
+  (a VM GPU's load) takes `Unavailable.symbol` and a short label, never the
+  unrecorded hatch. The Overview keeps one card order at every width.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills
   every row edge to edge and evens out card heights, so a card that isn't
   available on this Mac (no GPU, no power sensors) never leaves a hole.

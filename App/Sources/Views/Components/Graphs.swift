@@ -204,7 +204,10 @@ struct GraphPanel: View {
     var axisUnits: GraphMath.AxisUnits = .plain
     /// Said after the top axis label (see `GraphView.axisNote`).
     var axisNote: String?
-    var capacity = AppModel.graphSpan
+    /// Samples across; nil takes the page's window, as `GraphView` does.
+    var capacity: Int?
+    /// Puts the page's Fit collected data toggle in the time axis (`GraphFitToggle`).
+    var offersFit = false
 
     var body: some View {
         let tint = series.last?.color ?? .accentColor
@@ -221,7 +224,7 @@ struct GraphPanel: View {
                       axisNote: axisNote, cornerRadius: 8)
                 .frame(height: height)
                 .plotFrame(tint: tint, wash: (0.12, 0.02), border: 0.30)
-            TimeAxis(samples: capacity)
+            TimeAxis(samples: capacity, offersFit: offersFit)
         }
     }
 }
@@ -229,25 +232,36 @@ struct GraphPanel: View {
 /// "Last 5 min … now" under a scrolling graph: the window it covers, named at
 /// its oldest end, so graphs stacked on a page say outright that they cover
 /// the same minutes. The span follows the update speed, so it stays true
-/// when sampling is faster or slower.
+/// when sampling is faster or slower, and the page's window when
+/// Performance fits its graphs to what's been collected.
 struct TimeAxis: View {
     @Environment(AppModel.self) private var model
-    var samples: Int
+    @Environment(\.graphWindow) private var window
+    @Environment(\.offersGraphFit) private var fitOffered
+    /// Samples across; nil takes the page's window (`graphWindow`).
+    var samples: Int?
     /// Seconds per sample for a graph on its own cadence; nil follows the update speed.
     var interval: TimeInterval?
 
     /// Off under a graph too narrow for both ends' labels.
     var showsNow = true
+    /// The page's main graph: its axis holds the Fit collected data toggle
+    /// while the page offers one, so the window's label and the control
+    /// that changes it sit together.
+    var offersFit = false
 
     var body: some View {
-        HStack {
-            Text("Last \(Format.timeSpan(Double(samples) * (interval ?? model.updateSpeed.rawValue)))")
+        HStack(spacing: 10) {
+            Text("Last \(Format.timeSpan(Double(samples ?? window) * (interval ?? model.updateSpeed.rawValue)))")
+            if offersFit, fitOffered { GraphFitToggle() }
             Spacer(minLength: 0)
             if showsNow { Text("now") }
         }
         .font(.metadata)
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 2)
+        // As tall with the toggle as without, so the page doesn't move when it goes.
+        .frame(minHeight: offersFit ? GraphFitToggle.height : nil)
     }
 }
 
