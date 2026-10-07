@@ -21,9 +21,10 @@ struct GraphSeries {
 /// Drawn by `StreamGraphView` with Core Animation. Each sample rebuilds the
 /// paths once, and the render server then scrolls them one step to the left
 /// over the sampling interval, so the line streams in instead of jumping.
-/// Until the window fills, the stretch before the first sample is shaded and
-/// hatched, a dashed line marks where recording started, and a graph with an
-/// axis says how much it has collected, so the gap isn't read as zero.
+/// Until the window fills, the stretch before the first sample gets a neutral
+/// wash with a faint hatch and, where it fits, a "Not recorded yet" label; a
+/// dashed line marks where recording started, and a graph with an axis says
+/// how much it has collected, so the gap isn't read as zero.
 struct GraphView: NSViewRepresentable {
     var series: [GraphSeries]
     /// Fixed top of the scale; nil auto-scales to the visible data.
@@ -44,6 +45,8 @@ struct GraphView: NSViewRepresentable {
     var axis: ((Double) -> String)?
     /// Units the axis is labelled in, so its top lands on a round number.
     var axisUnits: GraphMath.AxisUnits = .plain
+    /// Said after the top label, such as "auto scale" for a top that isn't fixed.
+    var axisNote: String?
     var cornerRadius: CGFloat = 0
 
     func makeNSView(context: Context) -> StreamGraphView {
@@ -57,7 +60,7 @@ struct GraphView: NSViewRepresentable {
             },
             maxValue: maxValue, capacity: max(capacity, 2), showsGrid: showsGrid, lineWidth: lineWidth, glows: glows,
             stacked: stacked, minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling,
-            axis: axis, axisUnits: axisUnits, cornerRadius: cornerRadius
+            axis: axis, axisUnits: axisUnits, axisNote: axisNote, cornerRadius: cornerRadius
         )
         view.update(configuration, interval: context.environment.sampleInterval, streams: context.environment.streamsGraphs)
     }
@@ -83,6 +86,7 @@ final class StreamGraphView: NSView {
         var maximumCeiling: Double
         var axis: ((Double) -> String)?
         var axisUnits: GraphMath.AxisUnits
+        var axisNote: String?
         var cornerRadius: CGFloat
     }
 
@@ -103,13 +107,15 @@ final class StreamGraphView: NSView {
             line.lineJoin = .round
             line.shadowOffset = .zero
             head.bounds = CGRect(x: 0, y: 0, width: 12, height: 12)
-            halo.frame = head.bounds
-            halo.cornerRadius = 6
+            // A tight halo and a faint shadow: enough to find the newest
+            // value, not so much that it blurs the line it sits on.
+            halo.frame = head.bounds.insetBy(dx: 1.5, dy: 1.5)
+            halo.cornerRadius = 4.5
             dot.frame = head.bounds.insetBy(dx: 3, dy: 3)
             dot.cornerRadius = 3
             dot.shadowOffset = .zero
-            dot.shadowRadius = 4
-            dot.shadowOpacity = 1
+            dot.shadowRadius = 1.5
+            dot.shadowOpacity = 0.45
             dot.shadowPath = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: 6, height: 6), transform: nil)
             head.addSublayer(halo)
             head.addSublayer(dot)
@@ -126,15 +132,19 @@ final class StreamGraphView: NSView {
         var tangents: [CGFloat]
     }
 
-    /// Horizontal distance between the hatch's diagonals.
-    private static let hatchSpacing: CGFloat = 6
+    /// Horizontal distance between the hatch's diagonals: wide and faint,
+    /// so the unrecorded stretch reads as empty rather than as texture.
+    private static let hatchSpacing: CGFloat = 10
     private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+    private static let gapText = "Not recorded yet"
+    private static let gapFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+    private static let gapTextWidth = ceil(NSAttributedString(string: gapText, attributes: [.font: gapFont]).size().width)
 
     private let plot = CALayer()
     private let grid = CAShapeLayer()
     private let scroller = CALayer()
     private let columns = CAShapeLayer()
-    /// The stretch before the first sample, dimmed and hatched. It lives in
+    /// The stretch before the first sample, washed and faintly hatched. It lives in
     /// the scroller, so it slides with the data; the hatch is built once per
     /// size and each sample only moves layers.
     private let unrecorded = CALayer()
@@ -144,6 +154,9 @@ final class StreamGraphView: NSView {
     /// "45 s collected · 5-minute window", in the unrecorded stretch's corner.
     private let captionBadge = CALayer()
     private let captionLabel = CATextLayer()
+    /// "Not recorded yet", centred in the unrecorded stretch while it fits.
+    /// Outside the scroller, so it can keep to the stretch's middle.
+    private let gapLabel = CATextLayer()
     private let topLabel = CATextLayer()
     private let midLabel = CATextLayer()
     private var series: [SeriesLayers] = []
@@ -163,6 +176,8 @@ final class StreamGraphView: NSView {
     private var captionWidths: [String: CGFloat] = [:]
     /// What the caption shows, with the appearance it was coloured for.
     private var shownCaption = ""
+    /// The appearance the gap label was coloured for.
+    private var gapLabelIsDark: Bool?
     /// The caption VoiceOver reads as help, kept so it's set only on change.
     private var accessibilityCaption: String?
 
@@ -189,7 +204,7 @@ final class StreamGraphView: NSView {
         unrecorded.masksToBounds = true
         hatch.anchorPoint = .zero
         hatch.fillColor = nil
-        hatch.lineWidth = 1
+        hatch.lineWidth = 0.75
         unrecorded.addSublayer(hatch)
         boundary.anchorPoint = .zero
         boundary.fillColor = nil
@@ -201,12 +216,16 @@ final class StreamGraphView: NSView {
         captionLabel.anchorPoint = .zero
         captionLabel.alignmentMode = .left
         captionBadge.addSublayer(captionLabel)
+        gapLabel.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        gapLabel.alignmentMode = .center
+        gapLabel.isHidden = true
         scroller.addSublayer(columns)
         scroller.addSublayer(unrecorded)
         scroller.addSublayer(boundary)
         plot.addSublayer(grid)
         plot.addSublayer(scroller)
         layer?.addSublayer(plot)
+        layer?.addSublayer(gapLabel)
         layer?.addSublayer(captionBadge)
         layer?.addSublayer(topLabel)
         layer?.addSublayer(midLabel)
@@ -249,6 +268,7 @@ final class StreamGraphView: NSView {
         topLabel.contentsScale = scale
         midLabel.contentsScale = scale
         captionLabel.contentsScale = scale
+        gapLabel.contentsScale = scale
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -300,7 +320,7 @@ final class StreamGraphView: NSView {
         // deeper in light mode, and re-render when it changes.
         effectiveAppearance.performAsCurrentDrawingAppearance {
             drawGrid(in: plotRect, step: step, configuration: configuration)
-            drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, step: step, configuration: configuration)
+            drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, step: step, configuration: configuration, scrolls: scrolls)
             for (index, values) in shown.enumerated() {
                 let line = configuration.lines[index]
                 let layers = series[index]
@@ -445,7 +465,7 @@ final class StreamGraphView: NSView {
         layers.head.isHidden = !visible
         guard visible, let last = trace.ys.last else { return }
         let bright = line.color.fillShade
-        layers.halo.backgroundColor = bright.withAlphaComponent(0.28).cgColor
+        layers.halo.backgroundColor = bright.withAlphaComponent(0.16).cgColor
         layers.dot.backgroundColor = line.color.cgColor
         layers.dot.shadowColor = bright.cgColor
         layers.head.position = CGPoint(x: edge, y: last)
@@ -512,7 +532,13 @@ final class StreamGraphView: NSView {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         for (label, value, y) in [(topLabel, ceiling, plotRect.height - padding), (midLabel, ceiling / 2, padding + usable / 2)] {
             let color = NSColor(cgColor: labelColor) ?? .secondaryText
-            let text = NSAttributedString(string: axis(value), attributes: [.font: font, .foregroundColor: color])
+            let text = NSMutableAttributedString(string: axis(value), attributes: [.font: font, .foregroundColor: color])
+            if label === topLabel, let note = configuration.axisNote {
+                // The note in the accent colour, so a scale that isn't fixed
+                // isn't read as one that is.
+                let accent = NSColor(cgColor: NSColor.controlAccentColor.cgColor) ?? .controlAccentColor
+                text.append(NSAttributedString(string: "  ·  \(note)", attributes: [.font: Self.gapFont, .foregroundColor: accent]))
+            }
             if (label.string as? NSAttributedString)?.string != text.string, hasDrawn {
                 let fade = CATransition()
                 fade.type = .fade
@@ -524,13 +550,17 @@ final class StreamGraphView: NSView {
             label.frame = CGRect(x: 5, y: y - 14, width: max(plotRect.width - 10, 0), height: 14)
         }
     }
+}
 
+// MARK: - Unrecorded stretch
+
+extension StreamGraphView {
     /// Shades the stretch before the first of `samples`, marks where
-    /// recording started, and captions how much is collected. A sample only
-    /// moves and resizes layers here: the paths are rebuilt when the size
-    /// changes, and the caption's text when its rounded figure does.
-    /// Runs inside `render`'s appearance block, like `drawGrid`.
-    private func drawCoverage(samples: Int, in plotRect: CGRect, step: CGFloat, configuration: Configuration) {
+    /// recording started, labels the stretch and captions how much is
+    /// collected. A sample only moves and resizes layers here: the paths are
+    /// rebuilt when the size changes, and the caption's text when its rounded
+    /// figure does. Runs inside `render`'s appearance block, like `drawGrid`.
+    private func drawCoverage(samples: Int, in plotRect: CGRect, step: CGFloat, configuration: Configuration, scrolls: Bool) {
         // The oldest sample's x in the scroller, as in `render`. Left of it
         // nothing was recorded; with a full window it's at or past the edge.
         let start = plotRect.width + step - CGFloat(samples - 1) * step
@@ -538,7 +568,10 @@ final class StreamGraphView: NSView {
         unrecorded.isHidden = !filling
         boundary.isHidden = !filling || samples == 0
         let coverage = GraphCoverage(samples: samples, capacity: configuration.capacity, interval: interval)
-        defer { placeCaption(coverage, room: start - step, in: plotRect, configuration: configuration) }
+        defer {
+            placeCaption(coverage, room: start - step, in: plotRect, configuration: configuration)
+            placeGapLabel(start: start, step: step, in: plotRect, configuration: configuration, scrolls: scrolls)
+        }
         guard filling else { return }
 
         let size = scroller.bounds.size
@@ -560,9 +593,11 @@ final class StreamGraphView: NSView {
             boundary.path = line
             boundary.bounds = CGRect(x: 0, y: 0, width: 1, height: size.height)
         }
+        // A neutral wash over the plot's tint, with a hatch just strong
+        // enough to tell the stretch from a recorded quiet one.
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        unrecorded.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.35 : 0.5).cgColor
-        hatch.strokeColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.08 : 0.09).cgColor
+        unrecorded.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.4 : 0.6).cgColor
+        hatch.strokeColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.06 : 0.055).cgColor
         boundary.strokeColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.35 : 0.4).cgColor
 
         unrecorded.frame = CGRect(x: 0, y: 0, width: min(start, size.width), height: size.height)
@@ -608,6 +643,42 @@ final class StreamGraphView: NSView {
         }
         captionBadge.frame = CGRect(x: inset, y: bottom, width: width + 8, height: height)
         captionLabel.frame = CGRect(x: 4, y: 0, width: width + 1, height: 14)
+    }
+
+    /// Centres "Not recorded yet" in the unrecorded stretch of a graph with
+    /// an axis, between the middle and upper grid lines, clear of the axis
+    /// labels and the caption, while the stretch is wide enough for it.
+    /// Small multiples without an axis go without, like the caption. The
+    /// stretch's edge slides left between samples, so the label glides at
+    /// half its speed in the render server and stays centred. Runs inside
+    /// `render`'s appearance block.
+    private func placeGapLabel(start: CGFloat, step: CGFloat, in plotRect: CGRect, configuration: Configuration, scrolls: Bool) {
+        let height: CGFloat = 14
+        // The stretch's edge once this sample's scroll has run; it starts a step further right.
+        let edge = min(start - step, plotRect.width)
+        let fits = start > 0 && configuration.axis != nil && plotRect.height >= 56 && edge >= Self.gapTextWidth + 28
+        gapLabel.isHidden = !fits
+        gapLabel.removeAnimation(forKey: "glide")
+        guard fits else { return }
+
+        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if gapLabelIsDark != isDark {
+            gapLabelIsDark = isDark
+            let color = NSColor(white: isDark ? 1 : 0, alpha: TextTone.opacity(.tertiary, dark: isDark))
+            gapLabel.string = NSAttributedString(string: Self.gapText, attributes: [.font: Self.gapFont, .foregroundColor: color])
+        }
+        let padding = verticalPadding
+        let y = (padding + (plotRect.height - 2 * padding) * 0.625).rounded()
+        gapLabel.bounds = CGRect(x: 0, y: 0, width: Self.gapTextWidth + 2, height: height)
+        gapLabel.position = CGPoint(x: (edge / 2).rounded(), y: y)
+        guard scrolls, start <= plotRect.width else { return }
+        let glide = CABasicAnimation(keyPath: "position.x")
+        glide.fromValue = (start / 2).rounded()
+        glide.toValue = gapLabel.position.x
+        glide.duration = interval
+        glide.timingFunction = CAMediaTimingFunction(name: .linear)
+        glide.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        gapLabel.add(glide, forKey: "glide")
     }
 
     private func captionWidth(_ text: String) -> CGFloat {

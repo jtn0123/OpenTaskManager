@@ -198,6 +198,8 @@ struct GraphPanel: View {
     /// Labels the scale inside the graph; nil hides it.
     var axis: ((Double) -> String)?
     var axisUnits: GraphMath.AxisUnits = .plain
+    /// Said after the top axis label (see `GraphView.axisNote`).
+    var axisNote: String?
     var capacity = AppModel.graphSpan
 
     var body: some View {
@@ -211,7 +213,8 @@ struct GraphPanel: View {
                 }
             }
             GraphView(series: series, maxValue: maxValue, capacity: capacity, glows: true, stacked: stacked,
-                      minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits, cornerRadius: 8)
+                      minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling, axis: axis, axisUnits: axisUnits,
+                      axisNote: axisNote, cornerRadius: 8)
                 .frame(height: height)
                 .plotFrame(tint: tint, wash: (0.12, 0.02), border: 0.30)
             TimeAxis(samples: capacity)
