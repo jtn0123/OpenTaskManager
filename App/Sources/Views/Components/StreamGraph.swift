@@ -7,6 +7,11 @@ extension EnvironmentValues {
     @Entry var sampleInterval: TimeInterval = 1
     /// Scroll graphs continuously between samples instead of a step at a time.
     @Entry var streamsGraphs = true
+    /// Samples across the graphs on a page that share its window (those
+    /// that don't name a capacity of their own) and under their time axes:
+    /// `AppModel.graphSpan`, or fewer while Performance fits its graphs to
+    /// what's been collected (`GraphFit`).
+    @Entry var graphWindow = AppModel.graphSpan
 }
 
 struct GraphSeries {
@@ -30,8 +35,8 @@ struct GraphView: NSViewRepresentable {
     var series: [GraphSeries]
     /// Fixed top of the scale; nil auto-scales to the visible data.
     var maxValue: Double?
-    /// Samples across the full width.
-    var capacity = AppModel.graphSpan
+    /// Samples across the full width; nil takes the page's window, `graphWindow`.
+    var capacity: Int?
     var showsGrid = true
     var lineWidth: CGFloat = 1.5
     /// Bloom under each line and a glowing marker on the newest value.
@@ -55,6 +60,7 @@ struct GraphView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: StreamGraphView, context: Context) {
+        let capacity = capacity ?? context.environment.graphWindow
         let configuration = StreamGraphView.Configuration(
             lines: series.map {
                 StreamGraphView.Line(values: Array($0.values.suffix(capacity + 1)), color: NSColor($0.color), fill: $0.fill, dashed: $0.dashed)

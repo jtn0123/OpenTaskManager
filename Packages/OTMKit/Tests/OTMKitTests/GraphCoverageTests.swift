@@ -40,4 +40,44 @@ struct GraphCoverageTests {
     func windowNamesItsSpanLikeTheTimeAxis(seconds: Double, expected: String) {
         #expect(GraphCoverage.window(seconds) == expected)
     }
+
+    @Test(arguments: [
+        (0, 10), (1, 10), (10, 10), (11, 20), (35, 40), (40, 40), (41, 60), (61, 90), (91, 120),
+        (121, 150), (240, 240), (241, 270), (270, 270), (271, 300), (300, 300), (302, 300),
+    ])
+    func fittedWindowStepsUpToHoldWhatsCollected(samples: Int, expected: Int) {
+        #expect(GraphCoverage.fittedCapacity(samples: samples, span: 300) == expected)
+    }
+
+    @Test func fittedWindowHoldsEverySampleAndFillsAtLeastHalfPastTheFirstStep() {
+        for span in [120, 300] {
+            var previous = 0
+            for samples in 1...span {
+                let capacity = GraphCoverage.fittedCapacity(samples: samples, span: span)
+                #expect(capacity >= samples && capacity <= span)
+                #expect(capacity >= previous, "a window never shrinks as samples come in")
+                if samples > span / 30 { #expect(Double(samples) / Double(capacity) > 0.5) }
+                previous = capacity
+            }
+        }
+    }
+
+    @Test func fittedWindowStaysAtLeastTwoSamples() {
+        #expect(GraphCoverage.fittedCapacity(samples: 0, span: 2) == 2)
+        #expect(GraphCoverage.fittedCapacity(samples: 1, span: 30) == 2)
+        #expect(GraphCoverage.fittedCapacity(samples: 5, span: 1) == 2)
+    }
+
+    @Test func fittingStopsMatteringOnceOnlyTheFullWindowHoldsTheSamples() {
+        #expect(GraphCoverage.canFit(samples: 0, span: 300))
+        #expect(GraphCoverage.canFit(samples: 270, span: 300))
+        #expect(!GraphCoverage.canFit(samples: 271, span: 300))
+        #expect(!GraphCoverage.canFit(samples: 302, span: 300))
+    }
+
+    @Test func aFittedCaptionNamesTheFittedWindow() {
+        let capacity = GraphCoverage.fittedCapacity(samples: 35, span: 300)
+        #expect(GraphCoverage(samples: 35, capacity: capacity, interval: 1).caption == "35 s collected · 40 s window")
+        #expect(GraphCoverage(samples: 35, capacity: capacity, interval: 2).caption == "1 min collected · 1 min 20 s window")
+    }
 }

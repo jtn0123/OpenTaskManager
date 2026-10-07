@@ -16,7 +16,7 @@ struct PowerDetail: View {
             if let components = power.components {
                 breakdown(power, components)
             } else if let watts = power.systemWatts {
-                ChartCard(title: "Whole-system power draw", trailing: Format.watts(watts), tint: Theme.power) {
+                ChartCard(title: "Whole-system power draw", trailing: Format.watts(watts), tint: Theme.power, offersFit: true) {
                     GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)], glows: true,
                               minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
                         .chartFrame(height: DetailGraph.primary, tint: Theme.power)
@@ -74,7 +74,7 @@ struct PowerDetail: View {
         let series = chip.filter { $0.watts != nil }.map { GraphSeries(values: $0.values, color: $0.color) }
             + [GraphSeries(values: rest, color: Theme.restOfSystem)]
         return ChartCard(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "",
-                         tint: Theme.power, legend: legend) {
+                         tint: Theme.power, legend: legend, offersFit: true) {
             GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.primary, tint: Theme.power)
             Text(Self.restNote(components))
@@ -117,7 +117,7 @@ struct PowerDetail: View {
             legend: shares.map {
                 LegendItem(name: $0.name, color: $0.color, value: "\(Self.wattHours($0.joules)) · \(Format.percent($0.joules / total))")
             },
-            span: nil
+            timed: false
         ) {
             ShareBar(segments: shares.map { ($0.color, $0.joules) })
                 .frame(height: 14)

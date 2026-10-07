@@ -56,7 +56,7 @@ struct DiskDetail: View {
             Stat(label: "Written since boot", value: Format.bytes(disk.totalWritten))
         }
         // A card, like the network detail's throughput graph.
-        ChartCard(title: "Transfer rate", trailing: "read solid, write dashed", tint: Theme.disk) {
+        ChartCard(title: "Transfer rate", trailing: "read solid, write dashed", tint: Theme.disk, offersFit: true) {
             GraphView(series: [
                           GraphSeries(values: model.diskReadHistory[disk.id]?.values ?? [], color: Theme.disk),
                           GraphSeries(values: model.diskWriteHistory[disk.id]?.values ?? [], color: Theme.diskSecondary,
@@ -171,7 +171,7 @@ struct NetworkDetail: View {
                 }
                 // A card like Apps using the network below it, so the two
                 // plots run edge to edge over the same minutes.
-                ChartCard(title: "Throughput", trailing: "receive solid, send dashed", tint: Theme.network) {
+                ChartCard(title: "Throughput", trailing: "receive solid, send dashed", tint: Theme.network, offersFit: true) {
                     GraphView(series: [
                                   GraphSeries(values: received, color: Theme.network),
                                   GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),

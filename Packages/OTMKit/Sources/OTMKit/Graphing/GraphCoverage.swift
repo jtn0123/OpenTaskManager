@@ -53,3 +53,34 @@ public struct GraphCoverage: Equatable, Sendable {
         "\(Format.timeSpan(seconds)) window"
     }
 }
+
+// MARK: - Fitting a filling window
+
+extension GraphCoverage {
+    /// The windows a fitted graph steps through, in thirtieths of the full
+    /// one: 10, 20, 30, 40 and 60 s of a 5-minute window over the first
+    /// minute, then every 30 s.
+    static let fitSteps = [1, 2, 3, 4, 6, 9, 12, 15, 18, 21, 24, 27, 30]
+
+    /// Samples across graphs fitted to the `samples` collected so far, out
+    /// of a full window of `span`: the first step that holds them all.
+    ///
+    /// A step rather than the count itself, so the graphs keep scrolling
+    /// between samples, and their window, axis and caption change every
+    /// 30 s at most. Past the first step, what's collected fills at least
+    /// half the width. Never under 2, never over `span`.
+    public static func fittedCapacity(samples: Int, span: Int) -> Int {
+        let span = max(span, 2)
+        for step in fitSteps {
+            let capacity = max(Int((Double(span * step) / 30).rounded()), 2)
+            if capacity >= samples { return min(capacity, span) }
+        }
+        return span
+    }
+
+    /// Whether fitting changes anything: true while a window shorter than
+    /// `span` holds every sample collected.
+    public static func canFit(samples: Int, span: Int) -> Bool {
+        fittedCapacity(samples: samples, span: span) < max(span, 2)
+    }
+}

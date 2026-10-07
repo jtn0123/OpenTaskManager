@@ -4,10 +4,12 @@ import SwiftUI
 /// At-a-glance dashboard: a gauge per resource, a live map of every core,
 /// throughput, and which apps are using what.
 ///
-/// In a narrow window (820 points, with or without the sidebar) the gauges
-/// shrink, the top-app lists come straight after them, Disk and Network take
-/// a short row each, and the core map folds to a line that opens on a click,
-/// so the lists are on screen without scrolling.
+/// The cards keep one order at every width (gauges, the core map, Disk and
+/// Network, the top apps, Storage), so resizing never moves what's where;
+/// only how many share a row changes. In a narrow window (820 points, with or
+/// without the sidebar) the gauges shrink and Disk and Network take a short
+/// row each. The core map folds to a line on a click at any width, and stays
+/// as it was left when the window is resized.
 struct OverviewView: View {
     /// Below this width of the page, the narrow layout.
     private static let narrowWidth: CGFloat = 900
@@ -26,15 +28,9 @@ struct OverviewView: View {
                         // machine's) would only fill a gauge with an empty ring,
                         // so it takes a line and the cards below move up.
                         if let gpu = snapshot.gpus.first, gpu.deviceUtilization == nil { gpuStrip(gpu) }
-                        if isNarrow {
-                            topApps
-                            throughput(snapshot)
-                            CoreMap(snapshot: snapshot, folds: true)
-                        } else {
-                            CoreMap(snapshot: snapshot)
-                            throughput(snapshot)
-                            topApps
-                        }
+                        CoreMap(snapshot: snapshot)
+                        throughput(snapshot)
+                        topApps
                         StorageCard(volumes: snapshot.volumes)
                     }
                     .padding(20)
@@ -150,7 +146,7 @@ struct OverviewView: View {
     /// time by app.
     private func gpuStrip(_ gpu: GPUSample) -> some View {
         // A paravirtual GPU's name is just "GPU", which the title already says.
-        let name = gpu.name.caseInsensitiveCompare("GPU") == .orderedSame ? nil : gpu.name
+        let name = gpu.tellingName
         let memory = gpu.memoryInUse.map { (label: "Memory in use", value: Format.bytes($0)) }
         return NoticeStrip(title: "GPU", symbol: "cpu.fill", color: Theme.gpu,
                            text: [name, Unavailable.gpuUtilization].compactMap { $0 }.joined(separator: " · "),
@@ -375,30 +371,24 @@ private struct TopNetworkStrip: View {
 }
 
 /// Every logical CPU as a tile that fills with load, one row per core type.
+/// A click on the heading folds it to each core type's load; open or folded,
+/// it stays as it was left at every width.
 private struct CoreMap: View {
     @Environment(AppModel.self) private var model
     var snapshot: SystemSnapshot
-    /// Folded to its heading and each core type's load until opened, for a
-    /// narrow window; opening it is remembered.
-    var folds = false
-    @AppStorage("overviewShowsCores") private var showsCores = false
+    @AppStorage("overviewShowsCores") private var isOpen = true
 
     var body: some View {
         let topology = model.topology
-        let isOpen = !folds || showsCores
         Card {
-            if folds {
-                Button {
-                    showsCores.toggle()
-                } label: {
-                    heading(topology, isOpen: isOpen).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(isOpen ? "Hide the map of cores" : "Show each core's load and the graph by core type")
-                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
-            } else {
-                heading(topology, isOpen: true)
+            Button {
+                isOpen.toggle()
+            } label: {
+                heading(topology).contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help(isOpen ? "Hide the map of cores" : "Show each core's load and the graph by core type")
+            .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
             if isOpen {
                 HStack(alignment: .top, spacing: 24) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -416,15 +406,13 @@ private struct CoreMap: View {
     }
 
     /// "Cores" and the chip; folded, each core type's load instead.
-    private func heading(_ topology: CPUTopology, isOpen: Bool) -> some View {
+    private func heading(_ topology: CPUTopology) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if folds {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondaryText)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .accessibilityHidden(true)
-            }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondaryText)
+                .rotationEffect(.degrees(isOpen ? 90 : 0))
+                .accessibilityHidden(true)
             Text("Cores").font(.headline)
             Spacer(minLength: 8)
             if isOpen {

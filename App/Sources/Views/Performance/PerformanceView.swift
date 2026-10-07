@@ -18,6 +18,7 @@ struct PerformanceView: View {
     @State private var width: CGFloat = 0
     /// Whether the disk images under their heading in the list are shown.
     @AppStorage("performanceShowsDiskImages") private var showsDiskImages = false
+    @AppStorage(GraphFit.key) private var fitsGraphs = false
 
     /// The narrowest the detail gets beside the resource list. Below it, as
     /// in the narrowest window, the list gives way to a picker over the
@@ -46,7 +47,13 @@ struct PerformanceView: View {
                         Divider()
                     }
                     ScrollView {
+                        // Every graph on the page covers this one window. Both
+                        // values change a handful of times as it fills, not per tick.
+                        let collected = model.cpuHistory.count
+                        let canFit = GraphCoverage.canFit(samples: collected, span: AppModel.graphSpan)
                         detail(for: selected, snapshot: snapshot)
+                            .environment(\.graphWindow, GraphFit.window(samples: collected, fits: fitsGraphs && canFit))
+                            .environment(\.offersGraphFit, canFit)
                             .padding(20)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -277,7 +284,15 @@ private struct ResourceRow: View {
                 // A volume's or an image's name can be long, often one unbroken
                 // word ("UC_SIRI_…_Cryptex"): cut in the middle, whole in the tooltip.
                 Text(text.title).font(.headline.weight(selected ? .bold : .medium)).lineLimit(1).truncationMode(.middle)
-                Text(text.subtitle).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(3)
+                if !text.subtitle.isEmpty {
+                    Text(text.subtitle).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(3)
+                }
+                if let unreported = text.unreported {
+                    Label(unreported, systemImage: Unavailable.symbol)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondaryText)
+                        .lineLimit(2)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -302,17 +317,33 @@ private struct ResourceRow: View {
         case .sensors: Sparkline(values: model.sensorHistory.hottest[.chip]?.values ?? [], color: Theme.thermal)
         case .benchmarks:
             // Nothing to graph: a still glyph in the sparkline's frame.
-            Image(systemName: "stopwatch")
-                .font(.title2)
-                .foregroundStyle(.secondaryText)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .plotFrame(tint: Theme.other, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
-        case let .gpu(id): Sparkline(values: model.gpuHistory[id]?.values ?? [], color: Theme.gpu, maxValue: 1)
+            Self.glyph("stopwatch", tint: Theme.other)
+        case let .gpu(id):
+            if let gpu = snapshot.gpus.first(where: { $0.id == id }), gpu.deviceUtilization == nil {
+                // No load to draw, and never an empty plot that would pass for
+                // one not recorded yet: the memory in use the subtitle gives.
+                if gpu.memoryInUse != nil {
+                    Sparkline(values: model.gpuDetail[id]?.memoryInUse.values ?? [], color: Theme.gpu)
+                } else {
+                    Self.glyph(Unavailable.symbol, tint: Theme.gpu)
+                }
+            } else {
+                Sparkline(values: model.gpuHistory[id]?.values ?? [], color: Theme.gpu, maxValue: 1)
+            }
         case let .disk(id):
             Sparkline(values: zipSum(model.diskReadHistory[id]?.values, model.diskWriteHistory[id]?.values), color: Theme.disk)
         case let .network(id):
             Sparkline(values: zipSum(model.networkInHistory[id]?.values, model.networkOutHistory[id]?.values), color: Theme.network)
         }
+    }
+
+    /// A still glyph in the sparkline's frame, for a row with nothing to graph.
+    private static func glyph(_ symbol: String, tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.title2)
+            .foregroundStyle(.secondaryText)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .plotFrame(tint: tint, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
     }
 
     private func zipSum(_ a: [Double]?, _ b: [Double]?) -> [Double] {
@@ -375,7 +406,7 @@ private struct ResourceChip: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(text.help ?? text.subtitle.replacingOccurrences(of: "\n", with: " · "))
-        .accessibilityLabel("\(text.title), \(text.subtitle)")
+        .accessibilityLabel([text.title, text.subtitle, text.unreported].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -471,6 +502,9 @@ private struct ResourceText {
     var figure: String
     /// A disk's names in full, as a tooltip: nothing in it changes per tick.
     var help: String?
+    /// A reading this Mac doesn't give, which the list says under the
+    /// subtitle beside `Unavailable.symbol`: "Utilization not reported".
+    var unreported: String?
 
     @MainActor
     init(_ resource: Resource, snapshot: SystemSnapshot, sensors: SensorSample?) {
@@ -508,10 +542,22 @@ private struct ResourceText {
             help = "The CPU, GPU, disk and Internet tests' saved runs, to compare and run together"
         case let .gpu(id):
             let gpu = snapshot.gpus.first { $0.id == id }
-            let usage = gpu?.deviceUtilization.map { Format.percent($0) }
             title = "GPU"
-            subtitle = gpu.map { "\($0.name)\n\(usage ?? Unavailable.gpuUtilization)" } ?? ""
-            figure = usage ?? "—"
+            if let busy = gpu?.deviceUtilization {
+                figure = Format.percent(busy)
+                subtitle = [gpu?.tellingName, figure].compactMap { $0 }.joined(separator: "\n")
+            } else {
+                // Its memory in use, which the list's sparkline draws, in
+                // place of the load it doesn't report.
+                let memory = gpu?.memoryInUse.map { Self.unbroken(Format.bytes($0)) }
+                figure = memory ?? "—"
+                subtitle = [gpu?.tellingName, memory.map { "\($0) memory" }].compactMap { $0 }.joined(separator: "\n")
+                unreported = gpu == nil ? nil : Unavailable.gpuUtilization
+                help = gpu.map { _ in
+                    memory == nil ? Unavailable.gpuUtilizationDetail
+                        : "This GPU's driver doesn't report how busy it is, so its memory in use is shown instead."
+                }
+            }
         case let .disk(id):
             let disk = snapshot.disks.first { $0.id == id }
             title = disk.map(DiskText.title) ?? id
