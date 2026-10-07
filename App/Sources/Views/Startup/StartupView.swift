@@ -109,32 +109,38 @@ struct StartupView: View {
 
     private func page(_ items: [LaunchItem]) -> some View {
         let rows = visibleRows(items)
+        // Like the Processes inspector, the details take room only once
+        // something is selected. Beside the table, Name takes Publisher's room
+        // and a badge marks the third-party rows instead.
+        let wantsInspector = showInspector && selection != nil
+        let besideTable = wantsInspector && !isNarrow
         return VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 summary(items)
+                    .padding(.bottom, 2)
                 Picker("Show", selection: $filter) {
                     ForEach(StartupFilter.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                LoginItemsNote()
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 10)
 
             InspectorSplit(
-                listMinimum: StartupTable.minimumWidth(showsPublisher: filter.showsPublisher),
-                // Like the Processes inspector, the details take room only once
-                // something is selected.
-                wantsInspector: showInspector && selection != nil,
+                listMinimum: StartupTable.minimumWidth(showsPublisher: filter.showsPublisher && !wantsInspector),
+                wantsInspector: wantsInspector,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
                 widthKey: "startupInspectorWidth",
                 backTitle: "Startup"
             ) {
-                StartupTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,
-                             toggle: toggle, open: openDetails)
+                StartupTable(rows: rows, showsPublisher: filter.showsPublisher && !besideTable,
+                             badgesThirdParty: filter.showsPublisher && besideTable,
+                             selection: $selection, sortOrder: $sortOrder, toggle: toggle, open: openDetails)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } detail: {
                 if let item = items.first(where: { $0.id == selection }) {
@@ -274,35 +280,31 @@ private struct StartupTable: View {
     }
 
     var rows: [LaunchItem]
-    /// Off while the filter leaves one publisher, as every row would say it.
+    /// Off while the filter leaves one publisher, as every row would say it,
+    /// and while the details sit beside the table, which say it once.
     var showsPublisher: Bool
+    /// Marks third-party rows in Name while Publisher is off for the details.
+    var badgesThirdParty: Bool
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<LaunchItem>]
     var toggle: (LaunchItem) -> Void
     var open: () -> Void
+    /// Hides Publisher in place, rather than swapping tables (a conditional
+    /// column needs macOS 14.4), so the scroll position survives.
+    @State private var columns = TableColumnCustomization<LaunchItem>()
 
     /// The other columns hold short values that repeat down the table, so they
     /// start at the width those need and stop soon after; Name takes the rest.
     var body: some View {
-        Group {
-            // Two tables rather than a conditional column, which needs macOS 14.4.
-            if showsPublisher {
-                Table(rows, selection: $selection, sortOrder: $sortOrder) {
-                    nameColumn
-                    kindColumn
-                    statusColumn
-                    launchesColumn
-                    publisherColumn
-                }
-            } else {
-                Table(rows, selection: $selection, sortOrder: $sortOrder) {
-                    nameColumn
-                    kindColumn
-                    statusColumn
-                    launchesColumn
-                }
-            }
+        Table(rows, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columns) {
+            nameColumn
+            kindColumn
+            statusColumn
+            launchesColumn
+            publisherColumn
         }
+        .onAppear(perform: showPublisher)
+        .onChange(of: showsPublisher, showPublisher)
         .contextMenu(forSelectionType: LaunchItem.ID.self) { ids in
             if let id = ids.first, let item = rows.first(where: { $0.id == id }) {
                 if LaunchControl.restriction(for: item) == nil {
@@ -319,6 +321,13 @@ private struct StartupTable: View {
         }
     }
 
+    private static let publisherID = "publisher"
+
+    private func showPublisher() {
+        let visibility: Visibility = showsPublisher ? .visible : .hidden
+        if columns[visibility: Self.publisherID] != visibility { columns[visibility: Self.publisherID] = visibility }
+    }
+
     private var nameColumn: some Column {
         TableColumn("Name", value: \.name) { item in
             HStack(spacing: 6) {
@@ -326,6 +335,9 @@ private struct StartupTable: View {
                     .resizable()
                     .frame(width: 16, height: 16)
                 Text(item.name).lineLimit(1)
+                if badgesThirdParty, item.publisher == .thirdParty {
+                    ThirdPartyBadge()
+                }
             }
             // The whole name, for when the column cuts it short.
             .help("\(item.name)\n\(item.label)")
@@ -361,6 +373,27 @@ private struct StartupTable: View {
                 .foregroundStyle(item.publisher == .apple ? .secondary : .primary)
         }
         .width(min: Minimum.publisher, ideal: 75, max: 100)
+        .customizationID(Self.publisherID)
+        // Shown and hidden by the page, not from the header's menu.
+        .disabledCustomizationBehavior(.visibility)
+    }
+}
+
+/// Marks a third-party item in the Name column while Publisher is hidden.
+private struct ThirdPartyBadge: View {
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        // On a selected row the accent colour is behind it, so it turns white like the row's text.
+        let selected = prominence == .increased
+        Text("Third party")
+            .font(.metadata.weight(.medium))
+            .foregroundStyle(selected ? AnyShapeStyle(.primary) : AnyShapeStyle(Theme.network))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(selected ? AnyShapeStyle(.white.opacity(0.22)) : AnyShapeStyle(Theme.network.fillShade.opacity(0.18)), in: Capsule())
+            .fixedSize()
+            .help("Installed by something other than macOS")
     }
 }
 
@@ -395,8 +428,6 @@ extension LaunchItemState {
 // MARK: - Status bar
 
 private struct StartupStatusBar: View {
-    static let loginItemsSettings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
-
     var shown: Int
     var total: Int
     var scannedAt: Date?
@@ -411,22 +442,36 @@ private struct StartupStatusBar: View {
                 Text("Read at \(scannedAt.formatted(date: .omitted, time: .shortened))")
             }
             Spacer()
-            Text("Login Items aren't listed: macOS keeps them private")
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .layoutPriority(-1)
-                .help("Apps that open at login, and background items apps register with macOS, are kept where only "
-                    + "an administrator can read them. System Settings shows and changes them.")
-            Button("Open Login Items Settings") {
-                if let url = Self.loginItemsSettings { NSWorkspace.shared.open(url) }
-            }
-            .controlSize(.small)
         }
         .font(.subheadline)
         .monospacedDigit()
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
+    }
+}
+
+/// What the table can't show, above it where it reads as the table's scope:
+/// Login Items live where only an administrator can read them. The text
+/// wraps rather than truncating in a narrow window.
+private struct LoginItemsNote: View {
+    static let settings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Label("Login Items aren't listed: macOS keeps them private. System Settings shows and changes them.",
+                  systemImage: "info.circle")
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
+                .help("Apps that open at login, and background items apps register with macOS, are kept where only "
+                    + "an administrator can read them.")
+            Spacer(minLength: 0)
+            Button("Open Login Items Settings") {
+                if let url = Self.settings { NSWorkspace.shared.open(url) }
+            }
+            .controlSize(.small)
+            .fixedSize()
+        }
     }
 }
 

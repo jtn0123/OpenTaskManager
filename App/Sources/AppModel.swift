@@ -264,6 +264,11 @@ final class AppModel {
     var requestedStartupSearch: String?
     /// Highest whole-system draw seen on this Mac, kept across launches.
     private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
+    /// `SystemSnapshot.measuresProcessEnergy`, read off the tick's walk over
+    /// the processes and written only when it changes. Kept across launches,
+    /// so a Mac without power sensors (a VM) hides its power figures from the
+    /// first frame rather than a second later. nil until a sample has told.
+    private(set) var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
 
     var isPaused = false {
         didSet { isPaused ? stop() : start() }
@@ -420,6 +425,7 @@ final class AppModel {
         var totalGPU = 0.0
         var totalPower = 0.0
         var totalMemory = 0.0
+        var anyPower = false
         for process in snapshot.processes {
             var history = processHistory[process.pid] ?? History(capacity: Self.processHistoryCapacity)
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
@@ -429,6 +435,12 @@ final class AppModel {
             totalGPU += point.gpuFraction
             totalPower += point.powerWatts
             totalMemory += Double(point.memory)
+            if process.powerWatts != nil { anyPower = true }
+        }
+        // The rule in `ProcessSample.measuresEnergy`, without a second walk.
+        if snapshot.interval > 0, !snapshot.processes.isEmpty, anyPower != measuresProcessEnergy {
+            measuresProcessEnergy = anyPower
+            UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
         }
         processHistory = processes
         processGPUHistory.append(totalGPU)

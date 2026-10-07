@@ -129,6 +129,9 @@ locked or the window is on another Space.
 - When the process table runs out of width it hides optional columns, lowest
   `ProcessColumn.priority` first (the maths is `ColumnFit` in OTMKit's Layout/),
   apart from the user's Columns choices, and shows them again when there's room.
+  A column this Mac can't fill (Power, when `AppModel.measuresProcessEnergy`
+  is false) starts hidden the same way; the Columns menu says why, and the
+  user can still turn it on.
 - Pages with a table and details (Processes, Startup, Apps, Drivers,
   Connections) use `InspectorSplit`: the pane appears beside the table once
   something is selected, its width is draggable and remembered, and in a
@@ -138,6 +141,9 @@ locked or the window is on another Space.
   view shouldn't use `.fixedSize(horizontal: false, vertical: true)`: inside
   the window's split view it made the page take the pane's height and pushed
   the status bar out of a 730-point window. Plain wrapping text is enough.
+  The pane's minimum height also sets the page's, so a tall pinned part
+  (Startup's status and Restart/Stop) goes in `ViewThatFits(in: .vertical)`
+  with a fallback that scrolls it with the rest (see `StartupItemDetail`).
 - Performance and History fit the narrowest window (820 points with the
   sidebar shown) without clipping or scrolling sideways. Performance's resource
   list is an `HStack` column sized from the page width, not an `HSplitView`,

@@ -79,10 +79,19 @@ enum ProcessColumn: String, CaseIterable {
         self == .threads || self == .wakeups || self == .kind || self == .topTier
     }
 
-    /// The column's line in the Columns menus, saying so when it's on but
+    /// The column's line in the Columns menus, saying why it's hidden when
+    /// the user didn't hide it: this Mac doesn't report it, or it's on but
     /// hidden for now because the table is too narrow.
-    func menuTitle(hiddenToFit: Bool) -> String {
-        hiddenToFit ? "\(title) (hidden to fit)" : title
+    func menuTitle(hiddenToFit: Bool, unreported: Bool = false) -> String {
+        if unreported { return "\(title) (not reported on this Mac)" }
+        return hiddenToFit ? "\(title) (hidden to fit)" : title
+    }
+
+    /// Columns this Mac has no figures for, which start hidden: Power when
+    /// it doesn't measure energy per process (a virtual machine), where
+    /// every row would read "—". nil `measuresEnergy` is unknown yet.
+    static func unreported(measuresEnergy: Bool?) -> Set<ProcessColumn> {
+        measuresEnergy == false ? [.power] : []
     }
 
     /// Closes the Columns menus while a column is hidden to fit.
@@ -129,9 +138,13 @@ enum ProcessColumn: String, CaseIterable {
     }
 }
 
-/// The columns switched off in the Columns menu, saved as "kind,threads".
+/// The columns switched off in the Columns menu, and the ones this Mac can't
+/// fill that were switched on anyway, saved as "kind,threads,+power".
 struct HiddenProcessColumns: RawRepresentable, Equatable {
     var columns: Set<ProcessColumn>
+    /// Unreported columns (see `ProcessColumn.unreported`) the user turned
+    /// on, to see the dashes. The others stay hidden.
+    var shownAnyway: Set<ProcessColumn> = []
 
     static let defaults = HiddenProcessColumns(columns: Set(ProcessColumn.allCases.filter(\.hiddenByDefault)))
 
@@ -140,19 +153,33 @@ struct HiddenProcessColumns: RawRepresentable, Equatable {
     }
 
     init?(rawValue: String) {
-        columns = Set(rawValue.split(separator: ",").compactMap { ProcessColumn(rawValue: String($0)) })
+        let entries = rawValue.split(separator: ",")
+        columns = Set(entries.compactMap { ProcessColumn(rawValue: String($0)) })
+        shownAnyway = Set(entries.compactMap { $0.first == "+" ? ProcessColumn(rawValue: String($0.dropFirst())) : nil })
     }
 
     var rawValue: String {
-        columns.map(\.rawValue).sorted().joined(separator: ",")
+        (columns.map(\.rawValue) + shownAnyway.map { "+" + $0.rawValue }).sorted().joined(separator: ",")
     }
 
-    func contains(_ column: ProcessColumn) -> Bool {
-        columns.contains(column)
+    /// Hidden by choice, or because this Mac doesn't report it.
+    func hidden(unreported: Set<ProcessColumn>) -> Set<ProcessColumn> {
+        columns.union(unreported.subtracting(shownAnyway))
     }
 
-    mutating func toggle(_ column: ProcessColumn) {
+    func isOn(_ column: ProcessColumn, unreported: Set<ProcessColumn>) -> Bool {
+        !hidden(unreported: unreported).contains(column)
+    }
+
+    /// Switches a column on or off. An unreported column switched off goes
+    /// back to hiding by itself, so it shows again on a Mac that reports it.
+    mutating func toggle(_ column: ProcessColumn, unreported: Set<ProcessColumn>) {
         guard column != .name else { return }
-        if columns.remove(column) == nil { columns.insert(column) }
+        if isOn(column, unreported: unreported) {
+            if unreported.contains(column) { shownAnyway.remove(column) } else { columns.insert(column) }
+        } else {
+            columns.remove(column)
+            if unreported.contains(column) { shownAnyway.insert(column) }
+        }
     }
 }

@@ -40,7 +40,7 @@ struct ProcessesView: View {
                         ascending: $ascending,
                         model: model,
                         onShowInspector: openDetails,
-                        onToggleColumn: { hiddenColumns.toggle($0) },
+                        onToggleColumn: { hiddenColumns.toggle($0, unreported: unreportedColumns) },
                         onMinimumWidthChange: { tableMinimum = $0 },
                         onHiddenToFitChange: { hiddenToFit = $0 }
                     )
@@ -131,13 +131,18 @@ struct ProcessesView: View {
 
     /// Optional columns, also in the header's context menu. Hiding one makes
     /// room rather than squeezing the others' headings. A column that's on
-    /// but hidden to fit the width stays ticked and says so.
+    /// but hidden to fit the width stays ticked and says so; one this Mac
+    /// doesn't report says that, and shows its dashes once ticked.
     private var columnsMenu: some View {
         Menu {
+            let unreported = unreportedColumns
             ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
-                Toggle(column.menuTitle(hiddenToFit: hiddenToFit.contains(column)), isOn: Binding(
-                    get: { !hiddenColumns.contains(column) },
-                    set: { if $0 == hiddenColumns.contains(column) { hiddenColumns.toggle(column) } }
+                let title = column.menuTitle(hiddenToFit: hiddenToFit.contains(column), unreported: unreported.contains(column))
+                Toggle(title, isOn: Binding(
+                    get: { hiddenColumns.isOn(column, unreported: unreported) },
+                    set: { isOn in
+                        if isOn != hiddenColumns.isOn(column, unreported: unreported) { hiddenColumns.toggle(column, unreported: unreported) }
+                    }
                 ))
             }
             if !hiddenToFit.isEmpty {
@@ -151,6 +156,12 @@ struct ProcessesView: View {
         }
         .help(hiddenToFit.isEmpty ? "Columns: choose what the table shows"
             : "Columns: choose what the table shows. Some are hidden until there's room for them")
+    }
+
+    /// Columns with nothing to show on this Mac, such as Power in a VM.
+    /// Changes at most once per launch, so the table refits only then.
+    private var unreportedColumns: Set<ProcessColumn> {
+        ProcessColumn.unreported(measuresEnergy: model.measuresProcessEnergy)
     }
 
     private var detailsHelp: String {
@@ -205,6 +216,7 @@ struct ProcessesView: View {
             nodes: ProcessTreeBuilder.sort(nodes, by: sortKey, ascending: ascending),
             headerTotals: headerTotals(snapshot),
             hiddenColumns: hiddenColumns,
+            unreportedColumns: unreportedColumns,
             cpuScale: model.cpuScale,
             heatmap: heatmap,
             fastTierName: model.topology.tiers.first?.name ?? "P-core"
