@@ -16,6 +16,16 @@ enum IconCache {
     }()
 
     static func icon(for process: ProcessSample, app: NSRunningApplication?) -> NSImage {
+        // `NSRunningApplication.icon` makes a new image on every call, and a
+        // new image redraws the row's icon from full size every refresh.
+        if let app, let bundle = app.bundleURL?.path {
+            if let cached = icons[bundle] { return cached }
+            if let icon = app.icon {
+                icon.size = NSSize(width: 16, height: 16)
+                icons[bundle] = icon
+                return icon
+            }
+        }
         if let icon = app?.icon { return icon }
         guard let path = process.bundlePath ?? process.executablePath else { return generic }
         if let cached = icons[path] { return cached }

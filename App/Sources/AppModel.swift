@@ -250,8 +250,11 @@ final class AppModel {
     private(set) var userHistory: [UInt32: UserHistory] = [:]
     /// Directory lookups by uid, including misses, so each runs once.
     @ObservationIgnored private var accounts: [UInt32: UserAccount?] = [:]
-    /// Regular (Dock) apps by PID, refreshed each tick for grouping and icons.
+    /// Regular (Dock) apps by PID, for grouping and icons.
     private(set) var regularApps: [Int32: NSRunningApplication] = [:]
+    /// The running apps `regularApps` was last built from, and when.
+    @ObservationIgnored private var runningAppPIDs: [Int32] = []
+    @ObservationIgnored private var regularAppsRead = Date.distantPast
     private(set) var lastError: String?
     /// A process another page asked the Processes page to select, such as
     /// the owner of a socket on the Connections page. Cleared once shown.
@@ -347,6 +350,23 @@ final class AppModel {
         Task { [monitor] in await monitor.setOptions(options) }
     }
 
+    /// Asking every app for its activation policy costs more than the rest
+    /// of a tick's bookkeeping, so the list is rebuilt when apps launch or
+    /// quit, and every 10 s for an app that changes policy.
+    private func refreshRegularApps() {
+        let running = NSWorkspace.shared.runningApplications
+        let pids = running.map(\.processIdentifier)
+        let now = Date()
+        guard pids != runningAppPIDs || now.timeIntervalSince(regularAppsRead) >= 10 else { return }
+        runningAppPIDs = pids
+        regularAppsRead = now
+        let apps = Dictionary(
+            running.filter { $0.activationPolicy == .regular }.map { ($0.processIdentifier, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        if apps != regularApps { regularApps = apps }
+    }
+
     private func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
         // The first sample has no baseline, so its rates are all zero; keep it
         // for the process list but leave it out of the graphs.
@@ -355,12 +375,7 @@ final class AppModel {
             self.sensors = sensors
             if snapshot.interval > 0 { sensorHistory.append(sensors) }
         }
-        regularApps = Dictionary(
-            NSWorkspace.shared.runningApplications
-                .filter { $0.activationPolicy == .regular }
-                .map { ($0.processIdentifier, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
+        refreshRegularApps()
         users = UserUsageBuilder.build(snapshot.processes)
         guard snapshot.interval > 0 else { return }
 

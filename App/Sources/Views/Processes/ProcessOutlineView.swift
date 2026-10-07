@@ -235,6 +235,9 @@ struct ProcessOutlineView: NSViewRepresentable {
             var changes: [(parent: Item?, changes: OrderedDiff.Changes)] = []
             /// Parents whose rows aren't on screen; their children are re-read instead.
             var hidden: [Item] = []
+            /// Parents that gained their first child or lost their last, whose
+            /// disclosure triangle comes or goes.
+            var reshaped: [Item] = []
         }
 
         /// Moves, inserts and removes rows to match the new layout. Returns
@@ -257,6 +260,7 @@ struct ProcessOutlineView: NSViewRepresentable {
                 } else if let parent = items[parentID] {
                     if outline.isItemExpanded(parent), outline.row(forItem: parent) >= 0 {
                         plan.changes.append((parent, OrderedDiff.changes(from: previous, to: children)))
+                        if previous.isEmpty != children.isEmpty { plan.reshaped.append(parent) }
                     } else {
                         plan.hidden.append(parent)
                     }
@@ -303,11 +307,9 @@ struct ProcessOutlineView: NSViewRepresentable {
             outline.endUpdates()
             NSAnimationContext.endGrouping()
             for parent in plan.hidden { outline.reloadItem(parent, reloadChildren: true) }
-            // Section headers show a count, and a row that gained or lost its
-            // last child needs its disclosure triangle redrawn.
-            for case let (parent?, _) in plan.changes {
-                outline.reloadItem(parent, reloadChildren: false)
-            }
+            // Child counts on screen are restyled in place with the other
+            // cells; only a disclosure triangle needs the row rebuilt.
+            for parent in plan.reshaped { outline.reloadItem(parent, reloadChildren: false) }
         }
 
         private func refreshVisibleCells(in outline: NSOutlineView) {
@@ -817,7 +819,14 @@ final class ValueCell: NSTableCellView {
     func setMeter(_ fraction: Double, color: NSColor?) {
         let shown = color == nil || fraction < 0.01 ? 0 : min(fraction, 1)
         // Busier rows get a deeper colour as well as a longer bar.
-        bar.backgroundColor = color?.withAlphaComponent(0.20 + 0.40 * shown).cgColor
+        let fill = color?.withAlphaComponent(0.20 + 0.40 * shown).cgColor
+        if bar.backgroundColor != fill {
+            // A standalone layer animates every change unless told not to.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            bar.backgroundColor = fill
+            CATransaction.commit()
+        }
         guard shown != self.fraction else { return }
         self.fraction = shown
         needsLayout = true
