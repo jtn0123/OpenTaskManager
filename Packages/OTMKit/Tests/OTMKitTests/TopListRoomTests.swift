@@ -31,6 +31,20 @@ struct TopListRoomTests {
         #expect(TopListRoom.needed(listed: 6, limit: 6) == 6)
     }
 
+    @Test func theIdleLineIsShorterThanARow() {
+        // Nothing listed: the idle line alone.
+        #expect(TopListRoom.height(rows: 1, limit: 6, row: 22, idleLine: 17, spacing: 4) == 17)
+        #expect(TopListRoom.height(rows: 0, limit: 6, row: 22, idleLine: 17, spacing: 4) == 17)
+        // Two rows and the line under them.
+        #expect(TopListRoom.height(rows: 3, limit: 6, row: 22, idleLine: 17, spacing: 4) == 22 + 4 + 22 + 4 + 17)
+        // A full list has no idle line.
+        #expect(TopListRoom.height(rows: 6, limit: 6, row: 22, idleLine: 17, spacing: 4) == 6 * 22 + 5 * 4)
+        #expect(TopListRoom.height(rows: 9, limit: 6, row: 22, idleLine: 17, spacing: 4) == 6 * 22 + 5 * 4)
+        // Room held for five entries and the line is less than six rows'.
+        #expect(TopListRoom.height(rows: 6, limit: 7, row: 22, idleLine: 17, spacing: 4)
+            < TopListRoom.height(rows: 6, limit: 6, row: 22, idleLine: 17, spacing: 4))
+    }
+
     @Test func growsAtOnceAndShrinksOnlyAfterTheHold() {
         var room = TopListRoom(limit: 6, hold: 30)
         #expect(room.update(listed: 2, at: 0) == 3)

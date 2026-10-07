@@ -280,16 +280,16 @@ struct ProcessInspectorView: View {
         return VStack(alignment: .leading, spacing: 8) {
             InspectorHeading("Command")
             if let path = process.executablePath {
-                labelled("Executable") { CopyableText(value: path, splitsPath: true).font(.callout) }
+                labelled("Executable") { CopyableText(value: path, splitsPath: true).font(.tableText) }
             }
             if let directory = details?.directory {
-                labelled("Working directory") { CopyableText(value: directory, splitsPath: true).font(.callout) }
+                labelled("Working directory") { CopyableText(value: directory, splitsPath: true).font(.tableText) }
             } else if details != nil, process.isRestricted {
                 deniedRow("Working directory")
             }
             if let arguments = details?.arguments {
                 DetailDisclosure("Command line", preview: arguments.commandLine, isExpanded: $showsCommandLine) {
-                    CopyableText(value: arguments.commandLine).font(.callout)
+                    CopyableText(value: arguments.commandLine).font(.tableText)
                 }
                 environment(arguments.environment)
             } else if details != nil {
@@ -306,15 +306,15 @@ struct ProcessInspectorView: View {
                 Text("Environment").foregroundStyle(.secondaryText)
                 Text("None shown")
             }
-            .font(.callout)
+            .font(.tableText)
             .help("macOS gave no environment variables for it. It keeps them back for some processes, Apple's own among them.")
         } else {
             DetailDisclosure("Environment", preview: "\(variables.count) variables", isExpanded: $showsEnvironment) {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(variables) { variable in
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(variable.name).font(.callout.weight(.semibold))
-                            Text(variable.value).font(.callout.monospaced()).textSelection(.enabled).lineLimit(4)
+                            Text(variable.name).font(.tableText.weight(.semibold))
+                            Text(variable.value).font(.tableText.monospaced()).textSelection(.enabled).lineLimit(4)
                         }
                         .padding(.vertical, 2)
                     }
@@ -334,7 +334,7 @@ struct ProcessInspectorView: View {
                             Image(systemName: symbol(for: file))
                                 .foregroundStyle(file.socket?.isListening == true ? .green : .secondary)
                                 .frame(width: 14)
-                            Text(file.detail).font(.callout.monospaced()).textSelection(.enabled).lineLimit(2)
+                            Text(file.detail).font(.tableText.monospaced()).textSelection(.enabled).lineLimit(2)
                         }
                     }
                     if shown.isEmpty {
@@ -439,7 +439,7 @@ struct ProcessInspectorView: View {
             Text(label).foregroundStyle(.secondaryText)
             Text(ProcessAccess.denied).foregroundStyle(.secondaryText)
         }
-        .font(.callout)
+        .font(.tableText)
         .help(ProcessAccess.deniedHelp)
     }
 

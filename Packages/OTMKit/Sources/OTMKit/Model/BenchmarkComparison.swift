@@ -103,6 +103,21 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         baselineCaveat ?? comparedCaveat
     }
 
+    /// The verdict in a word or two, to sit beside the change: for a change
+    /// that counts, which way it went, "faster" or "slower" for a speed and
+    /// "higher" or "lower" for any other figure (a delay, responsiveness);
+    /// otherwise why it doesn't count: "within spread", "negligible",
+    /// "measured once", or "unchanged".
+    public var verdictWord: String {
+        switch verdict {
+        case .better, .worse:
+            let up = compared > baseline
+            return unit.isSpeed ? (up ? "faster" : "slower") : (up ? "higher" : "lower")
+        case .withinSpread, .negligible, .measuredOnce, .unchanged:
+            return verdict.title.lowercased()
+        }
+    }
+
     /// "Fill rate: timing unverified in the later run, so this change may not be real."
     public var caveatNote: String? {
         guard let caveat else { return nil }

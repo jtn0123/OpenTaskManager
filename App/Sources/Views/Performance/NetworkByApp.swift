@@ -123,7 +123,7 @@ struct NetworkAppsSection: View {
             Text("Receive").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
             Text("Send").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
         }
-        .font(.tableText)
+        .font(.metadata)
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 6)
     }
@@ -162,7 +162,7 @@ struct TopNetworkCard: View {
                     .foregroundStyle(Theme.network)
                 Spacer(minLength: 8)
                 Text("every \(Format.timeSpan(NetworkActivityStore.refreshSeconds))")
-                    .font(.subheadline)
+                    .font(.metadata)
                     .foregroundStyle(.secondaryText)
                     .help("Read with nettop every \(Format.timeSpan(NetworkActivityStore.refreshSeconds)) while this page is open")
             }
@@ -195,7 +195,7 @@ struct NetworkUsageRow: View {
     /// Wide enough for the widest rate ("99.9 Mbps") and its arrow, so the
     /// columns line up from row to row.
     static let rateColumnWidth: CGFloat = {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
         return ceil(("99.9 Mbps" as NSString).size(withAttributes: [.font: font]).width) + 14
     }()
 
@@ -220,7 +220,7 @@ struct NetworkUsageRow: View {
             rate(usage.received, symbol: "arrow.down", color: Theme.network)
             rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
         }
-        .font(.callout)
+        .font(.tableText)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(alignment: .leading) {

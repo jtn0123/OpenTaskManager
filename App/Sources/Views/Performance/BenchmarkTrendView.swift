@@ -159,19 +159,7 @@ private struct TrendChart: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text(figure.scaleUnit).font(.metadata).foregroundStyle(.secondaryText).fixedSize()
                 Spacer(minLength: 0)
-                if let compared = figure.latestCompared, let change = compared.fromBaseline {
-                    Label(BenchmarkChange.formatChange(change.change ?? .nan), systemImage: BenchmarkLook.symbol(change.verdict))
-                        .font(.callout)
-                        .monospacedDigit()
-                        .foregroundStyle(change.caveat == nil ? BenchmarkLook.color(change.verdict) : AnyShapeStyle(.secondaryText))
-                        .lineLimit(1)
-                        .fixedSize()
-                        .help("The newest run compared with the baseline, \(BenchmarkLook.when(compared.date)): "
-                            + "\(change.verdict.title.lowercased()). \(change.verdict.explanation)")
-                } else {
-                    // The change's room, kept so picking a baseline doesn't move the charts.
-                    Label("+0.0%", systemImage: "equal.circle").font(.callout).monospacedDigit().fixedSize().hidden()
-                }
+                baselineChange
             }
             // Beside a chart whose title wraps, the plots still line up.
             Spacer(minLength: 0)
@@ -190,6 +178,34 @@ private struct TrendChart: View {
         .padding(.vertical, 8)
         .background(tint.fillShade.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.16)))
+    }
+
+    /// The newest compared run's change from the baseline over its verdict in
+    /// a word ("within spread", "faster", "lower"), in the verdict's colour
+    /// unless either figure is in doubt. Without a baseline, their room is
+    /// kept, so picking one doesn't move the charts.
+    @ViewBuilder private var baselineChange: some View {
+        if let compared = figure.latestCompared, let change = compared.fromBaseline {
+            VStack(alignment: .trailing, spacing: 0) {
+                Label(BenchmarkChange.formatChange(change.change ?? .nan), systemImage: BenchmarkLook.symbol(change.verdict))
+                    .font(.callout)
+                    .monospacedDigit()
+                Text(change.verdictWord).font(.metadata)
+            }
+            .foregroundStyle(change.caveat == nil ? BenchmarkLook.color(change.verdict) : AnyShapeStyle(.secondaryText))
+            .lineLimit(1)
+            .fixedSize()
+            .accessibilityElement(children: .combine)
+            .help("The newest run compared with the baseline, \(BenchmarkLook.when(compared.date)): "
+                + "\(change.verdictWord). \(change.verdict.explanation)" + (change.caveatNote.map { " \($0)" } ?? ""))
+        } else {
+            VStack(alignment: .trailing, spacing: 0) {
+                Label("+0.0%", systemImage: "equal.circle").font(.callout).monospacedDigit()
+                Text(" ").font(.metadata)
+            }
+            .fixedSize()
+            .hidden()
+        }
     }
 
     private var chart: some View {
@@ -341,7 +357,7 @@ private struct TrendChart: View {
         if point.isBaseline {
             lines.append("This run is the baseline.")
         } else if let change = point.fromBaseline {
-            lines.append("\(BenchmarkChange.formatChange(change.change ?? .nan)) from the baseline: \(change.verdict.title.lowercased()). "
+            lines.append("\(BenchmarkChange.formatChange(change.change ?? .nan)) from the baseline: \(change.verdictWord). "
                 + change.verdict.explanation)
         } else if let id = trend.baseline, let base = runs[id], let run, let refusal = BenchmarkComparison.refusal(base, run) {
             lines.append("Not compared with the baseline: \(refusal.summary).")
