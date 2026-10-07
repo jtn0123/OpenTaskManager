@@ -28,6 +28,9 @@ Manager OG or any other proprietary task manager.
   Views/Processes (NSOutlineView table in `ProcessOutlineView`), Views/Performance,
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick),
+  Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
+  Views/System (hardware and security facts, read once when the page opens, never
+  per tick; the rows come from `SystemReport` in OTMKit),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -62,10 +65,12 @@ open -g -n .build/xcode/Build/Products/Debug/OpenTaskManager.app --args -openPag
 screencapture -x -o -l <windowID> out.png
 ```
 
-`-openPage Overview|Processes|Performance|Startup` sets the starting page, and
+`-openPage Overview|Processes|Performance|Startup|Users|System` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors` the Performance detail
-(`-openScroll bottom` starts the page scrolled to the end), and `-openProcess <pid>`
-selects a process so its inspector shows. Don't pass
+(`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
+selects a process so its inspector shows, and `-openUser <name>` opens that
+user's top processes on the Users page (and the system accounts, for root or a
+service account). Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
 sidebar stops working in that instance. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is

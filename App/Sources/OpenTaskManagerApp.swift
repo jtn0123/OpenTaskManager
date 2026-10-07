@@ -58,6 +58,8 @@ enum Page: String, CaseIterable, Identifiable {
     case processes = "Processes"
     case performance = "Performance"
     case startup = "Startup"
+    case users = "Users"
+    case system = "System"
 
     var id: String { rawValue }
 
@@ -67,6 +69,8 @@ enum Page: String, CaseIterable, Identifiable {
         case .processes: "list.bullet.rectangle"
         case .performance: "waveform.path.ecg"
         case .startup: "sunrise"
+        case .users: "person.2"
+        case .system: "info.circle"
         }
     }
 }
@@ -88,6 +92,8 @@ struct ContentView: View {
             case .processes: ProcessesView()
             case .performance: PerformanceView()
             case .startup: StartupView()
+            case .users: UsersView()
+            case .system: SystemInfoView()
             }
         }
         .navigationTitle(page.rawValue)

@@ -130,6 +130,17 @@ struct PowerHistory {
     }
 }
 
+/// One user's CPU (100 = one core) and summed process memory over time.
+struct UserHistory {
+    var cpu = History<Double>(capacity: AppModel.userHistoryCapacity)
+    var memory = History<Double>(capacity: AppModel.userHistoryCapacity)
+
+    mutating func append(_ totals: UsageTotals) {
+        cpu.append(totals.cpuPercent)
+        memory.append(Double(totals.memory))
+    }
+}
+
 enum UpdateSpeed: Double, CaseIterable, Identifiable {
     case fast = 0.5
     case normal = 1
@@ -199,6 +210,8 @@ final class AppModel {
     /// Two more than a graph shows, so its left edge stays filled while it scrolls.
     nonisolated static let historyCapacity = graphSpan + 2
     nonisolated static let processHistoryCapacity = 122
+    /// The Users page shows a minute or so per user, so keep it short.
+    nonisolated static let userHistoryCapacity = 62
 
     let monitor = SystemMonitor()
     let sensorMonitor = SensorMonitor()
@@ -227,6 +240,11 @@ final class AppModel {
     private(set) var networkInHistory: [String: History<Double>] = [:]
     private(set) var networkOutHistory: [String: History<Double>] = [:]
     private(set) var processHistory: [Int32: History<ProcessPoint>] = [:]
+    /// Each user's processes summed, for the Users page.
+    private(set) var users: [UserUsage] = []
+    private(set) var userHistory: [UInt32: UserHistory] = [:]
+    /// Directory lookups by uid, including misses, so each runs once.
+    @ObservationIgnored private var accounts: [UInt32: UserAccount?] = [:]
     /// Regular (Dock) apps by PID, refreshed each tick for grouping and icons.
     private(set) var regularApps: [Int32: NSRunningApplication] = [:]
     private(set) var lastError: String?
@@ -332,7 +350,16 @@ final class AppModel {
                 .map { ($0.processIdentifier, $0) },
             uniquingKeysWith: { first, _ in first }
         )
+        users = UserUsageBuilder.build(snapshot.processes)
         guard snapshot.interval > 0 else { return }
+
+        var histories: [UInt32: UserHistory] = [:]
+        for user in users {
+            var history = userHistory[user.uid] ?? UserHistory()
+            history.append(user.totals)
+            histories[user.uid] = history
+        }
+        userHistory = histories
 
         cpuHistory.append(snapshot.cpu.usage)
         for (index, usage) in snapshot.cpu.coreUsage.enumerated() where index < coreHistory.count {
@@ -390,6 +417,13 @@ final class AppModel {
 
     func displayName(for process: ProcessSample) -> String {
         regularApps[process.pid]?.localizedName ?? process.name
+    }
+
+    func account(for uid: UInt32) -> UserAccount? {
+        if let cached = accounts[uid] { return cached }
+        let account = UserAccounts.account(uid: uid)
+        accounts[uid] = .some(account)
+        return account
     }
 
     /// The `count` apps that used the most of a resource over the last

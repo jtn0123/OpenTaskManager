@@ -53,6 +53,17 @@ reveal its property list in Finder or open it. macOS keeps Login Items where
 only an administrator can read them, so the page links to their pane in System
 Settings instead.
 
+**Users**: a card for each person using the Mac, with their processes added
+up (CPU, memory, power, GPU), a minute of CPU and memory history, who's signed
+in at the screen, their Terminal and remote logins, and their busiest
+processes. Root and the service accounts sit together underneath, collapsed.
+
+**System**: what this Mac is: model, chip and core types, memory, graphics,
+displays, drives and volumes, network ports, battery health, macOS and kernel
+versions, uptime, and whether SIP, FileVault and Gatekeeper are on. The serial
+number, hardware UUID and MAC addresses stay hidden until you ask, and Copy
+Summary puts the page on the clipboard as plain text.
+
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
