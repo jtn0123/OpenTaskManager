@@ -86,12 +86,12 @@ final class GPUBenchmarkStore {
         task = nil
     }
 
-    /// `--args -openSpeedTest start` starts a run when the card first
-    /// shows, for screenshots of a running and a finished benchmark.
+    /// `--args -openResource gpu -openSpeedTest start` starts a run when the
+    /// card first shows, for screenshots of a running and a finished benchmark.
     func handleLaunchArgument() {
         guard !handledLaunchArgument else { return }
         handledLaunchArgument = true
-        if LaunchArgument.string("openSpeedTest") == "start" { start() }
+        if LaunchArgument.startsTest(on: "gpu") { start() }
     }
 
     /// In a debug build, `-gpuBenchmarkFixture nodevice|unsupported|notiming`
