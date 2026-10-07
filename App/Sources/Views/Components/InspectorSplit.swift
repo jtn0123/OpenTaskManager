@@ -24,6 +24,9 @@ struct InspectorSplit<Content: View, Detail: View>: View {
     /// Set while the window is too narrow for both side by side.
     @Binding var isNarrow: Bool
     var backTitle: String
+    /// Opt-in: at the far end of the Back bar while the details cover the
+    /// list, such as Connections' Previous and Next. Nil leaves the bar bare.
+    var backAccessory: AnyView?
     var content: Content
     var detail: Detail
 
@@ -38,6 +41,7 @@ struct InspectorSplit<Content: View, Detail: View>: View {
         isNarrow: Binding<Bool>,
         widthKey: String,
         backTitle: String,
+        backAccessory: AnyView? = nil,
         @ViewBuilder content: () -> Content,
         @ViewBuilder detail: () -> Detail
     ) {
@@ -47,6 +51,7 @@ struct InspectorSplit<Content: View, Detail: View>: View {
         _isNarrow = isNarrow
         _preferredWidth = AppStorage(wrappedValue: 320, widthKey)
         self.backTitle = backTitle
+        self.backAccessory = backAccessory
         self.content = content()
         self.detail = detail()
     }
@@ -109,6 +114,7 @@ struct InspectorSplit<Content: View, Detail: View>: View {
             .keyboardShortcut(.cancelAction)
             .help("Back to the list (Esc)")
             Spacer()
+            backAccessory
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
