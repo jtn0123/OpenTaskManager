@@ -3,7 +3,8 @@ import SQLite3
 
 /// The flight recorder's process history (schema 3).
 ///
-/// - `process_lifetimes`: every process seen, once, by PID and start time
+/// - `process_lifetimes`: every process with kept figures or seen at two
+///   record ends, once, by PID and start time
 ///   (0 where unread), with its name, path, user, bundle identifier and
 ///   launchd label, when the recording first and last saw it, and when it
 ///   ended if that was seen.
@@ -16,8 +17,10 @@ import SQLite3
 ///   tenths of a percent of one core, footprint in bytes, disk bytes a
 ///   second (null where unread).
 /// - `process_kinds` and `process_short_runs` (schema 4): processes that
-///   started and ended within one record with no figures kept get no
-///   lifetime; a record counts them by kind (name, executable, user; the
+///   started and ended within one record, or ended after their first
+///   record end, with no figures kept get no lifetime; the tracker defers
+///   idle starts one record, preserving their first-seen times. A record
+///   counts short runs by kind (name, executable, user; the
 ///   path '' where unread), one row per record and kind.
 ///
 /// A record without a process's row while it ran left it out as idle;
