@@ -288,7 +288,20 @@ Manager OG or any other proprietary task manager.
   its trail with the outlined folder underlined, why the map can only outline
   what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
   Reveal in Finder); "Where the space is" (`StorageReconcilePanel`), folded at
-  first, reads the volume's figures once per finished scan, off the main actor),
+  first, reads the volume's figures once per finished scan, off the main actor.
+  Largest Files supports Cmd/Shift selection by path; a treemap item's Add to
+  Cleanup joins it. Clean Up opens `StorageCleanupSheet` only after
+  `StorageCleanupReader` has refreshed the picks off the main actor. The scan
+  keeps volume and file identities with its bounded results. `StorageCleanupRules`
+  collapses picked descendants and flags changed, unowned, private, cloud and
+  remote items, leaving warnings unticked. Home and its standard folders,
+  mount points (or their parents), symbolic links, missing or unidentified
+  items and read-only volumes are never offered. Folder measurement is bounded
+  at 20,000 entries; unknown totals say "at least", never zero as a measurement.
+  `StorageCleanupExecution` rechecks each item immediately before the app's
+  `NSWorkspace.recycle` adapter moves it, reports each result and separately
+  measures the volume's available capacity before and after. Rescan is offered,
+  never automatic. A new scan clears cleanup selection; nothing runs per tick),
   Components/Graphs (graphs, bars, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -515,8 +528,10 @@ in its jump bar) scrolls it to that group, and
 opens, with `-openStorageFolder <path inside it>` opening a folder in the
 results, `-openStorageList largest|changes` showing the largest files or
 what changed since the last saved scan of that folder, and
-`-openStorageReconcile YES` unfolding "Where the space is". Pick a
-scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
+`-openStorageReconcile YES` unfolding "Where the space is", and
+`-openStorageCleanup <path>[,<path>…]` opening the cleanup review with those
+scan paths picked (use it with `-openStorageScope`; it never starts a move).
+Pick a scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
 Documents, Downloads and other apps' containers raise a privacy prompt.
 `-page <name>` works too. Each running copy keeps its own page
 (`PageSelection`): it reads the saved page, or the one these arguments name,

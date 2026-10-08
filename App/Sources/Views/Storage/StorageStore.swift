@@ -147,6 +147,12 @@ final class StorageStore {
     /// The folder the treemap and list show, as an item of `result`.
     var folder = 0
     var list: StorageList = .contents
+    var cleanupSelection: Set<String> = []
+    var cleanupAnchor: String?
+    var cleanupReview: StorageCleanupModel?
+    var readingCleanup = false
+    @ObservationIgnored var cleanupReadID = UUID()
+    @ObservationIgnored private var requestedCleanup: [String] = []
     /// Launch arguments are acted on once per run.
     @ObservationIgnored private var handledLaunchArguments = false
     /// A folder `-openStorageFolder` asked to open once the scan is in.
@@ -174,6 +180,11 @@ final class StorageStore {
         generation += 1
         let generation = generation
         self.scope = scope
+        cleanupReadID = UUID()
+        cleanupSelection = []
+        cleanupAnchor = nil
+        cleanupReview = nil
+        readingCleanup = false
         scanning = scope
         progress = nil
         let request = scope.request
@@ -199,6 +210,19 @@ final class StorageStore {
             scanning = nil
             progress = nil
             guard let usage else { return }
+            if !requestedCleanup.isEmpty {
+                let paths = requestedCleanup
+                requestedCleanup = []
+                let resolved = await Task.detached(priority: .userInitiated) {
+                    paths.map { path in
+                        let expanded = (path as NSString).expandingTildeInPath
+                        return URL(fileURLWithPath: expanded).resolvingSymlinksInPath().path
+                    }
+                }.value
+                guard self.generation == generation else { return }
+                for path in resolved { addToCleanup(path) }
+                reviewCleanup()
+            }
             readReconciliation(of: usage, request: request)
             // Saved once per scan, off the main actor; the results show meanwhile.
             let saved = await Task.detached(priority: .utility) { StorageArchive.save(usage, request: request) }.value
@@ -291,6 +315,7 @@ final class StorageStore {
         }
         guard let path = LaunchArgument.string("openStorageScope") else { return }
         requestedFolder = LaunchArgument.string("openStorageFolder")
+        requestedCleanup = LaunchArgument.string("openStorageCleanup")?.split(separator: ",").map(String.init) ?? []
         scan(StorageScope.resolve(path, volumes: volumes))
     }
 

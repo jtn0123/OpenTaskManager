@@ -308,17 +308,26 @@ private struct FileRow: View {
         }
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
-        .background(FileHighlight(path: file.path, hover: hover))
+        .background(FileHighlight(path: file.path, hover: hover, store: store))
         .contentShape(Rectangle())
-        .onTapGesture { show(file) }
+        .onTapGesture {
+            let flags = NSEvent.modifierFlags
+            store.selectForCleanup(file.path, command: flags.contains(.command), shift: flags.contains(.shift))
+            show(file)
+        }
         .contextMenu {
             Button("Show in Treemap") { show(file) }
             Divider()
             StorageItemMenu(path: file.path, isFolder: false, store: store)
         }
-        .help("\(file.category.title) · \((file.path as NSString).abbreviatingWithTildeInPath)\nClick to show it in the treemap")
+        .help("\(file.category.title) · \((file.path as NSString).abbreviatingWithTildeInPath)\n"
+            + "Click to select and show in the treemap. Cmd-click toggles; Shift-click selects a range.")
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(store.cleanupSelection.contains(file.path) ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction {
+            store.selectForCleanup(file.path, command: true, shift: false)
+            show(file)
+        }
     }
 
     /// The enclosing folder, as a trail below the scanned folder when it's
@@ -334,11 +343,12 @@ private struct FileRow: View {
 private struct FileHighlight: View {
     let path: String
     let hover: StorageHover
+    let store: StorageStore
 
     var body: some View {
-        let isMarked = hover.markedFile == path
+        let isMarked = store.cleanupSelection.contains(path)
         RoundedRectangle(cornerRadius: 6)
-            .fill(Color.accentColor.opacity(isMarked ? 0.16 : 0))
+            .fill(Color.accentColor.opacity(isMarked ? 0.16 : hover.markedFile == path ? 0.05 : 0))
             .overlay {
                 if isMarked { RoundedRectangle(cornerRadius: 6).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1) }
             }

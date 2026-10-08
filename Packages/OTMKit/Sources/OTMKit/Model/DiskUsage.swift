@@ -74,6 +74,7 @@ public struct DiskItem: Sendable, Codable, Hashable, Identifiable {
     /// For a folder, the category holding most of its bytes.
     public let category: DiskCategory
     public let modified: Date?
+    public let identity: StorageFileIdentity?
     /// Where the children sit in `DiskUsage.items`, largest first. A folder
     /// with more children than the scan keeps ends with a `smallerItems` row.
     public let children: Range<Int>
@@ -88,7 +89,7 @@ public struct DiskItem: Sendable, Codable, Hashable, Identifiable {
 
     public init(id: Int, parent: Int?, name: String, kind: DiskItemKind, allocatedSize: UInt64, logicalSize: UInt64,
                 itemCount: Int, category: DiskCategory, modified: Date?, children: Range<Int>,
-                contentsOmitted: Bool = false, isUnreadable: Bool = false, unreadableCount: Int = 0) {
+                contentsOmitted: Bool = false, isUnreadable: Bool = false, unreadableCount: Int = 0, identity: StorageFileIdentity? = nil) {
         self.id = id
         self.parent = parent
         self.name = name
@@ -98,6 +99,7 @@ public struct DiskItem: Sendable, Codable, Hashable, Identifiable {
         self.itemCount = itemCount
         self.category = category
         self.modified = modified
+        self.identity = identity
         self.children = children
         self.contentsOmitted = contentsOmitted
         self.isUnreadable = isUnreadable
@@ -117,14 +119,17 @@ public struct DiskFile: Sendable, Codable, Hashable, Identifiable {
     public let logicalSize: UInt64
     public let category: DiskCategory
     public let modified: Date?
+    public let identity: StorageFileIdentity?
 
-    public init(path: String, isPackage: Bool, allocatedSize: UInt64, logicalSize: UInt64, category: DiskCategory, modified: Date?) {
+    public init(path: String, isPackage: Bool, allocatedSize: UInt64, logicalSize: UInt64, category: DiskCategory, modified: Date?,
+                identity: StorageFileIdentity? = nil) {
         self.path = path
         self.isPackage = isPackage
         self.allocatedSize = allocatedSize
         self.logicalSize = logicalSize
         self.category = category
         self.modified = modified
+        self.identity = identity
     }
 
     public var name: String { (path as NSString).lastPathComponent }
