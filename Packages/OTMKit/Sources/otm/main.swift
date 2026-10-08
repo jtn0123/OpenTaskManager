@@ -101,6 +101,8 @@ USAGE:
                                  when, for how long, and the busiest processes
   otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
                                  History's processes by name, path, label or PID
+  otm startup [--source NAME] [--json]
+                                 Launchd folders, app registrations and loaded jobs
   otm startup history LABEL [--json]
   otm connections history [TEXT] [--since 1h|24h|7d] [--json]
                                  Stored launch job observations from the last 7 days

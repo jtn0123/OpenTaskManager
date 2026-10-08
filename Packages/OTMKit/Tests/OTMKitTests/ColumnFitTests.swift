@@ -70,7 +70,7 @@ struct StartupColumnTests {
     }
 
     @Test func memoryAndCPUGiveWayBeforeKind() {
-        #expect(StartupColumn.hidingOrder == [.launches, .publisher, .memory, .cpu, .kind])
+        #expect(StartupColumn.hidingOrder == [.source, .launches, .publisher, .memory, .cpu, .kind])
         #expect(StartupColumn.name.priority == nil)
         #expect(StartupColumn.status.priority == nil)
     }
@@ -78,15 +78,15 @@ struct StartupColumnTests {
     /// The 820-point window with the details beside the table, which takes
     /// Publisher off: Agent or Daemon stays, the idle CPU column goes.
     @Test func theNarrowestTableBesideTheDetailsKeepsKind() {
-        #expect(hidden(tableWidth: 490, userHidden: [.publisher]) == [.launches, .memory, .cpu])
+        #expect(hidden(tableWidth: 490, userHidden: [.publisher]) == [.source, .launches, .memory, .cpu])
         // Narrower still, Kind goes too, and Name and Status stay whatever the width.
-        #expect(hidden(tableWidth: 440, userHidden: [.publisher]) == [.launches, .memory, .cpu, .kind])
-        #expect(hidden(tableWidth: 200, userHidden: [.publisher]) == [.launches, .memory, .cpu, .kind])
+        #expect(hidden(tableWidth: 440, userHidden: [.publisher]) == [.source, .launches, .memory, .cpu, .kind])
+        #expect(hidden(tableWidth: 200, userHidden: [.publisher]) == [.source, .launches, .memory, .cpu, .kind])
     }
 
-    /// The 820-point window without the details: only Launches gives way.
-    @Test func theNarrowestWindowAloneDropsOnlyLaunches() {
-        #expect(hidden(tableWidth: 800) == [.launches])
+    /// The 820-point window without the details: Source and Launches give way.
+    @Test func theNarrowestWindowAloneDropsSourceAndLaunches() {
+        #expect(hidden(tableWidth: 800) == [.source, .launches])
         #expect(hidden(tableWidth: 1200).isEmpty)
     }
 }

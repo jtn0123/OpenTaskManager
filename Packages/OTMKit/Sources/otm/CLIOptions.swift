@@ -11,6 +11,7 @@ struct Options {
     var signal = "term"
     var depth = 1
     var sizes = false
+    var source: LaunchItemSource?
     var schedule = false
     var changes = false
     var reconcile = false
@@ -33,6 +34,11 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-n", "--count": options.count = iterator.next().flatMap(Int.init) ?? options.count
         case "-s", "--sort": options.sort = iterator.next() ?? options.sort
         case "-i", "--interval": options.interval = iterator.next().flatMap(Double.init) ?? options.interval
+        case "--source":
+            guard let name = iterator.next(), let source = LaunchItemSource(name: name) else {
+                fail("--source needs one of: " + LaunchItemSource.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            options.source = source
         case "--signal": options.signal = iterator.next() ?? options.signal
         case "-d", "--depth": options.depth = iterator.next().flatMap(Int.init) ?? options.depth
         case "--json": options.json = true

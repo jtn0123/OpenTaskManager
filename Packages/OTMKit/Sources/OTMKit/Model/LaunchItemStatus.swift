@@ -32,10 +32,12 @@ public struct LaunchItemStatus: Hashable, Sendable, Comparable {
     public struct Registration: Hashable, Sendable {
         public let isLoaded: Bool
         public let isDisabled: Bool
+        public let isAppManaged: Bool
 
-        public init(isLoaded: Bool, isDisabled: Bool) {
+        public init(isLoaded: Bool, isDisabled: Bool, isAppManaged: Bool = false) {
             self.isLoaded = isLoaded
             self.isDisabled = isDisabled
+            self.isAppManaged = isAppManaged
         }
 
         /// "Loaded" or "Not loaded". Disabled is the execution's word while
@@ -44,7 +46,11 @@ public struct LaunchItemStatus: Hashable, Sendable, Comparable {
 
         /// What that means, for a tooltip.
         public var explanation: String {
-            switch (isLoaded, isDisabled) {
+            if isAppManaged {
+                return isLoaded ? "launchd lists this app-managed job. macOS approval switches are not readable here."
+                    : "launchd does not list this item. Its macOS registration and approval state are unknown."
+            }
+            return switch (isLoaded, isDisabled) {
             case (true, false): "launchd has loaded its property list, so whatever launches the job can start it."
             case (true, true): "launchd still holds the job, but it's disabled, so launchd won't start it again."
             case (false, true): "Disabled, so launchd doesn't load it or start it."
@@ -69,7 +75,8 @@ public struct LaunchItemStatus: Hashable, Sendable, Comparable {
     /// failure names the state only while nothing runs: a job running again
     /// says Running, marked as needing a look. Restarting wins over both.
     public init(item: LaunchItem, health: LaunchJobHealth) {
-        let registration = Registration(isLoaded: item.job != nil, isDisabled: item.isDisabled)
+        let registration = Registration(isLoaded: item.job != nil, isDisabled: item.isDisabled,
+                                        isAppManaged: item.source.isAppBundled)
         let execution: Execution = switch (health, item.pid) {
         case let (.restarting(count), _): .restarting(count: count)
         case let (_, pid?): .running(pid: pid)
@@ -142,7 +149,8 @@ public struct LaunchItemStatus: Hashable, Sendable, Comparable {
         case .disabled:
             "Disabled: launchd won't start it until it's enabled again."
         case .notLoaded:
-            "launchd hasn't loaded this property list, so nothing starts it."
+            registration.isAppManaged ? "launchd does not list this item. Its registration or approval state is unknown."
+                : "launchd hasn't loaded this property list, so nothing starts it."
         }
     }
 

@@ -45,8 +45,17 @@ Manager OG or any other proprietary task manager.
 
 - `Packages/OTMKit`: sampling library (System/, Model/, Monitor/, Format/,
   Graphing/ for axis and curve maths and the squarified `Treemap`;
-  System/LaunchItems, LaunchTriggers and Launchctl read launchd plists and
-  parse `launchctl` output; System/DiskUsageScanner walks a folder for the
+  System/LaunchItems, BundledLaunchItems, LaunchTriggers and Launchctl read launchd
+  plists and parse `launchctl` output; Model/LaunchItemSource distinguishes the
+  five launchd folders, app-bundled agents and daemons, app login helpers and
+  loaded jobs without a file. Bundle discovery reuses InstalledApps' application
+  folders (never /System or a wider disk walk), with three directory listing
+  attempts per app and no signature checks, only on opening or Refresh.
+  BundleProgram resolves against the owning app; login helpers match by bundle
+  ID. launchd's bulk lists supply unmatched third-party jobs (Apple's fileless
+  jobs are on-demand XPC services and workers), excluding application and
+  anonymous process labels. Apps reuse their already-found bundle paths;
+  System/DiskUsageScanner walks a folder for the
   Storage page and `otm du`, with the category rules in Model/DiskCategoryRules,
   keeping to its own volumes by volume and by mount point (`MountBoundary`, which
   keeps a scan of /System out of the Data volume, from System/MountTable) and
@@ -300,6 +309,17 @@ Manager OG or any other proprietary task manager.
   notarization) and at most 20 log lines from a bounded tail. `LaunchJobFiles`
   refuses protected paths and links into them before touching their targets,
   reads only local regular files, and reports unavailable files as Not readable.
+  `otm startup [--source NAME] [--json]` lists the inventory with SOURCE,
+  accepting LaunchItemSource's raw names or visible titles; JSON retains the
+  existing item fields and adds source and owningAppPath. The Startup Source
+  menu wraps below the existing filter in a narrow window. Its details show
+  Source under Kind and reveal a plist or login helper. Bundled and fileless
+  jobs cannot be controlled here: their app or macOS owns registration.
+  Start at login counts enabled agents with RunAtLoad/KeepAlive and helpers
+  launchd lists, excluding boot daemons and unlisted helpers. App-bundled files
+  show shipped items, not proof of approval: Open at Login apps require Apple
+  Events or admin rights, and Background Task Management approval switches
+  require admin rights. The Settings button remains the way to inspect them.
   `otm startup history LABEL [--json]` reads stored events in both domains without
   sampling or modifying the database, printing coverage before events; its JSON
   is an object with `coverage` and `events`. `LaunchExitStatus` encodes only a
@@ -631,6 +651,7 @@ match, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show
 (`-openConnectionList closed|history` starts it on Closed recently or History;
 `-openConnectionSearch <text>` opens History with a search),
+`-openStartupSource <name>` picks the Source filter (the CLI source names or visible titles),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
 `-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
 (add `-openAppRemoval YES` to open its Move to Trash review),
@@ -781,7 +802,7 @@ fixtures. Use `-openResource benchmarks -guidedFixture YES
   double-click later, so the second click still lands on the same row.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
   `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
-  `StartupColumn`'s order (OTMKit's Layout/): Launches first, then Publisher,
+  `StartupColumn`'s order (OTMKit's Layout/): Source first, then Launches and Publisher,
   Memory, CPU and last Kind, so Name and Status keep their room and a narrow
   table still says Agent or Daemon.
 - The process inspector shows one process. When the selected row has others

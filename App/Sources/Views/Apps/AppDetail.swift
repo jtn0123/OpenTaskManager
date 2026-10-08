@@ -166,9 +166,11 @@ struct AppDetail: View {
                             .buttonStyle(.link)
                             .font(.callout)
                             .help("Show \(item.label) on the Startup page")
-                            Text("\(item.scope.title) · \(item.launchSummary) · \(status.title)")
+                            // What it is to this app: one it ships says so, not just its domain.
+                            Text("\(item.source.isAppBundled ? item.source.title : item.scope.title) · \(item.launchSummary) · \(status.title)")
                                 .font(.callout).foregroundStyle(.secondaryText)
-                                .lineLimit(1)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                                 .help("\(status.summary). launchd: \(status.registration.title)")
                         }
                     }
