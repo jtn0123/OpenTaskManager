@@ -64,7 +64,8 @@ extension FlightRecorder {
             let prior = before.map { incidentValue($0.average, metric: metric) } ?? "not recorded"
             let rose = metric == .cpu && before.map { figure.average > $0.average + 0.1 } == true
             rows.append(IncidentRow(id: "resource/\(name)", time: window.end, title: "\(name): \(value) (was \(prior))",
-                detail: "Recorded-time average · baseline: 10 minutes before · \(baselineWatched.words)", kind: rose ? "cpuRose" : name))
+                detail: "Average over recorded time · was: the 10 minutes before, \(baselineWatched.words.lowercased())",
+                kind: rose ? "cpuRose" : name))
         }
         let pressure = try incidentPressure(window, limit: limit)
         let oldPressure = try incidentPressure(window.baseline, limit: limit)
@@ -73,7 +74,8 @@ extension FlightRecorder {
                 title: "Memory pressure: \(pressure) (was \(oldPressure ?? "not recorded"))",
                 detail: "Recorded unavailable-memory share; not a categorical warning level"))
         }
-        let top = try topCPU(from: window.start, to: window.end, count: min(limit, 20))
+        // The five busiest that read above zero, as the Overview's top lists keep.
+        let top = try topCPU(from: window.start, to: window.end, count: min(limit, 5)).filter { $0.value >= 0.05 }
         rows += top.enumerated().map { index, app in
             IncidentRow(id: "busy/\(index)", time: window.end, title: app.name,
                 detail: "Busiest recorded CPU list · \(unsafe String(format: "%.1f", app.value))% of one core · names aggregated by recorder",

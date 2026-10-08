@@ -54,6 +54,31 @@ struct IncidentRecorderTests {
                                                "server · listener change on port 8080"])
     }
 
+    @Test func recordsASpanApartAreOneWatchedStretchAndTheBusiestGoMostFirst() async throws {
+        let url = url()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let recorder = try FlightRecorder(url: url)
+        var values = HistoryValues()
+        values.cpu = 0.3
+        // Twelve apps, so "busy/10" would sort before "busy/2" as text; one reads zero.
+        let apps = (1...12).map { HistoryApp(name: "App \($0)", value: Double(13 - $0)) } + [HistoryApp(name: "Idle", value: 0.01)]
+        // 10.4 s apart, as real records drift: each leaves a hole under a second before the next.
+        for index in 0..<6 {
+            try await recorder.append(HistoryRecord(time: date(1_010 + 10.4 * Double(index)), values: values, topCPU: apps))
+        }
+        let timeline = try await recorder.incident(.init(from: date(1_000), to: date(1_062)), reportFolders: [])
+        let resources = try #require(timeline.lanes.first { $0.kind == .resources })
+        #expect(resources.coverage.spans.count == 1)
+        // The records cover the window from the first one's span to the last: without bridging, six spans.
+        #expect(resources.coverage.words == "Watched throughout")
+        let wider = try await recorder.incident(.init(from: date(990), to: date(1_080)), reportFolders: [])
+        #expect(wider.lanes.first { $0.kind == .resources }?.coverage.words == "Partly watched · 1 watched span")
+        let busiest = resources.rows.filter { $0.id.hasPrefix("busy/") }.map(\.title)
+        #expect(busiest == ["App 1", "App 2", "App 3", "App 4", "App 5"])
+        #expect(resources.rows.first?.title.hasPrefix("CPU") == true, "figures keep their order ahead of the busiest")
+        #expect(FlightRecorder.bridged([.init(start: date(0), end: date(10)), .init(start: date(26), end: date(36))], within: 15).count == 2)
+    }
+
     @Test func resourceBaselineGapsAndCPUSequenceUseRecordedFigures() async throws {
         let url = url()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

@@ -53,12 +53,13 @@ public struct IncidentCoverage: Sendable, Codable, Equatable {
     }
 
     public var words: String {
-        if inferred { return "Observer coverage not retained · recording spans and event sightings shown" }
+        // Event watching isn't stored apart from recording; the lane's note says so in full.
+        if inferred { return "Inferred from recording spans" }
         return switch state {
         case .whole: "Watched throughout"
         case .partly:
             spans.isEmpty ? "Coverage cut · watched spans not loaded"
-                : "Partly watched · \(spans.count) watched spans" + (cut ? " · coverage cut" : "")
+                : "Partly watched · \(spans.count) watched \(spans.count == 1 ? "span" : "spans")" + (cut ? " · coverage cut" : "")
         case .none: "Not watched in this window"
         }
     }
@@ -112,7 +113,10 @@ public struct IncidentLane: Sendable, Codable {
     public init(kind: IncidentLaneKind, rows: [IncidentRow], coverage: IncidentCoverage,
                 domains: [String: IncidentCoverage] = [:], limit: Int = 200, cut: Bool = false, note: String = "") {
         self.kind = kind
-        self.rows = Array(rows.sorted { $0.time == $1.time ? $0.id < $1.id : $0.time < $1.time }.prefix(max(limit, 0)))
+        // Rows at the same time keep their given order: a lane's figures go CPU, memory, disk, network,
+        // and the busiest list most first ("busy/10" sorts before "busy/2" as text).
+        self.rows = rows.enumerated().sorted { $0.element.time == $1.element.time ? $0.offset < $1.offset : $0.element.time < $1.element.time }
+            .prefix(max(limit, 0)).map(\.element)
         self.coverage = coverage
         self.domains = domains
         self.cut = cut || rows.count > limit

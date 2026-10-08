@@ -9,10 +9,23 @@ struct IncidentView: View {
     let recorder: FlightRecorder?
     let fixture: Bool
     @Environment(\.dismiss) private var dismiss
-    @State private var minutes = 0
+    @State private var minutes: Int
     @State private var timeline: IncidentTimeline?
     @State private var error: String?
     @State private var includesPrivateDetails = false
+
+    init(initialWindow: IncidentWindow, recorder: FlightRecorder?, fixture: Bool) {
+        self.initialWindow = initialWindow
+        self.recorder = recorder
+        self.fixture = fixture
+        _minutes = State(initialValue: Self.choice(for: initialWindow) ?? 0)
+    }
+
+    /// The ± choice a window around a moment already is, so the picker never offers the same window twice.
+    private static func choice(for window: IncidentWindow) -> Int? {
+        let length = window.end.timeIntervalSince(window.start)
+        return IncidentWindow.minuteChoices.first { abs(Double($0 * 120) - length) < 1 }
+    }
 
     private var window: IncidentWindow {
         minutes == 0 ? initialWindow : IncidentWindow(at: initialWindow.midpoint, minutes: minutes)
@@ -28,7 +41,7 @@ struct IncidentView: View {
             Text("\(window.start.formatted(date: .abbreviated, time: .standard)) — \(window.end.formatted(date: .abbreviated, time: .standard))")
                 .font(.metadata).monospacedDigit()
             Picker("Window", selection: $minutes) {
-                Text("Original window").tag(0)
+                if Self.choice(for: initialWindow) == nil { Text("Picked range").tag(0) }
                 ForEach(IncidentWindow.minuteChoices, id: \.self) { Text("±\($0) min").tag($0) }
             }
             .pickerStyle(.segmented)
@@ -75,12 +88,19 @@ struct IncidentView: View {
     }
 
     private func coverageSummary(_ timeline: IncidentTimeline) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Recorder coverage").font(.headline)
-            ForEach(timeline.lanes, id: \.kind) { lane in
-                Text("\(lane.kind.rawValue): \(lane.domains.isEmpty ? lane.coverage.words : "see each launchd domain below")"
-                     + (lane.cut ? " · lane cut" : ""))
-                    .font(.metadata).foregroundStyle(.secondaryText)
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+                ForEach(timeline.lanes, id: \.kind) { lane in
+                    GridRow {
+                        Text(lane.kind.rawValue).font(.tableText)
+                        IncidentCoverageStrip(coverage: lane.coverage)
+                        Text((lane.domains.isEmpty ? lane.coverage.words : "Watched in every launchd domain; each below")
+                             + (lane.cut ? " · lane cut" : ""))
+                            .font(.metadata).foregroundStyle(.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
         }
     }
@@ -131,22 +151,20 @@ struct IncidentView: View {
     }
 
     private func coverage(_ value: IncidentCoverage) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 10) {
+            IncidentCoverageStrip(coverage: value)
             Text(value.words).font(.metadata).foregroundStyle(.secondaryText)
-            if value.state == .partly {
-                ForEach(value.spans) { span in
-                    Text("\(value.inferred ? "Recording / sighting" : "Watched") "
-                         + "\(span.start.formatted(date: .omitted, time: .standard)) — \(span.end.formatted(date: .omitted, time: .standard))")
-                        .font(.metadata).foregroundStyle(.secondaryText)
-                }
-            }
         }
     }
 
     private func evidenceRow(_ row: IncidentRow) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        // Resource figures sum up the window, here or in a sequence: its end isn't when they happened.
+        let showsTime = !row.id.hasPrefix("resource/") && !row.id.hasPrefix("busy/")
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
-                Text(row.time.formatted(date: .omitted, time: .standard)).monospacedDigit().foregroundStyle(.secondaryText)
+                if showsTime {
+                    Text(row.time.formatted(date: .omitted, time: .standard)).monospacedDigit().foregroundStyle(.secondaryText)
+                }
                 Text(row.title).textSelection(.enabled)
                 Spacer(minLength: 0)
                 if row.lifetime != nil || row.job != nil || row.socket != nil || row.kind == "listener" {
@@ -194,5 +212,50 @@ struct IncidentView: View {
                 try data.write(to: url, options: .atomic)
             }.value
         } catch { self.error = "Evidence could not be saved: \(error.localizedDescription)" }
+    }
+}
+
+/// A lane's watched spans across the window, in History's look: recorded bars over the track,
+/// hatched where nothing watched. Drawn once per load; the spans' times are in its help.
+struct IncidentCoverageStrip: View {
+    let coverage: IncidentCoverage
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let dark = colorScheme == .dark
+        Canvas { context, size in
+            let total = coverage.window.end.timeIntervalSince(coverage.window.start)
+            guard total > 0 else { return }
+            func x(_ time: Date) -> CGFloat { CGFloat(time.timeIntervalSince(coverage.window.start) / total) * size.width }
+            let middle = size.height / 2
+            context.fill(Path(roundedRect: CGRect(x: 0, y: middle - HistoryCoverage.bar / 2, width: size.width, height: HistoryCoverage.bar),
+                              cornerRadius: HistoryCoverage.bar / 2), with: .color(Color.primary.opacity(0.09)))
+            var holes: [CGRect] = []
+            var from = coverage.window.start
+            for span in coverage.spans + [LaunchHistoryInterval(start: coverage.window.end, end: coverage.window.end)] {
+                if span.start > from {
+                    holes.append(CGRect(x: x(from), y: middle - HistoryCoverage.band / 2, width: max(x(span.start) - x(from), 2),
+                                        height: HistoryCoverage.band))
+                }
+                from = max(from, span.end)
+            }
+            HistoryCoverage.drawGaps(holes, in: context, dark: dark)
+            for span in coverage.spans {
+                HistoryCoverage.drawRecorded(CGRect(x: x(span.start), y: middle - HistoryCoverage.bar / 2,
+                                                    width: max(x(span.end) - x(span.start), 3), height: HistoryCoverage.bar), in: context)
+            }
+        }
+        .frame(minWidth: 120, idealWidth: 220, maxWidth: 260)
+        .frame(height: HistoryCoverage.band)
+        .help(spans)
+        .accessibilityLabel(coverage.words)
+    }
+
+    private var spans: String {
+        guard !coverage.spans.isEmpty else { return coverage.words }
+        let label = coverage.inferred ? "Recording or event sighting" : "Watched"
+        return coverage.spans.map {
+            "\(label) \($0.start.formatted(date: .omitted, time: .standard)) – \($0.end.formatted(date: .omitted, time: .standard))"
+        }.joined(separator: "\n")
     }
 }

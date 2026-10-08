@@ -132,6 +132,23 @@ extension FlightRecorder {
             status = unsafe sqlite3_step(statement)
         }
         guard status == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
+        if source != .jobs && source != .sockets {
+            // Records a little over a span apart are continuous recording, as History's gaps have it.
+            spans = spans.mapValues { Self.bridged($0, within: recordSpan * (HistoryGap.spacing - 1)) }
+        }
         return spans.mapValues { IncidentCoverage(window: window, spans: $0, cut: count > limit) }
+    }
+
+    /// Ordered spans joined across holes no longer than `tolerance` seconds.
+    static func bridged(_ spans: [LaunchHistoryInterval], within tolerance: TimeInterval) -> [LaunchHistoryInterval] {
+        var joined: [LaunchHistoryInterval] = []
+        for span in spans {
+            if let last = joined.last, span.start.timeIntervalSince(last.end) <= tolerance {
+                joined[joined.count - 1] = LaunchHistoryInterval(start: last.start, end: max(last.end, span.end))
+            } else {
+                joined.append(span)
+            }
+        }
+        return joined
     }
 }
