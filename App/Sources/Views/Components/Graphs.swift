@@ -453,6 +453,7 @@ final class CardSurfaceView: NSView {
     private let sheen = CAGradientLayer()
     private var tint: NSColor?
     private var glow: Double = 0
+    private var hasStyled = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -480,13 +481,20 @@ final class CardSurfaceView: NSView {
     }
 
     func update(tint: NSColor?, glow: Double) {
-        let restyle = tint != self.tint
+        let restyle = !hasStyled || tint != self.tint
+        let glow = min(max(glow.isFinite ? glow : 0, 0), 1)
+        guard restyle || glow != self.glow else { return }
         self.tint = tint
-        self.glow = min(max(glow.isFinite ? glow : 0, 0), 1)
+        self.glow = glow
+        hasStyled = true
         if restyle { applyColors() }
         CATransaction.begin()
-        CATransaction.setAnimationDuration(0.6)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            CATransaction.setDisableActions(true)
+        } else {
+            CATransaction.setAnimationDuration(0.6)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        }
         halo.shadowOpacity = tint == nil ? 0 : Float(0.10 + 0.55 * self.glow)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             surface.borderColor = borderColor.cgColor

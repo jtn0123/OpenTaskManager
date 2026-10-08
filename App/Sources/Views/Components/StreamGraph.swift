@@ -27,8 +27,8 @@ struct GraphSeries {
 /// A task-manager graph: newest value on the right, older values sliding left.
 ///
 /// Drawn by `StreamGraphView` with Core Animation. Each sample rebuilds the
-/// paths once, and the render server then scrolls them one step to the left
-/// over the sampling interval, so the line streams in instead of jumping.
+/// paths once, and a shared window clock moves their layers in device-pixel
+/// steps over the sampling interval, so the line streams in instead of jumping.
 /// Until the window fills, the stretch before the first sample gets a light
 /// neutral wash with a faint hatch (`UnrecordedLook`), a dashed line marks
 /// where recording started, and a graph with an axis says at its foot how
@@ -125,19 +125,19 @@ final class StreamGraphView: NSView {
     private final class SeriesLayers {
         let fill = CAGradientLayer()
         let fillMask = CAShapeLayer()
+        let glow = CAShapeLayer()
         let line = CAShapeLayer()
         let head = CALayer()
         let halo = CALayer()
         let dot = CALayer()
-        /// Where the marker's glide ends: a redraw that keeps it lets the glide run on.
-        var headTarget: CGPoint?
 
         init() {
             fill.mask = fillMask
-            line.fillColor = nil
-            line.lineCap = .round
-            line.lineJoin = .round
-            line.shadowOffset = .zero
+            for stroke in [glow, line] {
+                stroke.fillColor = nil
+                stroke.lineCap = .round
+                stroke.lineJoin = .round
+            }
             head.bounds = CGRect(x: 0, y: 0, width: 12, height: 12)
             // A tight halo and a faint shadow: enough to find the newest
             // value, not so much that it blurs the line it sits on.
@@ -154,7 +154,7 @@ final class StreamGraphView: NSView {
         }
 
         func removeFromSuperlayers() {
-            [fill, line, head].forEach { $0.removeFromSuperlayer() }
+            [fill, glow, line, head].forEach { $0.removeFromSuperlayer() }
         }
     }
 
@@ -180,6 +180,7 @@ final class StreamGraphView: NSView {
     /// A fine grid's firmer rows, at its quarters.
     private let majorGrid = CAShapeLayer()
     private let scroller = CALayer()
+    private lazy var motion = StreamGraphMotion(scroller: scroller)
     private let columns = CAShapeLayer()
     /// The stretch before the first sample, washed and faintly hatched. It lives in
     /// the scroller, so it slides with the data; the hatch is built once per
@@ -221,8 +222,8 @@ final class StreamGraphView: NSView {
         plot.masksToBounds = true
         scroller.anchorPoint = .zero
         scroller.masksToBounds = false
-        // The scroller only ever moves sideways between samples, so a cached
-        // bitmap of it (glow included) slides for free in the render server.
+        // Only its position changes between samples, so a cached bitmap
+        // avoids drawing every stroke again at each device-pixel step.
         scroller.shouldRasterize = true
         for shape in [grid, majorGrid, columns] {
             shape.fillColor = nil
@@ -304,6 +305,12 @@ final class StreamGraphView: NSView {
         render(newSample: false)
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        motion.stop()
+        render(newSample: false)
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         let scale = window?.backingScaleFactor ?? 2
@@ -360,6 +367,8 @@ final class StreamGraphView: NSView {
         plot.frame = plotRect
         scroller.frame = CGRect(x: 0, y: 0, width: plotRect.width + 2 * step + 16, height: plotRect.height)
         scroller.rasterizationScale = window?.backingScaleFactor ?? 2
+        motion.prepare(view: self, step: step, interval: interval, scrolls: scrolls,
+                       reset: restep || !streams || reduceMotion)
         syncSeriesLayers(count: shown.count)
 
         var rescaleAnimations: [(CAShapeLayer, CGPath)] = []
@@ -384,26 +393,16 @@ final class StreamGraphView: NSView {
                     let oldBelow = below == nil ? nil : makeTrace(shown[index - 1], ceiling: previousCeiling, height: plotRect.height)
                     let old = makePaths(oldTrace, below: oldBelow, firstX: firstX, step: step)
                     rescaleAnimations.append((layers.line, old.line))
+                    if configuration.glows { rescaleAnimations.append((layers.glow, old.line)) }
                     rescaleAnimations.append((layers.fillMask, old.area))
                 }
                 style(layers, line: line, configuration: configuration, emphasis: emphasis, paths: paths)
                 placeHead(layers, line: line, trace: trace, edge: plotRect.maxX, animated: scrolls)
             }
         }
-        scroller.position = CGPoint(x: -step, y: 0)
         CATransaction.commit()
+        motion.resume()
 
-        if scrolls {
-            let scroll = CABasicAnimation(keyPath: "position.x")
-            scroll.fromValue = 0
-            scroll.toValue = -step
-            scroll.duration = interval
-            scroll.timingFunction = CAMediaTimingFunction(name: .linear)
-            scroll.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-            scroller.add(scroll, forKey: "scroll")
-        } else if restep || !streams || reduceMotion {
-            scroller.removeAnimation(forKey: "scroll")
-        }
         for (shape, from) in rescaleAnimations {
             let morph = CABasicAnimation(keyPath: "path")
             morph.fromValue = from
@@ -418,6 +417,7 @@ final class StreamGraphView: NSView {
         while series.count < count {
             let layers = SeriesLayers()
             scroller.addSublayer(layers.fill)
+            scroller.addSublayer(layers.glow)
             scroller.addSublayer(layers.line)
             layer?.addSublayer(layers.head)
             series.append(layers)
@@ -514,9 +514,13 @@ final class StreamGraphView: NSView {
         layers.line.strokeColor = line.color.traceShade.cgColor
         layers.line.lineWidth = line.dashed ? configuration.lineWidth : configuration.lineWidth * GraphEmphasis.traceWidth
         layers.line.lineDashPattern = line.dashed ? [4, 3] : nil
-        layers.line.shadowColor = bright.cgColor
-        layers.line.shadowRadius = configuration.glows ? 5 : 0
-        layers.line.shadowOpacity = configuration.glows ? 0.95 : 0
+        // A wide translucent stroke gives the bloom without an offscreen
+        // shadow pass. It shares the line's path, rebuilt once per sample.
+        layers.glow.isHidden = !configuration.glows
+        layers.glow.path = paths.line
+        layers.glow.strokeColor = bright.withAlphaComponent(0.18).cgColor
+        layers.glow.lineWidth = layers.line.lineWidth + 8
+        layers.glow.lineDashPattern = layers.line.lineDashPattern
 
         let filled = configuration.stacked || line.fill
         layers.fill.isHidden = !filled
@@ -537,34 +541,20 @@ final class StreamGraphView: NSView {
         let isTop = configuration?.stacked != true || layers === series.last
         let visible = configuration?.glows == true && !line.dashed && isTop && !trace.ys.isEmpty
         layers.head.isHidden = !visible
-        guard visible, let last = trace.ys.last else { return }
+        guard visible, let last = trace.ys.last else {
+            motion.placeHead(layers.head, target: layers.head.position, segment: nil, animated: false)
+            return
+        }
         let bright = line.color.fillShade
         layers.halo.backgroundColor = bright.withAlphaComponent(0.16).cgColor
         layers.dot.backgroundColor = line.color.traceShade.cgColor
         layers.dot.shadowColor = bright.cgColor
-        let target = CGPoint(x: edge, y: CGFloat(last))
-        layers.head.position = target
-        // Redrawn between samples with the newest value where it was, the
-        // marker's glide runs on with the scroll.
-        if !animated, target == layers.headTarget { return }
-        layers.headTarget = target
-        layers.head.removeAnimation(forKey: "glide")
-
         let count = trace.ys.count
-        guard animated, count > 1 else { return }
-        let keyframes = (0...12).map { frame -> NSValue in
-            let y = GraphMath.hermite(
-                from: trace.ys[count - 2], to: last,
-                startTangent: trace.tangents[count - 2], endTangent: trace.tangents[count - 1], at: Double(frame) / 12
-            )
-            return NSValue(point: CGPoint(x: edge, y: y))
-        }
-        let glide = CAKeyframeAnimation(keyPath: "position")
-        glide.values = keyframes
-        glide.duration = interval
-        glide.calculationMode = .linear
-        glide.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-        layers.head.add(glide, forKey: "glide")
+        let segment = count > 1 ? GraphMotionSegment(
+            start: trace.ys[count - 2], end: last,
+            startTangent: trace.tangents[count - 2], endTangent: trace.tangents[count - 1]
+        ) : nil
+        motion.placeHead(layers.head, target: CGPoint(x: edge, y: CGFloat(last)), segment: segment, animated: animated)
     }
 
     /// Runs inside `render`'s appearance block, so the colours resolve for this view.
@@ -619,6 +609,8 @@ final class StreamGraphView: NSView {
             label.string = text
             label.shadowColor = NSColor.windowBackgroundColor.cgColor
             label.frame = CGRect(x: 5, y: y - Self.labelHeight, width: max(plotRect.width - 10, 0), height: Self.labelHeight)
+            let ink = CGRect(x: 0, y: 0, width: min(text.size().width, label.bounds.width), height: Self.labelHeight)
+            label.shadowPath = CGPath(rect: ink, transform: nil)
         }
     }
 
