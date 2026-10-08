@@ -24,6 +24,10 @@ final class ConnectionStore {
     /// Sockets seen closing, the latest first: the last
     /// `ConnectionWatch.keptClosed`, from its `closedWindow` at most.
     private(set) var closedRows: [ConnectionRow] = []
+    var listenerReview: ListenerReview?
+    var listenerUnreadable = 0
+    var listenerError: String?
+    var acceptingListeners = false
     private(set) var summary = ConnectionSummary()
     private(set) var hiddenProcesses = 0
     /// How long the last walk took.
@@ -36,11 +40,20 @@ final class ConnectionStore {
     /// fills, not with every walk.
     private(set) var closedCoverage: ConnectionWatch.ClosedCoverage?
 
+    @ObservationIgnored let showsListenerFixture: Bool = {
+        #if DEBUG
+        LaunchArgument.string("listenerFixture") == "YES"
+        #else
+        false
+        #endif
+    }()
     @ObservationIgnored var watch = ConnectionWatch()
     @ObservationIgnored let historyWorker = ConnectionHistoryWorker()
     @ObservationIgnored var walkTask: Task<ConnectionHistoryWorker.Reading, Never>?
     @ObservationIgnored var nextBackgroundWalk = Date.distantPast
     @ObservationIgnored var visibleVisits = 0
+    @ObservationIgnored var watchActive = false
+    @ObservationIgnored var listenerAcceptance = 0
     @ObservationIgnored var historyRecorder: FlightRecorder?
     @ObservationIgnored var stoppingTask: Task<Void, Never>?
 
@@ -53,7 +66,7 @@ final class ConnectionStore {
     /// frozen like the other pages.
     func run(model: AppModel, opening: Bool) async {
         visibleVisits += 1
-        historyRecorder = model.showsSensorFixture ? nil : model.recorder
+        historyRecorder = model.showsSensorFixture || showsListenerFixture ? nil : model.recorder
         defer {
             visibleVisits -= 1
             if visibleVisits == 0 { stopUnlessBackground(force: model.isPaused) }
@@ -78,18 +91,24 @@ final class ConnectionStore {
     }
 
     private func refresh(_ model: AppModel) async {
-        guard walkTask == nil else { return }
+        guard walkTask == nil, !acceptingListeners else { return }
         if let stoppingTask { await stoppingTask.value }
-        guard walkTask == nil, !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
+        guard walkTask == nil, !acceptingListeners, !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
         let processes = connectionProcesses(model.snapshot?.processes ?? [], model: model)
-        let recorder = model.showsSensorFixture ? nil : model.recorder
+        let recorder = model.showsSensorFixture || showsListenerFixture ? nil : model.recorder
         historyRecorder = recorder
-        let task = Task { await historyWorker.read(recorder: recorder, spacing: 3, processes: processes) }
+        let acceptance = listenerAcceptance
+        let reviewsListeners = !model.showsSensorFixture && !showsListenerFixture
+        let task = Task {
+            await historyWorker.read(recorder: recorder, spacing: 3, processes: processes, reviewsListeners: reviewsListeners)
+        }
+        watchActive = true
         walkTask = task
         let reading = await task.value
         walkTask = nil
         nextBackgroundWalk = Date.now.addingTimeInterval(60)
         watch = reading.watch
+        applyListeners(reading.listeners, acceptance: acceptance)
         guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
         apply(reading.snapshot, model: model)
     }

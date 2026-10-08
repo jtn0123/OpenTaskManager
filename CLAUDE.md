@@ -232,7 +232,12 @@ Manager OG or any other proprietary task manager.
   recorded stretches and step edges bound the track and the moment panel:
   "Footprint about 412 MB (from the memory track)" (Resident for ps RSS),
   "Idle (not kept)" only for a watched idle point without memory, and
-  "Not recorded" for real gaps (`ProcessHistoryLabels` in OTMKit). Compare's figures, `HistoryIntervalStats` and
+  "Not recorded" for real gaps (`ProcessHistoryLabels` in OTMKit). At Latest, a running lifetime may show
+  its latest kept memory for at most one actual record span past the last recorded stretch, with
+  the kept reading's original time and "the latest record", never a newer or extrapolated value.
+  Ended lifetimes and stopped watches cannot borrow that reading. The memory chart has one key:
+  dashed "Memory kept while idle", solid "Busy figures" when present, and the shared hatched
+  "Not recorded" look. Idle stretches carry no repeated memory labels. Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; each interval's column heading gives how much
   of it was recorded, and `HistoryComparison.limitation` (a side under
@@ -287,6 +292,30 @@ Manager OG or any other proprietary task manager.
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
+  System/OwnerLookup and OwnerQuery reverse that lookup for a file (device and
+  inode), folder or volume (open paths and current directories), or local TCP/UDP
+  port. ProcessDescriptorReader shares the libproc buffers with ProcessInspector
+  and ConnectionSampler. Processes' View menu has Find Owner… (⇧⌘F), whose
+  FindOwnerSheet accepts text, a Finder drop or Choose… and selects a result by
+  ProcessIdentity. `otm owner <path|port> [--json]` prints the same matches,
+  coverage counts and walk time. Unreadable processes stay counted even when a
+  process has a partial match; an empty result names what was checked. Volumes
+  mention that Spotlight or the kernel may also prevent ejecting,
+  listener reviews (schema 8, `FlightRecorderListeners`): `listener_review`
+  keeps the reviewed baseline and pending changes independently of history retention,
+  even with recording off. `ListenerIdentityReader` reads signing team and identifier
+  once per executable path, without validation. Identity is path and signature,
+  TCP/UDP, port and bind scope (loopback, all interfaces or a specific address),
+  never PID or descriptor; a port in the system-assigned range (49152–65535) counts
+  as one per executable, so a random port at each launch isn't a new listener. `ListenerChangeRules` and `ListenerDebounce` in OTMKit
+  compare only identities seen on two consecutive walks; gaps restart the pair.
+  New executables, new ports, widened loopback binds, changed addresses and ports
+  held by another reviewed executable stay pending until Accept or Accept All adds
+  them to the baseline. The first walk seeds it without changes; unreadable
+  processes and paths are counted as unknown, never absent listeners.
+  The Connections summary's Listeners entry opens the review and each retained
+  observation's socket details. `otm ports --listeners --changes [--json]` reads
+  the saved review and compares two walks without creating or changing a baseline;
   socket history (schema 6, `FlightRecorderConnections`): `connection_lifetimes`
   keeps one row per observed segment from `ConnectionWatch`, with process identity,
   executable path and user, endpoints, the TCP states seen and its bounded timeline.
@@ -359,10 +388,15 @@ Manager OG or any other proprietary task manager.
   scope, PID and start time and names failed, crashed and restarting jobs for
   the Problems filter; `LaunchItemStatus` in OTMKit is the one label for what
   a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
-  running, Disabled, Not loaded) that the Status column, the details' header
-  and the Apps page share, with launchd's Loaded or Not loaded on a line of
-  its own, never in its place ("exit 1" where the column is narrow, the rest
-  in its tooltip); the details put Program right under it, and a notice
+  running, Disabled, Not loaded). The Status column stays short ("exit 1"
+  where narrow); its failure tooltip names when that exit was first seen,
+  or "time not known". The details say "Not running · last exit code 1 at …",
+  naming the date too before today, from the retained matching job baseline,
+  never an exact exit time or the latest unchanged read. Problems still
+  includes it. LaunchJobStore publishes the recorder's already-held baselines
+  after page writes, without another per-job query. View history beside Last
+  exit scrolls to the existing History section. Apps shares the short status;
+  launchd's Loaded or Not loaded stays on a line of its own; the details put Program right under it, and a notice
   (`LaunchJobHealth.notice`) only where it adds something: what a known code
   or a crash signal means, a failure before the run now, restarts seen; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
@@ -415,6 +449,13 @@ Manager OG or any other proprietary task manager.
   what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
   Reveal in Finder); "Where the space is" (`StorageReconcilePanel`), folded at
   first, reads the volume's figures once per finished scan, off the main actor.
+  Unfolded, its existing scroll view is capped at 180 points and at the space
+  left after the top cards and treemap. StorageResultsLayout reserves at least
+  180 points for the map itself, plus its breadcrumb, selection and caption,
+  so reconciliation scrolls inside the panel and the status strips stay visible.
+  Very tall top cards or a shorter window scroll the results as well, keeping
+  the schedule strip inside the window. Measurements change with content or
+  window size, never sampler ticks.
   Largest Files supports Cmd/Shift selection by path; a treemap item's Add to
   Cleanup joins it. Clean Up opens `StorageCleanupSheet` only after
   `StorageCleanupReader` has refreshed the picks off the main actor. The scan
@@ -432,12 +473,21 @@ Manager OG or any other proprietary task manager.
 
 ## Performance rules (the app must stay light)
 
+- Find Owner runs exactly one bounded descriptor walk per search, off the main
+  actor, with no timers, per-tick reads or sampler observation. Path resolution
+  reads the query once; file matches use the vnode's device and inode, never a
+  path string or per-descriptor stat. Port searches read only socket descriptors.
+
 - `StorageScheduler` has one one-shot timer for the earliest due scope, none
   without schedules. Due but ineligible work retries every 15 min and on wake;
   power/thermal change notifications also move this same timer forward.
   No scheduler work runs on sampler ticks. HID idle time, IOPowerSources, Low
   Power Mode and thermal state are read only at a timer firing. Run Now
   queues work on that same timer and still respects every safety condition.
+  Each refusal stores its reason and check time in the schedule's optional
+  lastRefusal, including scope access failures; older schedules still decode.
+  Due schedules show these in the page's popover with Run Now, or the default
+  two-minute idle rule and "Last checked: not recorded" before a refusal exists.
   A scan starts only after 2 min without input, with battery at least 30%,
   Low Power Mode off and thermal state below serious. Automatic walks use
   utility QoS, share the manual scanner and archive, and keep the scan slot
@@ -491,7 +541,12 @@ Manager OG or any other proprietary task manager.
   History switch, Keep watching connections in the background (`backgroundConnections`,
   off by default), schedules sockets at most once a minute while recording and the
   page isn't visible, on the same `ConnectionStore.shared` watch, off the main actor.
-  No new timer or per-tick descriptor work is added. Background walks publish no
+  No new timer or per-tick descriptor work is added. Listener review uses these
+  same walks, off the main actor, publishing only changed review state and counts.
+  Settings' `listenerChangeNotifications` switch defaults off and requests permission
+  only when turned on; with background watching enabled it posts one notification
+  for a walk's new batch, never again for unchanged pending changes.
+  Background walks publish no
   table rows, and page reads move the shared deadline on. The ConnectionHistory debug
   category logs wall and thread CPU seconds for each walk; a headless `otm ports`
   with `OTM_CONNECTION_WALK_TIMING=1` prints that measurement to stderr.
@@ -672,11 +727,15 @@ screencapture -x -o -l <windowID> out.png
 `-openResource cpu|memory|gpu|disk|network|power|sensors|benchmarks` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end, and Startup's
 details at their History and Files), `-openProcess <pid>`
-selects a process so its inspector shows, `-openProcessHistory <query>` (with
+selects a process so its inspector shows, `-openFindOwner <path or port>`
+starts on Processes and opens Find Owner with that query searched, `-openProcessHistory <query>` (with
 `-openPage History`) searches History's Processes section and charts the latest
 match, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show
 (`-openConnectionList closed|history` starts it on Closed recently or History;
+`-openListenerChanges YES` selects Connections and opens listener review;
+with debug `-listenerFixture YES` it shows made-up changes, never persisted,
+with Accept and notifications disabled;
 `-openConnectionSearch <text>` opens History with a search),
 `-openStartupSource <name>` picks the Source filter (the CLI source names or visible titles),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
@@ -701,7 +760,8 @@ Documents, Downloads and other apps' containers raise a privacy prompt.
 `-openStorageSchedules YES` opens the popover listing the schedules from the
 line under the page.
 In debug builds `-scheduleFixture YES` shows two made-up schedules (one due,
-one with Permission needed), never persisted or run. Their actions are disabled.
+one with Permission needed), with refusal reasons and check times, never
+persisted or run. Their actions, including the popover's Run Now, are disabled.
 
 Storage's Scan This Automatically… offers Daily or Weekly and a local time
 preference. Settings' Storage section lists schedules with Remove and Run Now.
@@ -750,6 +810,10 @@ the thermal state turns fair), so `-openResource benchmarks
 
 Guided benchmark sessions (`BenchmarkGuidedSheet`, `BenchmarkWorkspace.runGuided`)
 watch a 30 s quiet window, keeping current readings visible for at most 2 min.
+`BenchmarkPreflightStatus` in OTMKit names the current blocking condition, counts the continuous
+quiet streak against its requirement, and gives seconds left before the limit. CPU's row names
+its current load. Battery and Low Power Mode explicitly say they are advisories that do not delay
+readiness. Once quiet the sheet says Ready to proceed, with Proceed as the primary button.
 Wait keeps watching; Proceed or Cancel ends the preflight sooner. The sheet uses only published CPU, memory pressure, thermal and
 power readings from `BenchmarkContextFeed`; no extra sampler or work is added
 to a closed sheet's ticks. Power comes from the published battery's plugged-in
@@ -785,9 +849,17 @@ repeats, with their session blocks. `otm bench list` and `compare` group session
 In a debug build, `-openBenchmarkGuided cpu|gpu|all` selects Performance's
 Benchmarks workspace and opens the preflight without starting a test. Add
 `-guidedFixture YES` (or `-sustainedFixture YES`) for made-up CPU and GPU sessions
-and preflight readings, never saved. Proceed and Run all are disabled for those
+and preflight readings, never saved. The waiting fixture has low CPU and normal memory pressure
+but fair thermal state, so it names heat as the blocker while battery remains an advisory.
+Proceed and Run all are disabled for those
 fixtures. Use `-openResource benchmarks -guidedFixture YES
 -openBenchmarkCompare cpu:1,3` for grouped-session comparison screenshots.
+
+Benchmark results keep a short Debug build badge on every debug result, including saved-run
+pickers and tables. About debug builds folds the full qualification once per resource card or selected
+workspace family, including a comparable pair's debug qualification (exports keep its full wording); CPU workloads
+run slower without optimization, while GPU shaders use the GPU's own clock in either build.
+Comparison refusals and figure-specific timing warnings remain explicit beside the figures.
 
 ## Conventions
 
@@ -823,10 +895,13 @@ fixtures. Use `-openResource benchmarks -guidedFixture YES
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
   Protocol first, then PID, then Seen for, then Scope; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
-  Its six summary cards fold into a strip of chips (rows from
+  Its seven summary cards fold into a strip of chips (rows from
   `GridMath.stripRows`) when they don't fit one row or the details are open,
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.
+  History rows keep "PID 62194 · fd 4 · IPv4" under the process name, even
+  as Protocol and First / last seen give way to fit; descriptors remain
+  separate sockets, and the details header keeps the descriptor and family.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
   `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
   `StartupColumn`'s order (OTMKit's Layout/): Source first, then Launches and Publisher,
@@ -888,10 +963,12 @@ fixtures. Use `-openResource benchmarks -guidedFixture YES
 - A details pane has one scroll view, edge to edge between a pinned header and
   a pinned footer of actions, with dividers at both ends. Long technical values
   fold away in a `DetailDisclosure` (Startup's arguments, an app's certificate
-  chain). A path shows its name over its folder, which wraps and can be
-  selected (`CopyableText(splitsPath: true)`, `PathParts` in OTMKit), the whole
-  path in its tooltip and copied whole, with Copy Path beside Reveal in Finder:
-  one control, never a scroll view of its own. Identifiers too long for their
+  chain). A path shows its name over its folder, on at most two lines with
+  the middle cut (`CopyableText(splitsPath: true)`, PathParts.compactFolder in
+  OTMKit). Show full path expands selectable whole text; the tooltip and Copy
+  always keep the whole path, with Copy Path beside Reveal in Finder: one
+  control, never a scroll view of its own. This shared control serves Startup,
+  Apps, Drivers and the process inspector. Identifiers too long for their
   line (a UUID) keep to one, cut in the middle (`truncatesMiddle`).
 - A row picked outside its table (a launch argument, another page, Show in
   List) or moved by the user's filter, search or sort is brought into view
@@ -913,10 +990,11 @@ fixtures. Use `-openResource benchmarks -guidedFixture YES
   and a show in a narrow one lasts until the window crosses 900
   (`SidebarVisibility` in OTMKit, wired and saved by `SidebarVisibilityStore`).
   The View menu lists the pages (⌘1 to ⌘9).
-  With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
-  "Pages", whatever the page, out of the toolbar's glass so it sits with the
-  title, not the live badge) sits before
-  the title, and in a narrow window Pause drops its word to make room, as do
+  With it hidden, a page menu (`PageSwitcher`: the current page's title and the native menu
+  chevron, out of the toolbar's glass so it sits with the title) sits before
+  the separate navigation title. Keep this toolbar item: a title menu did nothing on macOS 26,
+  and removing the separate title sent the sidebar toggle to overflow. In a narrow window Pause
+  drops its word to make room, as do
   the pages' own items (`compactToolbar`: Startup's, Apps' and Drivers' read
   time loses "Read at" to its tooltip, Processes' Columns becomes a submenu
   of its View menu); keep

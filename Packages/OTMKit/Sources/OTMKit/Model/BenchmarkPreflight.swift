@@ -95,38 +95,40 @@ public struct BenchmarkSettling: Sendable {
         }
         let stablePower = recent.allSatisfy { $0.power == last?.power && $0.lowPowerMode == last?.lowPowerMode }
         let settled = continuous && covered >= window - Self.jitter && recent.allSatisfy(\.quiet) && stablePower
-        let validCPU = recent.filter { $0.interval <= 10 && $0.cpuBusy?.isFinite == true && (0...1).contains($0.cpuBusy ?? -1) }
-        let weight = validCPU.reduce(0) { $0 + min($1.interval, window) }
-        let busy = fresh && weight > 0 ? validCPU.reduce(0) { $0 + ($1.cpuBusy ?? 0) * min($1.interval, window) } / weight : nil
-        let cpuText = busy.map { "CPU load \(Format.percent($0)) over the last \(Int(min(covered, window).rounded())) s" }
-            ?? "CPU load unavailable"
-        let cpuQuiet = continuous && covered >= window - Self.jitter && validCPU.count == recent.count && recent.allSatisfy {
-            ($0.cpuBusy ?? 1) <= 0.1
-        }
+        let cpu = fresh ? last?.cpuBusy : nil
+        let validCPU = cpu.map { $0.isFinite && (0...1).contains($0) } == true
+        let cpuText = validCPU ? "CPU load \(Format.percent(cpu ?? 0)) now" : "CPU load unavailable"
+        let cpuQuiet = validCPU && (cpu ?? 1) <= 0.1
         let memory = fresh ? last?.memoryPressure : nil
         let thermal = fresh ? last?.thermal : nil
         let power = fresh ? last?.power : nil
         let lowPower = fresh ? last?.lowPowerMode : nil
         let rows = [
-            BenchmarkPreflightRow(id: "cpu", text: cpuText + (cpuQuiet ? " · quiet" : " · wait for a quiet window"), quiet: cpuQuiet),
+            BenchmarkPreflightRow(id: "cpu", text: cpuText + (cpuQuiet ? " · quiet" : " · wait for load under 10%"), quiet: cpuQuiet),
             BenchmarkPreflightRow(id: "memory", text: "Memory pressure \(memory?.rawValue ?? "unavailable") · "
                 + (memory == .normal ? "quiet" : "wait or proceed"), quiet: memory == .normal),
             BenchmarkPreflightRow(id: "thermal", text: "Thermal state \(thermal?.rawValue ?? "unavailable") · "
                 + (thermal == .nominal ? "quiet" : "wait for nominal or proceed"), quiet: thermal == .nominal),
             BenchmarkPreflightRow(id: "power", text: Self.powerText(power), quiet: power == .ac),
-            BenchmarkPreflightRow(id: "lowPower", text: "Low Power Mode " + (lowPower.map { $0 ? "on · results may be lower" : "off · quiet" }
-                ?? "unavailable · review before proceeding"), quiet: lowPower == false),
+            BenchmarkPreflightRow(id: "lowPower", text: Self.lowPowerText(lowPower), quiet: lowPower == false),
         ]
-        let verdict = settled ? (rows.allSatisfy(\.quiet) ? "Quiet window reached" : "Settled · review the conditions before proceeding")
-            : elapsed >= Self.maximumWait ? "Wait limit reached · proceed anyway or cancel" : "Waiting for a quiet window"
+        let verdict = status(now: now).verdict(settled: settled, elapsed: elapsed, hasAdvisories: !rows.allSatisfy(\.quiet))
         return BenchmarkPreflight(readings: readings, rows: rows, settled: settled, verdict: verdict, elapsed: elapsed)
+    }
+
+    private static func lowPowerText(_ lowPower: Bool?) -> String {
+        switch lowPower {
+        case true: "Low Power Mode on · results may be lower · advisory only, does not delay readiness"
+        case false: "Low Power Mode off · advisory only"
+        case nil: "Low Power Mode unavailable · waiting for readings"
+        }
     }
 
     private static func powerText(_ power: BenchmarkPowerSource?) -> String {
         switch power {
-        case .battery: "On battery · results may be lower than on power"
+        case .battery: "On battery · results may be lower · advisory only, does not delay readiness"
         case .ac: "On power · quiet"
-        case .ups: "On a UPS · review before proceeding"
+        case .ups: "On a UPS · advisory only, does not delay readiness"
         case nil: "Power source unavailable · review before proceeding"
         }
     }

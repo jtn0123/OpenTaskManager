@@ -300,7 +300,7 @@ struct BenchmarkRunTests {
         #expect(!macs.caveats.contains { $0.hasPrefix("Both runs are from a debug build") })
 
         let debug = try #require(comparison(BenchmarkRun(cpu(at: 100, optimized: false)), BenchmarkRun(cpu(at: 200, optimized: false))))
-        #expect(debug.caveats.contains { $0.hasPrefix("Both runs are from a debug build") })
+        #expect(debug.caveats.contains(BenchmarkComparison.debugBuildQualification))
 
         let links = try #require(comparison(BenchmarkRun(network(at: 100)), BenchmarkRun(network(at: 200, endpoint: "edge-2.example"))))
         #expect(links.caveats.first?.contains("not on this Mac; these runs reached different servers (edge-1.example, then edge-2.example)") == true)

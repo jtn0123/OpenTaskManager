@@ -14,9 +14,9 @@ struct CopyableText: View {
     /// identifiers too long for their line (a UUID) and paths in lists.
     var truncatesMiddle = false
     /// A file path as its name, prominent, over the folder that holds it
-    /// (`PathParts`), which wraps: for paths in a details pane, where a cut
-    /// in the middle hid the folders that tell two places apart. Still one
-    /// control, the whole path in its tooltip and copied whole.
+    /// (`PathParts`), with a folder preview on at most two lines. Expanding
+    /// keeps the whole folder selectable; the tooltip and Copy always use
+    /// the whole path.
     var splitsPath = false
     /// The value broken over more and more lines where it reads best (an
     /// address between its groups, never before its prefix; see
@@ -28,6 +28,7 @@ struct CopyableText: View {
     @Environment(\.isCurrentSearchMatch) private var isCurrentMatch
     @State private var isHovering = false
     @State private var copied = false
+    @State private var showsFullPath = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -52,6 +53,7 @@ struct CopyableText: View {
             .opacity(isHovering || copied ? 1 : 0)
         }
         .onHover { isHovering = $0 }
+        .onChange(of: value) { showsFullPath = false }
     }
 
     @ViewBuilder private var text: some View {
@@ -63,9 +65,23 @@ struct CopyableText: View {
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 if let folder = parts.folder {
-                    styled(folder)
-                        .foregroundStyle(.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    let preview = parts.compactFolder() ?? folder
+                    if showsFullPath {
+                        styled(value)
+                            .foregroundStyle(.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        styled(preview)
+                            .foregroundStyle(.secondaryText)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    // Only a folder the preview cut has more to show.
+                    if preview != folder {
+                        Button(showsFullPath ? "Hide full path" : "Show full path") { showsFullPath.toggle() }
+                            .buttonStyle(.link)
+                            .font(.metadata)
+                    }
                 }
             }
             .help(value)

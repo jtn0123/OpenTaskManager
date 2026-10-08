@@ -20,6 +20,7 @@ final class LaunchJobStore {
     /// Published after a page observation is saved, so the inspector can't
     /// query before the write and leave its newest events out until Refresh.
     private(set) var historyRead: Date?
+    private(set) var observedStates: [LaunchHistoryKey: LaunchHistoryState] = [:]
     @ObservationIgnored private var lastHistoryRead: ContinuousClock.Instant?
     @ObservationIgnored private var historyReadInFlight = false
     @ObservationIgnored private var pendingWrite: Task<Void, Never>?
@@ -66,7 +67,10 @@ final class LaunchJobStore {
             await previous?.value
             do {
                 try await recorder.observeLaunchJobs(reading, items: items, starts: starts)
-                if publish, historyRead.map({ $0 < reading.time }) ?? true { historyRead = reading.time }
+                if publish, historyRead.map({ $0 < reading.time }) ?? true {
+                    observedStates = await recorder.launchJobObservedStates()
+                    historyRead = reading.time
+                }
             } catch {
                 Self.logger.error("Couldn't save launch job history: \(error.localizedDescription, privacy: .public)")
             }

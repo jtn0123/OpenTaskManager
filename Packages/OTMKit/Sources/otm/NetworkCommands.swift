@@ -38,7 +38,12 @@ func listeningPorts(_ connections: [Connection]) -> [ListeningPort] {
     .sorted { ($0.port, $0.pid, $0.proto) < ($1.port, $1.pid, $1.proto) }
 }
 
-func portsCommand(_ options: Options) {
+func portsCommand(_ options: Options) async {
+    if options.changes {
+        guard options.listeners else { fail("ports --changes needs --listeners") }
+        await listenerChangesCommand(options)
+        return
+    }
     let sample = ConnectionSampler.sample()
     if ProcessInfo.processInfo.environment["OTM_CONNECTION_WALK_TIMING"] == "1" {
         let timing = "Socket walk: wall \(sample.duration) s, thread CPU \(sample.cpuDuration) s, "

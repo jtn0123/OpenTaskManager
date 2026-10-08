@@ -32,7 +32,7 @@ struct LaunchHistoryRecorderTests {
         #expect(try await !olderReader.keepsLaunchJobHistory())
         #expect(try await olderReader.launchJobEvents(label: "job", from: date(0), to: date(2_000)).isEmpty)
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 8)
+        #expect(try await recorder.schemaVersionOnDisk() == 9)
         #expect(try await recorder.keepsProcessHistory())
         #expect(try await recorder.processLifetimes(matching: "kept", from: date(0), to: date(2_000)).first?.lifetime.name == "kept")
         #expect(try await recorder.records(from: date(0), to: date(2_000)).first?.values.cpu == 42)
@@ -47,7 +47,7 @@ struct LaunchHistoryRecorderTests {
         let event = LaunchHistoryEvent(key: LaunchHistoryKey(label: "job", domain: "system"), time: date(1_010), kind: .started, pid: 3)
         try await recorder.appendLaunchJobEvents([event])
         let reopened = try FlightRecorder(url: url)
-        #expect(try await reopened.schemaVersionOnDisk() == 8)
+        #expect(try await reopened.schemaVersionOnDisk() == 9)
         #expect(try await reopened.launchJobEvents(label: "job", from: date(0), to: date(2_000)) == [event])
     }
 

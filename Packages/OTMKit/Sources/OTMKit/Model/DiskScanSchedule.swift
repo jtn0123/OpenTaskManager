@@ -7,6 +7,22 @@ public enum DiskScanCadence: String, Sendable, Codable, CaseIterable {
     public var days: Int { self == .daily ? 1 : 7 }
 }
 
+/// The last refusal belongs to a check, not to a sampling tick or a deadline.
+/// Optional on a schedule so older saved preferences still decode unchanged.
+public struct DiskScanScheduleRefusal: Sendable, Codable, Equatable {
+    public let reason: String
+    public let checkedAt: Date
+
+    public init(reason: String, checkedAt: Date) {
+        self.reason = reason
+        self.checkedAt = checkedAt
+    }
+
+    public func checkedText(time: (Date) -> String = { $0.formatted(date: .abbreviated, time: .shortened) }) -> String {
+        "Last checked: " + time(checkedAt)
+    }
+}
+
 /// The due time stays put until an attempt finishes, so sleep never loses a run.
 public struct DiskScanSchedule: Sendable, Codable, Equatable, Identifiable {
     public var id: String { path }
@@ -18,6 +34,7 @@ public struct DiskScanSchedule: Sendable, Codable, Equatable, Identifiable {
     /// The last finished attempt, including a scope that could not be read.
     public var lastRun: Date?
     public var lastResult: String?
+    public var lastRefusal: DiskScanScheduleRefusal?
 
     public init(path: String, cadence: DiskScanCadence, hour: Int = 2, minute: Int = 0, now: Date,
                 calendar: Calendar = .current) {
@@ -32,6 +49,7 @@ public struct DiskScanSchedule: Sendable, Codable, Equatable, Identifiable {
     public mutating func finish(at now: Date, result: String, calendar: Calendar = .current) {
         lastRun = now
         lastResult = result
+        lastRefusal = nil
         let day = calendar.startOfDay(for: now)
         let nextDay = calendar.date(byAdding: .day, value: cadence.days, to: day) ?? now.addingTimeInterval(86_400)
         dueAt = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: nextDay) ?? nextDay
@@ -43,12 +61,34 @@ public struct DiskScanSchedule: Sendable, Codable, Equatable, Identifiable {
         var updated = self
         updated.lastRun = previous.lastRun
         updated.lastResult = previous.lastResult
+        updated.lastRefusal = previous.lastRefusal
         if previous.cadence == cadence && previous.hour == hour && previous.minute == minute {
             updated.dueAt = previous.dueAt
         } else if let lastRun = previous.lastRun {
             updated.finish(at: lastRun, result: previous.lastResult ?? "Never run", calendar: calendar)
+            updated.lastRefusal = previous.lastRefusal
         }
         return updated
+    }
+
+    public var overdueReason: String {
+        lastRefusal?.reason ?? legacyRefusal?.reason ?? "Waits until the Mac is idle for 2 minutes"
+    }
+
+    public var lastCheckedText: String { (lastRefusal ?? legacyRefusal)?.checkedText() ?? "Last checked: not recorded" }
+
+    /// Older schedules kept scope failures as the last finished attempt.
+    /// A successful scan's result never explains why an overdue scan waits.
+    private var legacyRefusal: DiskScanScheduleRefusal? {
+        guard let lastResult, let lastRun,
+              [DiskScanScheduleSafety.permissionNeeded, "Folder unavailable", "Not mounted"].contains(lastResult) else { return nil }
+        return DiskScanScheduleRefusal(reason: lastResult, checkedAt: lastRun)
+    }
+
+    /// A refusal changes history while the same attempt is in flight. An
+    /// edit to the scope's deadline must still keep that old attempt apart.
+    public func hasSameDeadline(as other: Self) -> Bool {
+        path == other.path && cadence == other.cadence && hour == other.hour && minute == other.minute && dueAt == other.dueAt
     }
 
     public func status(at now: Date) -> String {

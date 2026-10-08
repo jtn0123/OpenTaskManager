@@ -572,8 +572,11 @@ private struct StartupTable: View {
     /// whole of it in the tooltip where only "Failed" fits.
     private var statusColumn: some Column {
         TableColumn("Status", value: \.status) { row in
+            let key = LaunchHistoryKey(row.item)
+            let firstSeen = row.status.failureFirstSeen(in: model.launchJobs.observedStates[key], key: key)
+            let explanation = row.status.observationExplanation(firstSeen: firstSeen)
             LaunchStateLabel(status: row.status)
-                .help("\(row.status.summary)\n\(row.status.explanation)\nlaunchd: \(row.status.registration.title)")
+                .help("\(row.status.summary)\n\(explanation)\nlaunchd: \(row.status.registration.title)")
         }
         .fitted(StartupColumn.status)
     }
@@ -677,9 +680,9 @@ private struct ThirdPartyBadge: View {
 /// What a job is doing: a coloured dot and the state, with its detail (the
 /// PID, the exit code, the signal) where there's room, shortened ("exit 1")
 /// where there's less. A job that needs a look has a warning sign for its
-/// dot. The table's Status column and the details' header both show this,
-/// so the two never disagree; whether launchd has the job loaded is the
-/// header's line of its own.
+/// dot. The table and the details share these execution words; a failed
+/// job's header instead dates its last exit. Registration stays on its
+/// own line.
 struct LaunchStateLabel: View {
     var status: LaunchItemStatus
     @Environment(\.backgroundProminence) private var prominence

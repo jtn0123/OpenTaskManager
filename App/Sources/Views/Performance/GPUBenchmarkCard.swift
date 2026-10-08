@@ -15,8 +15,9 @@ struct GPUBenchmarkCard: View, Equatable {
         let store = GPUBenchmarkStore.shared
         let run = store.running
         let results = store.history
+        let debugFigures = run != nil || results.isEmpty ? !CPUBenchmark.isOptimizedBuild : results.first?.optimized == false
         Card(tint: Theme.gpu) {
-            header(run: run, store: store)
+            header(run: run, store: store, debugFigures: debugFigures)
             if let run {
                 let progress = store.progress
                 GPUBenchmarkRunning(text: progress.map { "\($0.workload.title)…" } ?? "Compiling the shaders…", started: run.started,
@@ -41,9 +42,9 @@ struct GPUBenchmarkCard: View, Equatable {
                 SavedRunsDisclosure(kind: .gpu, runs: results.map(BenchmarkRun.init), place: "on this Mac")
                     .equatable()
             }
+            if debugFigures || results.contains(where: { !$0.optimized }) { DebugBuildHelp(kind: .gpu) }
             MethodologyDisclosure(preview: "FP32 compute, memory and fill rate, timed by the GPU · about \(Self.plannedSeconds) s") {
                 Text(caption(store.device))
-                Text("The GPU runs the same shaders and times them itself in any build, so a debug build's figures match a release build's.")
                 if run == nil, let latest = results.first {
                     if let note = latest.timingNote {
                         Label(note, systemImage: "clock.badge.exclamationmark")
@@ -68,12 +69,12 @@ struct GPUBenchmarkCard: View, Equatable {
             + "repeats timed by the GPU itself, and every result is checked. It keeps the GPU busy for about \(Self.plannedSeconds) s."
     }
 
-    private func header(run: GPUBenchmarkStore.Run?, store: GPUBenchmarkStore) -> some View {
+    private func header(run: GPUBenchmarkStore.Run?, store: GPUBenchmarkStore, debugFigures: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Label("Benchmark", systemImage: "stopwatch")
                 .font(.headline)
                 .foregroundStyle(Theme.gpu)
-            if !CPUBenchmark.isOptimizedBuild { DebugBuildBadge() }
+            if debugFigures { DebugBadge() }
             Spacer(minLength: 8)
             if run != nil {
                 Button("Cancel") { store.cancel() }
@@ -182,21 +183,6 @@ private func spread(_ fraction: Double) -> String {
 
 private func milliseconds(_ seconds: Double) -> String {
     "\(Format.fixed(seconds * 1000, 0)) ms"
-}
-
-/// Beside the title in a debug build: a debug build's figures match a
-/// release build's here, but the reader should know which they're seeing.
-private struct DebugBuildBadge: View {
-    var body: some View {
-        Text("Debug build")
-            .font(.metadata)
-            .foregroundStyle(.secondaryText)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.45)))
-            .fixedSize()
-            .help("The GPU runs the same shaders in any build and times them itself, so a debug build's figures match a release build's.")
-    }
 }
 
 /// A run in progress: what it's measuring, the time so far, and how far it is.

@@ -79,7 +79,7 @@ struct ConnectionDetail: View {
                         .padding(.vertical, 2)
                         .background(tint.opacity(0.15), in: Capsule())
                 }
-                Text(verbatim: "PID \(connection.pid) · descriptor \(connection.id.fd)")
+                Text(verbatim: "PID \(connection.pid) · descriptor \(connection.id.fd) · \(connection.shortFamily)")
                     .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .lineLimit(1)

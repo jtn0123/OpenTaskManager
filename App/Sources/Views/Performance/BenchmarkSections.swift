@@ -230,21 +230,6 @@ private struct BenchmarkSection: View {
     }
 }
 
-private struct DebugBadge: View {
-    var body: some View {
-        Text("Debug build")
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(BenchmarkLook.debug)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 1)
-            .background(BenchmarkLook.debug.fillShade.opacity(0.16), in: Capsule())
-            .overlay(Capsule().strokeBorder(BenchmarkLook.debug.opacity(0.4)))
-            .fixedSize()
-            .help("The latest run is from a debug build, which runs the app's own code many times slower: "
-                + "it isn't compared with a release build's runs.")
-    }
-}
-
 /// A run in progress: what it's measuring, the time so far, and how far it is.
 private struct SectionProgress: View {
     var run: SectionRun

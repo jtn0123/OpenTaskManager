@@ -79,6 +79,27 @@ struct ProcessMemoryKeepTests {
         #expect(points.last?.footprint == 100 * 1_024 * 1_024)
     }
 
+    @Test func liveEdgeCannotExtendAStoppedWatchOrBorrowAFutureStep() {
+        let lifetime = ProcessLifetime(id: 1, identity: memoryIdentity, name: "daemon", firstSeen: memoryDate(10),
+                                       lastSeen: memoryDate(30))
+        let coverage = [memoryDate(10)...memoryDate(30)]
+        let first = memoryStep(40, at: 10, edges: 1)
+        let future = memoryStep(100, at: 36)
+        func moment(_ time: Double, steps: [ProcessMemoryStep], span: Double = 10) -> ProcessHistoryLabels.Moment {
+            ProcessHistoryLabels.moment(of: lifetime, at: memoryDate(time), points: [], bucket: 60,
+                                        memory: steps, coverage: coverage, recordSpan: span)
+        }
+        #expect(moment(35, steps: [first, future]) == .latestMemory(first))
+        #expect(moment(35, steps: [first, memoryStep(40, at: 30, edges: 2)]) == .notRecorded)
+        #expect(moment(35, steps: [future]) == .notRecorded)
+        #expect(moment(35, steps: [first], span: 1) == .notRecorded)
+        #expect(moment(31, steps: [first], span: 1) == .latestMemory(first))
+        #expect(moment(35, steps: [first], span: .nan) == .notRecorded)
+        #expect(moment(35, steps: [], span: 10) == .notRecorded)
+        #expect(ProcessMemoryTrack.figure(at: memoryDate(35), steps: [first], coverage: coverage) == nil,
+                "the chart still ends at recorded coverage")
+    }
+
     @Test func heldFiguresAndChartsNeverBridgeGapsOrStoppedWatches() {
         let steps = [memoryStep(40, at: 10, edges: 1), memoryStep(80, at: 20), memoryStep(81, at: 30, edges: 2),
                      memoryStep(100, at: 60, measure: .resident, edges: 1)]
@@ -138,7 +159,7 @@ struct ProcessMemoryRecorderTests {
         #expect(before.peakFootprint == nil)
         #expect(try await old.processMemory(before).isEmpty)
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 8)
+        #expect(try await recorder.schemaVersionOnDisk() == 9)
         let after = try #require(try await recorder.processLifetime(memoryIdentity))
         #expect(after == before)
         #expect(try await recorder.processMemoryCoverage(after, from: memoryDate(0), to: memoryDate(30)).isEmpty)
@@ -148,7 +169,7 @@ struct ProcessMemoryRecorderTests {
         #expect(sqlite3_column_int64(statement, 0) == 41_943_040)
         sqlite3_finalize(statement)
         #expect(try await recorder.processMemory(after).isEmpty)
-        #expect(try await FlightRecorder(url: url).schemaVersionOnDisk() == 8)
+        #expect(try await FlightRecorder(url: url).schemaVersionOnDisk() == 9)
     }
 
     @Test func idleMemorySearchPeakGrowthRetentionAndReadOnlyReopen() async throws {

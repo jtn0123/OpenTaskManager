@@ -98,6 +98,26 @@ struct HistoryReplayLabelsTests {
         #expect(ProcessHistoryLabels.notRecorded == "Not recorded")
     }
 
+    @Test func liveEdgeNamesTheLatestKeptMemoryWithItsOriginalTime() {
+        let step = ProcessMemoryStep(time: date(1_090), footprint: 49 * 1_024 * 1_024, measure: .footprint)
+        let coverage = [date(1_080)...date(1_100)]
+        func moment(_ time: Double, ended: Double? = nil, gone: Bool = false) -> ProcessHistoryLabels.Moment {
+            ProcessHistoryLabels.moment(of: lifetime(ended: ended), at: date(time), points: [], bucket: 60,
+                                        memory: [step], coverage: coverage, isGone: gone, recordSpan: 10)
+        }
+        #expect(moment(1_101) == .latestMemory(step))
+        #expect(moment(1_110) == .latestMemory(step))
+        #expect(moment(1_110.001) == .notRecorded, "the chart bucket does not lengthen the record span")
+        #expect(moment(1_105, ended: 1_100) == .notRecorded)
+        #expect(moment(1_105, gone: true) == .notRecorded)
+        #expect(moment(1_070) == .notRecorded, "the live edge cannot fill an earlier gap")
+        let label = ProcessHistoryLabels.latestMemoryMoment(step)
+        #expect(label == "Footprint about 49.0 MB at \(step.time.formatted(date: .omitted, time: .standard)), the latest record")
+        #expect(!label.contains(date(1_105).formatted(date: .omitted, time: .standard)))
+        let resident = ProcessMemoryStep(time: step.time, footprint: step.footprint, measure: .resident)
+        #expect(ProcessHistoryLabels.latestMemoryMoment(resident).hasPrefix("Resident about 49.0 MB at "))
+    }
+
     @Test func keptZeroAndPartialIdleAreFiguresAndAnEndedLifetimeIsNotRunning() {
         let zero = point(1_010, stored: 1)
         #expect(ProcessHistoryLabels.moment(of: lifetime(), at: zero.time, points: [zero], bucket: 10) == .figures(zero))

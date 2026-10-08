@@ -7,7 +7,11 @@ actor ConnectionHistoryWorker {
     struct Reading: Sendable {
         let snapshot: ConnectionSnapshot
         let watch: ConnectionWatch
+        let listeners: ListenerReading
     }
+    var listenerRecorder: FlightRecorder?
+    var listenerReader = ListenerIdentityReader()
+    var listenerDebounce = ListenerDebounce()
     private var watch = ConnectionWatch(maximumSpacing: 121)
     private var history = ConnectionHistoryTracker()
     private var lastSpacing: TimeInterval = 3
@@ -15,7 +19,8 @@ actor ConnectionHistoryWorker {
     private var looksForStoredRows = true
     private static let log = Logger(subsystem: "OpenTaskManager", category: "ConnectionHistory")
 
-    func read(recorder: FlightRecorder?, spacing: TimeInterval, processes: [ProcessIdentity: ConnectionProcess]) async -> Reading {
+    func read(recorder: FlightRecorder?, spacing: TimeInterval, processes: [ProcessIdentity: ConnectionProcess],
+              reviewsListeners: Bool = true) async -> Reading {
         let snapshot = ConnectionSampler.sample()
         watch.maximumSpacing = max(spacing, lastSpacing) * 2 + 1
         lastSpacing = spacing
@@ -34,6 +39,8 @@ actor ConnectionHistoryWorker {
                 Self.log.error("Socket history lookup failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+        let listeners = await readListeners(snapshot, processes: metadata, recorder: recorder,
+                                            maximumSpacing: watch.maximumSpacing, enabled: reviewsListeners)
         let batch = next.observe(watch, at: snapshot.time, spacing: spacing, hidden: snapshot.hiddenProcesses,
                                  unreadable: snapshot.unreadablePIDs, processes: metadata, resumable: resumable)
         if let recorder {
@@ -44,10 +51,11 @@ actor ConnectionHistoryWorker {
             } catch { Self.log.error("Socket history write failed: \(error.localizedDescription, privacy: .public)") }
         }
         Self.log.debug("Socket walk: wall \(snapshot.duration, privacy: .public) s, thread CPU \(snapshot.cpuDuration, privacy: .public) s")
-        return Reading(snapshot: snapshot, watch: watch)
+        return Reading(snapshot: snapshot, watch: watch, listeners: listeners)
     }
 
     func stop(recorder: FlightRecorder?) async {
+        listenerDebounce.stop()
         var next = history
         let batch = next.stop()
         if let recorder {

@@ -25,7 +25,9 @@ final class PageSelection {
     init(defaults: UserDefaults = .standard, arguments: [String: Any] = LaunchArgument.domain) {
         self.defaults = defaults
         let storage = LaunchOptions.string("openStorageSchedule", in: arguments).map { _ in "Storage" }
-        let named = storage ?? LaunchOptions.string("openBenchmarkGuided", in: arguments).map { _ in "Performance" }
+        let owner = LaunchOptions.string("openFindOwner", in: arguments).map { _ in "Processes" }
+        let listeners = LaunchOptions.string("openListenerChanges", in: arguments) == "YES" ? "Connections" : nil
+        let named = owner ?? listeners ?? storage ?? LaunchOptions.string("openBenchmarkGuided", in: arguments).map { _ in "Performance" }
             ?? LaunchOptions.string("openPage", in: arguments) ?? LaunchOptions.string(Settings.page.key, in: arguments)
         page = Page.starting(openPage: named, savedPage: defaults.string(forKey: Settings.page.key))
     }

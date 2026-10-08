@@ -190,6 +190,10 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
 /// Two compatible runs of a test side by side: each figure's change, with
 /// both runs' spread, and what else differed between them.
 public struct BenchmarkComparison: Sendable, Codable, Equatable {
+    /// Export keeps the full qualification; the workspace explains it once behind its help disclosure.
+    public static let debugBuildQualification = "Both runs are from a debug build, which runs the app's own code many times "
+        + "slower than a release build: these figures compare only with each other."
+
     /// The earlier run's id, and the later one's.
     public var baseline: String
     public var compared: String
@@ -307,8 +311,7 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
                 + "repeat the run before trusting a small difference.")
         }
         if baseline.build?.optimized == false, compared.build?.optimized == false {
-            caveats.append("Both runs are from a debug build, which runs the app's own code many times slower than a release build: "
-                + "these figures compare only with each other.")
+            caveats.append(debugBuildQualification)
         }
         if let one = baseline.osVersion, let other = compared.osVersion, one != other {
             caveats.append("The system changed between the runs: \(one), then \(other).")

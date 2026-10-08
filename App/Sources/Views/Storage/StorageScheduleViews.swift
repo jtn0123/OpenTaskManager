@@ -88,7 +88,7 @@ struct StorageScheduleStatus: View {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 14) {
                                 ForEach(entries) { StorageScheduleRow(schedule: $0, controls: false) }
-                                Text("Run Now and Remove are in Settings › Storage.")
+                                Text("Run Now still waits for idle input and safe power and thermal conditions. Remove is in Settings › Storage.")
                                     .font(.explanation).foregroundStyle(.secondaryText)
                             }
                             .padding(16)
@@ -148,12 +148,19 @@ private struct StorageScheduleRow: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        let due = schedule.dueAt <= Date.now
         VStack(alignment: .leading, spacing: 4) {
             Label("\((schedule.path as NSString).abbreviatingWithTildeInPath) · \(schedule.cadence.title)", systemImage: "clock")
                 .font(.tableText).lineLimit(1).truncationMode(.middle).help(schedule.path)
             Text(schedule.status(at: Date())).font(.metadata).foregroundStyle(.secondaryText)
-            if let reason = scheduler.waiting[schedule.path] ?? schedule.lastResult {
+            if due {
+                Text(schedule.overdueReason).font(.explanation).foregroundStyle(.secondaryText)
+                Text(schedule.lastCheckedText).font(.metadata).foregroundStyle(.secondaryText)
+            } else if let reason = scheduler.waiting[schedule.path] ?? schedule.lastResult {
                 Text(reason).font(.explanation).foregroundStyle(.secondaryText)
+                if let refusal = schedule.lastRefusal {
+                    Text(refusal.checkedText()).font(.metadata).foregroundStyle(.secondaryText)
+                }
             }
             if !controls {
                 Button("Show Saved Scans") {
@@ -165,12 +172,14 @@ private struct StorageScheduleRow: View {
                 }
                 .disabled(scheduler.isFixture || StorageStore.shared.isScanning)
             }
-            if controls {
+            if controls || due {
                 HStack {
                     Button("Run Now") { scheduler.runNow(schedule.path) }
                         .help("Queue this scan now. It still waits for two minutes without input and safe power and thermal conditions.")
                         .disabled(scheduler.isFixture || StorageStore.shared.isScanning || scheduler.checking)
-                    Button("Remove") { scheduler.remove(schedule.path) }.disabled(scheduler.isFixture)
+                    if controls {
+                        Button("Remove") { scheduler.remove(schedule.path) }.disabled(scheduler.isFixture)
+                    }
                 }
             }
         }
