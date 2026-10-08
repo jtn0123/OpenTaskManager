@@ -104,7 +104,7 @@ struct ProcessHistoryTrackerTests {
             previous = now
         }
         let batch = tracker.close(at: date(1_010), samples: previous)
-        #expect(batch.started.count == 7, "every process seen gets a lifetime")
+        #expect(batch.started.count == 6, "kept figures get lifetimes now; the small idle process waits one record")
         #expect(batch.started.allSatisfy { $0.firstSeen == date(1_001) })
         let busy = try #require(batch.samples.first { $0.identity.pid == 10 })
         #expect(abs(busy.cpuPercent - 50) < 1e-9)
