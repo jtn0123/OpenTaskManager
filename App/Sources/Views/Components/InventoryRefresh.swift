@@ -4,7 +4,9 @@ import SwiftUI
 /// following the sampling tick (Startup, Apps, Drivers), with when the list
 /// was read beside it: "Read at 1:43 PM". The toolbar's live badge speaks
 /// for the metrics alone, so the two never compete. The status bar says it
-/// too, beside the counts.
+/// too, beside the counts. In a narrow window just the time shows, "1:43
+/// PM", with "Read at" in its tooltip, so the page's other items keep their
+/// place in the toolbar.
 struct InventoryRefresh: View {
     /// When the list was last read; nil before the first read finishes.
     var readAt: Date?
@@ -12,6 +14,7 @@ struct InventoryRefresh: View {
     /// What Refresh reads again.
     var help: String
     var refresh: () -> Void
+    @Environment(\.compactToolbar) private var isCompact
 
     var body: some View {
         HStack(spacing: 6) {
@@ -19,8 +22,10 @@ struct InventoryRefresh: View {
                 if isReading {
                     Text("Reading…")
                 } else if let readAt {
-                    Text("Read at \(InventoryRefresh.time(readAt))")
-                        .help("When this list was read. It isn't updated live: Refresh reads it again.")
+                    let time = InventoryRefresh.time(readAt)
+                    Text(isCompact ? time : "Read at \(time)")
+                        .help("Read at \(time). This list isn't updated live: Refresh reads it again.")
+                        .accessibilityLabel("Read at \(time)")
                 }
             }
             .font(.callout)

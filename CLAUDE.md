@@ -133,7 +133,10 @@ Manager OG or any other proprietary task manager.
   a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
   running, Disabled, Not loaded) that the Status column, the details' header
   and the Apps page share, with launchd's Loaded or Not loaded on a line of
-  its own, never in its place; the CPU and Memory cells look launchd's PID up in the
+  its own, never in its place ("exit 1" where the column is narrow, the rest
+  in its tooltip); the details put Program right under it, and a notice
+  (`LaunchJobHealth.notice`) only where it adds something: what a known code
+  or a crash signal means, a failure before the run now, restarts seen; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
   Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
   the main actor when the page opens and on Refresh, then streams bundle sizes in
@@ -332,9 +335,10 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
-  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting):
-  Launches first, then Publisher, Kind, Memory and CPU, so Name and Status
-  keep their room; Kind says Agent or Daemon when narrow.
+  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
+  `StartupColumn`'s order (OTMKit's Layout/): Launches first, then Publisher,
+  Memory, CPU and last Kind, so Name and Status keep their room and a narrow
+  table still says Agent or Daemon.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its
@@ -348,7 +352,9 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   switches, QoS; per field "Needs admin rights" for others' processes) and its
   ancestry (`ProcessAncestry`), each step selecting that process; its Threads
   tab reads the threads off the main actor once per tick, only while shown
-  (`ThreadActivityTracker`), as does `otm threads`. `-openProcessTab
+  (`ThreadActivityTracker`), as does `otm threads`; rows stay one line, and
+  a clicked thread's whole name, selectable, with Copy Thread Name, is pinned
+  under the list (`ThreadDetailLine`). `-openProcessTab
   threads|files` opens a tab with `-openProcess`.
 - The inspector's Group tab (`-openProcessTab group`) is offered only for a
   row with others nested under it, and the note's "See all N together" link
@@ -360,7 +366,8 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   count shared memory more than once; disk, GPU and power only where read).
   Its CPU graph is `AppModel.appGroupHistory` in Grouped; Tree keeps no group
   history, so it adds up the current members' own. A member's name selects it
-  in the table, expanding the rows above it. End All and Force Quit All first
+  in the table, expanding the rows above it. End and Force Quit, titled with
+  how many they'd end ("End 2 Processes…", "Force Quit 2…"), first
   list every target by name and PID, fixed when clicked, end the furthest from
   the root first, check each one's identity again just before
   (`ProcessGroupEnding`), and leave others', the system's and this app's
@@ -415,7 +422,10 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
   "Pages", whatever the page, out of the toolbar's glass so it sits with the
   title, not the live badge) sits before
-  the title, and in a narrow window Pause drops its word to make room; keep
+  the title, and in a narrow window Pause drops its word to make room, as do
+  the pages' own items (`compactToolbar`: Startup's, Apps' and Drivers' read
+  time loses "Read at" to its tooltip, Processes' Columns becomes a submenu
+  of its View menu); keep
   the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
   overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
   nothing, never the toolbar's toggle (`HiddenSidebarFocus`). The detail column

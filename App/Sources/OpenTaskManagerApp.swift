@@ -216,6 +216,7 @@ struct ContentView: View {
             // overflows inside the column instead (the window's minimum
             // height never followed the pages either).
             .frame(minHeight: 0, maxHeight: .infinity)
+            .environment(\.compactToolbar, sidebar.isNarrow == true)
         }
         // Only crossing the breakpoint matters, not every step of a resize.
         .onGeometryChange(for: Bool.self) { SidebarVisibility.isNarrow(width: $0.size.width) } action: { narrow in
@@ -236,10 +237,11 @@ struct ContentView: View {
                 } label: {
                     Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
-                // Just the icon while the page menu shares a narrow window's
-                // toolbar: the word pushed Startup's, Apps' and Drivers'
-                // Refresh, and System's Copy Summary, into the overflow menu.
-                .labelStyle(showsTitle: sidebar.isShown || sidebar.isNarrow != true)
+                // Just the icon in a narrow window, whether the page menu or
+                // the sidebar shares it: the word pushed Startup's, Apps' and
+                // Drivers' Refresh, System's Copy Summary and, with the
+                // sidebar shown, Processes' End Task into the overflow menu.
+                .labelStyle(showsTitle: sidebar.isNarrow != true)
                 .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
             }
             ToolbarItem(placement: .navigation) {
@@ -276,6 +278,14 @@ private extension ToolbarContent {
             self
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Whether the window is narrow (under 900 points, where the page menu
+    /// joins the toolbar), so the pages' toolbar items take their short
+    /// forms: Startup's "Read at" goes to a tooltip, Processes folds Columns
+    /// into its View menu. Without them, items went to the overflow menu.
+    @Entry var compactToolbar = false
 }
 
 private extension View {

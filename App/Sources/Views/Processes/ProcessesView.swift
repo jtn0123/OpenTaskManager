@@ -25,6 +25,8 @@ struct ProcessesView: View {
     /// selected row shows its own figures or its group's.
     @State private var expandedRows: Set<Int64> = []
     @State private var tableLink = ProcessTableLink()
+    /// A narrow window, where Columns joins the View menu.
+    @Environment(\.compactToolbar) private var compactToolbar
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,8 +79,12 @@ struct ProcessesView: View {
             ToolbarItem {
                 modeMenu
             }
-            ToolbarItem {
-                columnsMenu
+            // In a narrow window Columns is a submenu of the View menu, so
+            // End Task and Inspector keep their place beside the search.
+            if !compactToolbar {
+                ToolbarItem {
+                    columnsMenu
+                }
             }
             ToolbarItem {
                 Button {
@@ -119,7 +125,8 @@ struct ProcessesView: View {
     }
 
     /// How the rows are arranged, named in the toolbar rather than three
-    /// look-alike icons, with the choices ticked in its menu.
+    /// look-alike icons, with the choices ticked in its menu; in a narrow
+    /// window, Columns too, as a submenu.
     private var modeMenu: some View {
         Menu {
             Picker("View", selection: $mode) {
@@ -129,13 +136,21 @@ struct ProcessesView: View {
             }
             .pickerStyle(.inline)
             .labelsHidden()
+            if compactToolbar {
+                Divider()
+                Menu {
+                    columnItems
+                } label: {
+                    Label("Columns", systemImage: "tablecells")
+                }
+            }
         } label: {
             Label(mode.title, systemImage: mode.symbol)
         }
         .labelStyle(.titleAndIcon)
         .fixedSize()
         .help("View: group helpers under their app (Grouped), show which process started which (Tree), "
-            + "or list every process on its own (Flat)")
+            + "or list every process on its own (Flat)" + (compactToolbar ? "; and choose the columns" : ""))
     }
 
     /// Optional columns, also in the header's context menu. Hiding one makes
@@ -144,27 +159,31 @@ struct ProcessesView: View {
     /// doesn't report says that, and shows its dashes once ticked.
     private var columnsMenu: some View {
         Menu {
-            let unreported = unreportedColumns
-            ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
-                let title = column.menuTitle(hiddenToFit: hiddenToFit.contains(column), unreported: unreported.contains(column))
-                Toggle(title, isOn: Binding(
-                    get: { hiddenColumns.isOn(column, unreported: unreported) },
-                    set: { isOn in
-                        if isOn != hiddenColumns.isOn(column, unreported: unreported) { hiddenColumns.toggle(column, unreported: unreported) }
-                    }
-                ))
-            }
-            if !hiddenToFit.isEmpty {
-                Divider()
-                Text(ProcessColumn.hiddenToFitNote)
-            }
-            Divider()
-            Button("Default Columns") { hiddenColumns = .defaults }
+            columnItems
         } label: {
             Label("Columns", systemImage: "tablecells")
         }
         .help(hiddenToFit.isEmpty ? "Columns: choose what the table shows"
             : "Columns: choose what the table shows. Some are hidden until there's room for them")
+    }
+
+    @ViewBuilder private var columnItems: some View {
+        let unreported = unreportedColumns
+        ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
+            let title = column.menuTitle(hiddenToFit: hiddenToFit.contains(column), unreported: unreported.contains(column))
+            Toggle(title, isOn: Binding(
+                get: { hiddenColumns.isOn(column, unreported: unreported) },
+                set: { isOn in
+                    if isOn != hiddenColumns.isOn(column, unreported: unreported) { hiddenColumns.toggle(column, unreported: unreported) }
+                }
+            ))
+        }
+        if !hiddenToFit.isEmpty {
+            Divider()
+            Text(ProcessColumn.hiddenToFitNote)
+        }
+        Divider()
+        Button("Default Columns") { hiddenColumns = .defaults }
     }
 
     /// Columns with nothing to show on this Mac, such as Power in a VM.

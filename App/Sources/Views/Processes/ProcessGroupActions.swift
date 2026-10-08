@@ -16,9 +16,11 @@ extension AppModel {
     }
 }
 
-/// The Group tab's footer: End All and Force Quit All. Each first lists
-/// exactly whom it will end, by name and PID, as the group stands when it's
-/// clicked; a process that joins the group afterwards isn't added.
+/// The Group tab's footer: "End 2 Processes…" and "Force Quit 2…", counting
+/// the processes the review would list to end (`ProcessGroup.endingPlan`:
+/// your own, not this app). Each first lists exactly whom it will end, by
+/// name and PID, as the group stands when it's clicked; a process that joins
+/// the group afterwards isn't added.
 struct ProcessGroupActions: View {
     @Environment(AppModel.self) private var model
     let root: ProcessIdentity
@@ -27,31 +29,36 @@ struct ProcessGroupActions: View {
     /// system's group (launchd's whole branch in Tree) isn't ended from here.
     var canEnd: Bool
     @State private var request: GroupEndRequest?
-    /// What the last End All did, until another process is inspected.
+    /// What the last End did, until another process is inspected.
     @State private var outcome: String?
 
     var body: some View {
+        // The group as it stands this tick; the review takes it again when clicked.
+        let plan = canEnd ? model.processGroup(root, mode: mode)?.endingPlan(ownPID: getpid()) : nil
+        let count = plan?.targets.count ?? 0
+        let leftAlone = plan?.leftAlone.count ?? 0
         VStack(alignment: .leading, spacing: 6) {
             if let outcome {
                 Text(outcome).font(.explanation).foregroundStyle(.secondaryText)
             }
             HStack {
-                Button("End All…") { prepare(force: false) }
+                Button(ProcessGroupEnding.endTitle(count: count)) { prepare(force: false) }
                     .buttonStyle(.borderedProminent)
-                    .help(canEnd ? "End All: list every process in the group, then ask each to quit, so it can save its work first"
-                        : Self.cantEndHelp)
+                    .help(help(count: count, leftAlone: leftAlone,
+                               does: "then ask each to quit, so it can save its work first"))
                 Spacer()
-                // Kept apart from End All, as Force Quit is from End Task.
+                // Kept apart from End, as Force Quit is from End Task.
                 Button(role: .destructive) {
                     prepare(force: true)
                 } label: {
-                    Label("Force Quit All…", systemImage: "xmark.octagon")
+                    Label(ProcessGroupEnding.forceQuitTitle(count: count), systemImage: "xmark.octagon")
                 }
-                .foregroundStyle(canEnd ? .red : .secondary)
-                .help(canEnd ? "Force Quit All: list every process in the group, then stop each at once, without letting it save"
-                    : Self.cantEndHelp)
+                .foregroundStyle(count > 0 ? .red : .secondary)
+                .accessibilityLabel(ProcessGroupEnding.forceQuitAccessibilityLabel(count: count))
+                .help(help(count: count, leftAlone: leftAlone,
+                           does: "then stop each at once, without letting it save"))
             }
-            .disabled(!canEnd)
+            .disabled(count == 0)
         }
         .sheet(item: $request) { request in
             GroupEndSheet(request: request) { confirm(request) }
@@ -59,8 +66,24 @@ struct ProcessGroupActions: View {
         .onChange(of: root) { outcome = nil }
     }
 
+    /// Whom the buttons end, and whom they leave alone.
+    private func help(count: Int, leftAlone: Int, does action: String) -> String {
+        guard canEnd else { return Self.cantEndHelp }
+        guard count > 0 else { return Self.nothingToEndHelp }
+        let whom = count == 1 ? "the 1 process of yours in the group" : "the \(count) processes of yours in the group"
+        let others = switch leftAlone {
+        case 0: ""
+        case 1: ". 1 other is left alone"
+        default: ". \(leftAlone) others are left alone"
+        }
+        return "List \(whom), \(action)\(others)"
+    }
+
     private static let cantEndHelp = "Its process is the system's or another user's, so its group isn't ended from here; "
         + "End Task in each one's inspector can still ask for an administrator"
+
+    private static let nothingToEndHelp = "Nothing in this group can be ended from here: the rest are the system's, another "
+        + "user's or OpenTaskManager itself"
 
     /// The group as it stands now, in the order it would be ended.
     private func prepare(force: Bool) {

@@ -62,6 +62,8 @@ struct ProcessInspectorView: View {
     @State private var confirmingForceQuit = false
     @State private var showsCommandLine = false
     @State private var showsEnvironment = false
+    /// The thread clicked in the Threads tab, shown whole under its list.
+    @State private var pickedThread: PickedThread?
 
     /// Read every few seconds while the Overview shows.
     struct Details: Equatable {
@@ -126,7 +128,7 @@ struct ProcessInspectorView: View {
                     Group {
                         switch shownTab {
                         case .overview: overview(process)
-                        case .threads: ProcessThreadsView(process: process)
+                        case .threads: ProcessThreadsView(process: process, picked: $pickedThread)
                         case .files: files
                         case .group: ProcessGroupView(root: identity, mode: group?.mode ?? .grouped, onSelect: onSelect)
                         }
@@ -134,6 +136,9 @@ struct ProcessInspectorView: View {
                     .padding(.horizontal, 12)
                 }
                 .padding(.horizontal, -12)
+                if shownTab == .threads, let pickedThread {
+                    ThreadDetailLine(thread: pickedThread)
+                }
                 if shownTab == .group, let group {
                     ProcessGroupActions(root: identity, mode: group.mode, canEnd: !process.isRestricted)
                 } else {
@@ -143,6 +148,7 @@ struct ProcessInspectorView: View {
             .padding(12)
             .task(id: shownTab == .overview ? identity : nil) { await loadDetails() }
             .task(id: shownTab == .files ? identity : nil) { await loadOpenFiles() }
+            .onChange(of: identity) { pickedThread = nil }
         }
     }
 
