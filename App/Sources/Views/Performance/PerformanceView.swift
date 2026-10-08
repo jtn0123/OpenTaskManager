@@ -569,7 +569,7 @@ private struct ResourceText {
             title = "Thermals"
             // With no sensors (a VM), macOS's thermal pressure is all there is.
             figure = chipTemperature.map { "\($0) chip" } ?? pressure.title
-            detail = fans.isEmpty ? (chipTemperature == nil ? "Thermal pressure" : "Pressure \(pressure.rawValue)")
+            detail = fans.isEmpty ? (chipTemperature == nil ? "No sensors" : "Pressure \(pressure.rawValue)")
                 : "Fans " + fans.joined(separator: ", ")
             chip = chipTemperature ?? fans.first ?? pressure.title
         case .benchmarks:
