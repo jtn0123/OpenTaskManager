@@ -1,7 +1,8 @@
 import Foundation
 
 /// The recorder's averages and CPU peak need system ticks, even without a
-/// window. Its top-memory lists also need footprints at those ticks; CPU and
+/// window, at the chosen speed but never faster than once a second, so a
+/// hidden window never samples more often than a visible one. Its top-memory lists also need footprints at those ticks; CPU and
 /// disk counters alone cannot recover a footprint that grew and shrank.
 public struct BackgroundSamplingPolicy: Sendable, Equatable {
     public let interval: TimeInterval
@@ -16,7 +17,8 @@ public struct BackgroundSamplingPolicy: Sendable, Equatable {
     public init(visible: Bool, updateInterval: TimeInterval, recording: Bool, spikes: Bool,
                 restrictedDemand: Bool = false, sensorDemand: Bool = false) {
         publishesViews = visible
-        interval = visible ? (spikes ? min(updateInterval, 1) : updateInterval) : 1
+        let chosen = spikes ? min(updateInterval, 1) : updateInterval
+        interval = visible ? chosen : max(chosen, 1)
         processFigures = visible || recording || spikes
         processDetails = visible
         processGPU = visible

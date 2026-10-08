@@ -16,7 +16,7 @@ struct BackgroundSamplingPolicyTests {
     func hiddenFlightRecorderKeepsPeaksWithoutDisplayOnlyReads(step: Double) {
         let policy = BackgroundSamplingPolicy(visible: false, updateInterval: step, recording: true, spikes: false,
                                               restrictedDemand: true, sensorDemand: true)
-        #expect(policy.interval == 1, "CPU peaks and top-app memory peaks still need each second")
+        #expect(policy.interval == max(step, 1), "the chosen speed, never faster than once a second")
         #expect(policy.processFigures)
         #expect(!policy.publishesViews && !policy.processDetails && !policy.processGPU)
         #expect(!policy.restrictedProcessesLive && !policy.sensorsLive)

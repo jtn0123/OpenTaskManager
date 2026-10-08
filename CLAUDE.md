@@ -246,10 +246,11 @@ Manager OG or any other proprietary task manager.
   hiding, display sleep and screen lock override the count; showing a window
   interrupts the sampler's wait and takes a fresh sample.
 - With no visible content window, `BackgroundSamplingPolicy` in OTMKit keeps
-  a 1 s system feed: `HistoryAccumulator` averages ticks and keeps their CPU
-  peak, not just cumulative counters every 10 s. Its top-app memory lists keep
-  the highest sampled footprint, so native rusage figures and the kernel
-  process list also stay at 1 s. The latter keeps observed lifetimes and short
+  a system feed at the chosen update speed, never faster than 1 s, so a hidden
+  window never samples more often than a visible one: `HistoryAccumulator`
+  averages ticks and keeps their CPU peak, not just cumulative counters every
+  10 s. Its top-app memory lists keep the highest sampled footprint, so native
+  rusage figures and the kernel process list keep the same step. The latter keeps observed lifetimes and short
   runs correct; `ProcessHistoryTracker` takes native CPU and disk from cumulative
   counters and integrates restricted CPU between ps reads. Hidden sampling
   skips `PROC_PIDTASKINFO`, `ps -M` and the per-process GPU walk. With spike

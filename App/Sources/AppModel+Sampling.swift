@@ -23,11 +23,14 @@ extension AppModel {
                     recording: recorder != nil, spikes: SpikeCaptureStore.shared.needsSamples,
                     restrictedDemand: demand.contains(.restrictedProcesses), sensorDemand: demand.contains(.sensors)
                 )
+                // The step the hidden points were kept at, before this tick's.
+                let hiddenStep = backgroundSampling.interval
                 backgroundSampling.interval = policy.interval
                 if policy.publishesViews, samplingInterval != policy.interval { samplingCadenceChanged(to: policy.interval) }
                 // Hidden graph points can only be reused at their real step.
                 // A different display step starts with the unrecorded look.
-                if policy.publishesViews, !BackgroundGraphPolicy.canRestore(hiddenStep: 1, visibleStep: policy.interval) {
+                if policy.publishesViews, backgroundSampling.wasHidden,
+                   !BackgroundGraphPolicy.canRestore(hiddenStep: hiddenStep, visibleStep: policy.interval) {
                     backgroundSampling.points.removeAll()
                     backgroundSampling.hasGap = true
                 }
