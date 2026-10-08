@@ -1,5 +1,6 @@
 import AppKit
 import OTMKit
+import os
 
 /// Saves the flight recorder's events (`HistoryEvent`) as they happen: apps
 /// launched and quit, and the Mac going to sleep and waking, from
@@ -13,8 +14,8 @@ final class HistoryEventMonitor {
     private let recorder: FlightRecorder
     private var tracker = ProcessEventTracker()
     private var network: NetworkChangeMonitor?
-    /// Unsafe only for `deinit`, which takes them out of the notification centre.
-    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    // Tokens never leave the lock, including when deinit runs off the main actor.
+    private let observers = OSAllocatedUnfairLock<[NSObjectProtocol]>(uncheckedState: [])
 
     init(recorder: FlightRecorder) {
         self.recorder = recorder
@@ -41,7 +42,9 @@ final class HistoryEventMonitor {
 
     deinit {
         let center = NSWorkspace.shared.notificationCenter
-        for observer in observers { center.removeObserver(observer) }
+        observers.withLock { tokens in
+            for observer in tokens { center.removeObserver(observer) }
+        }
     }
 
     /// Takes one update's processes, leaving out the apps NSWorkspace
@@ -53,13 +56,15 @@ final class HistoryEventMonitor {
 
     private func observe(_ center: NotificationCenter, _ name: Notification.Name,
                          _ handle: @escaping @MainActor (HistoryEventMonitor, NSRunningApplication?) -> Void) {
-        observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
-            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                handle(self, app)
-            }
-        })
+        observers.withLock { tokens in
+            tokens.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    handle(self, app)
+                }
+            })
+        }
     }
 
     private func save(_ events: [HistoryEvent]) {
