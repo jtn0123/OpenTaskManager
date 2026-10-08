@@ -197,7 +197,8 @@ private struct HistoryProcessList {
     func lines(_ runs: ProcessHistoryShortRuns) -> [String] {
         var lines = ["\(runs.name)  \(runs.count) short \(runs.count == 1 ? "run" : "runs")",
                      "  between \(clock(runs.from)) and \(clock(runs.to)), each started and ended within a record "
-                         + "(\(Format.roughDuration(FlightRecorder.span))) with no figures kept"]
+                         + "(\(Format.roughDuration(FlightRecorder.span))) with no figures kept",
+                     "  counted as samples saw them, so more may have run"]
         let about = [runs.path, runs.user.isEmpty ? nil : "user \(runs.user)"].compactMap { $0 }
         if !about.isEmpty { lines.append("  " + about.joined(separator: " · ")) }
         return lines

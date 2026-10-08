@@ -282,7 +282,8 @@ enum HistoryProcessStyle {
     /// What short runs are, for tooltips.
     static let shortRunsHelp = "Processes that started and ended within one \(Format.roughDuration(FlightRecorder.span)) record "
         + "and stayed under every keep threshold are counted by name, executable and user rather than kept one by one, "
-        + "so they have no PIDs or charts. One seen at a record's end, or busy enough to keep figures, is listed on its own."
+        + "so they have no PIDs or charts. One seen at a record's end, or busy enough to keep figures, is listed on its own. "
+        + "Only those running when a sample was taken are counted, so more may have run."
 
     /// What "idle, not stored" means, for tooltips.
     static let idleHelp = "Idle, not stored: it ran, but under every keep threshold (CPU under "
