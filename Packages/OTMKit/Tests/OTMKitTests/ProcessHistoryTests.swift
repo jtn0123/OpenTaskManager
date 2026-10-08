@@ -340,6 +340,9 @@ struct FlightRecorderProcessTests {
         let match = try #require(try await recorder.processLifetimes(matching: "quiet", from: date(1_000), to: date(1_100)).first)
         #expect(match.summary.isIdle)
         #expect(match.summary.averageCPU == nil && match.summary.peakMemory == nil, "idle, not zero")
+        let points = try await recorder.processPoints(match.lifetime, from: date(1_000), to: date(1_100), bucket: 10)
+        #expect(ProcessHistoryLabels.moment(of: match.lifetime, at: date(1_020), points: points, bucket: 10) == .idle)
+        #expect(ProcessHistoryLabels.moment(of: match.lifetime, at: date(1_070), points: points, bucket: 10) == .notRecorded)
     }
 
     @Test func aRestrictedProcessHasNoDiskFigures() async throws {

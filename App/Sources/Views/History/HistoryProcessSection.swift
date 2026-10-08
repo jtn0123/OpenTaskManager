@@ -32,6 +32,7 @@ struct HistoryProcessSection: View {
     /// Results listed before "Show all".
     private static let listed = 6
     @State private var showsAll = false
+    @FocusState private var searchFocused: Bool
 
     private struct SearchKey: Equatable {
         let query: String
@@ -51,26 +52,39 @@ struct HistoryProcessSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: HistoryPageScroll.spacing) {
-            Card {
-                header
-                if isFile {
-                    note("A recording file keeps the figures above, not each process's. Search the live history for processes.")
-                } else if store.picked != nil {
-                    if let track = store.track {
-                        HistoryProcessSummary(track: track, onShowInProcesses: showInProcesses, onBack: store.unpick)
-                    } else {
-                        ProgressView().controlSize(.small)
+            if isFile {
+                HStack(spacing: 12) {
+                    Text(HistoryReplayLabels.processNotice)
+                        .font(.explanation)
+                        .foregroundStyle(.secondaryText)
+                    Spacer(minLength: 0)
+                    Button(HistoryReplayLabels.searchLive) {
+                        store.focusSearch()
+                        HistoryRecordingStore.shared.close()
                     }
-                } else if let results = store.results {
-                    list(results)
-                } else {
-                    note("Find a process History saw in this range by name, executable, launchd label or PID, "
-                        + "and chart its CPU, memory and disk.")
+                    .controlSize(.small)
+                    .fixedSize()
                 }
-            }
-            if store.picked != nil, let track = store.track {
-                HistoryProcessCharts(track: track, points: points, bucket: bucket, domain: domain, gaps: gaps, ticks: ticks,
-                                     timeLabels: timeLabels, scrubber: scrubber)
+            } else {
+                Card {
+                    header
+                    if store.picked != nil {
+                        if let track = store.track {
+                            HistoryProcessSummary(track: track, onShowInProcesses: showInProcesses, onBack: store.unpick)
+                        } else {
+                            ProgressView().controlSize(.small)
+                        }
+                    } else if let results = store.results {
+                        list(results)
+                    } else {
+                        note("Find a process History saw in this range by name, executable, launchd label or PID, "
+                            + "and chart its CPU, memory and disk.")
+                    }
+                }
+                if store.picked != nil, let track = store.track, !track.match.summary.isIdle {
+                    HistoryProcessCharts(track: track, points: points, bucket: bucket, domain: domain, gaps: gaps, ticks: ticks,
+                                         timeLabels: timeLabels, scrubber: scrubber)
+                }
             }
         }
         .task(id: SearchKey(query: store.query, requests: store.requests, recording: recorder?.url, domain: domain,
@@ -99,7 +113,13 @@ struct HistoryProcessSection: View {
                       prompt: Text("Name, executable, launchd label or PID"))
                 .textFieldStyle(.roundedBorder)
                 .frame(minWidth: 160, maxWidth: 300)
-                .disabled(isFile || recorder == nil)
+                .disabled(recorder == nil)
+                .focused($searchFocused)
+                .task(id: store.wantsSearchFocus) {
+                    guard store.wantsSearchFocus else { return }
+                    searchFocused = true
+                    store.wantsSearchFocus = false
+                }
                 .help("Search the processes History saw in this range. A whole number also finds that PID.")
             if !store.query.isEmpty {
                 Button {
@@ -222,6 +242,9 @@ private struct HistoryProcessRow: View {
     /// "10:02 – 10:42 AM · 40 min · CPU avg 3.2%, peak 45% · Memory peak 1.2 GB".
     private func details(_ lifetime: ProcessLifetime) -> String {
         let figures = HistoryProcessStyle.figures(match.summary, scale: model.cpuScale)
+        if match.summary.isIdle {
+            return ProcessHistoryLabels.lifetime(lifetime, isRunning: isRunning) + " · " + figures
+        }
         guard let span = lifetime.span(within: domain, isRunning: isRunning, now: domain.upperBound) else { return figures }
         return HistoryProcessStyle.ran(lifetime, span: span, domain: domain) + " · " + figures
     }
@@ -332,7 +355,7 @@ private struct HistoryProcessSummary: View {
                 .font(.callout)
                 .monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
-            HistoryProcessKeyRow()
+            if !track.match.summary.isIdle { HistoryProcessKeyRow() }
         }
     }
 
@@ -356,6 +379,9 @@ private struct HistoryProcessSummary: View {
 
     /// When it ran within the range.
     private var ranLine: String {
+        if track.match.summary.isIdle {
+            return ProcessHistoryLabels.lifetime(track.lifetime, isRunning: track.isRunning)
+        }
         guard let span = track.span else { return "Didn't run in this range" }
         let ran = HistoryProcessStyle.ran(track.lifetime, span: span, domain: track.domain)
         return HistoryProcessStyle.ranBefore(track.lifetime, domain: track.domain) ? ran : "Ran " + ran
@@ -364,6 +390,7 @@ private struct HistoryProcessSummary: View {
     /// Its figures over the part of the range it ran, and how many records kept them.
     private var figures: String {
         let summary = track.match.summary
+        if summary.isIdle { return ProcessHistoryLabels.idleSummary }
         var line = HistoryProcessStyle.figures(summary, scale: model.cpuScale)
         if let read = summary.averageDiskRead, let write = summary.averageDiskWrite {
             line += " · Disk avg read \(HistoryProcessStyle.unbroken(Format.bytesPerSecond(read))), "

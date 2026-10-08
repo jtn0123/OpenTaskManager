@@ -212,33 +212,71 @@ struct OpenedRecording: Identifiable, Sendable {
 /// Over the History page while a recording file shows: which recording,
 /// from which Mac, and the way back to the live history.
 struct HistoryRecordingBanner: View {
+    @Environment(\.compactToolbar) private var compact
     let recording: OpenedRecording
     let store: HistoryRecordingStore
     let scrubber: HistoryScrubber
     let player: HistoryPlayer
+    @State private var showsDetails = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: recording.incident == nil ? "record.circle" : "bolt.circle")
-                .font(.title2)
-                .foregroundStyle(HistorySessionStyle.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(recording.incident == nil ? "Recording: \(recording.title)" : "Spike: \(recording.title)")
-                    .font(.headline)
-                    .lineLimit(1)
-                if let incident = recording.incident { HistorySpikeIncidentLine(incident: incident) }
-                Text(details)
-                    .font(.callout)
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(1)
-                // Two lines in a narrow window, so what wasn't reported still shows.
-                Text(machine)
-                    .font(.callout)
-                    .foregroundStyle(.secondaryText)
-                    .lineLimit(2)
+        Group {
+            if compact {
+                VStack(alignment: .leading, spacing: 6) {
+                    heading
+                    if let incident = recording.incident {
+                        Text(HistoryReplayLabels.triggerTime(incident.primary))
+                            .font(.metadata)
+                            .foregroundStyle(.secondaryText)
+                    } else {
+                        Text(timeSpan).font(.metadata).foregroundStyle(.secondaryText)
+                    }
+                    HStack(spacing: 12) {
+                        actions
+                        Spacer(minLength: 0)
+                        detailsButton
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    Image(systemName: recording.incident == nil ? "record.circle" : "bolt.circle")
+                        .font(.title2)
+                        .foregroundStyle(HistorySessionStyle.tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        heading
+                        if let incident = recording.incident { HistorySpikeIncidentLine(incident: incident) }
+                        Text(details).font(.callout).foregroundStyle(.secondaryText).lineLimit(1)
+                        Text(machine).font(.callout).foregroundStyle(.secondaryText).lineLimit(2)
+                    }
+                    Spacer(minLength: 8)
+                    actions
+                }
             }
-            .help("\(recording.url.path)\n\(details)\n\(machine)")
-            Spacer(minLength: 8)
+        }
+        .help("\(recording.url.path)\n\(details)\n\(machine)")
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(HistorySessionStyle.tint.opacity(0.12))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var heading: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(recording.incident == nil ? "Recording: \(recording.title)" : "Spike: \(recording.title)")
+                .font(.headline)
+                .lineLimit(compact ? 2 : 1)
+            Text(HistoryReplayLabels.readOnly)
+                .font(.metadata.weight(.medium))
+                .foregroundStyle(.secondaryText)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(HistorySessionStyle.tint.opacity(0.12), in: Capsule())
+                .fixedSize()
+        }
+    }
+
+    private var actions: some View {
+        Group {
             if let incident = recording.incident {
                 HistoryJumpToSpike(incident: incident, scrubber: scrubber, player: player)
             }
@@ -246,26 +284,36 @@ struct HistoryRecordingBanner: View {
                 .fixedSize()
                 .help("Close this recording and show this Mac's own history again")
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(HistorySessionStyle.tint.opacity(0.12))
-        .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// "Wed, Oct 7 10:02 – 10:17 AM · 15 min · 91 records · read-only",
-    /// "… · 180 records of 1 s · …" when they aren't the usual ten seconds.
-    private var details: String {
+    private var detailsButton: some View {
+        Button("Details") { showsDetails.toggle() }
+            .fixedSize()
+            .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(details)
+                    Text(machine).foregroundStyle(.secondaryText)
+                    if let incident = recording.incident { HistorySpikeIncidentLine(incident: incident) }
+                }
+                .font(.explanation)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(16)
+                .frame(width: 360, alignment: .leading)
+            }
+    }
+
+    private var timeSpan: String {
         let session = recording.session
-        let length = recording.recordSeconds == FlightRecorder.span ? "" : " of \(Format.timeSpan(recording.recordSeconds))"
-        return [HistorySessionStyle.span(session.start, session.end, dated: true), Format.roughDuration(session.duration),
-                "\(recording.records) records\(length)", "read-only"].joined(separator: " · ")
+        return HistorySessionStyle.span(session.start, session.end, dated: true) + " · " + Format.roughDuration(session.duration)
     }
 
-    /// "Recorded on MacBook Pro · Apple M3 Pro · 36 GB · macOS 27.2 · GPU not reported".
+    /// Record count and machine details leave the compact banner for its popover.
+    private var details: String {
+        timeSpan + " · " + HistoryReplayLabels.recordCount(recording.records, seconds: recording.recordSeconds)
+    }
+
     private var machine: String {
-        let missing = recording.notReported
-        return "Recorded on \(recording.machine.summary)"
-            + (missing.isEmpty ? "" : " · \(ListFormatter.localizedString(byJoining: missing)) not reported")
+        HistoryReplayLabels.machine(recording.machine.summary, notReported: recording.notReported)
     }
 }
 

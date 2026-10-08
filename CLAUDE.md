@@ -162,7 +162,12 @@ Manager OG or any other proprietary task manager.
   that follow on, no PIDs, nothing to chart),
   the process inspector's Show History opens it, `-openProcessHistory <query>`
   searches it and picks the latest match, and `otm history processes <query>`
-  prints it; recording files carry no process history yet; Compare's figures, `HistoryIntervalStats` and
+  prints it; recording files carry no process history yet, so their Processes
+  section is a compact notice with Search Live History, which closes the file
+  and focuses the live search. Idle-only results show their lifetime and
+  "Idle throughout: no busy figures kept" without empty charts; the moment
+  panel says "Idle (not kept)" only for a watched idle point, and "Not recorded"
+  for real gaps (`ProcessHistoryLabels` in OTMKit). Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; each interval's column heading gives how much
   of it was recorded, and `HistoryComparison.limitation` (a side under
@@ -178,7 +183,10 @@ Manager OG or any other proprietary task manager.
   wording in `HistoryCompareLabels`). Under
   900 window points its interval and coverage headings shorten, the headline
   grid shows averages, and notices keep their full explanations in help;
-  the wide layout keeps its wording and figures. The pinned rail folds to a strip (the
+  the wide layout keeps its wording and figures. A side under 90% recorded,
+  or shares differing by more than 15 points, also puts both recorded shares
+  and the changes' recorded-time scope under the headline figures
+  (`HistoryCompareLabels.recordedScope`). The pinned rail folds to a strip (the
   section at the top, the span, the moment, Play and speed, a slim track that
   marks spike events) once the charts' top has scrolled under it; hovering a
   gap in either rail shows its span and possible causes (`HistoryGapLabels`).
@@ -201,7 +209,12 @@ Manager OG or any other proprietary task manager.
   at most 100 MB); a replay's `FlightRecorder.recordSpan` is the file's record
   length, so it buckets by the second; spike replays open at the first trigger's
   time (`SpikeReplay` in OTMKit), including `-openRecording` and playback started
-  with `-openPlayback`. The banner's Jump to Spike pauses there from anywhere,
+  with `-openPlayback`. Below 900 window points the recording banner keeps its
+  title, trigger time and actions, and moves the machine, record count and
+  unreported figures to Details. Both widths show a Read-only badge
+  (`HistoryReplayLabels` in OTMKit). The moment panel's event descriptions
+  wrap to two lines in their own column, beside a trailing column of complete
+  relative times. The banner's Jump to Spike pauses there from anywhere,
   with every trigger's time in its help. Every time chart marks the triggers
   with the rail's bolt and a thin rule, laid out once without reading the
   scrubber (`HistorySpikeChartMarks`); ordinary recordings still open at the end.
