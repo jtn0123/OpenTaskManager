@@ -552,9 +552,9 @@ private struct ResourceText {
         case .memory:
             let memory = snapshot.memory
             title = "Memory"
-            figure = "\(Self.unbroken(Format.bytes(memory.used))) / \(Self.unbroken(Format.bytes(memory.physical)))"
             chip = Format.percent(memory.usedFraction)
-            detail = "\(chip) · \(memory.pressure.rawValue.capitalized) pressure"
+            figure = "\(Self.unbroken(Format.bytes(memory.used))) · \(chip)"
+            detail = "Pressure \(memory.pressure.rawValue)"
         case .power:
             let watts = snapshot.power.systemWatts.map(Format.watts)
             let battery = snapshot.power.battery.map { "Battery \($0.percent)%" }
