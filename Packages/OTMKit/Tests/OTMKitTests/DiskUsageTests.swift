@@ -228,6 +228,7 @@ struct DiskUsageScannerTests {
         #expect(usage.root.logicalSize == 200_000)
         #expect(usage.root.allocatedSize == (try fixture.allocated("a/original.bin")))
         #expect(usage.hardLinkDuplicates == 1)
+        #expect(usage.hardLinkDuplicateSize == (try fixture.allocated("a/original.bin")))
         #expect(usage.fileCount == 2)
         #expect(usage.largestFiles.count == 1)
     }
