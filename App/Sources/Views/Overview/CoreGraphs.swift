@@ -196,7 +196,7 @@ private struct CoreGridLayout: Layout {
 }
 
 /// One logical CPU's recent load as a small graph, under its number and its
-/// reading now, coloured as Performance's Every core tiles are. The labels
+/// reading now, drawn in `CoreTileLook` as Performance's Every core tiles are. The labels
 /// have a line of their own, so a busy core's trace never runs under them.
 private struct CoreGraphTile: View {
     var cpu: Int
@@ -207,24 +207,24 @@ private struct CoreGraphTile: View {
     var color: Color
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 5)
+        let shape = RoundedRectangle(cornerRadius: CoreTileLook.cornerRadius)
         VStack(spacing: 0) {
             HStack {
                 Text("\(cpu)").foregroundStyle(.secondaryText)
                 Spacer(minLength: 4)
-                Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? AnyShapeStyle(color) : AnyShapeStyle(.secondaryText))
+                Text(Format.percent(usage)).foregroundStyle(CoreTileLook.isHot(usage) ? AnyShapeStyle(color) : AnyShapeStyle(.secondaryText))
             }
-            // The metadata size, 12 pt, so the small multiples keep their room for the graph.
-            .font(.system(size: 12, weight: .medium).monospacedDigit())
+            .font(CoreTileLook.labelFont)
             .lineLimit(1)
-            .padding(.horizontal, 6)
-            .frame(height: 17)
-            GraphView(series: [GraphSeries(values: values, color: color)], maxValue: top, lineWidth: 1.2, glows: true, cornerRadius: 4)
+            .padding(.horizontal, CoreTileLook.labelInset)
+            .frame(height: CoreTileLook.labelHeight)
+            GraphView(series: [GraphSeries(values: values, color: color)], maxValue: top, lineWidth: CoreTileLook.lineWidth, glows: true,
+                      cornerRadius: CoreTileLook.cornerRadius - 1)
                 .padding([.horizontal, .bottom], 1)
         }
-        .background(LinearGradient(colors: [color.opacity(0.06 + 0.22 * usage), color.opacity(0.02)], startPoint: .top, endPoint: .bottom),
-                    in: shape)
-        .overlay(shape.strokeBorder(color.opacity(0.18 + 0.5 * usage)))
+        .background(LinearGradient(colors: [color.opacity(CoreTileLook.washTop(usage)), color.opacity(CoreTileLook.washFoot)],
+                                   startPoint: .top, endPoint: .bottom), in: shape)
+        .overlay(shape.strokeBorder(color.opacity(CoreTileLook.border(usage))))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("CPU \(cpu)")
         .accessibilityValue(Format.percent(usage))

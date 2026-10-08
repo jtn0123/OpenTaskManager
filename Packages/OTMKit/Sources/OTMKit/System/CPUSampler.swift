@@ -26,6 +26,9 @@ final class CPUSampler {
         defer { previousTicks = ticks }
 
         var coreUsage: [Double] = []
+        var coreSystem: [Double] = []
+        coreUsage.reserveCapacity(ticks.count)
+        coreSystem.reserveCapacity(ticks.count)
         var totalUser: UInt64 = 0, totalSystem: UInt64 = 0, totalAll: UInt64 = 0
         let haveBaseline = previousTicks.count == ticks.count
         for (cpu, current) in ticks.enumerated() {
@@ -37,6 +40,7 @@ final class CPUSampler {
             let nice = UInt64(current[Int(CPU_STATE_NICE)] &- before[Int(CPU_STATE_NICE)])
             let all = user + system + idle + nice
             coreUsage.append(all == 0 ? 0 : Double(user + system + nice) / Double(all))
+            coreSystem.append(all == 0 ? 0 : Double(system) / Double(all))
             totalUser += user + nice
             totalSystem += system
             totalAll += all
@@ -46,11 +50,11 @@ final class CPUSampler {
         _ = getloadavg(&load, 3)
 
         guard totalAll > 0 else {
-            return CPUSample(usage: 0, user: 0, system: 0, coreUsage: coreUsage, loadAverage: load)
+            return CPUSample(usage: 0, user: 0, system: 0, coreUsage: coreUsage, coreSystem: coreSystem, loadAverage: load)
         }
         let user = Double(totalUser) / Double(totalAll)
         let system = Double(totalSystem) / Double(totalAll)
-        return CPUSample(usage: user + system, user: user, system: system, coreUsage: coreUsage, loadAverage: load)
+        return CPUSample(usage: user + system, user: user, system: system, coreUsage: coreUsage, coreSystem: coreSystem, loadAverage: load)
     }
 }
 

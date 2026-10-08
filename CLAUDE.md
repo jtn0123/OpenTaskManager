@@ -43,7 +43,9 @@ Manager OG or any other proprietary task manager.
   yours; items go through `NSWorkspace.recycle`, never rm); Layout/ holds the width maths for the details
   pane, `SplitMath`, the process table's columns, `ColumnFit`, and the
   Overview's per-core graphs, `CoreGrid` (core types side by side when they
-  fit one line, otherwise rows of shared columns, a short last row balanced);
+  fit one line, otherwise rows of shared columns, a short last row balanced),
+  the CPU page's, `CoreAreaGrid` (near-square tiles filling its main graph's
+  area), and Performance's main graphs' heights and figures, `HeroLayout`;
   System/NetworkQuality (parses `networkQuality -c`) and System/DiskSpeedTest (one
   unlinked temp file, F_NOCACHE reads, verified, cancellable) back the user-started
   speed tests on Performance's network and disk details (`SpeedTestStores`; nothing
@@ -268,8 +270,8 @@ Manager OG or any other proprietary task manager.
   for one sample gets neither a row nor 30 s of empty room. The card tells
   samples apart by `AppModel.appGroupsUptime`, which isn't observed: reading
   `snapshot` there too drew the Overview's cards about twice a tick.
-  Performance's Fit collected data toggle (`GraphFit`, in the main graph's
-  time axis until the window is nearly full) narrows that one window, through
+  Performance's Fit collected data toggle (`GraphFit`, on by default, in the
+  main graph's time axis until the window is nearly full) narrows that one window, through
   the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
   never per tick, so the graphs keep scrolling. A reading a Mac never gives
   (a VM GPU's load) takes `Unavailable.symbol` and a short label, never the
@@ -507,6 +509,24 @@ the thermal state turns fair), so `-openResource benchmarks
   segmented pickers on a live page out of `ViewThatFits`: it measured them
   again every tick (about half a percent of a core for the CPU graph's two),
   so that caption row is a small `Layout` instead.
+- Each Performance device page opens the same way (`PerformanceHero.swift`):
+  `DeviceHeader`, its title over a segmented `LevelBar` (Core Animation layers,
+  the lit width eased in the render server; a nil fraction leaves it dim) and the
+  current figure, then one `DeviceCard` whose main graph (`heroPlot`, which
+  sets `fineGridRows`, so the graph draws `FineGridLines`: still rows, columns
+  that scroll with the data as every live graph's do, `FineGridSpacing` in
+  OTMKit) is `Hero.height` tall: the pane's measured height
+  (`detailPaneHeight`, which changes with the window, never per tick) less
+  `Hero.reserved`, clamped by `HeroHeight` in OTMKit, with the device's figures
+  under it in `DeviceFigures` (columns from `FigureColumns`). Everything else
+  follows that card. The CPU page's default is a graph per logical CPU
+  (`CoreGraphGrid`: one AppKit view hosting a `StreamGraphView` a tile, busy time
+  filled and kernel time, `CPUSample.coreSystem`, as a line; tiles laid out by
+  `CoreAreaGrid` in OTMKit, 18 CPUs 6 by 3, core types on rows of their own
+  where that costs nothing; the Overview's Cores tiles grown, both drawn in
+  `CoreTileLook`, so they read as one family). A GPU that doesn't report utilization graphs its
+  memory in use there (`GPUHero`), its bar dim. The resource list's rows give a
+  live graph in the device's colour and two lines of figures (`ResourceText`).
 - History's chart legends draw a sample of each line as it's stroked
   (`HistoryLine.Stroke`, solid, dashed or dotted, over its fill when it has
   one), so two lines on a chart never differ by colour alone, and give what

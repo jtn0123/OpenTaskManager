@@ -18,7 +18,9 @@ struct PerformanceView: View {
     @State private var width: CGFloat = 0
     /// Whether the disk images under their heading in the list are shown.
     @AppStorage("performanceShowsDiskImages") private var showsDiskImages = false
-    @AppStorage(GraphFit.key) private var fitsGraphs = false
+    @AppStorage(GraphFit.key) private var fitsGraphs = GraphFit.standard
+    /// The detail pane's visible height, which each device's main graph fills (`Hero`).
+    @State private var paneHeight: CGFloat = 0
 
     /// The narrowest the detail gets beside the resource list. Below it, as
     /// in the narrowest window, the list gives way to a picker over the
@@ -54,9 +56,11 @@ struct PerformanceView: View {
                         detail(for: selected, snapshot: snapshot)
                             .environment(\.graphWindow, GraphFit.window(samples: collected, fits: fitsGraphs && canFit))
                             .environment(\.offersGraphFit, canFit)
+                            .environment(\.detailPaneHeight, paneHeight)
                             .padding(20)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { paneHeight = $0 }
                     .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
                 }
             }
@@ -254,6 +258,7 @@ private struct RailHighlight: View {
         if selected {
             shape
                 .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.12))
+                .overlay(shape.strokeBorder(Color.accentColor.opacity(colorScheme == .dark ? 0.7 : 0.55), lineWidth: 1.25))
                 .overlay(alignment: .leading) {
                     Capsule()
                         .fill(Color.accentColor)
@@ -278,27 +283,30 @@ private struct ResourceRow: View {
     @State private var hovering = false
 
     var body: some View {
-        let text = ResourceText(resource, snapshot: snapshot, sensors: model.sensors)
+        let text = ResourceText(resource, snapshot: snapshot, sensors: model.sensors, topology: model.topology)
         HStack(spacing: 10) {
             sparkline
-                .frame(width: compact ? 48 : 64, height: 40)
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: compact ? 56 : 76, height: 48)
+            VStack(alignment: .leading, spacing: 1) {
                 // A volume's or an image's name can be long, often one unbroken
                 // word ("UC_SIRI_…_Cryptex"): cut in the middle, whole in the tooltip.
-                Text(text.title).font(.headline.weight(selected ? .bold : .medium)).lineLimit(1).truncationMode(.middle)
-                if !text.subtitle.isEmpty {
-                    Text(text.subtitle).font(.subheadline).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(3)
+                Text(text.title).font(.headline.weight(selected ? .bold : .semibold)).lineLimit(1).truncationMode(.middle)
+                if !text.figure.isEmpty {
+                    Text(text.figure).font(.callout.weight(.medium)).monospacedDigit().lineLimit(1)
+                }
+                if !text.detail.isEmpty {
+                    Text(text.detail).font(.metadata).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(2)
                 }
                 if let unreported = text.unreported {
                     Label(unreported, systemImage: Unavailable.symbol)
-                        .font(.subheadline)
+                        .font(.metadata)
                         .foregroundStyle(.secondaryText)
                         .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
         .padding(.leading, 12)
         .padding(.trailing, 6)
         .background { RailHighlight(selected: selected, hovering: hovering) }
@@ -313,10 +321,16 @@ private struct ResourceRow: View {
 
     @ViewBuilder private var sparkline: some View {
         switch resource {
-        case .cpu: Sparkline(values: model.cpuHistory.values, color: Theme.cpu, maxValue: 1)
-        case .memory: Sparkline(values: model.memoryHistory.values, color: Theme.memory, maxValue: 1)
-        case .power: Sparkline(values: model.powerHistory.values, color: Theme.power)
-        case .sensors: Sparkline(values: model.sensorHistory.hottest[.chip]?.values ?? [], color: Theme.thermal)
+        case .cpu: RailGraph(values: model.cpuHistory.values, color: Theme.cpu, maxValue: 1)
+        case .memory: RailGraph(values: model.memoryHistory.values, color: Theme.memory, maxValue: 1)
+        case .power: RailGraph(values: model.powerHistory.values, color: Theme.power)
+        case .sensors:
+            // With no temperatures (a VM), the thermal pressure the page graphs.
+            if let chip = model.sensorHistory.hottest[.chip] {
+                RailGraph(values: chip.values, color: Theme.thermal)
+            } else {
+                RailGraph(values: model.thermalPressureHistory.values, color: Theme.thermal, maxValue: 1)
+            }
         case .benchmarks:
             // Nothing to graph: a still glyph in the sparkline's frame.
             Self.glyph("stopwatch", tint: Theme.other)
@@ -325,17 +339,17 @@ private struct ResourceRow: View {
                 // No load to draw, and never an empty plot that would pass for
                 // one not recorded yet: the memory in use the subtitle gives.
                 if gpu.memoryInUse != nil {
-                    Sparkline(values: model.gpuDetail[id]?.memoryInUse.values ?? [], color: Theme.gpu)
+                    RailGraph(values: model.gpuDetail[id]?.memoryInUse.values ?? [], color: Theme.gpu)
                 } else {
                     Self.glyph(Unavailable.symbol, tint: Theme.gpu)
                 }
             } else {
-                Sparkline(values: model.gpuHistory[id]?.values ?? [], color: Theme.gpu, maxValue: 1)
+                RailGraph(values: model.gpuHistory[id]?.values ?? [], color: Theme.gpu, maxValue: 1)
             }
         case let .disk(id):
-            Sparkline(values: zipSum(model.diskReadHistory[id]?.values, model.diskWriteHistory[id]?.values), color: Theme.disk)
+            RailGraph(values: zipSum(model.diskReadHistory[id]?.values, model.diskWriteHistory[id]?.values), color: Theme.disk)
         case let .network(id):
-            Sparkline(values: zipSum(model.networkInHistory[id]?.values, model.networkOutHistory[id]?.values), color: Theme.network)
+            RailGraph(values: zipSum(model.networkInHistory[id]?.values, model.networkOutHistory[id]?.values), color: Theme.network)
         }
     }
 
@@ -345,12 +359,27 @@ private struct ResourceRow: View {
             .font(.title2)
             .foregroundStyle(.secondaryText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .plotFrame(tint: tint, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
+            .plotFrame(tint: tint, wash: (0.16, 0.03), border: 0.6, lineWidth: 1, cornerRadius: 5)
     }
 
     private func zipSum(_ a: [Double]?, _ b: [Double]?) -> [Double] {
         guard let a, let b else { return a ?? b ?? [] }
         return zip(a, b).map(+)
+    }
+}
+
+/// A rail row's live graph of its last minute: the device's colour over a
+/// fine grid that scrolls with it, framed in it, as the detail's main graph is.
+private struct RailGraph: View {
+    var values: [Double]
+    var color: Color
+    var maxValue: Double?
+
+    var body: some View {
+        GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue, capacity: 60,
+                  lineWidth: 1.4, glows: true, cornerRadius: 5)
+            .environment(\.fineGridRows, 4)
+            .plotFrame(tint: color, wash: (0.18, 0.04), border: 0.6, lineWidth: 1, cornerRadius: 5)
     }
 }
 
@@ -378,7 +407,7 @@ private struct ResourcePicker: View {
                                    holdsSelection: !showsImages && images.contains(selection))
                 }
                 if showsImages || !images.contains(resource) {
-                    ResourceChip(text: ResourceText(resource, snapshot: snapshot, sensors: model.sensors),
+                    ResourceChip(text: ResourceText(resource, snapshot: snapshot, sensors: model.sensors, topology: model.topology),
                                  color: resource.color, selected: resource == selection) {
                         selection = resource
                     }
@@ -401,14 +430,15 @@ private struct ResourceChip: View {
                 Circle().fill(color).frame(width: 7, height: 7)
                 // A long volume or image name is cut in the middle when the row is short of room, the whole of it in the tooltip.
                 Text(text.title).fontWeight(selected ? .bold : .medium).truncationMode(.middle)
-                Text(text.figure).foregroundStyle(.secondaryText).monospacedDigit()
+                Text(text.chip).foregroundStyle(.secondaryText).monospacedDigit()
             }
             .modifier(ChipLook(selected: selected, hovering: hovering))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(text.help ?? text.subtitle.replacingOccurrences(of: "\n", with: " · "))
-        .accessibilityLabel([text.title, text.subtitle, text.unreported].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+        .help(text.help ?? [text.figure, text.detail].filter { !$0.isEmpty }.joined(separator: " · "))
+        .accessibilityLabel([text.title, text.figure, text.detail, text.unreported].compactMap { $0 }.filter { !$0.isEmpty }
+            .joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -498,62 +528,70 @@ private struct ChipRows: Layout {
 /// What the list and the picker say about a resource.
 private struct ResourceText {
     var title: String
-    /// The list's lines under the title.
-    var subtitle: String
-    /// The picker's one short figure.
+    /// The list's first line under the title: the reading its graph draws.
     var figure: String
+    /// The list's second line: what goes with it.
+    var detail = ""
+    /// The picker's one short figure.
+    var chip: String
     /// A disk's names in full, as a tooltip: nothing in it changes per tick.
     var help: String?
     /// A reading this Mac doesn't give, which the list says under the
-    /// subtitle beside `Unavailable.symbol`: "Utilization not reported".
+    /// figures beside `Unavailable.symbol`: "Utilization not reported".
     var unreported: String?
 
     @MainActor
-    init(_ resource: Resource, snapshot: SystemSnapshot, sensors: SensorSample?) {
+    init(_ resource: Resource, snapshot: SystemSnapshot, sensors: SensorSample?, topology: CPUTopology) {
         switch resource {
         case .cpu:
             title = "CPU"
-            subtitle = Format.percent(snapshot.cpu.usage)
-            figure = subtitle
+            chip = Format.percent(snapshot.cpu.usage)
+            figure = "\(chip) busy"
+            let load = snapshot.cpu.loadAverage.first.map { " · load \(Format.fixed($0, 2))" } ?? ""
+            detail = "\(topology.logicalCores) CPUs" + load
         case .memory:
             let memory = snapshot.memory
             title = "Memory"
-            subtitle = "\(Self.unbroken(Format.bytes(memory.used))) / \(Self.unbroken(Format.bytes(memory.physical))) "
-                + "(\(Format.percent(memory.usedFraction)))"
-            figure = Format.percent(memory.usedFraction)
+            chip = Format.percent(memory.usedFraction)
+            figure = "\(Self.unbroken(Format.bytes(memory.used))) · \(chip)"
+            detail = "Pressure \(memory.pressure.rawValue)"
         case .power:
             let watts = snapshot.power.systemWatts.map(Format.watts)
-            let battery = snapshot.power.battery.map { "\($0.percent)%" }
+            let battery = snapshot.power.battery.map { "Battery \($0.percent)%" }
             title = "Power"
-            subtitle = (watts ?? "—") + (battery.map { " · \($0)" } ?? "")
             figure = watts ?? battery ?? "—"
+            detail = watts == nil ? "" : battery ?? (snapshot.power.adapter == nil ? "" : "AC power")
+            chip = watts ?? battery ?? "—"
         case .sensors:
-            let chip = sensors?.hottest(.chip).map(Format.celsius)
+            let chipTemperature = sensors?.hottest(.chip).map(Format.celsius)
             let fans = sensors?.fans.map { $0.isStopped ? "off" : Format.rpm($0.rpm) } ?? []
             let pressure = snapshot.power.thermalState
             title = "Thermals"
-            subtitle = [chip, fans.isEmpty ? nil : "Fans " + fans.joined(separator: ", ")].compactMap { $0 }.joined(separator: "\n")
             // With no sensors (a VM), macOS's thermal pressure is all there is.
-            if subtitle.isEmpty { subtitle = "Pressure \(pressure.rawValue)" }
-            figure = chip ?? fans.first ?? pressure.title
+            figure = chipTemperature.map { "\($0) chip" } ?? pressure.title
+            detail = fans.isEmpty ? (chipTemperature == nil ? "No sensors" : "Pressure \(pressure.rawValue)")
+                : "Fans " + fans.joined(separator: ", ")
+            chip = chipTemperature ?? fans.first ?? pressure.title
         case .benchmarks:
             let age = BenchmarkWorkspace.shared.newest.map { Format.ago(Date().timeIntervalSince($0)) }
             title = "Benchmarks"
-            subtitle = age.map { "Newest \($0)" } ?? "No runs yet"
-            figure = age ?? "No runs yet"
+            figure = age.map { "Newest \($0)" } ?? "No runs yet"
+            chip = age ?? "No runs yet"
             help = "The CPU, GPU, disk and Internet tests' saved runs, to compare and run together"
         case let .gpu(id):
             let gpu = snapshot.gpus.first { $0.id == id }
             title = "GPU"
             if let busy = gpu?.deviceUtilization {
-                figure = Format.percent(busy)
-                subtitle = [gpu?.tellingName, figure].compactMap { $0 }.joined(separator: "\n")
+                chip = Format.percent(busy)
+                figure = "\(chip) busy"
+                detail = gpu?.tellingName ?? gpu?.memoryInUse.map { "\(Self.unbroken(Format.bytes($0))) memory" } ?? ""
             } else {
                 // Its memory in use, which the list's sparkline draws, in
                 // place of the load it doesn't report.
                 let memory = gpu?.memoryInUse.map { Self.unbroken(Format.bytes($0)) }
+                chip = memory ?? "—"
                 figure = memory ?? "—"
-                subtitle = [gpu?.tellingName, memory.map { "\($0) memory" }].compactMap { $0 }.joined(separator: "\n")
+                detail = gpu?.tellingName ?? (memory == nil ? "" : "Memory in use")
                 unreported = gpu == nil ? nil : Unavailable.gpuUtilization
                 help = gpu.map { _ in
                     memory == nil ? Unavailable.gpuUtilizationDetail
@@ -563,17 +601,19 @@ private struct ResourceText {
         case let .disk(id):
             let disk = snapshot.disks.first { $0.id == id }
             title = disk.map(DiskText.title) ?? id
-            subtitle = disk.map { "\(DiskText.identity($0))\n\(Format.percent($0.activeFraction)) active" } ?? ""
-            figure = disk.map { "\(Format.percent($0.activeFraction)) active" } ?? "—"
+            chip = disk.map { "\(Format.percent($0.activeFraction)) active" } ?? "—"
+            figure = chip
+            // Its transfer rate over which disk it is, each on a line of its own.
+            detail = disk.map {
+                Self.unbroken(Format.bytesPerSecond($0.readBytesPerSecond + $0.writeBytesPerSecond)) + "\n" + DiskText.identity($0)
+            } ?? ""
             help = disk.map(DiskText.help)
         case let .network(id):
             let link = snapshot.network.first { $0.id == id }
             title = link?.displayName ?? id
-            subtitle = link.map {
-                Self.unbroken("↓ \(Format.bitsPerSecond($0.receivedBytesPerSecond))") + "  "
-                    + Self.unbroken("↑ \(Format.bitsPerSecond($0.sentBytesPerSecond))")
-            } ?? ""
-            figure = subtitle
+            figure = link.map { Self.unbroken("↓ \(Format.bitsPerSecond($0.receivedBytesPerSecond))") } ?? ""
+            detail = link.map { Self.unbroken("↑ \(Format.bitsPerSecond($0.sentBytesPerSecond))") } ?? ""
+            chip = [figure, detail].joined(separator: "  ")
         }
     }
 

@@ -6,54 +6,24 @@ struct GPUDetail: View {
     var gpu: GPUSample
     var snapshot: SystemSnapshot
 
-    private static var renderer: Color { Theme.gpuRenderer }
-    private static var tiler: Color { Theme.gpuTiler }
     private static var clock: Color { Theme.gpuClock }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            DetailHeader(title: "GPU", subtitle: subtitle)
-            stats()
-            // A paravirtual GPU only reports memory. The strip says so, and the
-            // graphs it can draw move up rather than sit under a flat 0%.
-            if let busy = gpu.deviceUtilization { utilization(busy) }
+            // Its title, level bar and main graph: utilization, or memory in use
+            // where a paravirtual GPU reports nothing else, never a flat 0%.
+            GPUHero(gpu: gpu, snapshot: snapshot)
             byApp()
             FillGrid(minimum: 280) {
                 if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }
-                if let memory = gpu.memoryInUse { memoryCard(memory) }
+                // Where utilization isn't reported, memory in use is the main graph.
+                if gpu.deviceUtilization != nil, let memory = gpu.memoryInUse { memoryCard(memory) }
             }
             TopAppsCard(title: "GPU", symbol: "cpu.fill", color: Theme.gpu, groups: model.appGroups,
                         metric: \.gpuFraction, format: { Format.percent($0.gpuFraction, digits: 1) }, column: .gpu,
                         measure: GPUTimeFigure.label + ". " + GPUTimeFigure.help)
             GPUBenchmarkCard()
                 .equatable()
-        }
-    }
-
-    /// The name and cores; a paravirtual GPU's name, "GPU", would only repeat the title.
-    private var subtitle: String {
-        [gpu.tellingName, gpu.coreCount.map { "\($0) cores" }].compactMap { $0 }.joined(separator: " · ")
-    }
-
-    private func utilization(_ busy: Double) -> some View {
-        let detail = model.gpuDetail[gpu.id] ?? GPUHistory()
-        var legend = [LegendItem(name: "Device", color: Theme.gpu, value: Format.percent(busy))]
-        if let renderer = gpu.rendererUtilization {
-            legend.append(LegendItem(name: "Renderer (shading)", color: Self.renderer, value: Format.percent(renderer)))
-        }
-        if let tiler = gpu.tilerUtilization {
-            legend.append(LegendItem(name: "Tiler (geometry)", color: Self.tiler, value: Format.percent(tiler)))
-        }
-        return ChartCard(title: "Utilization", trailing: Format.percent(busy), tint: Theme.gpu, legend: legend, offersFit: true) {
-            GraphView(
-                series: [
-                    GraphSeries(values: model.gpuHistory[gpu.id]?.values ?? [], color: Theme.gpu),
-                    GraphSeries(values: detail.renderer.values, color: Self.renderer, fill: false),
-                    GraphSeries(values: detail.tiler.values, color: Self.tiler, fill: false, dashed: true),
-                ],
-                maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8
-            )
-            .chartFrame(height: DetailGraph.primary, tint: Theme.gpu)
         }
     }
 
@@ -67,10 +37,9 @@ struct GPUDetail: View {
             LegendItem(name: $1.name, color: colors[$0], value: Format.percent($1.current, digits: 1), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.percent(other.last ?? 0, digits: 1))]
         // Over the same window as the graphs around it, so they line up. The
-        // first graph where utilization isn't reported, so it holds the toggle.
+        // hero above holds the Fit toggle, whether or not utilization is reported.
         return ChartCard(title: "GPU time by app", trailing: GPUTimeFigure.label, trailingHelp: GPUTimeFigure.help,
-                         tint: Theme.gpu, legend: legend, note: gpu.deviceUtilization == nil ? GPUTimeFigure.withoutUtilization : nil,
-                         offersFit: gpu.deviceUtilization == nil) {
+                         tint: Theme.gpu, legend: legend, note: gpu.deviceUtilization == nil ? GPUTimeFigure.withoutUtilization : nil) {
             GraphView(series: series, glows: true, stacked: true,
                       minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
                 .chartFrame(height: DetailGraph.secondary, tint: Theme.gpu)
@@ -102,32 +71,6 @@ struct GPUDetail: View {
         }
     }
 
-    private func stats() -> some View {
-        MetricStrip(tint: Theme.gpu) {
-            if let busy = gpu.deviceUtilization {
-                Stat(label: "Utilization", number: busy, color: Theme.gpu) { Format.percent($0) }
-            }
-            if let renderer = gpu.rendererUtilization {
-                Stat(label: "Renderer", number: renderer, color: Self.renderer) { Format.percent($0) }
-            }
-            if let tiler = gpu.tilerUtilization {
-                Stat(label: "Tiler", number: tiler, color: Self.tiler) { Format.percent($0) }
-            }
-            if let frequency = gpu.frequencyMHz {
-                Stat(label: "Clock", number: frequency) { Format.frequency(megahertz: $0) }
-            }
-            if let memory = gpu.memoryInUse {
-                Stat(label: "Memory in use", number: Double(memory), format: MemoryDetail.bytesAxis)
-            }
-            if let watts = snapshot.power.components?.watts(.gpu) {
-                Stat(label: "Power", number: watts, format: Format.watts)
-            }
-            if gpu.deviceUtilization == nil {
-                CapabilityNote(label: "Utilization", text: Unavailable.gpuUtilizationShort,
-                               detail: Unavailable.gpuUtilizationDetail + " GPU time by app and memory in use are measured.")
-            }
-        }
-    }
 }
 
 /// What a process's GPU figure is, said the same way wherever it shows: the

@@ -23,6 +23,9 @@ struct LiveSystemTests {
         #expect(snapshot.interval > 0.2)
         #expect(snapshot.uptime > 0)
         #expect(snapshot.cpu.coreUsage.count == monitor.topology.logicalCores)
+        #expect(snapshot.cpu.coreSystem.count == snapshot.cpu.coreUsage.count)
+        // A CPU's kernel time is part of its busy time, never more.
+        #expect(zip(snapshot.cpu.coreSystem, snapshot.cpu.coreUsage).allSatisfy { $0 >= 0 && $0 <= $1 + 1e-9 })
         #expect((0...1).contains(snapshot.cpu.usage))
         #expect(snapshot.memory.physical > 0)
         #expect(snapshot.memory.used <= snapshot.memory.physical)
