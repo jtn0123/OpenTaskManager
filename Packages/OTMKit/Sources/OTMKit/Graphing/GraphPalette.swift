@@ -108,6 +108,8 @@ public struct GraphPalette: Sendable, Hashable {
     public private(set) var swatches: [Role: Swatch]
     /// The colours "by app" graphs give their apps, in turn.
     public let series: [Swatch]
+    /// How much the lines outweigh the grid and fills around them.
+    public let emphasis: GraphEmphasis
 
     public subscript(role: Role) -> Swatch {
         swatches[role] ?? Swatch(tone: RGB(0x808080), lightContrast: 4.5, darkContrast: 3)
@@ -139,7 +141,7 @@ extension GraphPalette {
     /// Builds a palette from tones, each with the preset's floors unless
     /// given its own light-mode depth.
     private init(tones: [Role: RGB], series: [RGB], light: Double, dark: Double, depths: [Role: Double] = [:],
-                 seriesDepths: [Double] = [], brighter: [Role: Double] = [:]) {
+                 seriesDepths: [Double] = [], brighter: [Role: Double] = [:], emphasis: GraphEmphasis = .standard) {
         swatches = tones.reduce(into: [:]) { result, entry in
             result[entry.key] = Swatch(tone: entry.value, lightContrast: depths[entry.key] ?? light,
                                        darkContrast: brighter[entry.key] ?? dark)
@@ -147,6 +149,7 @@ extension GraphPalette {
         self.series = series.enumerated().map { index, tone in
             Swatch(tone: tone, lightContrast: seriesDepths.indices.contains(index) ? seriesDepths[index] : light, darkContrast: dark)
         }
+        self.emphasis = emphasis
     }
 
     /// The app's colours since its first release. Every tone already clears
@@ -224,7 +227,7 @@ extension GraphPalette {
         // Blues and yellows alternate up a stack of apps, so neighbours differ most.
         let series = [sky, orange, blue, yellow, vermillion, purple]
         return GraphPalette(tones: tones, series: series, light: 4.5, dark: 3, depths: tones.mapValues { depth[$0] ?? 4.5 },
-                            seriesDepths: series.map { depth[$0] ?? 4.5 })
+                            seriesDepths: series.map { depth[$0] ?? 4.5 }, emphasis: .colorBlind)
     }()
 
     /// The standard hues at WCAG AAA, 7:1, against white in light mode and
@@ -237,6 +240,6 @@ extension GraphPalette {
         tones: standardTones, series: standardSeries, light: 7, dark: 7,
         depths: [.diskSecondary: 11, .networkSecondary: 11, .gpuRenderer: 11, .gpuClock: 11, .other: 10, .swap: 10,
                  .thermal: 10, .dram: 10, .power: 9],
-        brighter: [.thermal: 9]
+        brighter: [.thermal: 9], emphasis: .highContrast
     )
 }

@@ -313,12 +313,35 @@ public struct HistoryPoint: Sendable, Identifiable, Equatable {
         }
     }
 
-    /// The `runs` of a single point, which have nothing to fill under: a
-    /// fill one point wide only draws a hairline down from its dot.
-    public static func lone(_ runs: [Int?]) -> Set<Int> {
-        var counts: [Int: Int] = [:]
-        for case let run? in runs { counts[run, default: 0] += 1 }
-        return Set(counts.compactMap { $0.value == 1 ? $0.key : nil })
+    /// The `runs` too short on the chart to fill under: those whose stretch
+    /// within `domain` lasts less than `minimumSpan` seconds, a run of one
+    /// point among them. A fill a few points wide reads as a bar rising from
+    /// the axis rather than a stretch of readings; such a run keeps its line,
+    /// with a dot at each end (`ends`), so a single reading is a dot.
+    public static func unfilled(_ points: [HistoryPoint], runs: [Int?], within domain: ClosedRange<Date>,
+                                minimumSpan: TimeInterval) -> Set<Int> {
+        var spans: [Int: (first: Date, last: Date)] = [:]
+        for (point, run) in zip(points, runs) {
+            guard let run else { continue }
+            spans[run] = (spans[run]?.first ?? point.time, point.time)
+        }
+        return Set(spans.compactMap { run, span in
+            // Only what the chart shows of it counts: a run that starts before the window is cut at its edge.
+            let shown = min(span.last, domain.upperBound).timeIntervalSince(max(span.first, domain.lowerBound))
+            return shown < minimumSpan ? run : nil
+        })
+    }
+
+    /// The first and last point (by index) of each of `chosen` among
+    /// `runs`, oldest first; one index for a run of one point.
+    public static func ends(of chosen: Set<Int>, in runs: [Int?]) -> [Int] {
+        guard !chosen.isEmpty else { return [] }
+        var ends: [Int: (first: Int, last: Int)] = [:]
+        for (index, run) in runs.enumerated() {
+            guard let run, chosen.contains(run) else { continue }
+            ends[run] = (ends[run]?.first ?? index, index)
+        }
+        return Set(ends.values.flatMap { [$0.first, $0.last] }).sorted()
     }
 }
 

@@ -115,7 +115,8 @@ enum ProcessColumn: String, CaseIterable {
     var headerHelp: String? {
         switch self {
         case .memory: MemoryMeasure.column
-        case .gpu: "GPU: the share of the GPU's time each process used. \"—\" for a process that hasn't used the GPU."
+        case .gpu: "GPU: each process's GPU time ÷ elapsed time (10% is 0.1 s of GPU work each second). "
+            + "\"—\" for a process that hasn't used the GPU."
         case .neuralMemory: MemoryMeasure.neuralColumn
         default: nil
         }

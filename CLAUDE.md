@@ -234,7 +234,10 @@ Manager OG or any other proprietary task manager.
   watching the enclosing clip view's bounds (`StickyHeader` in OTMKit), so it
   moves only on scroll, never per tick; rows are added below it.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
-  per sample and a Core Animation scroll slides them between samples. Changing
+  per sample and a Core Animation scroll slides them between samples. An
+  update without a new sample (pages redraw a few milliseconds after a tick)
+  draws nothing and never cuts a scroll short: that made Performance's details
+  and the inspector step a sample at a time while their sidebars glided. Changing
   numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
   Don't swap either for SwiftUI `Path` or `Text` animations. The History page
   is the exception: its graphs are static Swift Charts, reloaded once per graph
@@ -260,7 +263,11 @@ Manager OG or any other proprietary task manager.
   small graph per logical CPU (`CoreGraphsCard`). Top lists (`TopAppsCard`) skip figures that read as zero and hold
   their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump;
   the idle line under the rows is a footer shorter than a row
-  (`TopListRoom.height`), so a sparse list alone in its row stays compact.
+  (`TopListRoom.height`), so a sparse list alone in its row stays compact,
+  and the room grows only for rows two samples in a row list, so an app busy
+  for one sample gets neither a row nor 30 s of empty room. The card tells
+  samples apart by `AppModel.appGroupsUptime`, which isn't observed: reading
+  `snapshot` there too drew the Overview's cards about twice a tick.
   Performance's Fit collected data toggle (`GraphFit`, in the main graph's
   time axis until the window is nearly full) narrows that one window, through
   the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
@@ -513,7 +520,13 @@ the thermal state turns fair), so `-openResource benchmarks
   the view; AppKit views that keep colours compare `GraphColors.shared.revision`
   (see `SensorReadingTable`). "By app" graphs colour apps with
   `Theme.appColors(for:in:)` (`SeriesSlots`), so an app keeps its colour as the
-  ranking changes.
+  ranking changes. Lines outweigh the grid and fills by the palette's
+  `GraphEmphasis` (live graphs, History, the Settings preview): solid traces
+  wider, light-mode traces deeper (`traceShade`; Color-blind friendly and High
+  contrast keep their shades, already at their limits), grid and fills
+  fainter; the unrecorded look keeps its weight. On History a run of readings
+  under about 8 points wide (`HistoryPoint.unfilled`) gets no fill, only its
+  line and end dots, so it never reads as a bar.
 - Secondary text (labels, captions, units, footnotes) takes
   `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (12 pt, the
   floor for anything a reading depends on); explanations meant to be read

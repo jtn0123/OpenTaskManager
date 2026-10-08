@@ -194,9 +194,11 @@ private struct HistoryProcessChartCard: View {
         let dark = colorScheme == .dark
         let wash = HistoryGapStyle.wash(dark: dark)
         let (notRunning, unwatched) = shading
+        // Lines over fainter fills and grid, as on the page's other charts.
+        let emphasis = GraphColors.shared.emphasis
         return Chart {
             stretchMarks(notRunning: notRunning, unwatched: unwatched, dark: dark, wash: wash)
-            fillMarks(points, top: top)
+            fillMarks(points, top: top, fade: emphasis.fill)
             ForEach(gaps.shades.indices, id: \.self) { index in
                 let shade = gaps.shades[index]
                 RectangleMark(xStart: .value("Time", shade.start), xEnd: .value("Time", shade.end))
@@ -214,12 +216,12 @@ private struct HistoryProcessChartCard: View {
         .chartYScale(domain: 0...top)
         .chartYAxis {
             AxisMarks(values: [0, top / 2, top]) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.08))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.08 * emphasis.grid))
             }
         }
         .chartXAxis {
             AxisMarks(values: ticks) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.055))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.055 * emphasis.grid))
                 AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 11)).foregroundStyle(.secondaryText)
             }
         }
@@ -261,16 +263,19 @@ private struct HistoryProcessChartCard: View {
         }
     }
 
+    /// A run too short to fill (a lone point, or a few only a sliver of the
+    /// plot wide, which would read as a bar up from the axis) gets dots at
+    /// its ends (`dots`) and no fill, as on the page's other charts.
     @ChartContentBuilder
-    private func fillMarks(_ points: [HistoryPoint], top: Double) -> some ChartContent {
+    private func fillMarks(_ points: [HistoryPoint], top: Double, fade: Double) -> some ChartContent {
         ForEach(chart.lines.filter(\.fill)) { line in
             let runs = HistoryPoint.runs(points, value: line.value)
-            let lone = HistoryPoint.lone(runs)
+            let unfilled = HistoryPoint.unfilled(points, runs: runs, within: domain, minimumSpan: gaps.narrowestFill)
             ForEach(points.indices, id: \.self) { index in
-                if let run = runs[index], !lone.contains(run), let value = line.value(points[index].values) {
+                if let run = runs[index], !unfilled.contains(run), let value = line.value(points[index].values) {
                     AreaMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)),
                              series: .value("Series", "\(line.name) \(run)"), stacking: .unstacked)
-                        .foregroundStyle(LinearGradient(colors: [line.color.opacity(0.42), line.color.opacity(0.03)],
+                        .foregroundStyle(LinearGradient(colors: [line.color.opacity(0.42 * fade), line.color.opacity(0.03 * fade)],
                                                         startPoint: .top, endPoint: .bottom))
                         .interpolationMethod(.monotone)
                 }
@@ -282,6 +287,7 @@ private struct HistoryProcessChartCard: View {
     private func lineMarks(_ points: [HistoryPoint], top: Double) -> some ChartContent {
         ForEach(chart.lines) { line in
             let runs = HistoryPoint.runs(points, value: line.value)
+            let trace = line.color.traceShade
             ForEach(points.indices, id: \.self) { index in
                 if let run = runs[index], let value = line.value(points[index].values) {
                     let series = "\(line.name) \(run)"
@@ -294,17 +300,18 @@ private struct HistoryProcessChartCard: View {
                     }
                     LineMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)),
                              series: .value("Series", series))
-                        .foregroundStyle(line.color)
+                        .foregroundStyle(trace)
                         .lineStyle(line.stroke.style)
                         .interpolationMethod(.monotone)
                 }
             }
         }
         ForEach(chart.lines) { line in
+            let trace = line.color.traceShade
             ForEach(dots(on: line, points: points), id: \.self) { index in
                 if let value = line.value(points[index].values) {
                     PointMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)))
-                        .foregroundStyle(line.color)
+                        .foregroundStyle(trace)
                         .symbolSize(18)
                 }
             }
@@ -320,13 +327,13 @@ private struct HistoryProcessChartCard: View {
     }
 
     /// The points (by index) that get a dot on `line`: where it breaks off
-    /// and picks up again, and a lone point.
+    /// and picks up again, and the ends of a run too short to fill, so a
+    /// single reading is a dot.
     private func dots(on line: HistoryLine, points: [HistoryPoint]) -> [Int] {
         let runs = HistoryPoint.runs(points, value: line.value)
-        let lone = HistoryPoint.lone(runs)
+        let short = HistoryPoint.unfilled(points, runs: runs, within: domain, minimumSpan: gaps.narrowestFill)
         let ends = line.stroke.marksBreaks ? HistoryPoint.breaks(points, runs: runs) : []
-        let alone = lone.isEmpty ? [] : points.indices.filter { runs[$0].map(lone.contains) ?? false }
-        return Set(ends + alone).filter { $0 < points.count }.sorted()
+        return Set(ends + HistoryPoint.ends(of: short, in: runs)).filter { $0 < points.count }.sorted()
     }
 
     private static func style(of kind: HistoryGap.Shade.Kind, wash: Color) -> LinearGradient {
