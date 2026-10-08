@@ -578,7 +578,7 @@ private final class DiskScan {
             let children = arena[Int(order[position])].children
             let start = order.count
             order.append(contentsOf: children)
-            parents.append(contentsOf: repeatElement(position, count: children.count))
+            parents.append(contentsOf: repeatElement(Optional(position), count: children.count))
             ranges.append(start..<order.count)
             position += 1
         }

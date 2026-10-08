@@ -44,7 +44,7 @@ private func record(_ tracker: inout ProcessHistoryTracker, from: Int, through: 
 // MARK: - Which processes are only counted
 
 struct ProcessShortRunTrackerTests {
-    @Test func countsThoseThatStartAndEndWithinARecordAndKeepsThoseAtItsEnd() {
+    @Test func countsThoseThatStartAndEndWithinARecordAndDefersThoseAtItsEnd() {
         var tracker = ProcessHistoryTracker(span: 10, ownPID: app)
         var previous: [ProcessSample] = []
         _ = record(&tracker, from: 1_001, through: 1_010, previous: &previous) { _ in [] }
@@ -57,12 +57,12 @@ struct ProcessShortRunTrackerTests {
             return list
         }
         #expect(batch.shortRuns == [ProcessHistoryBatch.ShortRuns(name: "sleep", path: "/bin/sleep", user: "me", count: 2)])
-        #expect(batch.started.map(\.identity.pid) == [52], "the one seen at the record's end keeps its lifetime")
+        #expect(batch.started.isEmpty, "the one seen at the record's end waits one record")
         #expect(batch.ended.isEmpty, "the counted ones get no end either")
-        // It ends in the next record: it lived across the boundary, so it stays a lifetime of its own.
+        // It ends in the next record without figures, so it joins that record's short runs.
         let next = record(&tracker, from: 1_021, through: 1_030, previous: &previous) { _ in [] }
-        #expect(next.ended.map(\.identity.pid) == [52])
-        #expect(next.shortRuns.isEmpty)
+        #expect(next.started.isEmpty && next.ended.isEmpty)
+        #expect(next.shortRuns == [ProcessHistoryBatch.ShortRuns(name: "sleep", path: "/bin/sleep", user: "me", count: 1)])
     }
 
     @Test func keepsALifetimeForOneWhoseFiguresWereKept() {
@@ -130,8 +130,10 @@ struct ProcessShortRunTrackerTests {
             return list
         }
         #expect(batch.shortRuns == [ProcessHistoryBatch.ShortRuns(name: "ps", path: "/bin/ps", user: "me", count: 1)])
-        #expect(batch.started.map(\.identity.pid) == [92], "one of the app's own that outlives the record keeps its lifetime")
+        #expect(batch.started.isEmpty, "the app's own process also waits one record")
         #expect(batch.ended.isEmpty)
+        let next = record(&tracker, from: 1_021, through: 1_030, previous: &previous) { _ in [] }
+        #expect(next.started.isEmpty && next.ended.isEmpty && next.shortRuns.isEmpty, "its own deferred child is left out too")
     }
 
     @Test func aProcessThatRanIntoAGapIsntAShortRun() {

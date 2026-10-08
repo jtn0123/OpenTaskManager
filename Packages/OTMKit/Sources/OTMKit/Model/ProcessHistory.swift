@@ -85,7 +85,7 @@ public struct ProcessHistorySample: Sendable, Equatable, Codable {
 }
 
 /// Which processes a record keeps figures for. Every process that lives
-/// across a record's end, or whose figures a record keeps, gets a lifetime
+/// across two record ends, or whose figures a record keeps, gets a lifetime
 /// (shorter ones are only counted, `ProcessHistoryBatch.ShortRuns`), but
 /// figures cost a row each, so a record keeps only the ones doing something:
 ///
@@ -135,7 +135,8 @@ public enum ProcessHistoryKeep {
 
 /// What one record adds to the process history: the processes seen
 /// starting and ending since the last, launchd labels learned, and the
-/// figures the record keeps (`ProcessHistoryKeep`).
+/// figures the record keeps (`ProcessHistoryKeep`). The tracker holds an
+/// idle start one record before handing it on, with its original firstSeen.
 public struct ProcessHistoryBatch: Sendable, Equatable {
     /// A process seen for the first time.
     public struct Start: Sendable, Equatable {
@@ -177,7 +178,8 @@ public struct ProcessHistoryBatch: Sendable, Equatable {
     }
 
     /// How many processes of one kind (name, executable and user) started
-    /// and ended within the record with no figures kept: counted together
+    /// and ended within the record or after their first record end with no
+    /// figures kept: counted together
     /// rather than each given a lifetime (`ProcessHistoryTracker`).
     public struct ShortRuns: Sendable, Equatable {
         public let name: String
@@ -223,7 +225,8 @@ public struct ProcessHistoryShortRuns: Sendable, Equatable, Identifiable, Codabl
     public let count: Int
     /// The records that counted them.
     public let records: Int
-    /// The start of the first record that counted them and the end of the last: they all ran between.
+    /// The start of the first record that counted their ends and the end
+    /// of the last. A deferred run may have started in the preceding record.
     public let from: Date
     public let to: Date
 

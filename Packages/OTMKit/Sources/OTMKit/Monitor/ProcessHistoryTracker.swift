@@ -15,8 +15,10 @@ import Foundation
 /// lifetime of its own: the record counts it with others of its name,
 /// executable and user (`ProcessHistoryBatch.ShortRuns`). One the app
 /// itself started (its own `ps`, `nettop` or `launchctl` reads) isn't
-/// counted at all. Anything seen at a record's end, or kept with figures,
-/// keeps its lifetime.
+/// counted at all. A new process seen at a record's end waits one record:
+/// still running then, it keeps its lifetime with the original first-seen
+/// time; ended without kept figures, it is only counted. Kept figures
+/// always get a lifetime at once.
 public struct ProcessHistoryTracker: Sendable {
     /// A process's cumulative counters.
     struct Counters: Sendable, Equatable {
@@ -67,7 +69,7 @@ public struct ProcessHistoryTracker: Sendable {
     public var watchesRestricted = true
     /// When the record being made began: the last one's end.
     private var recordStart: Date?
-    /// The app's own children seen starting since the last record.
+    /// The app's own children seen starting since the last record, or deferred.
     private var children: Set<ProcessIdentity> = []
     /// Each process's counters at the start of the stretch, or at its own
     /// start within it.
@@ -80,6 +82,9 @@ public struct ProcessHistoryTracker: Sendable {
     private var covered = 0.0
     private var last: Date?
     private var started: [ProcessHistoryBatch.Start] = []
+    /// Idle starts held for one record, with their original first sightings.
+    private var deferred: [ProcessHistoryBatch.Start] = []
+    private var deferredSince: Date?
     private var ended: [ProcessHistoryBatch.End] = []
     /// The launchd labels handed on already, by process.
     private var labelsNoted: [ProcessIdentity: String] = [:]
@@ -111,7 +116,6 @@ public struct ProcessHistoryTracker: Sendable {
         for process in disappeared {
             ended.append(ProcessHistoryBatch.End(identity: process.identity, time: endTime,
                                                  isEnded: watchesRestricted || !process.isRestricted))
-            labelsNoted.removeValue(forKey: process.identity)
         }
 
         if afterGap {
@@ -159,19 +163,29 @@ public struct ProcessHistoryTracker: Sendable {
         }
         let kept = ProcessHistoryKeep.select(figures)
         let short = shortRuns(kept: kept, since: recordStart ?? time.addingTimeInterval(-span))
-        var learned: [ProcessIdentity: String] = [:]
+        let keptIdentities = Set(kept.lazy.map(\.identity))
+        let running = Set(samples.lazy.map(\.identity))
+        let waiting = Set(started.lazy.filter { running.contains($0.identity) && !keptIdentities.contains($0.identity) }.map(\.identity))
+        let starts = (deferred + started).filter { !waiting.contains($0.identity) && !short.identities.contains($0.identity) }
+        // A label can arrive while its start is deferred, then disappear from
+        // launchd's list before the next record. Hand it on with the lifetime.
+        var learned = Dictionary(starts.compactMap { start in labelsNoted[start.identity].map { (start.identity, $0) } },
+                                 uniquingKeysWith: { _, latest in latest })
         for (identity, label) in labels where labelsNoted[identity] != label && !short.identities.contains(identity) {
-            learned[identity] = label
+            if !waiting.contains(identity) { learned[identity] = label }
             labelsNoted[identity] = label
         }
         let batch = ProcessHistoryBatch(
-            time: time, started: short.identities.isEmpty ? started : started.filter { !short.identities.contains($0.identity) },
+            time: time, started: starts,
             labels: learned, samples: kept,
             ended: short.identities.isEmpty ? ended : ended.filter { !short.identities.contains($0.identity) }, shortRuns: short.runs
         )
+        deferred = started.filter { waiting.contains($0.identity) }
+        deferredSince = time
         started = []
+        for end in ended { labelsNoted.removeValue(forKey: end.identity) }
         ended = []
-        children = []
+        children.formIntersection(waiting)
         recordStart = time
         finished = []
         covered = 0
@@ -185,18 +199,24 @@ public struct ProcessHistoryTracker: Sendable {
     }
 
     /// The processes that started at or after `since` (the record's start,
-    /// by the kernel's start time) and were seen to end within the record,
+    /// by the kernel's start time), or were deferred at its start, and ended,
     /// none of them in `kept`, and how many of each kind, the app's own
     /// children left out of the counts.
     private func shortRuns(kept: [ProcessHistorySample],
                            since: Date) -> (identities: Set<ProcessIdentity>, runs: [ProcessHistoryBatch.ShortRuns]) {
-        guard !started.isEmpty, !ended.isEmpty else { return ([], []) }
+        guard !started.isEmpty || !deferred.isEmpty, !ended.isEmpty else { return ([], []) }
         let gone = Set(ended.lazy.filter(\.isEnded).map(\.identity))
         let keptIdentities = Set(kept.lazy.map(\.identity))
+        let deferredIdentities = Set(deferred.lazy.map(\.identity))
         var identities = Set<ProcessIdentity>()
         var counts: [ShortRunKind: Int] = [:]
-        for start in started where gone.contains(start.identity) && !keptIdentities.contains(start.identity) {
-            guard let began = start.identity.startTime, began >= since else { continue }
+        for start in deferred + started where gone.contains(start.identity) && !keptIdentities.contains(start.identity) {
+            if deferredIdentities.contains(start.identity) {
+                // A gap changed the record's start: its end was not watched throughout.
+                guard deferredSince == since else { continue }
+            } else {
+                guard let began = start.identity.startTime, began >= since else { continue }
+            }
             identities.insert(start.identity)
             if !children.contains(start.identity) {
                 counts[ShortRunKind(name: start.name, path: start.path, user: start.user), default: 0] += 1
