@@ -80,6 +80,9 @@ struct TopAppsCard: View {
     /// Why there's no ranking, when this Mac doesn't measure the metric at
     /// all. Without it, every app would read 0 and the card "quiet".
     var unavailable: String?
+    /// What the figures measure, on the title's hover, where the title
+    /// alone doesn't say (Top GPU's).
+    var measure: String?
 
     var body: some View {
         let ranked = unavailable == nil ? groups.filter { $0.process != nil && metric($0.totals) > minimum } : []
@@ -131,6 +134,7 @@ struct TopAppsCard: View {
             Label("Top \(title)", systemImage: symbol)
                 .font(.headline)
                 .foregroundStyle(color)
+                .help(measure ?? "")
             Spacer(minLength: 8)
             if unavailable == nil {
                 Button("Show all", action: showAll)
@@ -267,8 +271,12 @@ struct ChartLegend: View {
 struct ChartCard<Chart: View>: View {
     var title: String
     var trailing = ""
+    /// What the trailing text means, on hover: a figure's exact measure.
+    var trailingHelp: String?
     var tint: Color
     var legend: [LegendItem] = []
+    /// A line under the legend, for what the chart can't say itself.
+    var note: String?
     /// A chart over time, with a time axis for the page's window under it.
     var timed = true
     /// The detail's main graph, whose time axis holds the page's Fit
@@ -282,12 +290,19 @@ struct ChartCard<Chart: View>: View {
                 Text(title).font(.headline)
                 Spacer()
                 Text(trailing).font(.callout).foregroundStyle(.secondaryText).monospacedDigit()
+                    .help(trailingHelp ?? "")
             }
             VStack(spacing: 3) {
                 chart
                 if timed { TimeAxis(offersFit: offersFit) }
             }
             if !legend.isEmpty { ChartLegend(items: legend) }
+            if let note {
+                Text(note)
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
