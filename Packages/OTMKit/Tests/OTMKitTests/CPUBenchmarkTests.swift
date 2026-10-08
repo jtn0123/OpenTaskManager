@@ -137,23 +137,34 @@ struct CPUBenchmarkTests {
         }
     }
 
+    /// The cancel lands as the warm-up ends, with the run held there, so the
+    /// first timed repeat starts cancelled. How the run then stopped is read
+    /// from the cancellation, never from a clock that a loaded Mac stretches.
     @Test func cancellingTheTaskStopsAMeasurement() async {
         var long = quick
         long.repeatSeconds = 30
-        let started = Date()
+        let cancellation = CPUBenchmarkCancellation()
+        let gate = ProgressGate(holdingAt: 1)
         // As the app runs it: a typed catch inside a task.
         let task = Task { () async -> CPUBenchmarkError? in
+            defer { gate.runEnded() }
             do throws(CPUBenchmarkError) {
-                _ = try await CPUBenchmark.measure(configuration: long, workers: 2, appVersion: "tests") { _ in }
+                _ = try await CPUBenchmark.measure(configuration: long, workers: 2, appVersion: "tests", cancellation: cancellation) {
+                    gate.report(fraction: $0.fraction)
+                }
                 return nil
             } catch {
                 return error
             }
         }
-        try? await Task.sleep(for: .milliseconds(100))
+        let held = await gate.waitUntilHeld()
         task.cancel()
+        gate.open()
+        #expect(held, "the run reached its first timed repeat")
         #expect(await task.value == .cancelled)
-        #expect(Date().timeIntervalSince(started) < 5)
+        // Its one worker had 30 s to run: it saw the cancel and stopped partway.
+        #expect(cancellation.stoppedWorkers == 1, "the worker stops when cancelled rather than running out the repeat")
+        #expect(gate.reportsAfterHold == 0, "no repeat finishes after the cancel")
     }
 
     @Test func summarisesRepeats() {

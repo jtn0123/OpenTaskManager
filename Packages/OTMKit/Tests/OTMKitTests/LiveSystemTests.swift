@@ -144,16 +144,45 @@ struct LiveSystemTests {
         #expect(launchd.neuralMemory == nil, "restricted processes have no figure")
     }
 
+    /// The loop spins until its own thread has used 0.3 s of CPU, however long
+    /// the Mac's load makes that take, and the check is on CPU time: never on
+    /// the share of a core the loop happened to get.
     @Test func cpuPercentTracksBusyWork() async throws {
         let monitor = SystemMonitor()
+        let processBefore = Self.processCPUSeconds()
         _ = await monitor.sample()
-        let deadline = Date().addingTimeInterval(0.4)
-        var counter = 0
-        while Date() < deadline { counter &+= 1 }
+        let busy = Self.spin(cpuSeconds: 0.3)
         let snapshot = await monitor.sample()
+        let process = Self.processCPUSeconds() - processBefore
         let me = try #require(snapshot.processes.first { $0.pid == getpid() })
-        #expect(me.cpuPercent > 30, "spinning for 0.4 s should register at least 30% of a core, got \(me.cpuPercent)")
-        #expect(counter > 0)
+
+        // The percent is CPU time over the sampler's interval. That time takes in
+        // all of the loop's, which ran between the two reads, and no more than
+        // the whole process used around them. 1 ms covers the clocks' rounding.
+        let used = me.cpuPercent / 100 * snapshot.interval
+        #expect(used >= busy - 0.001, "the loop used \(busy) s of CPU, but \(me.cpuPercent)% over \(snapshot.interval) s is \(used) s")
+        #expect(used <= process + 0.001, "the process used \(process) s of CPU in all, but \(me.cpuPercent)% is \(used) s")
+    }
+
+    /// Spins until this thread has used `cpuSeconds` of CPU, and returns how much it used.
+    private static func spin(cpuSeconds: Double) -> Double {
+        let start = threadCPUSeconds()
+        var used = 0.0
+        while used < cpuSeconds { used = threadCPUSeconds() - start }
+        return used
+    }
+
+    private static func threadCPUSeconds() -> Double {
+        Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e9
+    }
+
+    /// The process's CPU time, every thread's, from `getrusage` rather than
+    /// the sampler's own read.
+    private static func processCPUSeconds() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        let seconds = usage.ru_utime.tv_sec + usage.ru_stime.tv_sec
+        return Double(seconds) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6
     }
 
     @Test func inspectsOwnArgumentsAndOpenFiles() throws {

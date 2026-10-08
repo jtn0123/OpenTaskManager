@@ -243,15 +243,34 @@ public enum CPUBenchmarkError: Error, Equatable, Sendable {
 
 /// Stops a running benchmark from another thread; workers notice within a few milliseconds.
 public final class CPUBenchmarkCancellation: Sendable {
-    private let flag = OSAllocatedUnfairLock(initialState: false)
+    private struct State {
+        var cancelled = false
+        var stoppedWorkers = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 
     public func cancel() {
-        flag.withLock { $0 = true }
+        state.withLock { $0.cancelled = true }
     }
 
-    public var isCancelled: Bool { flag.withLock { $0 } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    /// Workers that saw the cancel partway through a pass and stopped there,
+    /// rather than running on to the pass's end. Tests read it to tell a
+    /// prompt stop from one that waited out the pass.
+    var stoppedWorkers: Int { state.withLock { $0.stoppedWorkers } }
+
+    /// Whether the run is cancelled, so the worker checking stops mid-pass;
+    /// counts it if so.
+    func stopsWorker() -> Bool {
+        state.withLock { state in
+            if state.cancelled { state.stoppedWorkers += 1 }
+            return state.cancelled
+        }
+    }
 }
 
 /// A CPU benchmark the user starts: integer, floating-point and memory
@@ -335,7 +354,15 @@ public enum CPUBenchmark {
     public static func measure(configuration: CPUBenchmarkConfiguration = .standard, workers: Int = defaultWorkers, appVersion: String,
                                progress: @escaping @Sendable (CPUBenchmarkProgress) -> Void) async throws(CPUBenchmarkError)
         -> CPUBenchmarkResult {
-        let cancellation = CPUBenchmarkCancellation()
+        try await measure(configuration: configuration, workers: workers, appVersion: appVersion, cancellation: CPUBenchmarkCancellation(),
+                          progress: progress)
+    }
+
+    /// `measure`, with the cancellation that cancelling the task sets, so a
+    /// test can see how the run stopped.
+    static func measure(configuration: CPUBenchmarkConfiguration, workers: Int, appVersion: String, cancellation: CPUBenchmarkCancellation,
+                        progress: @escaping @Sendable (CPUBenchmarkProgress) -> Void) async throws(CPUBenchmarkError)
+        -> CPUBenchmarkResult {
         let outcome: Result<CPUBenchmarkResult, CPUBenchmarkError> = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 Thread.detachNewThread {
@@ -407,7 +434,7 @@ public enum CPUBenchmark {
                     if now >= deadline { break }
                     if now - lastCheck >= checkInterval {
                         lastCheck = now
-                        if cancellation?.isCancelled == true {
+                        if cancellation?.stopsWorker() == true {
                             tally.cancelled = true
                             break
                         }
