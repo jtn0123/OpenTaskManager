@@ -470,7 +470,7 @@ struct HistoryMomentProcess: View {
 
     static func moment(of track: HistoryProcessStore.Track, at time: Date) -> Moment {
         ProcessHistoryLabels.moment(of: track.lifetime, at: time, points: track.figures, bucket: track.bucket,
-                                    memory: track.memory, coverage: track.memoryCoverage)
+                                    memory: track.memory, coverage: track.memoryCoverage, isGone: !track.isRunning)
     }
 
     var body: some View {
@@ -492,6 +492,9 @@ struct HistoryMomentProcess: View {
                         .help(HistoryProcessStyle.idleHelp)
                 case .notRunning:
                     note("Not running then")
+                case .notSeenAfter(let lastSeen):
+                    note(ProcessHistoryLabels.notSeen(after: lastSeen))
+                        .help("It ended while nothing was watching, so when exactly isn't known.")
                 case .notRecorded:
                     note(ProcessHistoryLabels.notRecorded)
                 }
@@ -574,6 +577,7 @@ struct HistoryMomentProcessLine: View {
         case .memory(let step): return ProcessHistoryLabels.memoryMoment(step)
         case .idle: return ProcessHistoryLabels.idleMoment
         case .notRunning: return "not running"
+        case .notSeenAfter(let lastSeen): return "not seen after " + lastSeen.formatted(date: .omitted, time: .standard)
         case .notRecorded: return ProcessHistoryLabels.notRecorded
         }
     }

@@ -23,13 +23,26 @@ public enum ProcessHistoryLabels {
         case idle
         case memory(ProcessMemoryStep)
         case notRunning
+        /// Gone by now, but it went while nothing watched, so its end is unknown.
+        case notSeenAfter(Date)
         case notRecorded
     }
 
+    /// "Not seen after 11:07:19 AM": never "not running", which the gap
+    /// between its last sighting and the next watched record can't tell.
+    public static func notSeen(after date: Date) -> String {
+        "Not seen after \(date.formatted(date: .omitted, time: .standard))"
+    }
+
     public static func moment(of lifetime: ProcessLifetime, at time: Date, points: [ProcessHistoryPoint],
-                              bucket: TimeInterval, memory: [ProcessMemoryStep] = [], coverage: [ClosedRange<Date>] = []) -> Moment {
+                              bucket: TimeInterval, memory: [ProcessMemoryStep] = [], coverage: [ClosedRange<Date>] = [],
+                              isGone: Bool = false) -> Moment {
         if time < lifetime.started.addingTimeInterval(-bucket) { return .notRunning }
         if let ended = lifetime.ended, time > ended.addingTimeInterval(bucket) { return .notRunning }
+        // `isGone`: not running now, though no record saw it end.
+        if lifetime.ended == nil, isGone, time > lifetime.lastSeen.addingTimeInterval(bucket) {
+            return .notSeenAfter(lifetime.lastSeen)
+        }
         // Memory coverage uses the actual records, not a coarse bucket's reach.
         if !memory.isEmpty, !coverage.contains(where: { $0.contains(time) }) { return .notRecorded }
         guard let point = ProcessHistoryPoint.at(time, in: points, bucket: bucket) else { return .notRecorded }

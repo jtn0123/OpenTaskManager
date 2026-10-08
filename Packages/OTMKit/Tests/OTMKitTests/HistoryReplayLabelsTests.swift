@@ -87,6 +87,12 @@ struct HistoryReplayLabelsTests {
         #expect(moment(950) == .notRecorded, "before its first watched record, it was not recorded")
         #expect(moment(880) == .notRunning)
         #expect(moment(1_200) == .notRecorded, "after the last sighting it may still have run")
+        #expect(ProcessHistoryLabels.moment(of: lifetime, at: date(1_200), points: points, bucket: 10, isGone: true)
+            == .notSeenAfter(date(1_100)), "gone now, but its end went unwatched")
+        #expect(ProcessHistoryLabels.moment(of: lifetime, at: date(1_105), points: points, bucket: 10, isGone: true)
+            == .notRecorded, "within a record of its last sighting it may still have run")
+        #expect(ProcessHistoryLabels.moment(of: self.lifetime(ended: 1_100), at: date(1_200), points: points, bucket: 10,
+                                            isGone: true) == .notRunning, "a seen end stays not running")
         #expect(ProcessHistoryLabels.moment(of: lifetime, at: date(1_010), points: [], bucket: 10) == .notRecorded)
         #expect(ProcessHistoryLabels.idleMoment == "Idle (not kept)")
         #expect(ProcessHistoryLabels.notRecorded == "Not recorded")
