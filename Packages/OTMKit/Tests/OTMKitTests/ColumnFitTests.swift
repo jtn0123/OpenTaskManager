@@ -57,3 +57,36 @@ struct ColumnFitTests {
         #expect(ColumnFit.hidden(columns, available: minimum) == ["user", "power", "disk"])
     }
 }
+
+struct StartupColumnTests {
+    /// The columns as the Startup table offers them to `ColumnFit`: each
+    /// with the table's 17-point gap, and Publisher left out where `userHidden` says.
+    private func hidden(tableWidth: Double, userHidden: Set<StartupColumn> = []) -> Set<StartupColumn> {
+        let columns = StartupColumn.allCases.filter { !userHidden.contains($0) }.map {
+            ColumnFit.Column(id: $0, width: Double($0.minWidth) + 17, priority: $0.priority)
+        }
+        // Less the table's 10-point insets either side.
+        return ColumnFit.hidden(columns, available: tableWidth - 20)
+    }
+
+    @Test func memoryAndCPUGiveWayBeforeKind() {
+        #expect(StartupColumn.hidingOrder == [.launches, .publisher, .memory, .cpu, .kind])
+        #expect(StartupColumn.name.priority == nil)
+        #expect(StartupColumn.status.priority == nil)
+    }
+
+    /// The 820-point window with the details beside the table, which takes
+    /// Publisher off: Agent or Daemon stays, the idle CPU column goes.
+    @Test func theNarrowestTableBesideTheDetailsKeepsKind() {
+        #expect(hidden(tableWidth: 490, userHidden: [.publisher]) == [.launches, .memory, .cpu])
+        // Narrower still, Kind goes too, and Name and Status stay whatever the width.
+        #expect(hidden(tableWidth: 440, userHidden: [.publisher]) == [.launches, .memory, .cpu, .kind])
+        #expect(hidden(tableWidth: 200, userHidden: [.publisher]) == [.launches, .memory, .cpu, .kind])
+    }
+
+    /// The 820-point window without the details: only Launches gives way.
+    @Test func theNarrowestWindowAloneDropsOnlyLaunches() {
+        #expect(hidden(tableWidth: 800) == [.launches])
+        #expect(hidden(tableWidth: 1200).isEmpty)
+    }
+}

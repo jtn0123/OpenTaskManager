@@ -198,9 +198,69 @@ struct LaunchJobWatchTests {
         // Running again, it keeps saying Running.
         #expect(LaunchItemStatus(item: crashed, health: .crashed(signal: 11)).title == "Running")
         #expect(LaunchJobHealth.crashed(signal: 11).explanation(for: crashed, record: nil, time: offset)
-            == "Killed by signal 11 (SIGSEGV): the program crashed. It's running again now.")
+            == "Killed by signal 11 (SIGSEGV): a bad memory access, reading or writing memory it doesn't own, "
+            + "usually a bug in the program. It's running again now.")
         #expect(LaunchJobHealth.healthy.headline == nil)
         #expect(!LaunchJobHealth.healthy.needsAttention)
+    }
+
+    /// The header's "Failed · exit code 1" already says what a notice
+    /// would: no notice, and no Last exit line to say it a third time.
+    @Test func aFailureTheStatusLineSaysInFullGetsNoNotice() {
+        let failed = job(pid: nil, lastExit: .code(1))
+        #expect(LaunchJobHealth.failed(code: 1).notice(for: failed, record: nil, time: offset) == nil)
+        #expect(LaunchJobHealth.failed(code: 1).tellsLastExit)
+        #expect(LaunchJobHealth.healthy.notice(for: job(pid: nil), record: nil, time: offset) == nil)
+        #expect(!LaunchJobHealth.healthy.tellsLastExit)
+    }
+
+    /// What the status line can't say: what a known code or a crash signal
+    /// means, in plain words.
+    @Test func noticesExplainKnownCodesAndCrashSignals() {
+        let failed = job(pid: nil, lastExit: .code(78))
+        #expect(LaunchJobHealth.failed(code: 78).notice(for: failed, record: nil, time: offset) == LaunchJobNotice(
+            headline: "What exit code 78 means",
+            text: "EX_CONFIG: a setup problem, such as a program or file it can't find or isn't allowed to open."))
+        #expect(LaunchJobHealth.failed(code: 127).notice(for: failed, record: nil, time: offset)?.text
+            == "Its program wasn't found.")
+        let crashed = job(pid: nil, lastExit: .code(-6))
+        #expect(LaunchJobHealth.crashed(signal: 6).notice(for: crashed, record: nil, time: offset) == LaunchJobNotice(
+            headline: "What SIGABRT means",
+            text: "It stopped itself on finding something wrong, such as a failed check or a fatal error."))
+        #expect(LaunchJobHealth.crashed(signal: 6).tellsLastExit)
+        // Every crash signal has its plain words; launchd's stops and idle exits aren't crashes.
+        for signal in LaunchExitStatus.crashSignals {
+            #expect(LaunchExitStatus.meaning(ofSignal: signal) != nil)
+        }
+        #expect(LaunchExitStatus.meaning(ofSignal: SIGKILL) == nil)
+        #expect(LaunchExitStatus.meaning(ofSignal: SIGTERM) == nil)
+    }
+
+    /// Running again, the status line says Running: the notice tells what
+    /// went wrong before, exit code and all.
+    @Test func aJobRunningAgainAfterAFailureIsToldInFull() {
+        let again = job(pid: 42, lastExit: .code(1))
+        #expect(LaunchJobHealth.failed(code: 1).notice(for: again, record: nil, time: offset) == LaunchJobNotice(
+            headline: "Its last run failed", text: "Exited with code 1. It's running again now."))
+        let crashedAgain = job(pid: 42, lastExit: .code(-5))
+        #expect(LaunchJobHealth.crashed(signal: 5).notice(for: crashedAgain, record: nil, time: offset)?.headline
+            == "Its last run crashed")
+    }
+
+    /// Restarts seen are what the status line's "3 times in 15 min" leaves
+    /// out: since when, the last one, and what ended the run before.
+    @Test func restartsSeenGetANotice() {
+        var watch = LaunchJobWatch()
+        for (index, pid) in [500, 501, 502, 503].enumerated() {
+            watch.observe([job(pid: Int32(pid), lastExit: .code(-11))], startTimes: [:], at: at(Double(index) * 10))
+        }
+        let item = job(pid: 503, lastExit: .code(-11))
+        let notice = watch.health(of: item).notice(for: item, record: watch.record(for: item), time: offset)
+        #expect(notice?.headline == "Restarting again and again")
+        #expect(notice?.text.hasPrefix("Restarted 3 times since +0, the last at +30") == true)
+        #expect(!watch.health(of: item).tellsLastExit)
+        // Without the record there's nothing to add to the status line.
+        #expect(LaunchJobHealth.restarting(count: 3).notice(for: item, record: nil, time: offset) == nil)
     }
 
     @Test func summarisesRestarts() {
