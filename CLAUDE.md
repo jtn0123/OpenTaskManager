@@ -260,6 +260,15 @@ Manager OG or any other proprietary task manager.
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
+  System/OwnerLookup and OwnerQuery reverse that lookup for a file (device and
+  inode), folder or volume (open paths and current directories), or local TCP/UDP
+  port. ProcessDescriptorReader shares the libproc buffers with ProcessInspector
+  and ConnectionSampler. Processes' View menu has Find Owner… (⇧⌘F), whose
+  FindOwnerSheet accepts text, a Finder drop or Choose… and selects a result by
+  ProcessIdentity. `otm owner <path|port> [--json]` prints the same matches,
+  coverage counts and walk time. Unreadable processes stay counted even when a
+  process has a partial match; an empty result names what was checked. Volumes
+  mention that Spotlight or the kernel may also prevent ejecting,
   socket history (schema 6, `FlightRecorderConnections`): `connection_lifetimes`
   keeps one row per observed segment from `ConnectionWatch`, with process identity,
   executable path and user, endpoints, the TCP states seen and its bounded timeline.
@@ -404,6 +413,11 @@ Manager OG or any other proprietary task manager.
   Components/Graphs (graphs, bars, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
+
+- Find Owner runs exactly one bounded descriptor walk per search, off the main
+  actor, with no timers, per-tick reads or sampler observation. Path resolution
+  reads the query once; file matches use the vnode's device and inode, never a
+  path string or per-descriptor stat. Port searches read only socket descriptors.
 
 - `StorageScheduler` has one one-shot timer for the earliest due scope, none
   without schedules. Due but ineligible work retries every 15 min and on wake;
@@ -645,7 +659,8 @@ screencapture -x -o -l <windowID> out.png
 `-openResource cpu|memory|gpu|disk|network|power|sensors|benchmarks` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end, and Startup's
 details at their History and Files), `-openProcess <pid>`
-selects a process so its inspector shows, `-openProcessHistory <query>` (with
+selects a process so its inspector shows, `-openFindOwner <path or port>`
+starts on Processes and opens Find Owner with that query searched, `-openProcessHistory <query>` (with
 `-openPage History`) searches History's Processes section and charts the latest
 match, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show

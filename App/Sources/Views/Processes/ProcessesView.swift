@@ -10,6 +10,9 @@ struct ProcessesView: View {
     @Setting(Settings.showInspector) private var showInspector: Bool
     @Setting(Settings.hiddenProcessColumns) private var hiddenColumns: HiddenProcessColumns
     @State private var search = ""
+    @State private var showsFindOwner = false
+    @State private var didOpenFindOwner = false
+    @State private var ownerInitialQuery = ""
     /// By PID and start time, so a selected process that ends never hands
     /// its inspector, or End Task, to a later process given its PID.
     @State private var selection: Set<ProcessIdentity> = []
@@ -67,6 +70,22 @@ struct ProcessesView: View {
             }
         }
         .samplingDemand(.restrictedProcesses)
+        .sheet(isPresented: $showsFindOwner, onDismiss: { ownerInitialQuery = "" }, content: {
+            FindOwnerSheet(initialQuery: ownerInitialQuery) { identity in
+                guard model.process(identity) != nil else { return false }
+                select(identity)
+                if isNarrow { showsFullDetail = false }
+                showsFindOwner = false
+                return true
+            }
+        })
+        .onAppear {
+            if !didOpenFindOwner, let query = LaunchArgument.string("openFindOwner") {
+                ownerInitialQuery = query
+                didOpenFindOwner = true
+                showsFindOwner = true
+            }
+        }
         .onChange(of: isNarrow) {
             // The split covers the table with an open inspector when the window
             // turns narrow. At launch it can decide that before `-openProcess`'s
@@ -137,6 +156,9 @@ struct ProcessesView: View {
             }
             .pickerStyle(.inline)
             .labelsHidden()
+            Divider()
+            Button("Find Owner…") { showsFindOwner = true }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
             if compactToolbar {
                 Divider()
                 Menu {
