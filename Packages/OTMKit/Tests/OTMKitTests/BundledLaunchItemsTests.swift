@@ -52,6 +52,7 @@ struct BundledLaunchItemsTests {
         93 0 0x123.anonymous.worker.93
         - 0 org.example.version.2
         - 0 com.apple.mdworker.shared.0D000000-0700-0000-0000-000000000000
+        61 0 org.example.agent.678B4C0B-014D-4089-8003-3CF92B67E05D
         """)
         let systemJobs = Launchctl.parseServices("""
         system = {
@@ -74,6 +75,9 @@ struct BundledLaunchItemsTests {
         #expect(!inventory.items.contains { $0.label.hasPrefix("application.") || $0.label.contains("anonymous") })
         // Apple's on-demand services without a file are macOS internals, not startup items.
         #expect(!inventory.items.contains { $0.label.hasPrefix("com.apple.") })
+        // A per-connection copy of a listed job (sshd per SSH session) is a run of it, not an item.
+        #expect(!inventory.items.contains { $0.label.hasPrefix("org.example.agent.") })
+        #expect(!LaunchItems.isInstance("org.example.version.2", ofOneOf: ["org.example.version"]))
         let fileless = inventory.items.filter { $0.label == "org.example.fileless" }
         #expect(fileless.count == 2 && Set(fileless.map(\.id)).count == 2)
         #expect(fileless.allSatisfy { $0.source == .loadedWithoutFile && !$0.hasFile && !$0.startsAutomatically })

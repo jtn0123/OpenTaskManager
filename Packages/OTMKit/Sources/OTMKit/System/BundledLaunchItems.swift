@@ -78,6 +78,7 @@ extension LaunchItems {
         func unmatched(_ jobs: [String: LaunchJobStatus], scope: LaunchItemScope) -> [LaunchItem] {
             jobs.keys.sorted().compactMap { label in
                 guard !labels.contains(label), !label.hasPrefix("application."), !isAnonymousLabel(label),
+                      !isInstance(label, ofOneOf: labels),
                       publisher(plistPath: "", label: label) == .thirdParty else { return nil }
                 return LaunchItem(label: label, name: displayName(forLabel: label), plistPath: "", modified: nil,
                                   scope: scope, source: .loadedWithoutFile, owningAppPath: nil,
@@ -87,6 +88,14 @@ extension LaunchItems {
             }
         }
         return unmatched(userJobs, scope: .userAgent) + unmatched(systemJobs, scope: .daemon)
+    }
+
+    /// launchd names a job's per-connection copies after it plus a UUID (an
+    /// inetd-style sshd per SSH session, "com.openssh.sshd.<UUID>"): those are
+    /// runs of a job already listed, not registrations of their own.
+    static func isInstance(_ label: String, ofOneOf labels: Set<String>) -> Bool {
+        guard let dot = label.lastIndex(of: ".") else { return false }
+        return UUID(uuidString: String(label[label.index(after: dot)...])) != nil && labels.contains(String(label[..<dot]))
     }
 
     private static func isAnonymousLabel(_ label: String) -> Bool {

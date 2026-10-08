@@ -14,11 +14,11 @@ private func startupInventoryCommand(_ options: Options) {
     if options.json {
         printJSON(items)
     } else {
-        print(pad("NAME", 32) + pad("KIND", 14) + pad("SOURCE", 28) + pad("STATUS", 16) + "LABEL")
+        print(pad("NAME", 32) + pad("KIND", 14) + pad("SOURCE", 28) + pad("STATUS", 22) + "LABEL")
         for item in items {
             let status = LaunchItemStatus(item: item, health: watch.health(of: item))
             print(pad(item.name, 32) + pad(item.scope.title, 14) + pad(item.source.title, 28)
-                  + pad(status.summary, 16) + item.label)
+                  + pad(status.summary, 22) + item.label)
         }
         print("\n\(items.count) items · Open at Login apps and macOS approval switches are not readable here.")
     }
