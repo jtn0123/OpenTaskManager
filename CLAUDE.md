@@ -207,7 +207,7 @@ Manager OG or any other proprietary task manager.
   observed end or last sighting. Unknown bug types stay Diagnostic report;
   hang reports never claim a crash. Show Report reveals the file in Finder.
   Delivered signals and accepted Quit requests are `.endedByApp` events with
-  identity, executable path and signal in their JSON detail; schema 8's event
+  identity, executable path and signal in their JSON detail; schema 9's event
   index keeps same-named group targets separately. Quit requests and SIGTERM
   deliveries keep their wording, since neither proves that it caused an exit.
   New observed launchd ends keep the exited identity; replacements never
