@@ -85,6 +85,8 @@ final class HistoryProcessStore {
 
     /// The search field's text.
     var query = ""
+    /// A file's Search Live History hands focus to the live field once it appears.
+    var wantsSearchFocus = false
     /// Counts requests from elsewhere, so one for the query already shown
     /// still runs the search again.
     private(set) var requests = 0
@@ -117,6 +119,13 @@ final class HistoryProcessStore {
         pending = .identity(identity)
         requests += 1
         unpick()
+    }
+
+    /// Returns to the search without reselecting a pending lifetime.
+    func focusSearch() {
+        pending = nil
+        unpick()
+        wantsSearchFocus = true
     }
 
     func pick(_ match: ProcessHistoryMatch) {
@@ -262,7 +271,8 @@ enum HistoryProcessStyle {
     /// peak 45% · Memory peak 1.2 GB", or why there are none.
     static func figures(_ summary: ProcessHistorySummary, scale: CPUScale) -> String {
         guard summary.records > 0 else { return "Not recorded while it ran" }
-        guard let average = summary.averageCPU, let peak = summary.peakCPU else { return "Idle throughout, not stored" }
+        if summary.isIdle { return ProcessHistoryLabels.idleSummary }
+        guard let average = summary.averageCPU, let peak = summary.peakCPU else { return ProcessHistoryLabels.notRecorded }
         var parts = ["CPU avg \(unbroken(scale.format(average))), peak \(unbroken(scale.format(peak)))"]
         if let memory = summary.peakMemory { parts.append("Memory peak \(unbroken(Format.bytes(memory)))") }
         return parts.joined(separator: " · ")
