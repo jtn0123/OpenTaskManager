@@ -330,10 +330,15 @@ struct HistorySpikeIncidentLine: View {
 /// Settings' History section: the spike capture switch.
 struct SpikeCaptureSettings: View {
     @Bindable private var store = SpikeCaptureStore.shared
+    @Setting(Settings.backgroundConnections) private var backgroundConnections: Bool
 
     var body: some View {
         Section("History") {
             Toggle("Capture spikes automatically", isOn: $store.isEnabled)
+            Toggle("Keep watching connections in the background", isOn: $backgroundConnections)
+            Text("While the flight recorder is on, read sockets once a minute away from Connections. Short connections may be missed.")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
             Text(HistorySpikeStyle.explanation + " Open them from History's Spikes button.")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)

@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import Observation
 import OTMKit
 
@@ -6,8 +7,9 @@ import OTMKit
 ///
 /// Walking every process's descriptors costs a few thousand system calls, so
 /// it runs off the main actor every few seconds, and only while the page is
-/// on screen: the view's `.task` drives `run`, and SwiftUI cancels it when
-/// the page goes away. Each walk is noted in a `ConnectionWatch`, off the
+/// on screen by default: the view's `.task` drives `run`, and SwiftUI cancels
+/// it when the page goes away. The opt-in background scheduler shares that
+/// watch once a minute while recording. Each walk is noted in a `ConnectionWatch`, off the
 /// main actor with the walk, for how long each socket has been seen and
 /// which closed. The store lasts the session, so that survives a visit to
 /// another page; the time away shows as a gap the page didn't watch.
@@ -34,7 +36,14 @@ final class ConnectionStore {
     /// fills, not with every walk.
     private(set) var closedCoverage: ConnectionWatch.ClosedCoverage?
 
-    @ObservationIgnored private var watch = ConnectionWatch()
+    @ObservationIgnored var watch = ConnectionWatch()
+    @ObservationIgnored let historyWorker = ConnectionHistoryWorker()
+    @ObservationIgnored var walkTask: Task<ConnectionHistoryWorker.Reading, Never>?
+    @ObservationIgnored var nextBackgroundWalk = Date.distantPast
+    @ObservationIgnored var visibleVisits = 0
+    @ObservationIgnored var historyRecorder: FlightRecorder?
+    @ObservationIgnored var stoppingTask: Task<Void, Never>?
+
     /// Each socket's process name and icon as they were while it was open,
     /// for its row once it has closed and its process may be gone.
     @ObservationIgnored private var looks: [ObservedConnection.ID: ConnectionRow.Look] = [:]
@@ -43,6 +52,12 @@ final class ConnectionStore {
     /// the page opens, so the page isn't empty or stale, then leaves the data
     /// frozen like the other pages.
     func run(model: AppModel, opening: Bool) async {
+        visibleVisits += 1
+        historyRecorder = model.showsSensorFixture ? nil : model.recorder
+        defer {
+            visibleVisits -= 1
+            if visibleVisits == 0 { stopUnlessBackground(force: model.isPaused) }
+        }
         await model.samplingDemand.waitUntilVisible()
         guard !Task.isCancelled else { return }
         guard !model.isPaused else {
@@ -63,16 +78,20 @@ final class ConnectionStore {
     }
 
     private func refresh(_ model: AppModel) async {
-        let watch = watch
-        let (snapshot, next) = await Task.detached(priority: .utility) {
-            let snapshot = ConnectionSampler.sample()
-            var next = watch
-            next.observe(snapshot.connections, at: snapshot.time)
-            return (snapshot, next)
-        }.value
+        guard walkTask == nil else { return }
+        if let stoppingTask { await stoppingTask.value }
+        guard walkTask == nil, !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
+        let processes = connectionProcesses(model.snapshot?.processes ?? [], model: model)
+        let recorder = model.showsSensorFixture ? nil : model.recorder
+        historyRecorder = recorder
+        let task = Task { await historyWorker.read(recorder: recorder, spacing: 3, processes: processes) }
+        walkTask = task
+        let reading = await task.value
+        walkTask = nil
+        nextBackgroundWalk = Date.now.addingTimeInterval(60)
+        watch = reading.watch
         guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
-        self.watch = next
-        apply(snapshot, model: model)
+        apply(reading.snapshot, model: model)
     }
 
     private func apply(_ snapshot: ConnectionSnapshot, model: AppModel) {
@@ -129,20 +148,22 @@ struct ConnectionRow: Identifiable {
     let isNewListener: Bool
     /// The process that held it still runs; always, while the socket is open.
     let processRunning: Bool
+    let lifetime: ConnectionLifetime?
 
-    init(socket: ObservedConnection, look: Look, at now: Date, processRunning: Bool) {
+    init(socket: ObservedConnection, look: Look, at now: Date, processRunning: Bool, lifetime: ConnectionLifetime? = nil) {
         self.socket = socket
         processName = look.name
         icon = look.icon
         self.now = now
         isNewListener = socket.isNewListener(at: now)
         self.processRunning = processRunning
+        self.lifetime = lifetime
     }
 
     var connection: Connection { socket.connection }
     var id: ObservedConnection.ID { socket.id }
     var pid: Int32 { connection.pid }
-    var isOpen: Bool { socket.isOpen }
+    var isOpen: Bool { lifetime == nil && socket.isOpen }
     var protocolName: String { "\(connection.transport.rawValue) \(connection.family.rawValue)" }
     /// Local endpoints sort by port, which is what people scan for.
     var localOrder: PortOrder { PortOrder(port: connection.local.port ?? 0, address: connection.local.address) }

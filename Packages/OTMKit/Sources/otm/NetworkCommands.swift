@@ -40,6 +40,11 @@ func listeningPorts(_ connections: [Connection]) -> [ListeningPort] {
 
 func portsCommand(_ options: Options) {
     let sample = ConnectionSampler.sample()
+    if ProcessInfo.processInfo.environment["OTM_CONNECTION_WALK_TIMING"] == "1" {
+        let timing = "Socket walk: wall \(sample.duration) s, thread CPU \(sample.cpuDuration) s, "
+            + "\(sample.scannedProcesses) processes scanned, \(sample.hiddenProcesses) unreadable\n"
+        FileHandle.standardError.write(Data(timing.utf8))
+    }
     let ports = listeningPorts(sample.connections)
     if options.json {
         printJSON(ports)

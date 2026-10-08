@@ -4,6 +4,7 @@ import OTMKit
 extension AppModel {
     func visibilityChanged() {
         SpikeCaptureStore.shared.setVisible(samplingDemand.hasVisibleWindow)
+        if !samplingDemand.hasVisibleWindow { ConnectionStore.shared.stopUnlessBackground() }
         // Cancellation interrupts the wait, so showing a window takes a
         // fresh sample immediately instead of waiting for an idle deadline.
         stop()
@@ -42,6 +43,7 @@ extension AppModel {
                 guard !Task.isCancelled else { return }
                 ingest(snapshot, sensors: sensors)
                 sampleLaunchHistory(processes: snapshot.processes)
+                sampleConnectionHistory(processes: snapshot.processes)
                 deadline = max(deadline.advanced(by: .seconds(policy.interval)), clock.now)
                 try? await Task.sleep(until: deadline, clock: clock)
             }

@@ -11,16 +11,23 @@ public struct ConnectionSnapshot: Sendable {
     public let scannedProcesses: Int
     /// How long the walk took.
     public let duration: TimeInterval
+    public let cpuDuration: TimeInterval
+    public let unreadablePIDs: Set<Int32>
+    public let processes: [ProcessIdentity: ConnectionProcess]
     /// When the walk began.
     public let time: Date
 
     public init(connections: [Connection], hiddenProcesses: Int, scannedProcesses: Int, duration: TimeInterval,
-                time: Date = Date()) {
+                time: Date = Date(), cpuDuration: TimeInterval = 0, unreadablePIDs: Set<Int32> = [],
+                processes: [ProcessIdentity: ConnectionProcess] = [:]) {
         self.connections = connections
         self.hiddenProcesses = hiddenProcesses
         self.scannedProcesses = scannedProcesses
         self.duration = duration
         self.time = time
+        self.cpuDuration = cpuDuration
+        self.unreadablePIDs = unreadablePIDs
+        self.processes = processes
     }
 }
 
@@ -34,36 +41,55 @@ public enum ConnectionSampler {
         // reads stay within their buffers.
         let time = Date()
         let started = DispatchTime.now()
+        let cpuStarted = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: 256)
         var connections: [Connection] = []
         var hidden = 0
+        var unreadable = Set<Int32>()
         var scanned = 0
+        var metadata: [ProcessIdentity: ConnectionProcess] = [:]
+        var users: [UInt32: String] = [:]
 
         // PID 0 is the kernel, which has no descriptor table to read.
         for pid in allPIDs() where pid > 0 {
             errno = 0
             guard let count = listDescriptors(of: pid, into: &descriptors) else {
+                unreadable.insert(pid)
                 if errno == EPERM || errno == EACCES { hidden += 1 }
                 continue
             }
             scanned += 1
-            var process: (name: String, start: Date?)?
+            var process: Description?
             for descriptor in descriptors.prefix(count) where Int32(descriptor.proc_fdtype) == PROX_FDTYPE_SOCKET {
                 var info = socket_fdinfo()
                 let size = Int32(MemoryLayout<socket_fdinfo>.size)
-                guard unsafe proc_pidfdinfo(pid, descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { continue }
+                errno = 0
+                guard unsafe proc_pidfdinfo(pid, descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else {
+                    if unreadable.insert(pid).inserted, errno == EPERM || errno == EACCES { hidden += 1 }
+                    continue
+                }
                 let described = process ?? describe(pid)
                 process = described
                 if let connection = decode(info.psi, pid: pid, fd: descriptor.proc_fd, processName: described.name,
                                            processStart: described.start) {
                     connections.append(connection)
+                    if metadata[connection.process] == nil {
+                        let user = described.uid.map { uid in
+                            let name = users[uid] ?? UserAccounts.account(uid: uid)?.name ?? String(uid)
+                            users[uid] = name
+                            return name
+                        } ?? "Not recorded"
+                        metadata[connection.process] = ConnectionProcess(name: described.name, path: described.path, user: user)
+                    }
                 }
             }
         }
 
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
         return ConnectionSnapshot(connections: connections, hiddenProcesses: hidden, scannedProcesses: scanned,
-                                  duration: elapsed, time: time)
+                                  duration: elapsed, time: time,
+                                  cpuDuration: Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - cpuStarted) / 1_000_000_000,
+                                  unreadablePIDs: unreadable, processes: metadata)
     }
 
     /// A TCP or UDP socket as a connection. Sockets that are neither bound
@@ -120,6 +146,7 @@ public enum ConnectionSampler {
             let written = buffer.withUnsafeMutableBytes {
                 unsafe proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
             }
+            if written == 0, errno == 0 { return 0 }
             guard written > 0 else { return nil }
             // A full buffer may have cut the list short; ask for the real size.
             guard Int(written) >= buffer.count * stride else { return Int(written) / stride }
@@ -132,16 +159,28 @@ public enum ConnectionSampler {
 
     /// The process's name and when it started, from the one record
     /// `proc_name` reads the name from, so the start time takes no extra call.
-    private static func describe(_ pid: Int32) -> (name: String, start: Date?) {
+    private struct Description {
+        let name: String
+        let start: Date?
+        let path: String?
+        let uid: UInt32?
+    }
+
+    private static func describe(_ pid: Int32) -> Description {
         // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
         // reads stay within their buffers.
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard unsafe proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return ("PID \(pid)", nil) }
+        guard unsafe proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else {
+            return Description(name: "PID \(pid)", start: nil, path: nil, uid: nil)
+        }
         let name = text(info.pbi_name)
         let shown = name.isEmpty ? text(info.pbi_comm) : name
         let start = ProcessIdentity.startTime(microseconds: Int64(info.pbi_start_tvsec) * 1_000_000 + Int64(info.pbi_start_tvusec))
-        return (shown.isEmpty ? "PID \(pid)" : shown, start)
+        var path = [CChar](repeating: 0, count: 4096)
+        let length = path.withUnsafeMutableBytes { unsafe proc_pidpath(pid, $0.baseAddress, UInt32($0.count)) }
+        let executable = length > 0 ? String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) : nil
+        return Description(name: shown.isEmpty ? "PID \(pid)" : shown, start: start, path: executable, uid: info.pbi_uid)
     }
 
     /// A kernel record's fixed-size C string, up to its first NUL.
