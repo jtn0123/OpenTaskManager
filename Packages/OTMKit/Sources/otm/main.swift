@@ -58,12 +58,15 @@ USAGE:
                                  Each thread's CPU over the interval, CPU time,
                                  state and priority (your own processes, or
                                  any with sudo)
-  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--json]
+  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--reconcile] [--json]
                                  What's using the space under PATH (default: the
                                  current folder): biggest folders and files,
                                  space by category; --changes saves the scan
                                  (as the Storage page does) and shows what grew
-                                 and shrank since the last saved one
+                                 and shrank since the last saved one;
+                                 --reconcile adds where the space is: the
+                                 volume's figures, its APFS container and
+                                 snapshots, and what the scan doesn't account for
   otm netquality [INTERFACE] [--json]
                                  Internet download and upload capacity and
                                  responsiveness (macOS's networkQuality); fills
@@ -103,6 +106,7 @@ struct Options {
     var depth = 1
     var sizes = false
     var changes = false
+    var reconcile = false
     var extremes: Double?
 }
 
@@ -124,6 +128,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
         case "--changes": options.changes = true
+        case "--reconcile": options.reconcile = true
         case "--extremes":
             guard let seconds = iterator.next().flatMap(Double.init), seconds >= 0 else { fail("--extremes needs a number of seconds") }
             options.extremes = seconds
@@ -370,9 +375,12 @@ struct DiskUsageReport: Encodable {
     let categories: [CategoryEntry]
     /// With `--changes`, when an earlier scan was saved.
     let changes: DiskChangesReport?
+    /// With `--reconcile`.
+    let reconciliation: DiskReconciliationReport?
 
-    init(_ usage: DiskUsage, depth: Int, count: Int, changes: DiskChangesReport? = nil) {
+    init(_ usage: DiskUsage, depth: Int, count: Int, changes: DiskChangesReport? = nil, reconciliation: DiskReconciliationReport? = nil) {
         self.changes = changes
+        self.reconciliation = reconciliation
         func entries(_ item: DiskItem, depth: Int) -> [Entry] {
             usage.children(of: item).prefix(count).map { child in
                 Entry(name: child.kind == .smallerItems ? "\(child.itemCount) smaller items" : child.name, kind: child.kind.rawValue,
@@ -806,9 +814,11 @@ case "du":
         }
         comparison = earlier.map { DiskScanComparison(earlier: $0, later: summary) }
     }
+    let reconciliation = options.reconcile ? DiskReconciliationReader.read(usage, request: request) : nil
     if options.json {
         printJSON(DiskUsageReport(usage, depth: options.depth, count: options.count,
-                                  changes: comparison.map { DiskChangesReport($0, count: options.count) }))
+                                  changes: comparison.map { DiskChangesReport($0, count: options.count) },
+                                  reconciliation: reconciliation.map(DiskReconciliationReport.init)))
     } else {
         print(diskUsageSummary(usage, depth: options.depth, count: options.count))
         if let comparison {
@@ -816,6 +826,7 @@ case "du":
         } else if options.changes {
             print("\nNo earlier scan of this folder was saved. This one is, so the next `otm du --changes` can compare with it.")
         }
+        if let reconciliation { print(diskReconciliationSummary(reconciliation)) }
     }
 
 case "netquality":

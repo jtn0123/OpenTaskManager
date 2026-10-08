@@ -23,10 +23,20 @@ Manager OG or any other proprietary task manager.
   Graphing/ for axis and curve maths and the squarified `Treemap`;
   System/LaunchItems, LaunchTriggers and Launchctl read launchd plists and
   parse `launchctl` output; System/DiskUsageScanner walks a folder for the
-  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules;
+  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules,
+  keeping to its own volumes by volume and by mount point (`MountBoundary`, which
+  keeps a scan of /System out of the Data volume, from System/MountTable) and
+  counting hard links once by device and inode (`HardLinkLedger`), both in
+  Model/DiskScanRules;
   Model/DiskScanSummary (a scan's bounded, versioned summary), System/DiskScanHistory
   (the last 10 per scope) and Model/DiskScanComparison (interval diff maths) back
-  Storage's Changes mode and `otm du --changes`;
+  Storage's Changes mode and `otm du --changes`; Model/DiskReconciliation (the
+  remainder, the volume's used space less the scan's, for a whole volume or
+  home, a folder's share otherwise, and what could be in it, named with figures
+  only where known, never as space to free or wholly as snapshots),
+  Model/APFSList (`diskutil apfs list` and `listSnapshots` plists, neither
+  needing admin rights) and System/DiskReconciliationReader back Storage's
+  "Where the space is" and `otm du --reconcile`;
   System/InstalledApps, MachO and CodeSigning find and read app bundles for the
   Apps page and `otm apps`, and System/AppRemoval finds what an app keeps in
   your Library for its Move to Trash review (tests use a fake home, never
@@ -156,7 +166,8 @@ Manager OG or any other proprietary task manager.
   picked there is named above the map, not in a tag over it (`PickedChangeBar`:
   its trail with the outlined folder underlined, why the map can only outline
   what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
-  Reveal in Finder)),
+  Reveal in Finder); "Where the space is" (`StorageReconcilePanel`), folded at
+  first, reads the volume's figures once per finished scan, off the main actor),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -279,8 +290,9 @@ searches the System page and `-openSystemCategory network` (or another group
 in its jump bar) scrolls it to that group, and
 `-openStorageScope <path>` scans that folder or volume when the Storage page
 opens, with `-openStorageFolder <path inside it>` opening a folder in the
-results and `-openStorageList largest|changes` showing the largest files or
-what changed since the last saved scan of that folder. Pick a
+results, `-openStorageList largest|changes` showing the largest files or
+what changed since the last saved scan of that folder, and
+`-openStorageReconcile YES` unfolding "Where the space is". Pick a
 scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
 Documents, Downloads and other apps' containers raise a privacy prompt. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
