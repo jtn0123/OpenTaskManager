@@ -125,6 +125,7 @@ struct ProcessEndingEvidenceTests {
         let ending = ProcessEnding(lifetime: endedLifetime())
         #expect(ending.words { String(Int($0.timeIntervalSince(endStart))) }
             == ["Ended between 50 and 60; no crash report or exit status was found"])
+        #expect(ending.words { _ in "12:02:00" } == ["Ended at about 12:02:00; no crash report or exit status was found"])
         var unobserved = endedLifetime()
         unobserved.ended = nil
         #expect(ProcessEnding(lifetime: unobserved).words { _ in "12:03:00" }

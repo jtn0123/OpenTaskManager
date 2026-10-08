@@ -111,7 +111,10 @@ public struct ProcessEnding: Sendable, Codable, Equatable {
     public func words(clock: (Date) -> String) -> [String] {
         if !evidence.isEmpty { return evidence.map { $0.words(clock: clock) } }
         if let ended {
-            return ["Ended between \(clock(lastSeen)) and \(clock(ended)); no crash report or exit status was found"]
+            // Both inside one reading of the clock: a range from a time to itself says nothing more.
+            let (from, to) = (clock(lastSeen), clock(ended))
+            let when = from == to ? "Ended at about \(to)" : "Ended between \(from) and \(to)"
+            return ["\(when); no crash report or exit status was found"]
         }
         return ["Last seen at \(clock(lastSeen)); no crash report or exit status was found"]
     }
