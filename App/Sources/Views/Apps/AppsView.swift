@@ -52,7 +52,7 @@ struct AppRow: Identifiable {
 /// it costs nothing while it sits open.
 struct AppsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     @AppStorage("appsFilter") private var filter: AppsFilter = .all
     @AppStorage("showAppsInspector") private var showInspector = true
     @State private var store = InstalledAppStore()

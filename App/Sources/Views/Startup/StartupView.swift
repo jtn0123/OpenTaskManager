@@ -63,7 +63,7 @@ struct StartupRow: Identifiable, Equatable {
 /// by the PID launchd reports, so a tick redraws them and not the table.
 struct StartupView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     @AppStorage("startupFilter") private var filter: StartupFilter = .all
     @AppStorage("showStartupInspector") private var showInspector = true
     @State private var items: [LaunchItem]?

@@ -513,7 +513,7 @@ private struct RowGroupNote: View {
 /// to the History page searched for this process, with it picked, to see it
 /// over the hours and days History keeps.
 private struct ProcessHistoryLink: View {
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     let identity: ProcessIdentity
     let name: String
 

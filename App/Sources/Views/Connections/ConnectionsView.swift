@@ -5,7 +5,7 @@ import SwiftUI
 /// reachable from the network, and who each app is talking to.
 struct ConnectionsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// Lasts the session, so the sockets seen closing survive other pages.
     private let store = ConnectionStore.shared
     @State private var filter: ConnectionFilter = .all

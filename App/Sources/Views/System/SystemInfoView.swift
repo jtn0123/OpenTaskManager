@@ -17,7 +17,7 @@ struct SystemInfoView: View {
     private nonisolated static let titledButtonsWidth: CGFloat = 900
 
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     @State private var info: SystemInfo?
     @State private var displays: [DisplayInfo] = []
     @State private var devices: PeripheralInventory?

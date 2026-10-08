@@ -15,7 +15,7 @@ import SwiftUI
 /// per tick; nothing here reads the sampler's latest tick in its body.
 struct HistoryProcessSection: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// The opened file, else the live recording.
     let recorder: FlightRecorder?
     /// Showing a recording file, which keeps no process history.
