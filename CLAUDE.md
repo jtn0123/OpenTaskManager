@@ -20,6 +20,14 @@ Manager OG or any other proprietary task manager.
   ignored; new files under `App/Sources` are picked up by `make generate`.
 - All tests must pass and lint must be clean (`swiftlint lint --strict`).
   Never suppress warnings or skip tests.
+- `make test` runs OTMKit's Swift Testing suite and `make test-app`'s hostless
+  app logic tests. `OpenTaskManagerLogicTests` compiles only the stores and
+  helpers listed in `project.yml`, with no application dependency, `TEST_HOST`
+  or `BUNDLE_LOADER`. The project keeps XcodeGen's project presets (including
+  warnings) and sets target paths explicitly to avoid its test-host preset.
+  Tests inject isolated defaults suites or temporary
+  folders, never the user's settings or Application Support. Keep pure rules
+  in OTMKit; the app tests pin persistence, observation and framework wiring.
 
 ## Layout
 
@@ -226,7 +234,9 @@ Manager OG or any other proprietary task manager.
 ## Performance rules (the app must stay light)
 
 - Slow sources follow visible demand, counted across windows by
-  `SamplingDemandStore` and `SamplingDemand` in OTMKit. A demand view releases
+  `SamplingDemandStore` and `SamplingDemand` in OTMKit. `SamplingDemandLease`
+  keeps each view's count balanced across repeated visibility notices. A demand
+  view releases
   its count when removed, scrolled out, minimized or occluded. The Overview's
   CPU and Power cards, Performance's Thermals rail row or chip, and the Thermals
   detail need sensors each tick; otherwise `SensorMonitor` reads every 5 s.
@@ -434,7 +444,7 @@ the thermal state turns fair), so `-openResource benchmarks
 ## Conventions
 
 - Process CPU is stored as Activity Monitor-style percent (100 = one core) and
-  displayed through `CPUScale`, which defaults to share of the whole CPU.
+  displayed through OTMKit's `CPUScale`, which defaults to share of the whole CPU.
 - Restricted processes (root and other users) only have CPU and memory, read
   via `/bin/ps`. Show "—" for other fields, never zero.
 - When the process table runs out of width it hides optional columns, lowest
@@ -539,7 +549,8 @@ the thermal state turns fair), so `-openResource benchmarks
 - In a window under 900 points the sidebar hides itself and comes back when
   the window widens; a hide in a wide window is remembered (`sidebarHidden`)
   and a show in a narrow one lasts until the window crosses 900
-  (`SidebarVisibility` in OTMKit). The View menu lists the pages (⌘1 to ⌘9).
+  (`SidebarVisibility` in OTMKit, wired and saved by `SidebarVisibilityStore`).
+  The View menu lists the pages (⌘1 to ⌘9).
   With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
   "Pages", whatever the page, out of the toolbar's glass so it sits with the
   title, not the live badge) sits before

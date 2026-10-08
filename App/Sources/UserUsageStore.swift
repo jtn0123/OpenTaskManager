@@ -8,6 +8,11 @@ import OTMKit
 final class UserUsageStore {
     private(set) var users: [UserUsage] = []
     private(set) var histories: [UInt32: UserHistory] = [:]
+    @ObservationIgnored private let historyCapacity: Int
+
+    init(historyCapacity: Int) {
+        self.historyCapacity = historyCapacity
+    }
 
     func ingest(_ processes: [ProcessSample], interval: Double, live: Bool) {
         if live { users = UserUsageBuilder.build(processes) }
@@ -19,7 +24,7 @@ final class UserUsageStore {
         var next: [UInt32: UserHistory] = [:]
         for (uid, totals) in totals {
             // Remove the old ring before appending, so it grows in place.
-            var history = previous.removeValue(forKey: uid) ?? UserHistory()
+            var history = previous.removeValue(forKey: uid) ?? UserHistory(capacity: historyCapacity)
             history.append(totals)
             next[uid] = history
         }

@@ -11,20 +11,22 @@ export DEVELOPER_DIR
 
 PROJECT   := OpenTaskManager.xcodeproj
 SCHEME    := OpenTaskManager
+TEST_SCHEME := OpenTaskManagerLogicTests
 DERIVED   := .build/xcode
 DEST      := platform=macOS,arch=$(shell uname -m)
 APP_DEBUG := $(DERIVED)/Build/Products/Debug/OpenTaskManager.app
 APP_REL   := $(DERIVED)/Build/Products/Release/OpenTaskManager.app
 KIT       := Packages/OTMKit
 
-.PHONY: help generate build release run test coverage cli install-cli icon lint clean
+.PHONY: help generate build release run test test-app coverage cli install-cli icon lint clean
 
 help:
 	@echo "make generate     Generate $(PROJECT) from project.yml (needs xcodegen)"
 	@echo "make build        Debug build of the app"
 	@echo "make run          Build and launch the app"
 	@echo "make release      Release build of the app"
-	@echo "make test         Run the OTMKit test suite"
+	@echo "make test         Run OTMKit and hostless app logic tests"
+	@echo "make test-app     Run hostless app logic tests"
 	@echo "make coverage     Run OTMKit tests and report source line coverage"
 	@echo "make cli          Build the otm command-line tool (release)"
 	@echo "make install-cli  Copy otm to /usr/local/bin"
@@ -47,6 +49,10 @@ run: build
 
 test:
 	swift test --package-path $(KIT)
+	$(MAKE) test-app
+
+test-app: generate
+	xcodebuild -project $(PROJECT) -scheme $(TEST_SCHEME) -configuration Debug -derivedDataPath $(DERIVED) -destination "$(DEST)" -quiet test
 
 coverage:
 	bash scripts/coverage.sh
