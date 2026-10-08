@@ -165,7 +165,7 @@ private struct HistoryProcessChartCard: View {
     private var shading: (notRunning: [ClosedRange<Date>], unwatched: [HistoryGap]) {
         let lifetime = track.lifetime
         var notRunning: [ClosedRange<Date>] = []
-        var unwatched: [HistoryGap] = []
+        var unseen: [ClosedRange<Date>] = []
         func add(_ start: Date, _ end: Date, to list: inout [ClosedRange<Date>]) {
             let lower = max(start, domain.lowerBound)
             let upper = min(end, domain.upperBound)
@@ -175,16 +175,16 @@ private struct HistoryProcessChartCard: View {
         if let ended = lifetime.ended {
             add(ended, domain.upperBound, to: &notRunning)
         }
-        var watched: [ClosedRange<Date>] = []
         // History saw it only from its first record; one already running then wasn't watched before.
         if lifetime.firstSeen.timeIntervalSince(lifetime.started) > bucket {
-            add(lifetime.started, lifetime.firstSeen, to: &watched)
+            add(lifetime.started, lifetime.firstSeen, to: &unseen)
         }
         if !track.isRunning, lifetime.ended == nil {
-            add(lifetime.lastSeen, domain.upperBound, to: &watched)
+            add(lifetime.lastSeen, domain.upperBound, to: &unseen)
         }
-        unwatched = watched.map { HistoryGap(start: $0.lowerBound, end: $0.upperBound) }
-        return (notRunning, unwatched)
+        // Recorded by an older build, which kept no process history.
+        for stretch in track.unwatched { add(stretch.lowerBound, stretch.upperBound, to: &unseen) }
+        return (notRunning, unseen.map { HistoryGap(start: $0.lowerBound, end: $0.upperBound) })
     }
 
     private func plot(_ points: [HistoryPoint], top: Double) -> some View {

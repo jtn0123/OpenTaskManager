@@ -362,6 +362,32 @@ struct FlightRecorderProcessTests {
         #expect(gone.ended == nil)
     }
 
+    @Test func recordsAnOlderBuildWroteArentIdle() async throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        // This build records 1,010-1,020, an older one (records, no process history) 1,030-1,050, this one again 1,060-1,070.
+        do {
+            let first = try FlightRecorder(url: url)
+            for time in [1_010.0, 1_020, 1_030, 1_040, 1_050, 1_060, 1_070] { try await first.append(record(at: time)) }
+            try await first.append(ProcessHistoryBatch(time: date(1_010), started: [start(60, 900, name: "daemon", at: 1_001)]))
+            try await first.append(ProcessHistoryBatch(time: date(1_020)))
+        }
+        let second = try FlightRecorder(url: url)
+        try await second.append(ProcessHistoryBatch(time: date(1_060), started: [start(60, 900, name: "daemon", at: 1_051)],
+                                                    samples: [kept(60, 900, cpu: 20)]))
+        try await second.append(ProcessHistoryBatch(time: date(1_070), samples: [kept(60, 900, cpu: 20)]))
+
+        let lifetime = try #require(try await second.processLifetime(identity(60, 900)))
+        let points = try await second.processPoints(lifetime, from: date(1_000), to: date(1_100), bucket: 10)
+        #expect(points.map(\.time) == [1_010, 1_020, 1_060, 1_070].map(date), "nothing said where nobody watched")
+        #expect(points.map(\.state) == [.idle, .idle, .stored, .stored])
+        #expect(try await second.processUnwatched(lifetime, from: date(1_000), to: date(1_100), bucket: 10)
+                == [date(1_020)...date(1_050)])
+        let summary = try await second.processSummary(lifetime, from: date(1_000), to: date(1_100))
+        #expect(summary.records == 4, "the older build's records don't count")
+        #expect(summary.averageCPU == 10)
+    }
+
     @Test func prunesWithTheRecordsRetention() async throws {
         let url = temporaryURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

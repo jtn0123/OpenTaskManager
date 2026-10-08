@@ -17,7 +17,9 @@ import SQLite3
 ///   second (null where unread).
 ///
 /// A record without a process's row while it ran left it out as idle;
-/// a stretch without records wasn't recorded at all.
+/// a stretch without records wasn't recorded at all, and a record outside
+/// every run's watch was written by a build that keeps no process history
+/// (an older one), so it says nothing about any process.
 extension FlightRecorder {
     static let processTables = """
         CREATE TABLE IF NOT EXISTS process_watches (id INTEGER PRIMARY KEY, started REAL NOT NULL, last REAL NOT NULL);
@@ -35,6 +37,8 @@ extension FlightRecorder {
     private static let lifetimeColumns = """
         l.id, l.pid, l.start_time, l.name, l.path, l.user_name, l.bundle, l.job, l.restricted, l.first_seen, \(lastSeen), l.ended
         """
+    /// A record written while a run of a build keeping process history watched.
+    private static let watchedRecord = "EXISTS (SELECT 1 FROM process_watches w WHERE w.started <= records.time AND w.last >= records.time)"
 
     // MARK: - Writing
 
@@ -155,15 +159,15 @@ extension FlightRecorder {
 
     /// `lifetime`'s chart points between two dates, a bucket of `bucket`
     /// seconds each, at least a record long, grouped as `points` groups
-    /// the records. Only buckets with records while it ran are points; a
-    /// gap in the recording breaks the segments as it does `points`'.
+    /// the records. Only buckets with watched records while it ran are
+    /// points; a gap in the recording breaks the segments as it does `points`'.
     public func processPoints(_ lifetime: ProcessLifetime, from start: Date, to end: Date,
                               bucket: TimeInterval) throws(FlightRecorderError) -> [ProcessHistoryPoint] {
         let bucket = max(bucket, recordSpan)
         guard let window = try recordWindow(lifetime, from: start, to: end) else { return [] }
         let records = try Self.prepare("""
             SELECT CAST(time / ?1 AS INTEGER), MAX(time), COUNT(DISTINCT CAST(time / ?2 AS INTEGER)) FROM records
-            WHERE time >= ?3 AND time <= ?4 GROUP BY 1 ORDER BY 1
+            WHERE time >= ?3 AND time <= ?4 AND \(Self.watchedRecord) GROUP BY 1 ORDER BY 1
             """, on: database)
         defer { sqlite3_finalize(records) }
         sqlite3_bind_double(records, 1, bucket)
@@ -209,6 +213,37 @@ extension FlightRecorder {
         return Self.segmented(points, gap: bucket * HistoryGap.spacing)
     }
 
+    /// The stretches within `lifetime`'s run, between two dates, that were
+    /// recorded but not watched for processes (by an older build), each
+    /// bucket of `bucket` seconds reaching back from its last record, joined
+    /// where they follow on: neither idle nor figures, but unknown.
+    public func processUnwatched(_ lifetime: ProcessLifetime, from start: Date, to end: Date,
+                                 bucket: TimeInterval) throws(FlightRecorderError) -> [ClosedRange<Date>] {
+        let bucket = max(bucket, recordSpan)
+        guard let window = try recordWindow(lifetime, from: start, to: end) else { return [] }
+        let statement = try Self.prepare("""
+            SELECT CAST(time / ?1 AS INTEGER), MAX(time) FROM records
+            WHERE time >= ?2 AND time <= ?3 AND NOT \(Self.watchedRecord) GROUP BY 1 ORDER BY 1
+            """, on: database)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, bucket)
+        sqlite3_bind_double(statement, 2, window.lowerBound.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
+        var stretches: [ClosedRange<Date>] = []
+        var previous: Int64?
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let key = sqlite3_column_int64(statement, 0)
+            let time = Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
+            if let previous, key == previous + 1, let last = stretches.last {
+                stretches[stretches.count - 1] = last.lowerBound...time
+            } else {
+                stretches.append(time.addingTimeInterval(-bucket)...time)
+            }
+            previous = key
+        }
+        return stretches
+    }
+
     // MARK: - Helpers
 
     /// A chart bucket's records: its key, its last record's time and how many records it holds.
@@ -250,7 +285,8 @@ extension FlightRecorder {
 
     private func recordCount(in window: ClosedRange<Date>) throws(FlightRecorderError) -> Int {
         let statement = try Self.prepare(
-            "SELECT COUNT(DISTINCT CAST(time / ? AS INTEGER)) FROM records WHERE time >= ? AND time <= ?", on: database
+            "SELECT COUNT(DISTINCT CAST(time / ? AS INTEGER)) FROM records WHERE time >= ? AND time <= ? AND \(Self.watchedRecord)",
+            on: database
         )
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_double(statement, 1, recordSpan)

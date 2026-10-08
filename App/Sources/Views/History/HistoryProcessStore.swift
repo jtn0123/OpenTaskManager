@@ -30,6 +30,8 @@ final class HistoryProcessStore {
         let figures: [ProcessHistoryPoint]
         /// Where every record left it out as idle.
         let idle: [ClosedRange<Date>]
+        /// Where it ran but an older build, keeping no process history, recorded.
+        let unwatched: [ClosedRange<Date>]
         /// Whether it's the process running now with its PID.
         let isRunning: Bool
         let bucket: TimeInterval
@@ -133,9 +135,11 @@ final class HistoryProcessStore {
         }
         let summary = (try? await recorder.processSummary(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? .empty
         let figures = (try? await recorder.processPoints(lifetime, from: domain.lowerBound, to: domain.upperBound, bucket: bucket)) ?? []
+        let unwatched = (try? await recorder.processUnwatched(lifetime, from: domain.lowerBound, to: domain.upperBound,
+                                                              bucket: bucket)) ?? []
         guard !Task.isCancelled, picked == identity else { return }
         let next = Track(match: ProcessHistoryMatch(lifetime: lifetime, summary: summary), points: figures.map(HistoryProcessKey.point),
-                         figures: figures, idle: ProcessHistoryPoint.idleStretches(figures, bucket: bucket),
+                         figures: figures, idle: ProcessHistoryPoint.idleStretches(figures, bucket: bucket), unwatched: unwatched,
                          isRunning: isRunning(identity), bucket: bucket, domain: domain)
         if track != next { track = next }
     }
