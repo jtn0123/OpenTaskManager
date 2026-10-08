@@ -44,6 +44,7 @@ public struct History<Element: Sendable>: Sendable {
     /// for are left out. Sums many histories without building each one's
     /// `values` first.
     public func addValues(to sums: inout [Double], _ figure: (Element) -> Double) {
+        // The arrays stay borrowed here; index wraps inside storage and slot visits only the aligned tail of sums.
         let count = min(storage.count, sums.count)
         guard count > 0 else { return }
         let length = storage.count
@@ -55,7 +56,7 @@ public struct History<Element: Sendable>: Sendable {
             sums.withUnsafeMutableBufferPointer { sumsBuffer in
                 guard let element = storageBuffer.baseAddress, let sum = sumsBuffer.baseAddress else { return }
                 while slot < end {
-                    sum[slot] += figure(element[index])
+                    unsafe sum[slot] += figure(element[index])
                     index = index + 1 == length ? 0 : index + 1
                     slot += 1
                 }

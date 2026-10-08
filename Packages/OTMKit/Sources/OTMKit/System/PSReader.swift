@@ -79,10 +79,11 @@ enum PSReader {
     }
 
     private static func withBytes(_ text: String, _ body: (inout Bytes) -> Void) {
+        // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
         var text = text
         text.withUTF8 { buffer in
             guard let base = buffer.baseAddress else { return }
-            var bytes = Bytes(base: base, start: 0, end: buffer.count)
+            var bytes = unsafe Bytes(base: base, start: 0, end: buffer.count)
             body(&bytes)
         }
     }
@@ -90,7 +91,8 @@ enum PSReader {
     /// A run of ps's output, read from the front. It indexes a raw pointer
     /// rather than a buffer or a Substring so debug builds don't go through
     /// the standard library's unspecialized generics for every byte.
-    private struct Bytes {
+    /// Only withBytes constructs this cursor; derived cursors keep its bounds and never leave that borrow.
+    @safe private struct Bytes {
         let base: UnsafePointer<UInt8>
         var start: Int
         let end: Int
@@ -103,40 +105,45 @@ enum PSReader {
             byte >= 0x30 && byte <= 0x39
         }
 
-        var first: UInt8? { start < end ? base[start] : nil }
+        // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
+        var first: UInt8? { unsafe start < end ? base[start] : nil }
 
         /// The next line that isn't empty.
         mutating func line() -> Bytes? {
-            while start < end, base[start] == 0x0A { start += 1 }
+            // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
+            while start < end, unsafe base[start] == 0x0A { start += 1 }
             return upTo(0x0A)
         }
 
         /// The next space-separated field.
         mutating func field() -> Bytes? {
-            while start < end, base[start] == 0x20 { start += 1 }
+            // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
+            while start < end, unsafe base[start] == 0x20 { start += 1 }
             return upTo(0x20)
         }
 
         /// The bytes before the next `separator` (or the end), stepping past
         /// it; nil once nothing is left.
         mutating func upTo(_ separator: UInt8) -> Bytes? {
+            // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
             guard start < end else { return nil }
             var stop = start
-            while stop < end, base[stop] != separator { stop += 1 }
+            while stop < end, unsafe base[stop] != separator { stop += 1 }
             defer { start = Swift.min(stop + 1, end) }
-            return Bytes(base: base, start: start, end: stop)
+            return unsafe Bytes(base: base, start: start, end: stop)
         }
 
         /// Digits only, as ps prints PIDs and sizes.
         func integer() -> UInt64? {
+            // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
             guard start < end else { return nil }
             var value: UInt64 = 0
             var index = start
             while index < end {
-                guard Self.isDigit(base[index]) else { return nil }
+                guard unsafe Self.isDigit(base[index]) else { return nil }
                 let (shifted, overflow) = value.multipliedReportingOverflow(by: 10)
                 guard !overflow else { return nil }
-                value = shifted + UInt64(base[index] &- 0x30)
+                value = unsafe shifted + UInt64(base[index] &- 0x30)
                 index += 1
             }
             return value
@@ -147,12 +154,13 @@ enum PSReader {
         }
 
         func cpuTime() -> Double? {
+            // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
             var days = 0.0
             var clock = self
             var dash = start
-            while dash < end, base[dash] != 0x2D { dash += 1 } // "-"
+            while dash < end, unsafe base[dash] != 0x2D { dash += 1 } // "-"
             if dash < end {
-                guard let value = Bytes(base: base, start: start, end: dash).decimal() else { return nil }
+                guard let value = unsafe Bytes(base: base, start: start, end: dash).decimal() else { return nil }
                 days = value
                 clock.start = dash + 1
             }
@@ -169,12 +177,13 @@ enum PSReader {
         /// the digits make an exact whole number, and one division by a power
         /// of ten rounds it correctly. Anything else goes to `Double`'s parser.
         func decimal() -> Double? {
+            // Bytes stays inside the string's UTF8 borrow; start and end bound each scan and every derived slice.
             var digits: UInt64 = 0
             var count = 0
             var places = -1
             var index = start
             while index < end {
-                let byte = base[index]
+                let byte = unsafe base[index]
                 if byte == 0x2E, places < 0 { // "."
                     places = 0
                 } else if Self.isDigit(byte), count < 15 {
@@ -182,7 +191,7 @@ enum PSReader {
                     count += 1
                     if places >= 0 { places += 1 }
                 } else {
-                    return Double(String(decoding: UnsafeBufferPointer(start: base + start, count: end - start), as: UTF8.self))
+                    return unsafe Double(String(decoding: UnsafeBufferPointer(start: base + start, count: end - start), as: UTF8.self))
                 }
                 index += 1
             }

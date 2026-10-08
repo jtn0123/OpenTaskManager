@@ -332,17 +332,30 @@ struct FlightRecorderHardwareTests {
         #expect(sqlite3_column_int(statement, 0) == 1 + 2 + 14 * 6 + 2 + 18)
     }
 
+    @Test func hardwareBlobRejectsEveryTruncatedPrefix() {
+        let good = Data([1, 1, 0, 3, 0, 0x00, 0x00, 0x80, 0x3F, 2, 0, 100, 255])
+        for count in 0..<good.count {
+            #expect(HardwareBlob.decode(good.prefix(count).bytes) == nil)
+        }
+        // A nonzero Data start index must not move the blob's byte offsets.
+        let padded = Data([0xFF]) + good
+        let decoded = HardwareBlob.decode(padded.dropFirst().bytes)
+        #expect(decoded?.figures.map { $0.row } == [3])
+        #expect(decoded?.figures.map { $0.value } == [1])
+        #expect(decoded?.coreLoads == [0.5, nil])
+    }
+
     @Test func readsBytesOfAnotherLayoutAsNoFigures() {
         let good = Data([1, 1, 0, 3, 0, 0x00, 0x00, 0x80, 0x3F, 2, 0, 100, 255])
-        let decoded = good.withUnsafeBytes { HardwareBlob.decode($0) }
+        let decoded = HardwareBlob.decode(good.bytes)
         #expect(decoded?.figures.map { $0.row } == [3])
         #expect(decoded?.figures.map { $0.value } == [1])
         #expect(decoded?.coreLoads == [0.5, nil])
         var newer = good
         newer[0] = 2
-        #expect(newer.withUnsafeBytes { HardwareBlob.decode($0) } == nil)
-        #expect(good.dropLast().withUnsafeBytes { HardwareBlob.decode($0) } == nil)
-        #expect(Data().withUnsafeBytes { HardwareBlob.decode($0) } == nil)
+        #expect(HardwareBlob.decode(newer.bytes) == nil)
+        #expect(HardwareBlob.decode(good.dropLast().bytes) == nil)
+        #expect(HardwareBlob.decode(Data().bytes) == nil)
     }
 
     @Test func bucketsTheFiguresAsTheGraphPointsAreGrouped() async throws {

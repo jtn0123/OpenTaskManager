@@ -54,12 +54,13 @@ extension FlightRecorder {
 
     /// Saves a record's process history (`ProcessHistoryTracker`) in one transaction.
     public func append(_ batch: ProcessHistoryBatch) throws(FlightRecorderError) {
-        try Self.execute("BEGIN IMMEDIATE", on: database)
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        unsafe try Self.execute("BEGIN IMMEDIATE", on: database)
         do throws(FlightRecorderError) {
-            try processWriter.write(batch, on: database)
-            try Self.execute("COMMIT", on: database)
+            unsafe try processWriter.write(batch, on: database)
+            unsafe try Self.execute("COMMIT", on: database)
         } catch {
-            sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
+            unsafe sqlite3_exec(database, "ROLLBACK", nil, nil, nil)
             processWriter.forget()
             throw error
         }
@@ -68,6 +69,7 @@ extension FlightRecorder {
     /// Deletes process figures and short runs before `date`, the lifetimes
     /// and runs last seen before it, and kinds no short run is left of.
     func pruneProcesses(before date: Date) throws(FlightRecorderError) {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let cutoff = date.timeIntervalSince1970
         // A lifetime's last figures can come a record after its end; give
         // it a minute so none is left without its lifetime.
@@ -79,17 +81,17 @@ extension FlightRecorder {
             """,
             "DELETE FROM process_watches WHERE last < ?1 AND id NOT IN (SELECT watch FROM process_lifetimes WHERE watch IS NOT NULL)",
         ]
-        if try Self.hasTable("process_short_runs", database) {
+        if unsafe try Self.hasTable("process_short_runs", database) {
             statements += [
                 "DELETE FROM process_short_runs WHERE time < ?1",
                 "DELETE FROM process_kinds WHERE id NOT IN (SELECT kind FROM process_short_runs)",
             ]
         }
         for sql in statements {
-            let statement = try Self.prepare(sql, on: database)
-            defer { sqlite3_finalize(statement) }
-            if sqlite3_bind_parameter_count(statement) > 0 { sqlite3_bind_double(statement, 1, cutoff) }
-            guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
+            let statement = unsafe try Self.prepare(sql, on: database)
+            defer { unsafe sqlite3_finalize(statement) }
+            if unsafe sqlite3_bind_parameter_count(statement) > 0 { unsafe sqlite3_bind_double(statement, 1, cutoff) }
+            guard unsafe sqlite3_step(statement) == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
         }
     }
 
@@ -98,14 +100,16 @@ extension FlightRecorder {
     /// Whether the database has process history tables: false for one an
     /// older build made that this build hasn't opened to write yet.
     public func keepsProcessHistory() throws(FlightRecorderError) -> Bool {
-        try Self.hasTable("process_samples", database)
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        unsafe try Self.hasTable("process_samples", database)
     }
 
     static func hasTable(_ name: String, _ handle: OpaquePointer) throws(FlightRecorderError) -> Bool {
-        let statement = try prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", on: handle)
-        defer { sqlite3_finalize(statement) }
-        bind(name, to: statement, at: 1)
-        return sqlite3_step(statement) == SQLITE_ROW
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", on: handle)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe bind(name, to: statement, at: 1)
+        return unsafe sqlite3_step(statement) == SQLITE_ROW
     }
 
     /// The short runs between two dates of processes whose name or
@@ -114,25 +118,26 @@ extension FlightRecorder {
     /// on, the latest first, `limit` at most.
     public func processShortRuns(matching query: String, from start: Date, to end: Date,
                                  limit: Int = 100) throws(FlightRecorderError) -> [ProcessHistoryShortRuns] {
-        guard let query = ProcessHistorySearch.normalized(query), try Self.hasTable("process_short_runs", database) else { return [] }
-        let statement = try Self.prepare("""
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        guard let query = ProcessHistorySearch.normalized(query), unsafe try Self.hasTable("process_short_runs", database) else { return [] }
+        let statement = unsafe try Self.prepare("""
             SELECT k.id, k.name, k.path, k.user_name, s.time, s.count FROM process_kinds k
             JOIN process_short_runs s ON s.kind = k.id AND s.time >= ?2 AND s.time <= ?3
             WHERE k.name LIKE ?1 ESCAPE '\\' OR k.path LIKE ?1 ESCAPE '\\'
             ORDER BY k.id, s.time
             """, on: database)
-        defer { sqlite3_finalize(statement) }
-        Self.bind(ProcessHistorySearch.likePattern(query), to: statement, at: 1)
-        sqlite3_bind_double(statement, 2, Self.sampleTime(start))
-        sqlite3_bind_double(statement, 3, end.timeIntervalSince1970)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe Self.bind(ProcessHistorySearch.likePattern(query), to: statement, at: 1)
+        unsafe sqlite3_bind_double(statement, 2, Self.sampleTime(start))
+        unsafe sqlite3_bind_double(statement, 3, end.timeIntervalSince1970)
         // Records follow on a record's length apart, give or take the second they're kept to.
         let followOn = recordSpan * 1.5 + 1
         var found: [ProcessHistoryShortRuns] = []
         var current: (kind: Int64, runs: ProcessHistoryShortRuns)?
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let kind = sqlite3_column_int64(statement, 0)
-            let time = Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
-            let count = Int(sqlite3_column_int64(statement, 5))
+        while unsafe sqlite3_step(statement) == SQLITE_ROW {
+            let kind = unsafe sqlite3_column_int64(statement, 0)
+            let time = unsafe Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+            let count = unsafe Int(sqlite3_column_int64(statement, 5))
             if let open = current, open.kind == kind, time.timeIntervalSince(open.runs.to) <= followOn {
                 let runs = open.runs
                 current = (kind, ProcessHistoryShortRuns(name: runs.name, path: runs.path, user: runs.user, count: runs.count + count,
@@ -140,8 +145,8 @@ extension FlightRecorder {
                 continue
             }
             if let open = current { found.append(open.runs) }
-            let path = Self.text(statement, 2) ?? ""
-            current = (kind, ProcessHistoryShortRuns(name: Self.text(statement, 1) ?? "", path: path.isEmpty ? nil : path,
+            let path = unsafe Self.text(statement, 2) ?? ""
+            current = unsafe (kind, ProcessHistoryShortRuns(name: Self.text(statement, 1) ?? "", path: path.isEmpty ? nil : path,
                                                      user: Self.text(statement, 3) ?? "", count: count, records: 1,
                                                      from: time.addingTimeInterval(-recordSpan), to: time))
         }
@@ -156,22 +161,27 @@ extension FlightRecorder {
     /// its figures over the part of the range it ran.
     public func processLifetimes(matching query: String, from start: Date, to end: Date,
                                  limit: Int = 100) throws(FlightRecorderError) -> [ProcessHistoryMatch] {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         guard let query = ProcessHistorySearch.normalized(query) else { return [] }
-        let statement = try Self.prepare("""
+        let statement = unsafe try Self.prepare("""
             SELECT \(Self.lifetimeColumns) FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
             WHERE (l.name LIKE ?1 ESCAPE '\\' OR l.path LIKE ?1 ESCAPE '\\' OR l.bundle LIKE ?1 ESCAPE '\\'
                 OR l.job LIKE ?1 ESCAPE '\\' OR l.pid = ?2)
                 AND l.first_seen <= ?4 AND \(Self.lastSeen) >= ?3
             ORDER BY \(Self.lastSeen) DESC, l.first_seen DESC, l.id DESC LIMIT ?5
-            """, on: database)
-        defer { sqlite3_finalize(statement) }
-        Self.bind(ProcessHistorySearch.likePattern(query), to: statement, at: 1)
-        if let pid = ProcessHistorySearch.pid(query) { sqlite3_bind_int64(statement, 2, Int64(pid)) } else { sqlite3_bind_null(statement, 2) }
-        sqlite3_bind_double(statement, 3, start.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 4, end.timeIntervalSince1970)
-        sqlite3_bind_int64(statement, 5, Int64(max(limit, 0)))
+            """, on: unsafe database)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe Self.bind(ProcessHistorySearch.likePattern(query), to: statement, at: 1)
+        if let pid = ProcessHistorySearch.pid(query) {
+            unsafe sqlite3_bind_int64(statement, 2, Int64(pid))
+        } else {
+            unsafe sqlite3_bind_null(statement, 2)
+        }
+        unsafe sqlite3_bind_double(statement, 3, start.timeIntervalSince1970)
+        unsafe sqlite3_bind_double(statement, 4, end.timeIntervalSince1970)
+        unsafe sqlite3_bind_int64(statement, 5, Int64(max(limit, 0)))
         var lifetimes: [ProcessLifetime] = []
-        while sqlite3_step(statement) == SQLITE_ROW { lifetimes.append(Self.lifetime(statement)) }
+        while unsafe sqlite3_step(statement) == SQLITE_ROW { unsafe lifetimes.append(Self.lifetime(statement)) }
         var matches: [ProcessHistoryMatch] = []
         for lifetime in lifetimes {
             matches.append(ProcessHistoryMatch(lifetime: lifetime, summary: try processSummary(lifetime, from: start, to: end)))
@@ -181,36 +191,38 @@ extension FlightRecorder {
 
     /// The lifetime of `identity`, if the recording has seen it.
     public func processLifetime(_ identity: ProcessIdentity) throws(FlightRecorderError) -> ProcessLifetime? {
-        let statement = try Self.prepare("""
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try Self.prepare("""
             SELECT \(Self.lifetimeColumns) FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
             WHERE l.pid = ? AND l.start_time = ?
-            """, on: database)
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int64(statement, 1, Int64(identity.pid))
-        sqlite3_bind_double(statement, 2, identity.startTime?.timeIntervalSince1970 ?? 0)
-        return sqlite3_step(statement) == SQLITE_ROW ? Self.lifetime(statement) : nil
+            """, on: unsafe database)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe sqlite3_bind_int64(statement, 1, Int64(identity.pid))
+        unsafe sqlite3_bind_double(statement, 2, identity.startTime?.timeIntervalSince1970 ?? 0)
+        return unsafe sqlite3_step(statement) == SQLITE_ROW ? Self.lifetime(statement) : nil
     }
 
     /// `lifetime`'s figures over the part of the range it ran.
     public func processSummary(_ lifetime: ProcessLifetime, from start: Date, to end: Date) throws(FlightRecorderError) -> ProcessHistorySummary {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         guard let window = try recordWindow(lifetime, from: start, to: end) else { return .empty }
         let records = try recordCount(in: window)
-        let statement = try Self.prepare("""
+        let statement = unsafe try Self.prepare("""
             SELECT COUNT(*), SUM(cpu), MAX(cpu), MAX(memory), SUM(disk_read), SUM(disk_write), COUNT(disk_read)
             FROM process_samples WHERE lifetime = ? AND time >= ? AND time <= ?
             """, on: database)
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int64(statement, 1, lifetime.id)
-        sqlite3_bind_double(statement, 2, Self.sampleTime(window.lowerBound) - 1)
-        sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
-        let stored = Int(sqlite3_column_int64(statement, 0))
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe sqlite3_bind_int64(statement, 1, lifetime.id)
+        unsafe sqlite3_bind_double(statement, 2, Self.sampleTime(window.lowerBound) - 1)
+        unsafe sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
+        guard unsafe sqlite3_step(statement) == SQLITE_ROW else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
+        let stored = unsafe Int(sqlite3_column_int64(statement, 0))
         // Copies of the app running side by side can each keep a record's row.
         let counted = max(records, stored)
         // Idle records count as nothing in the averages; with none kept there are no figures to give.
         let kept = stored > 0
-        let hasDisk = kept && sqlite3_column_int64(statement, 6) > 0
-        return ProcessHistorySummary(
+        let hasDisk = unsafe kept && sqlite3_column_int64(statement, 6) > 0
+        return unsafe ProcessHistorySummary(
             records: counted, stored: stored, recordedSeconds: Double(counted) * recordSpan,
             averageCPU: kept ? sqlite3_column_double(statement, 1) / 10 / Double(counted) : nil,
             peakCPU: kept ? sqlite3_column_double(statement, 2) / 10 : nil,
@@ -226,34 +238,35 @@ extension FlightRecorder {
     /// points; a gap in the recording breaks the segments as it does `points`'.
     public func processPoints(_ lifetime: ProcessLifetime, from start: Date, to end: Date,
                               bucket: TimeInterval) throws(FlightRecorderError) -> [ProcessHistoryPoint] {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let bucket = max(bucket, recordSpan)
         guard let window = try recordWindow(lifetime, from: start, to: end) else { return [] }
-        let records = try Self.prepare("""
+        let records = unsafe try Self.prepare("""
             SELECT CAST(time / ?1 AS INTEGER), MAX(time), COUNT(DISTINCT CAST(time / ?2 AS INTEGER)) FROM records
             WHERE time >= ?3 AND time <= ?4 AND \(Self.watchedRecord) GROUP BY 1 ORDER BY 1
-            """, on: database)
-        defer { sqlite3_finalize(records) }
-        sqlite3_bind_double(records, 1, bucket)
-        sqlite3_bind_double(records, 2, recordSpan)
-        sqlite3_bind_double(records, 3, window.lowerBound.timeIntervalSince1970)
-        sqlite3_bind_double(records, 4, window.upperBound.timeIntervalSince1970)
+            """, on: unsafe database)
+        defer { unsafe sqlite3_finalize(records) }
+        unsafe sqlite3_bind_double(records, 1, bucket)
+        unsafe sqlite3_bind_double(records, 2, recordSpan)
+        unsafe sqlite3_bind_double(records, 3, window.lowerBound.timeIntervalSince1970)
+        unsafe sqlite3_bind_double(records, 4, window.upperBound.timeIntervalSince1970)
         var buckets: [RecordBucket] = []
-        while sqlite3_step(records) == SQLITE_ROW {
-            buckets.append(RecordBucket(key: sqlite3_column_int64(records, 0), time: sqlite3_column_double(records, 1),
+        while unsafe sqlite3_step(records) == SQLITE_ROW {
+            unsafe buckets.append(RecordBucket(key: sqlite3_column_int64(records, 0), time: sqlite3_column_double(records, 1),
                                         records: Int(sqlite3_column_int64(records, 2))))
         }
-        let samples = try Self.prepare("""
+        let samples = unsafe try Self.prepare("""
             SELECT CAST(time / ?1 AS INTEGER), COUNT(*), SUM(cpu), MAX(cpu), MAX(memory), SUM(disk_read), SUM(disk_write),
                 COUNT(disk_read) FROM process_samples WHERE lifetime = ?2 AND time >= ?3 AND time <= ?4 GROUP BY 1
             """, on: database)
-        defer { sqlite3_finalize(samples) }
-        sqlite3_bind_double(samples, 1, bucket)
-        sqlite3_bind_int64(samples, 2, lifetime.id)
-        sqlite3_bind_double(samples, 3, Self.sampleTime(window.lowerBound) - 1)
-        sqlite3_bind_double(samples, 4, window.upperBound.timeIntervalSince1970)
+        defer { unsafe sqlite3_finalize(samples) }
+        unsafe sqlite3_bind_double(samples, 1, bucket)
+        unsafe sqlite3_bind_int64(samples, 2, lifetime.id)
+        unsafe sqlite3_bind_double(samples, 3, Self.sampleTime(window.lowerBound) - 1)
+        unsafe sqlite3_bind_double(samples, 4, window.upperBound.timeIntervalSince1970)
         var stored: [Int64: StoredBucket] = [:]
-        while sqlite3_step(samples) == SQLITE_ROW {
-            stored[sqlite3_column_int64(samples, 0)] = StoredBucket(
+        while unsafe sqlite3_step(samples) == SQLITE_ROW {
+            unsafe stored[sqlite3_column_int64(samples, 0)] = StoredBucket(
                 count: Int(sqlite3_column_int64(samples, 1)), cpu: sqlite3_column_double(samples, 2) / 10,
                 cpuPeak: sqlite3_column_double(samples, 3) / 10, memory: sqlite3_column_double(samples, 4),
                 diskRead: sqlite3_column_double(samples, 5), diskWrite: sqlite3_column_double(samples, 6),
@@ -282,21 +295,22 @@ extension FlightRecorder {
     /// where they follow on: neither idle nor figures, but unknown.
     public func processUnwatched(_ lifetime: ProcessLifetime, from start: Date, to end: Date,
                                  bucket: TimeInterval) throws(FlightRecorderError) -> [ClosedRange<Date>] {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let bucket = max(bucket, recordSpan)
         guard let window = try recordWindow(lifetime, from: start, to: end) else { return [] }
-        let statement = try Self.prepare("""
+        let statement = unsafe try Self.prepare("""
             SELECT CAST(time / ?1 AS INTEGER), MAX(time) FROM records
             WHERE time >= ?2 AND time <= ?3 AND NOT \(Self.watchedRecord) GROUP BY 1 ORDER BY 1
-            """, on: database)
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, bucket)
-        sqlite3_bind_double(statement, 2, window.lowerBound.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
+            """, on: unsafe database)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe sqlite3_bind_double(statement, 1, bucket)
+        unsafe sqlite3_bind_double(statement, 2, window.lowerBound.timeIntervalSince1970)
+        unsafe sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
         var stretches: [ClosedRange<Date>] = []
         var previous: Int64?
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let key = sqlite3_column_int64(statement, 0)
-            let time = Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
+        while unsafe sqlite3_step(statement) == SQLITE_ROW {
+            let key = unsafe sqlite3_column_int64(statement, 0)
+            let time = unsafe Date(timeIntervalSince1970: sqlite3_column_double(statement, 1))
             if let previous, key == previous + 1, let last = stretches.last {
                 stretches[stretches.count - 1] = last.lowerBound...time
             } else {
@@ -330,15 +344,16 @@ extension FlightRecorder {
     /// first after it was seen to its last sighting, or for one seen ending
     /// to the first record from then, which holds its last seconds.
     private func recordWindow(_ lifetime: ProcessLifetime, from start: Date, to end: Date) throws(FlightRecorderError) -> ClosedRange<Date>? {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         var last = lifetime.lastSeen
         if let ended = lifetime.ended {
             // Only a record that follows on: one after a gap didn't cover it.
-            let statement = try Self.prepare("SELECT MIN(time) FROM records WHERE time >= ? AND time <= ?", on: database)
-            defer { sqlite3_finalize(statement) }
-            sqlite3_bind_double(statement, 1, ended.timeIntervalSince1970)
-            sqlite3_bind_double(statement, 2, ended.timeIntervalSince1970 + recordSpan * 1.5)
-            if sqlite3_step(statement) == SQLITE_ROW, sqlite3_column_type(statement, 0) != SQLITE_NULL {
-                last = Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
+            let statement = unsafe try Self.prepare("SELECT MIN(time) FROM records WHERE time >= ? AND time <= ?", on: database)
+            defer { unsafe sqlite3_finalize(statement) }
+            unsafe sqlite3_bind_double(statement, 1, ended.timeIntervalSince1970)
+            unsafe sqlite3_bind_double(statement, 2, ended.timeIntervalSince1970 + recordSpan * 1.5)
+            if unsafe sqlite3_step(statement) == SQLITE_ROW, unsafe sqlite3_column_type(statement, 0) != SQLITE_NULL {
+                last = unsafe Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
             }
         }
         let lower = max(lifetime.firstSeen, start)
@@ -347,16 +362,17 @@ extension FlightRecorder {
     }
 
     private func recordCount(in window: ClosedRange<Date>) throws(FlightRecorderError) -> Int {
-        let statement = try Self.prepare(
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try Self.prepare(
             "SELECT COUNT(DISTINCT CAST(time / ? AS INTEGER)) FROM records WHERE time >= ? AND time <= ? AND \(Self.watchedRecord)",
-            on: database
+            on: unsafe database
         )
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, recordSpan)
-        sqlite3_bind_double(statement, 2, window.lowerBound.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
-        return Int(sqlite3_column_int64(statement, 0))
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe sqlite3_bind_double(statement, 1, recordSpan)
+        unsafe sqlite3_bind_double(statement, 2, window.lowerBound.timeIntervalSince1970)
+        unsafe sqlite3_bind_double(statement, 3, window.upperBound.timeIntervalSince1970)
+        guard unsafe sqlite3_step(statement) == SQLITE_ROW else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
+        return unsafe Int(sqlite3_column_int64(statement, 0))
     }
 
     /// A record's time as `process_samples` keeps it, in whole seconds.
@@ -377,11 +393,12 @@ extension FlightRecorder {
     }
 
     static func lifetime(_ statement: OpaquePointer) -> ProcessLifetime {
+        // The caller holds the statement on a row; column data is copied before its next step or finalize.
         func date(_ column: Int32) -> Date? {
-            sqlite3_column_type(statement, column) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, column))
+            unsafe sqlite3_column_type(statement, column) == SQLITE_NULL ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, column))
         }
-        let start = sqlite3_column_double(statement, 2)
-        return ProcessLifetime(
+        let start = unsafe sqlite3_column_double(statement, 2)
+        return unsafe ProcessLifetime(
             id: sqlite3_column_int64(statement, 0),
             identity: ProcessIdentity(pid: Int32(truncatingIfNeeded: sqlite3_column_int64(statement, 1)),
                                       startTime: start > 0 ? Date(timeIntervalSince1970: start) : nil),
@@ -407,40 +424,43 @@ final class ProcessHistoryWriter {
     }
 
     func write(_ batch: ProcessHistoryBatch, on handle: OpaquePointer) throws(FlightRecorderError) {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let time = batch.time.timeIntervalSince1970
         let watch: Int64
         if let current = self.watch {
             watch = current
         } else {
-            watch = try newWatch(at: time, on: handle)
+            watch = unsafe try newWatch(at: time, on: handle)
             self.watch = watch
         }
-        if !batch.started.isEmpty { try start(batch.started, watch: watch, on: handle) }
-        if !batch.labels.isEmpty { try label(batch.labels, on: handle) }
-        if !batch.samples.isEmpty { try keep(batch.samples, at: batch.time, on: handle) }
-        if !batch.ended.isEmpty { try end(batch.ended, watch: watch, on: handle) }
-        if !batch.shortRuns.isEmpty { try count(batch.shortRuns, at: batch.time, on: handle) }
-        let moved = try FlightRecorder.prepare("UPDATE process_watches SET last = MAX(last, ?) WHERE id = ?", on: handle)
-        defer { sqlite3_finalize(moved) }
-        sqlite3_bind_double(moved, 1, time)
-        sqlite3_bind_int64(moved, 2, watch)
-        try Self.step(moved, on: handle)
+        if !batch.started.isEmpty { unsafe try start(batch.started, watch: watch, on: handle) }
+        if !batch.labels.isEmpty { unsafe try label(batch.labels, on: handle) }
+        if !batch.samples.isEmpty { unsafe try keep(batch.samples, at: batch.time, on: handle) }
+        if !batch.ended.isEmpty { unsafe try end(batch.ended, watch: watch, on: handle) }
+        if !batch.shortRuns.isEmpty { unsafe try count(batch.shortRuns, at: batch.time, on: handle) }
+        let moved = unsafe try FlightRecorder.prepare("UPDATE process_watches SET last = MAX(last, ?) WHERE id = ?", on: handle)
+        defer { unsafe sqlite3_finalize(moved) }
+        unsafe sqlite3_bind_double(moved, 1, time)
+        unsafe sqlite3_bind_int64(moved, 2, watch)
+        unsafe try Self.step(moved, on: handle)
     }
 
     private func newWatch(at time: Double, on handle: OpaquePointer) throws(FlightRecorderError) -> Int64 {
-        let statement = try FlightRecorder.prepare("INSERT INTO process_watches (started, last) VALUES (?, ?)", on: handle)
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_double(statement, 1, time)
-        sqlite3_bind_double(statement, 2, time)
-        try Self.step(statement, on: handle)
-        return sqlite3_last_insert_rowid(handle)
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try FlightRecorder.prepare("INSERT INTO process_watches (started, last) VALUES (?, ?)", on: handle)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe sqlite3_bind_double(statement, 1, time)
+        unsafe sqlite3_bind_double(statement, 2, time)
+        unsafe try Self.step(statement, on: handle)
+        return unsafe sqlite3_last_insert_rowid(handle)
     }
 
     /// Adds each lifetime, or takes over one already there (seen by an
     /// earlier run of the app, the process still running): its last
     /// sighting becomes that run's last record.
     private func start(_ starts: [ProcessHistoryBatch.Start], watch: Int64, on handle: OpaquePointer) throws(FlightRecorderError) {
-        let statement = try FlightRecorder.prepare("""
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try FlightRecorder.prepare("""
             INSERT INTO process_lifetimes (pid, start_time, name, path, user_name, bundle, restricted, first_seen, last_seen, watch)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)
             ON CONFLICT (pid, start_time) DO UPDATE SET
@@ -449,76 +469,79 @@ final class ProcessHistoryWriter {
                 bundle = COALESCE(excluded.bundle, bundle), restricted = excluded.restricted
             RETURNING id
             """, on: handle)
-        defer { sqlite3_finalize(statement) }
+        defer { unsafe sqlite3_finalize(statement) }
         for start in starts {
-            sqlite3_reset(statement)
-            sqlite3_bind_int64(statement, 1, Int64(start.identity.pid))
-            sqlite3_bind_double(statement, 2, start.identity.startTime?.timeIntervalSince1970 ?? 0)
-            FlightRecorder.bind(start.name, to: statement, at: 3)
-            bindOptional(start.path, to: statement, at: 4)
-            FlightRecorder.bind(start.user, to: statement, at: 5)
-            bindOptional(start.path.flatMap(bundleID(forExecutable:)), to: statement, at: 6)
-            sqlite3_bind_int(statement, 7, start.isRestricted ? 1 : 0)
-            sqlite3_bind_double(statement, 8, start.firstSeen.timeIntervalSince1970)
-            sqlite3_bind_int64(statement, 9, watch)
-            guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
-            rows[start.identity] = sqlite3_column_int64(statement, 0)
-            while sqlite3_step(statement) == SQLITE_ROW {}
+            unsafe sqlite3_reset(statement)
+            unsafe sqlite3_bind_int64(statement, 1, Int64(start.identity.pid))
+            unsafe sqlite3_bind_double(statement, 2, start.identity.startTime?.timeIntervalSince1970 ?? 0)
+            unsafe FlightRecorder.bind(start.name, to: statement, at: 3)
+            unsafe bindOptional(start.path, to: statement, at: 4)
+            unsafe FlightRecorder.bind(start.user, to: statement, at: 5)
+            unsafe bindOptional(start.path.flatMap(bundleID(forExecutable:)), to: statement, at: 6)
+            unsafe sqlite3_bind_int(statement, 7, start.isRestricted ? 1 : 0)
+            unsafe sqlite3_bind_double(statement, 8, start.firstSeen.timeIntervalSince1970)
+            unsafe sqlite3_bind_int64(statement, 9, watch)
+            guard unsafe sqlite3_step(statement) == SQLITE_ROW else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(handle))) }
+            rows[start.identity] = unsafe sqlite3_column_int64(statement, 0)
+            while unsafe sqlite3_step(statement) == SQLITE_ROW {}
         }
     }
 
     private func label(_ labels: [ProcessIdentity: String], on handle: OpaquePointer) throws(FlightRecorderError) {
-        let statement = try FlightRecorder.prepare("UPDATE process_lifetimes SET job = ? WHERE pid = ? AND start_time = ?", on: handle)
-        defer { sqlite3_finalize(statement) }
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try FlightRecorder.prepare("UPDATE process_lifetimes SET job = ? WHERE pid = ? AND start_time = ?", on: handle)
+        defer { unsafe sqlite3_finalize(statement) }
         for (identity, label) in labels {
-            sqlite3_reset(statement)
-            FlightRecorder.bind(label, to: statement, at: 1)
-            sqlite3_bind_int64(statement, 2, Int64(identity.pid))
-            sqlite3_bind_double(statement, 3, identity.startTime?.timeIntervalSince1970 ?? 0)
-            try Self.step(statement, on: handle)
+            unsafe sqlite3_reset(statement)
+            unsafe FlightRecorder.bind(label, to: statement, at: 1)
+            unsafe sqlite3_bind_int64(statement, 2, Int64(identity.pid))
+            unsafe sqlite3_bind_double(statement, 3, identity.startTime?.timeIntervalSince1970 ?? 0)
+            unsafe try Self.step(statement, on: handle)
         }
     }
 
     private func keep(_ samples: [ProcessHistorySample], at time: Date, on handle: OpaquePointer) throws(FlightRecorderError) {
-        let statement = try FlightRecorder.prepare("""
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try FlightRecorder.prepare("""
             INSERT OR REPLACE INTO process_samples (lifetime, time, cpu, memory, disk_read, disk_write) VALUES (?, ?, ?, ?, ?, ?)
             """, on: handle)
-        defer { sqlite3_finalize(statement) }
+        defer { unsafe sqlite3_finalize(statement) }
         for sample in samples {
-            guard let row = try row(for: sample.identity, on: handle) else { continue }
-            sqlite3_reset(statement)
-            sqlite3_bind_int64(statement, 1, row)
-            sqlite3_bind_int64(statement, 2, Int64(FlightRecorder.sampleTime(time)))
-            sqlite3_bind_int64(statement, 3, Int64((sample.cpuPercent * 10).rounded()))
-            sqlite3_bind_int64(statement, 4, Int64(clamping: sample.memory))
+            guard let row = unsafe try row(for: sample.identity, on: handle) else { continue }
+            unsafe sqlite3_reset(statement)
+            unsafe sqlite3_bind_int64(statement, 1, row)
+            unsafe sqlite3_bind_int64(statement, 2, Int64(FlightRecorder.sampleTime(time)))
+            unsafe sqlite3_bind_int64(statement, 3, Int64((sample.cpuPercent * 10).rounded()))
+            unsafe sqlite3_bind_int64(statement, 4, Int64(clamping: sample.memory))
             for (index, rate) in [sample.diskRead, sample.diskWrite].enumerated() {
-                if let rate, rate.isFinite { sqlite3_bind_int64(statement, Int32(index + 5), Int64(rate.rounded())) } else {
-                    sqlite3_bind_null(statement, Int32(index + 5))
+                if let rate, rate.isFinite { unsafe sqlite3_bind_int64(statement, Int32(index + 5), Int64(rate.rounded())) } else {
+                    unsafe sqlite3_bind_null(statement, Int32(index + 5))
                 }
             }
-            try Self.step(statement, on: handle)
+            unsafe try Self.step(statement, on: handle)
         }
     }
 
     /// Closes each lifetime: ended, or for one no longer watched, last seen
     /// now and no longer this run's.
     private func end(_ ends: [ProcessHistoryBatch.End], watch: Int64, on handle: OpaquePointer) throws(FlightRecorderError) {
-        let ended = try FlightRecorder.prepare("UPDATE process_lifetimes SET ended = ?1, last_seen = MAX(last_seen, ?1) WHERE id = ?2",
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let ended = unsafe try FlightRecorder.prepare("UPDATE process_lifetimes SET ended = ?1, last_seen = MAX(last_seen, ?1) WHERE id = ?2",
                                                on: handle)
-        defer { sqlite3_finalize(ended) }
-        let unwatched = try FlightRecorder.prepare("""
+        defer { unsafe sqlite3_finalize(ended) }
+        let unwatched = unsafe try FlightRecorder.prepare("""
             UPDATE process_lifetimes SET last_seen = MAX(last_seen, ?1), watch = NULL WHERE id = ?2 AND watch = ?3
             """, on: handle)
-        defer { sqlite3_finalize(unwatched) }
+        defer { unsafe sqlite3_finalize(unwatched) }
         for end in ends {
-            guard let row = try row(for: end.identity, on: handle) else { continue }
+            guard let row = unsafe try row(for: end.identity, on: handle) else { continue }
             rows.removeValue(forKey: end.identity)
-            let statement = end.isEnded ? ended : unwatched
-            sqlite3_reset(statement)
-            sqlite3_bind_double(statement, 1, end.time.timeIntervalSince1970)
-            sqlite3_bind_int64(statement, 2, row)
-            if !end.isEnded { sqlite3_bind_int64(statement, 3, watch) }
-            try Self.step(statement, on: handle)
+            let statement = unsafe end.isEnded ? ended : unwatched
+            unsafe sqlite3_reset(statement)
+            unsafe sqlite3_bind_double(statement, 1, end.time.timeIntervalSince1970)
+            unsafe sqlite3_bind_int64(statement, 2, row)
+            if !end.isEnded { unsafe sqlite3_bind_int64(statement, 3, watch) }
+            unsafe try Self.step(statement, on: handle)
         }
     }
 
@@ -526,42 +549,44 @@ final class ProcessHistoryWriter {
     /// aren't remembered between records: pruning, here or in another
     /// copy of the app, may have deleted one since.
     private func count(_ runs: [ProcessHistoryBatch.ShortRuns], at time: Date, on handle: OpaquePointer) throws(FlightRecorderError) {
-        let kind = try FlightRecorder.prepare("""
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let kind = unsafe try FlightRecorder.prepare("""
             INSERT INTO process_kinds (name, path, user_name) VALUES (?, ?, ?)
             ON CONFLICT (name, path, user_name) DO UPDATE SET name = excluded.name RETURNING id
             """, on: handle)
-        defer { sqlite3_finalize(kind) }
+        defer { unsafe sqlite3_finalize(kind) }
         // Another copy of the app counting the same second's runs counts the same processes.
-        let counted = try FlightRecorder.prepare("""
+        let counted = unsafe try FlightRecorder.prepare("""
             INSERT INTO process_short_runs (kind, time, count) VALUES (?, ?, ?)
             ON CONFLICT (kind, time) DO UPDATE SET count = MAX(count, excluded.count)
             """, on: handle)
-        defer { sqlite3_finalize(counted) }
+        defer { unsafe sqlite3_finalize(counted) }
         for run in runs {
-            sqlite3_reset(kind)
-            FlightRecorder.bind(run.name, to: kind, at: 1)
-            FlightRecorder.bind(run.path ?? "", to: kind, at: 2)
-            FlightRecorder.bind(run.user, to: kind, at: 3)
-            guard sqlite3_step(kind) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
-            let id = sqlite3_column_int64(kind, 0)
-            while sqlite3_step(kind) == SQLITE_ROW {}
-            sqlite3_reset(counted)
-            sqlite3_bind_int64(counted, 1, id)
-            sqlite3_bind_int64(counted, 2, Int64(FlightRecorder.sampleTime(time)))
-            sqlite3_bind_int64(counted, 3, Int64(run.count))
-            try Self.step(counted, on: handle)
+            unsafe sqlite3_reset(kind)
+            unsafe FlightRecorder.bind(run.name, to: kind, at: 1)
+            unsafe FlightRecorder.bind(run.path ?? "", to: kind, at: 2)
+            unsafe FlightRecorder.bind(run.user, to: kind, at: 3)
+            guard unsafe sqlite3_step(kind) == SQLITE_ROW else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(handle))) }
+            let id = unsafe sqlite3_column_int64(kind, 0)
+            while unsafe sqlite3_step(kind) == SQLITE_ROW {}
+            unsafe sqlite3_reset(counted)
+            unsafe sqlite3_bind_int64(counted, 1, id)
+            unsafe sqlite3_bind_int64(counted, 2, Int64(FlightRecorder.sampleTime(time)))
+            unsafe sqlite3_bind_int64(counted, 3, Int64(run.count))
+            unsafe try Self.step(counted, on: handle)
         }
     }
 
     /// The lifetime's row: this run's, or one the database has.
     private func row(for identity: ProcessIdentity, on handle: OpaquePointer) throws(FlightRecorderError) -> Int64? {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         if let row = rows[identity] { return row }
-        let statement = try FlightRecorder.prepare("SELECT id FROM process_lifetimes WHERE pid = ? AND start_time = ?", on: handle)
-        defer { sqlite3_finalize(statement) }
-        sqlite3_bind_int64(statement, 1, Int64(identity.pid))
-        sqlite3_bind_double(statement, 2, identity.startTime?.timeIntervalSince1970 ?? 0)
-        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
-        return sqlite3_column_int64(statement, 0)
+        let statement = unsafe try FlightRecorder.prepare("SELECT id FROM process_lifetimes WHERE pid = ? AND start_time = ?", on: handle)
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe sqlite3_bind_int64(statement, 1, Int64(identity.pid))
+        unsafe sqlite3_bind_double(statement, 2, identity.startTime?.timeIntervalSince1970 ?? 0)
+        guard unsafe sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return unsafe sqlite3_column_int64(statement, 0)
     }
 
     /// The identifier of the app bundle an executable runs from, read from
@@ -577,10 +602,12 @@ final class ProcessHistoryWriter {
     }
 
     private func bindOptional(_ text: String?, to statement: OpaquePointer, at index: Int32) {
-        if let text { FlightRecorder.bind(text, to: statement, at: index) } else { sqlite3_bind_null(statement, index) }
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        if let text { unsafe FlightRecorder.bind(text, to: statement, at: index) } else { unsafe sqlite3_bind_null(statement, index) }
     }
 
     private static func step(_ statement: OpaquePointer, on handle: OpaquePointer) throws(FlightRecorderError) {
-        guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        guard unsafe sqlite3_step(statement) == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(handle))) }
     }
 }

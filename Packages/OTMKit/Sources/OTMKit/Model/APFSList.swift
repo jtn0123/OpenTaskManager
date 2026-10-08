@@ -163,11 +163,12 @@ public enum SnapshotListing: Sendable, Equatable {
 /// A plist printed by a tool, perhaps after a stray line or two.
 enum PlistOutput {
     static func dictionary(in output: String) -> [String: Any]? {
+        // The optional format output is nil; Foundation owns the decoded plist values.
         guard let start = output.range(of: "<?xml") ?? output.range(of: "<plist") else { return nil }
         let end = output.range(of: "</plist>", options: .backwards).map(\.upperBound) ?? output.endIndex
         guard start.lowerBound < end else { return nil }
         let data = Data(output[start.lowerBound..<end].utf8)
-        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+        return unsafe (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     }
 
     static func bytes(_ value: Any?) -> UInt64 {

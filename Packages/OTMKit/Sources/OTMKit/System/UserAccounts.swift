@@ -48,19 +48,20 @@ public struct ConsoleUser: Sendable, Hashable {
 
 public enum UserAccounts {
     public static func account(uid: UInt32) -> UserAccount? {
+        // The passwd record and strings stay inside the scratch buffer's borrow, and getpwuid_r receives its exact capacity.
         var size = max(sysconf(Int32(_SC_GETPW_R_SIZE_MAX)), 4096)
         // A directory-service account can outgrow the suggested buffer; grow it and retry.
         for _ in 0..<4 {
-            var record = passwd()
+            var record = unsafe passwd()
             var result: UnsafeMutablePointer<passwd>?
             var buffer = [CChar](repeating: 0, count: size)
             let (status, account) = buffer.withUnsafeMutableBufferPointer { storage -> (Int32, UserAccount?) in
-                let status = getpwuid_r(uid, &record, storage.baseAddress, storage.count, &result)
-                guard status == 0, result != nil else { return (status, nil) }
+                let status = unsafe getpwuid_r(uid, &record, storage.baseAddress, storage.count, &result)
+                guard status == 0, unsafe result != nil else { return (status, nil) }
                 // The record's strings point into `storage`, so copy them out here.
-                let name = record.pw_name.map { String(cString: $0) } ?? String(uid)
-                let gecos = record.pw_gecos.map { String(cString: $0) } ?? ""
-                let home = record.pw_dir.map { String(cString: $0) }
+                let name = unsafe record.pw_name.map { unsafe String(cString: $0) } ?? String(uid)
+                let gecos = unsafe record.pw_gecos.map { unsafe String(cString: $0) } ?? ""
+                let home = unsafe record.pw_dir.map { unsafe String(cString: $0) }
                 return (0, UserAccount(uid: uid, name: name, fullName: fullName(fromGecos: gecos, login: name),
                                        homeDirectory: home.flatMap { $0.isEmpty ? nil : $0 }))
             }
@@ -90,13 +91,14 @@ public enum UserAccounts {
 
     /// The user signed in at the screen. nil at the login window.
     public static func consoleUser() -> ConsoleUser? {
+        // The local UID or stat record stays live until its synchronous C call returns.
         var uid: uid_t = 0
-        if let name = SCDynamicStoreCopyConsoleUser(nil, &uid, nil) as String? {
+        if let name = unsafe SCDynamicStoreCopyConsoleUser(nil, &uid, nil) as String? {
             return consoleUser(name: name, uid: uid)
         }
         // Without configd, whoever owns the console device is signed in.
         var info = stat()
-        guard stat("/dev/console", &info) == 0 else { return nil }
+        guard unsafe stat("/dev/console", &info) == 0 else { return nil }
         return consoleUser(name: account(uid: info.st_uid)?.name ?? String(info.st_uid), uid: info.st_uid)
     }
 
@@ -110,14 +112,15 @@ public enum UserAccounts {
 
     /// Current logins from utmpx, oldest first.
     public static func sessions() -> [LoginSession] {
+        // The lock holds utmpx's cursor; each record is copied before getutxent advances or endutxent closes it.
         // getutxent walks one shared cursor, so only one reader may use it at a time.
         utmpxLock.lock()
         defer { utmpxLock.unlock() }
         setutxent()
         defer { endutxent() }
         var sessions: [LoginSession] = []
-        while let entry = getutxent() {
-            let record = entry.pointee
+        while let entry = unsafe getutxent() {
+            let record = unsafe entry.pointee
             guard Int32(record.ut_type) == USER_PROCESS else { continue }
             let user = string(record.ut_user)
             guard !user.isEmpty else { continue }
@@ -135,8 +138,9 @@ public enum UserAccounts {
 
     /// Decodes a fixed-size, NUL-padded C character array.
     static func string<T>(_ field: T) -> String {
+        // The borrowed C tuple is decoded only within its byte count and stops at the first NUL.
         withUnsafeBytes(of: field) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+            unsafe String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
         }
     }
 }

@@ -16,11 +16,13 @@ public enum ProcessDetailReader {
     /// The process that has `pid` now, from the kernel's process table, which
     /// anyone may read. nil when there's no such process.
     public static func identity(of pid: Int32) -> ProcessIdentity? {
+        // Each kernel call borrows an aligned record or array with its byte capacity; only returned records and
+        // bounded name tuples are read.
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0, info.kp_proc.p_pid == pid else { return nil }
-        let start = info.kp_proc.p_un.__p_starttime
+        var info = unsafe kinfo_proc()
+        var size = unsafe MemoryLayout<kinfo_proc>.stride
+        guard unsafe sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0, unsafe info.kp_proc.p_pid == pid else { return nil }
+        let start = unsafe info.kp_proc.p_un.__p_starttime
         return ProcessIdentity(pid: pid, startTime: ProcessIdentity.startTime(microseconds: Int64(start.tv_sec) * 1_000_000 + Int64(start.tv_usec)))
     }
 
@@ -28,6 +30,8 @@ public enum ProcessDetailReader {
     /// over by a later process reads as `.unavailable`, never as the newcomer's.
     public static func diagnostics(_ identity: ProcessIdentity, at time: TimeInterval = ProcessInfo.processInfo.systemUptime)
         -> ProcessDiagnostics {
+        // Each kernel call borrows an aligned record or array with its byte capacity; only returned records and
+        // bounded name tuples are read.
         var all = proc_taskallinfo()
         switch taskInfo(identity, into: &all) {
         case let .failure(failure): return .unreadable(identity, at: time, because: failure)
@@ -36,8 +40,8 @@ public enum ProcessDetailReader {
         let task = all.ptinfo
         var usage = rusage_info_v4()
         let hasUsage = withUnsafeMutablePointer(to: &usage) { pointer in
-            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
-                proc_pid_rusage(identity.pid, RUSAGE_INFO_V4, $0) == 0
+            unsafe pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                unsafe proc_pid_rusage(identity.pid, RUSAGE_INFO_V4, $0) == 0
             }
         }
         let usageFailure = hasUsage ? nil : ProcessReadFailure(errno: errno)
@@ -68,13 +72,15 @@ public enum ProcessDetailReader {
 
     /// Every thread of the process, with its CPU time, state and priority.
     public static func threads(_ identity: ProcessIdentity) -> Result<[ThreadSample], ProcessReadFailure> {
+        // Each kernel call borrows an aligned record or array with its byte capacity; only returned records and
+        // bounded name tuples are read.
         var all = proc_taskallinfo()
         if case let .failure(failure) = taskInfo(identity, into: &all) { return .failure(failure) }
         // Room for threads started since the count, and a retry if it was short.
         var capacity = Int(all.ptinfo.pti_threadnum) + 32
         for _ in 0..<4 {
             var ids = [UInt64](repeating: 0, count: capacity)
-            let bytes = ids.withUnsafeMutableBytes { proc_pidinfo(identity.pid, listThreadIDs, 0, $0.baseAddress, Int32($0.count)) }
+            let bytes = ids.withUnsafeMutableBytes { unsafe proc_pidinfo(identity.pid, listThreadIDs, 0, $0.baseAddress, Int32($0.count)) }
             guard bytes > 0 else { return .failure(ProcessReadFailure(errno: errno)) }
             let count = Int(bytes) / MemoryLayout<UInt64>.stride
             if count == capacity {
@@ -88,10 +94,12 @@ public enum ProcessDetailReader {
     }
 
     private static func thread(_ pid: Int32, id: UInt64) -> ThreadSample? {
+        // Each kernel call borrows an aligned record or array with its byte capacity; only returned records and
+        // bounded name tuples are read.
         var info = proc_threadinfo()
         let size = Int32(MemoryLayout<proc_threadinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTHREADID64INFO, id, &info, size) == size else { return nil }
-        let name = withUnsafeBytes(of: info.pth_name) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        guard unsafe proc_pidinfo(pid, PROC_PIDTHREADID64INFO, id, &info, size) == size else { return nil }
+        let name = withUnsafeBytes(of: info.pth_name) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         return ThreadSample(
             id: id,
             name: name.isEmpty ? nil : name,
@@ -107,10 +115,12 @@ public enum ProcessDetailReader {
     /// The task and BSD info in one call, after checking the process is
     /// still the one that started when `identity` says.
     private static func taskInfo(_ identity: ProcessIdentity, into all: inout proc_taskallinfo) -> Result<Void, ProcessReadFailure> {
+        // Each kernel call borrows an aligned record or array with its byte capacity; only returned records and
+        // bounded name tuples are read.
         // The kernel's own task isn't readable, even by its owner.
         guard identity.pid > 0 else { return .failure(.denied) }
         let size = Int32(MemoryLayout<proc_taskallinfo>.size)
-        guard proc_pidinfo(identity.pid, PROC_PIDTASKALLINFO, 0, &all, size) == size else {
+        guard unsafe proc_pidinfo(identity.pid, PROC_PIDTASKALLINFO, 0, &all, size) == size else {
             return .failure(ProcessReadFailure(errno: errno))
         }
         let start = ProcessIdentity.startTime(microseconds: Int64(all.pbsd.pbi_start_tvsec) * 1_000_000 + Int64(all.pbsd.pbi_start_tvusec))

@@ -94,7 +94,8 @@ public struct SpikeCaptureLibrary: Sendable {
 
     /// Moves a capture to the Trash.
     public func delete(_ url: URL) throws {
-        try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+        // lstat borrows the local record only for this call; the path is a NUL-terminated Swift string borrow.
+        unsafe try FileManager.default.trashItem(at: url, resultingItemURL: nil)
     }
 
     // MARK: - Reading

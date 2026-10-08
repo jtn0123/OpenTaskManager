@@ -18,6 +18,13 @@ Manager OG or any other proprietary task manager.
   summary; there is no coverage threshold yet.
 - `project.yml` is the source of truth. The `.xcodeproj` is generated and
   ignored; new files under `App/Sources` are picked up by `make generate`.
+- OTMKit and `otm` enable strict memory safety (Swift tools 6.2+, built with
+  Swift 6.4). Keep each unavoidable C call or pointer expression marked `unsafe`
+  with a comment explaining its bounds, lifetime and alignment. Owned or scoped
+  pointer wrappers expose `@safe` interfaces only where those invariants hold.
+  `Span` and `RawSpan`, including `Data.bytes`, work on macOS 14 with this
+  toolchain; `Array.span` needs macOS 26, so do not use it for this deployment target.
+  Keep the hot pointer loops below intact; annotations do not change their work.
 - All tests must pass and lint must be clean (`swiftlint lint --strict`).
   Never suppress warnings or skip tests.
 

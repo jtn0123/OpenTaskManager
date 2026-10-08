@@ -12,23 +12,24 @@ final class HardwareCatalogue {
     /// hasn't written it as it is now. Another copy of the app may have
     /// added it already; the upsert returns that row.
     func row(for series: HistoryHardwareSeries, on handle: OpaquePointer) throws(FlightRecorderError) -> Int64 {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         if let cached = rows[series.id], cached.series == series { return cached.row }
-        let statement = try FlightRecorder.prepare("""
+        let statement = unsafe try FlightRecorder.prepare("""
             INSERT INTO hardware_series (key, kind, unit, label, source, rank) VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT (key) DO UPDATE SET kind = excluded.kind, unit = excluded.unit, label = excluded.label,
                 source = excluded.source, rank = excluded.rank
             RETURNING id
             """, on: handle)
-        defer { sqlite3_finalize(statement) }
-        FlightRecorder.bind(series.id, to: statement, at: 1)
-        FlightRecorder.bind(series.kind.rawValue, to: statement, at: 2)
-        FlightRecorder.bind(series.unit.rawValue, to: statement, at: 3)
-        FlightRecorder.bind(series.label, to: statement, at: 4)
-        FlightRecorder.bind(series.source, to: statement, at: 5)
-        sqlite3_bind_int64(statement, 6, Int64(series.rank))
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
-        let row = sqlite3_column_int64(statement, 0)
-        while sqlite3_step(statement) == SQLITE_ROW {}
+        defer { unsafe sqlite3_finalize(statement) }
+        unsafe FlightRecorder.bind(series.id, to: statement, at: 1)
+        unsafe FlightRecorder.bind(series.kind.rawValue, to: statement, at: 2)
+        unsafe FlightRecorder.bind(series.unit.rawValue, to: statement, at: 3)
+        unsafe FlightRecorder.bind(series.label, to: statement, at: 4)
+        unsafe FlightRecorder.bind(series.source, to: statement, at: 5)
+        unsafe sqlite3_bind_int64(statement, 6, Int64(series.rank))
+        guard unsafe sqlite3_step(statement) == SQLITE_ROW else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(handle))) }
+        let row = unsafe sqlite3_column_int64(statement, 0)
+        while unsafe sqlite3_step(statement) == SQLITE_ROW {}
         rows[series.id] = (row, series)
         return row
     }
@@ -36,14 +37,15 @@ final class HardwareCatalogue {
     /// Every series in the table, by row. One of a kind or unit this build
     /// doesn't know (written by a newer one) is left out, and so are its figures.
     static func load(on handle: OpaquePointer) throws(FlightRecorderError) -> [Int64: HistoryHardwareSeries] {
-        let statement = try FlightRecorder.prepare("SELECT id, key, kind, unit, label, source, rank FROM hardware_series", on: handle)
-        defer { sqlite3_finalize(statement) }
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
+        let statement = unsafe try FlightRecorder.prepare("SELECT id, key, kind, unit, label, source, rank FROM hardware_series", on: handle)
+        defer { unsafe sqlite3_finalize(statement) }
         var series: [Int64: HistoryHardwareSeries] = [:]
-        while sqlite3_step(statement) == SQLITE_ROW {
-            guard let key = FlightRecorder.text(statement, 1),
-                  let kind = FlightRecorder.text(statement, 2).flatMap(HistoryHardwareSeries.Kind.init(rawValue:)),
-                  let unit = FlightRecorder.text(statement, 3).flatMap(SensorUnit.init(rawValue:)) else { continue }
-            series[sqlite3_column_int64(statement, 0)] = HistoryHardwareSeries(
+        while unsafe sqlite3_step(statement) == SQLITE_ROW {
+            guard let key = unsafe FlightRecorder.text(statement, 1),
+                  let kind = unsafe FlightRecorder.text(statement, 2).flatMap(HistoryHardwareSeries.Kind.init(rawValue:)),
+                  let unit = unsafe FlightRecorder.text(statement, 3).flatMap(SensorUnit.init(rawValue:)) else { continue }
+            unsafe series[sqlite3_column_int64(statement, 0)] = HistoryHardwareSeries(
                 id: key, kind: kind, unit: unit, label: FlightRecorder.text(statement, 4) ?? key,
                 source: FlightRecorder.text(statement, 5) ?? "", rank: Int(sqlite3_column_int64(statement, 6))
             )
@@ -71,12 +73,13 @@ enum HardwareBlob {
     /// described in `record.hardwareSeries` is left out.
     static func encode(_ record: HistoryRecord, catalogue: HardwareCatalogue,
                        on handle: OpaquePointer) throws(FlightRecorderError) -> Data? {
+        // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let values = record.values
         guard !values.hardware.isEmpty || values.coreLoads.contains(where: { $0 != nil }) else { return nil }
         var figures: [(row: UInt16, value: Float)] = []
         for series in record.hardwareSeries {
             guard let value = values.hardware[series.id], value.isFinite else { continue }
-            let row = try catalogue.row(for: series, on: handle)
+            let row = unsafe try catalogue.row(for: series, on: handle)
             guard let short = UInt16(exactly: row) else { continue }
             figures.append((short, Float(value)))
         }
@@ -99,11 +102,11 @@ enum HardwareBlob {
 
     /// The figures in `bytes`, by series row, and each core's load; nil for
     /// bytes of another layout or cut short.
-    static func decode(_ bytes: UnsafeRawBufferPointer) -> (figures: [(row: Int64, value: Double)], coreLoads: [Double?])? {
+    static func decode(_ bytes: RawSpan) -> (figures: [(row: Int64, value: Double)], coreLoads: [Double?])? {
         var offset = 0
-        func read<T: FixedWidthInteger>(_: T.Type) -> T? {
-            guard offset + MemoryLayout<T>.size <= bytes.count else { return nil }
-            let value = bytes.loadUnaligned(fromByteOffset: offset, as: T.self)
+        func read<T: FixedWidthInteger & ConvertibleFromBytes>(_: T.Type) -> T? {
+            guard offset + MemoryLayout<T>.size <= bytes.byteCount else { return nil }
+            let value = bytes.load(fromByteOffset: offset, as: T.self)
             offset += MemoryLayout<T>.size
             return T(littleEndian: value)
         }
@@ -130,8 +133,9 @@ enum HardwareBlob {
     @discardableResult
     static func read(_ statement: OpaquePointer, _ column: Int32, series: [Int64: HistoryHardwareSeries],
                      into values: inout HistoryValues) -> [HistoryHardwareSeries] {
-        guard sqlite3_column_type(statement, column) == SQLITE_BLOB, let base = sqlite3_column_blob(statement, column),
-              let decoded = decode(UnsafeRawBufferPointer(start: base, count: Int(sqlite3_column_bytes(statement, column)))) else {
+        // The caller holds the row until decoding finishes; SQLite supplies the blob's byte count and no pointer escapes.
+        guard unsafe sqlite3_column_type(statement, column) == SQLITE_BLOB, let base = unsafe sqlite3_column_blob(statement, column),
+              let decoded = unsafe decode(RawSpan(_unsafeStart: base, byteCount: Int(sqlite3_column_bytes(statement, column)))) else {
             return []
         }
         var held: [HistoryHardwareSeries] = []
@@ -145,6 +149,9 @@ enum HardwareBlob {
     }
 
     private static func append<T: FixedWidthInteger>(_ value: T, to data: inout Data) {
-        withUnsafeBytes(of: value.littleEndian) { data.append(contentsOf: $0) }
+        // Integer shifts write the wire order without borrowing a raw pointer.
+        for shift in stride(from: 0, to: T.bitWidth, by: 8) {
+            data.append(UInt8(truncatingIfNeeded: value >> shift))
+        }
     }
 }
