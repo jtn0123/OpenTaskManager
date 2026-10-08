@@ -207,8 +207,9 @@ struct SustainedOutcome: View, Equatable {
 }
 
 /// A sustained run's windows as a line, throughput from zero over the run's
-/// time, the first window's level dashed across it, and the windows where
-/// macOS reported a thermal state above nominal shaded. Static: built when
+/// time, the first window's level dashed across it, and the windows that
+/// ended with macOS reporting a thermal state above nominal shaded whole, as
+/// the state changed somewhere in them. Static: built when
 /// its windows change, never per tick.
 struct SustainedChart: View, Equatable {
     let trace: BenchmarkSustainedTrace
@@ -241,6 +242,8 @@ struct SustainedChart: View, Equatable {
                         RoundedRectangle(cornerRadius: 2).fill(Self.shade(.serious)).frame(width: 12, height: 10)
                         Text("Thermal state above nominal")
                     }
+                    .help("Windows that ended with macOS reporting a thermal state above nominal: it changed during the window, "
+                        + "by its end.")
                 }
             }
             .font(.metadata)

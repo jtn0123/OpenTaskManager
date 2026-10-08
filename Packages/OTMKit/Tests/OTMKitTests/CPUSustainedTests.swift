@@ -96,13 +96,13 @@ struct CPUSustainedSummaryTests {
                                                                                   .fair, .fair, .fair, .fair, .serious]),
                                                        thermalAtStart: .nominal))
         // A window's state is as it ended: the fifth ends at 0:50, the tenth at 1:40.
-        #expect(warming.thermalText == "macOS reported thermal state nominal at the start, fair from 0:50, serious from 1:40 "
-            + "and nominal from 1:50.")
+        #expect(warming.thermalText == "macOS reported thermal state nominal at the start, fair by 0:50, serious by 1:40 "
+            + "and nominal by 1:50.")
         #expect(warming.worstThermal == .serious)
         #expect(!warming.thermalText.contains("throttl"))
         #expect(!warming.heldText.contains("throttl"))
         let started = try #require(CPUSustainedSummary(windows: windows([100, 99], thermal: [.fair, .fair]), thermalAtStart: .nominal))
-        #expect(started.thermalText == "macOS reported thermal state nominal at the start, fair from 0:10.")
+        #expect(started.thermalText == "macOS reported thermal state nominal at the start, fair by 0:10.")
     }
 
     @Test func chartsFromZeroInClockTicks() {

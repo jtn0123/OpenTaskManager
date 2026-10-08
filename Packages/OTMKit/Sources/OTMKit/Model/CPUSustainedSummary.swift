@@ -97,11 +97,13 @@ public struct CPUSustainedSummary: Sendable, Equatable {
 
     /// What macOS reported about heat, from the start: "macOS reported
     /// thermal state nominal throughout." or "macOS reported thermal state
-    /// nominal at the start, fair from 0:50 and serious from 1:40."
+    /// nominal at the start, fair by 0:50 and serious by 1:40." A state is
+    /// read as each window ends, so a change is dated "by" that end: it came
+    /// somewhere in that window.
     public var thermalText: String {
         guard let start = thermalSteps.first else { return "" }
         guard thermalSteps.count > 1 else { return "macOS reported thermal state \(start.state.rawValue) throughout." }
-        let changes = thermalSteps.dropFirst().map { "\($0.state.rawValue) from \(Self.clock($0.at))" }
+        let changes = thermalSteps.dropFirst().map { "\($0.state.rawValue) by \(Self.clock($0.at))" }
         let list = changes.count == 1 ? changes[0] : changes.dropLast().joined(separator: ", ") + " and " + (changes.last ?? "")
         return "macOS reported thermal state \(start.state.rawValue) at the start, \(list)."
     }
