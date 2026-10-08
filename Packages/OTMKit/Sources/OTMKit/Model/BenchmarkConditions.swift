@@ -7,7 +7,8 @@ public extension BenchmarkComparison {
     static func conditionSummary(_ first: BenchmarkRun, _ second: BenchmarkRun) -> String? {
         let (earlier, later) = first.date <= second.date ? (first, second) : (second, first)
         let sessionDifferences = sessionWarnings(earlier, later)
-        if !sessionDifferences.isEmpty { return sessionDifferences.prefix(2).map(\.text).joined(separator: "; ") }
+        // Each session warning is a sentence with a semicolon of its own, so they join as sentences.
+        if !sessionDifferences.isEmpty { return sessionDifferences.prefix(2).map(\.text).joined(separator: " ") }
         let warnings = contextWarnings(earlier, later)
         guard !warnings.isEmpty else { return nil }
         guard let one = earlier.context, let other = later.context else {

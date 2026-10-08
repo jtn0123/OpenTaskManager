@@ -156,6 +156,10 @@ struct BenchmarkSessionTests {
         let warnings = BenchmarkComparison.sessionWarnings(one, other)
         #expect(warnings.contains { $0.text == "Session A started on power; B on battery." })
         #expect(BenchmarkComparison.conditionSummary(one, other)?.contains("on battery") == true)
+        other.session?.preflight?.readings[29].thermal = .serious
+        let summary = BenchmarkComparison.conditionSummary(one, other)
+        #expect(summary?.hasPrefix("Session A started on power; B on battery. Session A started thermal ") == true)
+        #expect(summary?.contains(".;") == false, "sentences never take a semicolon after their full stop")
     }
 }
 
