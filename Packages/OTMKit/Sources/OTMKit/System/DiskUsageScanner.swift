@@ -169,6 +169,7 @@ private final class DiskScan {
         let logical: UInt64
         let category: DiskCategory
         let modified: Date?
+        let identity: StorageFileIdentity?
     }
 
     private enum Child {
@@ -186,6 +187,7 @@ private final class DiskScan {
         /// Strictly inside a package: merged into it, never listed.
         let withinPackage: Bool
         let modified: Date?
+        let identity: StorageFileIdentity?
         var allocated: UInt64 = 0
         var logical: UInt64 = 0
         var items = 0
@@ -221,6 +223,7 @@ private final class DiskScan {
         var items: Int
         var category: DiskCategory
         var modified: Date?
+        var identity: StorageFileIdentity?
         var children: [Int32] = []
         var omitted = false
         var unreadable = false
@@ -282,6 +285,7 @@ private final class DiskScan {
         boundary = MountBoundary(root: rootPath, allowed: volumes, mountPoints: MountTable.mountPoints())
         stack = [Frame(url: root, name: (rootPath as NSString).lastPathComponent, region: request.rootRegion ?? request.rules.region(at: rootPath),
                        isPackage: false, withinPackage: false, modified: rootValues?.contentModificationDate,
+                       identity: Self.cleanupIdentity(root),
                        children: LargestKept(limit: request.childLimit))]
 
         let errors = ErrorLog()
@@ -368,7 +372,8 @@ private final class DiskScan {
             }
         }
         stack.append(Frame(url: url, name: name, region: region, isPackage: isPackage, withinPackage: parent.insidePackage,
-                           modified: values.contentModificationDate, children: LargestKept(limit: parent.insidePackage ? 0 : request.childLimit)))
+                           modified: values.contentModificationDate, identity: Self.cleanupIdentity(url),
+                           children: LargestKept(limit: parent.insidePackage ? 0 : request.childLimit)))
     }
 
     private func addFile(_ url: URL, values: URLResourceValues) {
@@ -396,10 +401,18 @@ private final class DiskScan {
         stack[top].categoryBytes[category.rawValue] += allocated
         guard !stack[top].insidePackage else { return }
         let modified = values.contentModificationDate
-        offer(.file(FileChild(url: url, allocated: allocated, logical: logical, category: category, modified: modified)), size: allocated, to: top)
+        let identity = stack[top].children.accepts(allocated) || largest.accepts(allocated) ? Self.cleanupIdentity(url) : nil
+        offer(.file(FileChild(url: url, allocated: allocated, logical: logical, category: category, modified: modified,
+                              identity: identity)), size: allocated, to: top)
         offerLargest(allocated) {
-            DiskFile(path: url.path, isPackage: false, allocatedSize: allocated, logicalSize: logical, category: category, modified: modified)
+            DiskFile(path: url.path, isPackage: false, allocatedSize: allocated, logicalSize: logical, category: category,
+                     modified: modified, identity: identity)
         }
+    }
+
+    /// Only files that can enter a kept list need another identity read; smaller files stay folded.
+    private static func cleanupIdentity(_ url: URL) -> StorageFileIdentity? {
+        identity(of: url).map { StorageFileIdentity(volume: String($0.device), file: String($0.inode)) }
     }
 
     /// A file's device and inode, which together name it however many paths it has.
@@ -449,7 +462,8 @@ private final class DiskScan {
                         return index
                     case let .file(file):
                         return allocate(Node(name: file.url.lastPathComponent, kind: .file, allocated: file.allocated,
-                                             logical: file.logical, items: 0, category: file.category, modified: file.modified))
+                                             logical: file.logical, items: 0, category: file.category, modified: file.modified,
+                                             identity: file.identity))
                     }
                 }
                 if frame.foldedCount > 0 {
@@ -459,7 +473,8 @@ private final class DiskScan {
             }
         }
         let index = allocate(Node(name: frame.name, kind: frame.isPackage ? .package : .folder, allocated: frame.allocated,
-                                  logical: frame.logical, items: frame.items, category: frame.dominantCategory, modified: frame.modified,
+                                  logical: frame.logical, items: frame.items, category: frame.dominantCategory,
+                                  modified: frame.modified, identity: frame.identity,
                                   children: children, omitted: omitted, unreadable: frame.isUnreadable,
                                   unreadableCount: frame.unreadableCount))
         guard !isRoot else { return index }
@@ -469,7 +484,7 @@ private final class DiskScan {
         if frame.isPackage {
             offerLargest(frame.allocated) {
                 DiskFile(path: frame.url.path, isPackage: true, allocatedSize: frame.allocated, logicalSize: frame.logical,
-                         category: frame.dominantCategory, modified: frame.modified)
+                         category: frame.dominantCategory, modified: frame.modified, identity: frame.identity)
             }
         }
         if liveNodes > request.nodeBudget { tighten() }
@@ -590,7 +605,7 @@ private final class DiskScan {
             return DiskItem(id: offset, parent: parents[offset], name: isRoot ? rootFrame.name : node.name, kind: isRoot ? .folder : node.kind,
                             allocatedSize: node.allocated, logicalSize: node.logical, itemCount: node.items, category: node.category,
                             modified: node.modified, children: ranges[offset], contentsOmitted: node.omitted, isUnreadable: node.unreadable,
-                            unreadableCount: node.unreadableCount)
+                            unreadableCount: node.unreadableCount, identity: node.identity)
         }
         let categories = DiskCategory.allCases
             .map { DiskCategoryTotal(category: $0, allocatedSize: rootFrame.categoryBytes[$0.rawValue]) }

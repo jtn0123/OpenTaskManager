@@ -47,7 +47,16 @@ struct StorageView: View {
                 Task { focus = stage }
             }
         }
+        .sheet(item: Binding(get: { store.cleanupReview }, set: { store.cleanupReview = $0 })) { model in
+            StorageCleanupSheet(model: model, store: store)
+        }
         .toolbar {
+            ToolbarItem {
+                if !store.cleanupSelection.isEmpty {
+                    Button(store.readingCleanup ? "Reviewing…" : "Clean Up (\(store.cleanupSelection.count))…") { store.reviewCleanup() }
+                        .disabled(store.readingCleanup || store.isScanning)
+                }
+            }
             ToolbarItem {
                 ScopeMenu(store: store)
             }
@@ -115,7 +124,7 @@ private struct ScopeMenu: View {
     }
 }
 
-/// The right-click actions for an item. Nothing here deletes anything.
+/// Right-click offers paths and adds a real scan item to a separate cleanup review.
 struct StorageItemMenu: View {
     let path: String
     let isFolder: Bool
@@ -124,6 +133,13 @@ struct StorageItemMenu: View {
     var body: some View {
         Button("Reveal in Finder") { store.reveal(path) }
         Button("Copy Path") { store.copyPath(path) }
+        if store.cleanupPick(path) != nil {
+            if store.cleanupSelection.contains(path) {
+                Button("Remove from Cleanup") { store.cleanupSelection.remove(path) }
+            } else {
+                Button("Add to Cleanup") { store.addToCleanup(path) }
+            }
+        }
         if isFolder {
             Divider()
             Button("Scan This Folder") { store.scan(.folder(URL(fileURLWithPath: path, isDirectory: true))) }
@@ -156,7 +172,7 @@ private struct StorageStartView: View {
                     .foregroundStyle(LinearGradient(colors: [Theme.disk, Theme.cpu], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .accessibilityHidden(true)
                 Text("What's using your disk space?").font(.title2.weight(.semibold))
-                Text("Pick a place to scan. Nothing is read until you do, and nothing is ever deleted.")
+                Text("Pick a place to scan. Nothing is read until you do. Cleanup needs a separate review before anything moves to the Trash.")
                     .foregroundStyle(.secondaryText)
                     .multilineTextAlignment(.center)
             }

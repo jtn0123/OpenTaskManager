@@ -525,7 +525,8 @@ private struct TreemapPointer: View {
                 return .handled
             }
             .contextMenu {
-                if let item = inner?.item ?? hovered?.item, item.kind != .smallerItems { menu(item) }
+                if let item = inner?.item ?? hovered?.item ?? hover.selected.flatMap({ TreemapKeyboard.item($0, in: layout) }),
+                   item.kind != .smallerItems { menu(item) }
             }
     }
 }
