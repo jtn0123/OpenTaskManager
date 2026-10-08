@@ -347,7 +347,8 @@ struct HistoryProcessKeyRow: View {
             item("Idle, not stored", help: HistoryProcessStyle.idleHelp) {
                 HistoryIdleSample()
             }
-            item("Not recorded", help: "Gaps: the app wasn't running, the Mac slept, or updates were paused.") {
+            item("Not recorded", help: "Gaps: the app wasn't running, the Mac slept, or updates were paused; or History wasn't "
+                + "watching this process then (before its first sighting, or while an older build recorded).") {
                 Canvas { context, size in
                     HistoryCoverage.drawGaps([CGRect(x: 0.5, y: 0.5, width: size.width - 1, height: size.height - 1)], in: context,
                                              dark: colorScheme == .dark)
