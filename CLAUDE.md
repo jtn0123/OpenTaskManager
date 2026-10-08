@@ -686,6 +686,26 @@ Manager OG or any other proprietary task manager.
   them from escaping. The network callback retains a weak context rather
   than an unretained monitor, so queued callbacks cannot outlive their target.
 
+GPU benchmark workload protocol v2 times fill as pixels blended divided by the interval
+from the first render pass's vertex start to the last pass's fragment end. It measures
+render passes only: no resolves, stores into other targets, or command-buffer scheduling.
+On GPUs with stage-boundary sampling and the common timestamp counter set, one shared
+two-slot sample buffer is allocated for the run's fill runner and reused after completion.
+Each submission is bracketed by Metal CPU/GPU timestamp pairs; counter ticks are converted
+using that submission's clock slope. Resolution and output verification happen after timing,
+separately. Missing, error or non-monotonic counters fall back to command-buffer GPU time
+and qualify the figure; they never prevent a supported workload from finishing. No counter
+allocation, reads or polling occur outside a user-started benchmark.
+
+Each timed repeat saves optional `GPUTimingEvidence`: render-pass, command-buffer and wall
+intervals. Fill timing is verified only when every repeat's counter interval is inside its
+command-buffer interval within 1 ms, and command-buffer time is not short of wall time by
+the existing 5% and 5 ms rule. Repeat spread remains separate; comparisons still use both
+runs' spread overlap. Qualified fill figures keep the Timing unverified badge and are left
+out of faster/slower verdicts, with “Fill rate left out: timing not verified on this GPU”.
+The CLI prints timing sources and verdicts; JSON carries the evidence. Saved v1 results
+still decode with their timing caveat and never compare with v2 results.
+
 ## Screenshots and UI checks
 
 Never click or script the UI while the user is at the machine, and never bring
@@ -800,8 +820,9 @@ A session discards one full warm-up pass, then measures N full passes (3 by
 default, 1–10 offered) in
 fixed CPU, GPU, optional disk, optional Internet order, through the existing
 stores. A failed or cancelled pass stops the protocol; cancellation keeps the
-store occupied until its runner has stopped. Kernels and their timing loops are
-unchanged. Each saved repeat has an optional `session` block (schema 1, protocol
+store occupied until its runner has stopped. Each test uses its current workload
+protocol, including GPU fill protocol v2. Each saved repeat has an optional
+`session` block (schema 1, protocol
 1, session ID, preflight samples and verdicts, repeat index and count). Older
 results have no session; reading never rewrites them. History retention counts a
 session as one entry and keeps its measured repeats together. Workspace picks,
@@ -822,7 +843,10 @@ repeats, with their session blocks. `otm bench list` and `compare` group session
 In a debug build, `-openBenchmarkGuided cpu|gpu|all` selects Performance's
 Benchmarks workspace and opens the preflight without starting a test. Add
 `-guidedFixture YES` (or `-sustainedFixture YES`) for made-up CPU and GPU sessions
-and preflight readings, never saved. The waiting fixture has low CPU and normal memory pressure
+and preflight readings, never saved. The GPU fixture includes all three workloads: the
+newest session has qualified fill timing, and the older sessions have verified counters.
+It also supplies the GPU resource card; fixture runs are disabled. The waiting
+fixture has low CPU and normal memory pressure
 but fair thermal state, so it names heat as the blocker while battery remains an advisory.
 Proceed and Run all are disabled for those
 fixtures. Use `-openResource benchmarks -guidedFixture YES

@@ -285,6 +285,7 @@ public extension BenchmarkChange.Verdict {
         case .negligible: "Negligible"
         case .measuredOnce: "Measured once"
         case .unchanged: "Unchanged"
+        case .timingUnverified: "Timing unverified"
         }
     }
 
@@ -297,6 +298,7 @@ public extension BenchmarkChange.Verdict {
         case .negligible: "It moved past both runs' spread, but by less than 1%: too little to matter."
         case .measuredOnce: "This test measures each figure once, so there's no spread to tell noise from change."
         case .unchanged: "The same figure in both runs."
+        case .timingUnverified: "Timing was not verified, so this figure is left out of faster/slower verdicts."
         }
     }
 }

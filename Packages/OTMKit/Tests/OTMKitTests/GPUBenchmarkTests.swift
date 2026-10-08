@@ -46,7 +46,7 @@ struct GPUBenchmarkTests {
     /// workloads changed: bump `GPUBenchmark.suiteVersion` and update the pinned values.
     @Test func standardWorkloadsArePinned() {
         let standard = GPUBenchmarkConfiguration.standard
-        #expect(GPUBenchmark.suiteVersion == 1)
+        #expect(GPUBenchmark.suiteVersion == 2)
         #expect(standard.computeThreads == 1 << 20 && standard.computeIterations == 1024 && standard.computeSeedGroups == 64)
         #expect(standard.memoryBytes == 256 << 20 && standard.memoryLanes == 1 << 17)
         #expect(standard.fillSize == 2048 && standard.fillLayers == 256)
@@ -147,6 +147,7 @@ struct GPUBenchmarkTests {
             let measured = workload.measurement
             #expect(measured.repeats.count == quick.repeats)
             #expect(measured.gpuSeconds.count == quick.repeats && measured.wallSeconds.count == quick.repeats)
+            #expect(measured.timingEvidence?.count == quick.repeats)
             #expect(measured.median > 0 && measured.unitsPerRepeat >= 1)
             #expect(measured.gpuSeconds.allSatisfy { $0 > 0 })
         }

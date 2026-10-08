@@ -28,9 +28,12 @@ private func gpu(at time: TimeInterval, optimized: Bool = true, rates: [Double] 
         let gpu = shortTimed.contains(workload) ? 0.45 : 0.5
         return GPUWorkloadResult(workload: workload, measurement: GPUBenchmarkMeasurement(repeats: rates, gpuSeconds: [gpu, gpu, gpu],
                                                                                           wallSeconds: [0.501, 0.501, 0.501],
-                                                                                          unitsPerRepeat: 40))
+                                                                                          unitsPerRepeat: 40, timingEvidence: Array(repeating:
+                        GPUTimingEvidence(counterInterval: workload == .fill ? .init(start: 10.001, end: 10 + gpu - 0.001) : nil,
+                            commandBufferInterval: .init(start: 10, end: 10 + gpu), wallInterval: .init(start: 0, end: 0.501)), count: 3)))
     }
-    return GPUBenchmarkResult(date: Date(timeIntervalSince1970: time), suiteVersion: 1, configuration: .standard, device: device,
+    return GPUBenchmarkResult(date: Date(timeIntervalSince1970: time), suiteVersion: GPUBenchmark.suiteVersion, configuration: .standard,
+                              device: device,
                               osVersion: "macOS 27.2 (27C61)", appVersion: optimized ? "otm 0.1.0" : "OpenTaskManager 0.1.0",
                               optimized: optimized, thermalStateAtStart: .nominal, thermalStateAtEnd: .fair, lowPowerMode: false,
                               seconds: 9, workloads: workloads)
@@ -312,6 +315,9 @@ struct BenchmarkRunTests {
         #expect(fill.baselineCaveat == nil)
         #expect(fill.comparedCaveat == .timingUnverified)
         #expect(fill.caveat == .timingUnverified)
+        #expect(fill.verdict == .timingUnverified)
+        #expect(fill.verdictWord == "timing unverified")
+        #expect(later.caveats.contains("Fill rate left out: timing not verified on this GPU"))
         #expect(fill.caveatNote == "Fill rate: timing unverified in the later run, so this change may not be real.")
         #expect(later.changes.first { $0.id == "compute" }?.caveat == nil)
         // First, since it bears on a row's verdict.

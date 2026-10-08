@@ -113,7 +113,9 @@ public extension BenchmarkRun {
                 guard figures.count == ordered.count, figures.allSatisfy({ $0.value.isFinite }) else { return nil }
                 var figure = BenchmarkMeasurement(id: reference.id, name: reference.name, variant: reference.variant,
                                                   repeats: figures.map(\.value), unit: reference.unit,
-                                                  caveat: figures.compactMap(\.caveat).first)
+                                                  caveat: figures.compactMap(\.caveat).first,
+                                                  timingDetail: figures.first(where: { $0.caveat != nil })?.timingDetail
+                                                    ?? figures.first?.timingDetail)
                 // Include each pass's internal spread so a session cannot hide timing noise.
                 figure.low = figures.map { $0.low ?? $0.value }.min()
                 figure.high = figures.map { $0.high ?? $0.value }.max()

@@ -188,7 +188,7 @@ enum BenchmarkLook {
         case .better: "checkmark.circle.fill"
         case .worse: "exclamationmark.circle.fill"
         case .withinSpread, .negligible, .unchanged: "equal.circle"
-        case .measuredOnce: "questionmark.circle"
+        case .measuredOnce, .timingUnverified: "questionmark.circle"
         }
     }
 
@@ -197,7 +197,7 @@ enum BenchmarkLook {
         switch verdict {
         case .better: AnyShapeStyle(better)
         case .worse: AnyShapeStyle(worse)
-        case .withinSpread, .negligible, .measuredOnce, .unchanged: AnyShapeStyle(.secondaryText)
+        case .withinSpread, .negligible, .measuredOnce, .unchanged, .timingUnverified: AnyShapeStyle(.secondaryText)
         }
     }
 

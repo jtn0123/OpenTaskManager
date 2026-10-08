@@ -119,11 +119,13 @@ public enum BenchmarkFigureCaveat: String, Sendable, Codable {
     /// commit to completion (`GPUBenchmarkMeasurement.gpuTimeLooksShort`),
     /// so the figure, work over that time, may read high.
     case timingUnverified
+    /// The fill interval could not be verified with render-pass counters.
+    case renderTimingUnverified
 
     /// A few words to put beside the figure: "Timing unverified".
     public var title: String {
         switch self {
-        case .timingUnverified: "Timing unverified"
+        case .timingUnverified, .renderTimingUnverified: "Timing unverified"
         }
     }
 
@@ -131,6 +133,7 @@ public enum BenchmarkFigureCaveat: String, Sendable, Codable {
     public var brief: String {
         switch self {
         case .timingUnverified: "the GPU's own clock ran short of the wall clock, so the figure may read high"
+        case .renderTimingUnverified: "render-pass timing could not be verified on this GPU"
         }
     }
 
@@ -140,6 +143,9 @@ public enum BenchmarkFigureCaveat: String, Sendable, Codable {
         case .timingUnverified:
             "The GPU's own clock put this figure's repeats well short of the time from commit to completion. A virtual "
                 + "machine's GPU can under-report its time, and other apps' GPU work can hold up a start, so the figure may read high."
+        case .renderTimingUnverified:
+            "The fill interval could not be verified against command-buffer and wall time with render-pass counters. "
+                + "The figure is shown with its timing qualification and left out of faster/slower verdicts."
         }
     }
 }
@@ -163,9 +169,11 @@ public struct BenchmarkMeasurement: Sendable, Codable, Equatable, Identifiable {
     public var repeats: Int?
     /// Why the figure itself may be off; nil for most.
     public var caveat: BenchmarkFigureCaveat?
+    /// The recorded timing reason and interval, when available.
+    public var timingDetail: String?
 
     public init(id: String, name: String, variant: String? = nil, value: Double, unit: BenchmarkUnit, low: Double? = nil,
-                high: Double? = nil, repeats: Int? = nil, caveat: BenchmarkFigureCaveat? = nil) {
+                high: Double? = nil, repeats: Int? = nil, caveat: BenchmarkFigureCaveat? = nil, timingDetail: String? = nil) {
         self.id = id
         self.name = name
         self.variant = variant
@@ -175,16 +183,17 @@ public struct BenchmarkMeasurement: Sendable, Codable, Equatable, Identifiable {
         self.high = high
         self.repeats = repeats
         self.caveat = caveat
+        self.timingDetail = timingDetail
     }
 
     /// From timed repeats: their median, slowest and fastest.
     init(id: String, name: String, variant: String? = nil, repeats values: [Double], unit: BenchmarkUnit,
-         caveat: BenchmarkFigureCaveat? = nil) {
+         caveat: BenchmarkFigureCaveat? = nil, timingDetail: String? = nil) {
         let sorted = values.sorted()
         let middle = sorted.count / 2
         let median = sorted.isEmpty ? 0 : sorted.count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
         self.init(id: id, name: name, variant: variant, value: median, unit: unit, low: sorted.first, high: sorted.last,
-                  repeats: values.isEmpty ? nil : values.count, caveat: caveat)
+                  repeats: values.isEmpty ? nil : values.count, caveat: caveat, timingDetail: timingDetail)
     }
 
     /// "Integer, 6 workers".
@@ -394,7 +403,8 @@ public extension BenchmarkRun {
             // A GPU time that looked short qualifies that one figure, not the run.
             return BenchmarkMeasurement(id: workload.workload.rawValue, name: workload.workload.title,
                                         repeats: workload.measurement.repeats, unit: unit,
-                                        caveat: workload.measurement.gpuTimeLooksShort ? .timingUnverified : nil)
+                                        caveat: workload.measurement.timingCaveat(for: workload.workload),
+                                        timingDetail: workload.measurement.timingDescription(for: workload.workload))
         }
         let conditions = Self.conditions(thermal: result.worstThermalState, lowPower: result.lowPowerMode)
         let device = result.device
