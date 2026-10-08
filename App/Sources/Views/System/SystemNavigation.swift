@@ -45,9 +45,6 @@ final class SystemNavigator {
     /// The search's matches, as the jump bar last showed them.
     @ObservationIgnored private var matches: [SystemReportSearch.Match] = []
     @ObservationIgnored private var frames: [SystemTarget: CGRect] = [:]
-    /// Until when scrolling leaves `category` alone: a group jumped to near
-    /// the end of the page can't reach its top, and stays picked anyway.
-    @ObservationIgnored private var heldUntil = Date.distantPast
     /// The card Refresh keeps in place, and where its top was.
     @ObservationIgnored private var anchor: (target: SystemTarget, top: CGFloat)?
     @ObservationIgnored private var markTask: Task<Void, Never>?
@@ -56,6 +53,7 @@ final class SystemNavigator {
 
     /// A card's (or the summary's) frame in the page, or nil once it's gone.
     func setFrame(_ frame: CGRect?, of target: SystemTarget) {
+        guard frames[target] != frame else { return }
         frames[target] = frame
         if let frame, let anchor, anchor.target == target, abs(frame.minY - anchor.top) > 0.5 {
             // Something above it grew or shrank: scroll by as much.
@@ -71,8 +69,14 @@ final class SystemNavigator {
     }
 
     private func follow() {
-        guard Date.now >= heldUntil, let visible = tracker?.visiblePage else { return }
-        let next = topCard(at: visible.minY).map(SystemCategory.init)
+        guard let visible = tracker?.visiblePage else { return }
+        let headers = SystemCategory.allCases.compactMap { category in
+            let top = InfoSection.Kind.allCases.compactMap { kind in
+                SystemCategory(kind) == category ? frames[.card(kind)]?.minY : nil
+            }.min()
+            return top.map { ScrollSpy.Header(category, top: $0) }
+        }
+        let next = ScrollSpy.nearestHeader(headers, line: visible.minY + Self.margin)
         if next != category { category = next }
     }
 
@@ -93,9 +97,9 @@ final class SystemNavigator {
             SystemCategory(kind) == category ? frames[.card(kind)].map { (kind: kind, frame: $0) } : nil
         }
         guard let first = cards.min(by: { $0.frame.minY < $1.frame.minY }) else { return }
-        hold()
-        self.category = category
         proxy?.scrollTo(SystemTarget.card(first.kind), anchor: .top)
+        // A jump at the end may not move the clip view. Read its settled position too.
+        DispatchQueue.main.async { [weak self] in self?.follow() }
     }
 
     /// The group before or after the one at the top, of `categories`.
@@ -124,11 +128,10 @@ final class SystemNavigator {
             match = nil
             mark = nil
             guard !search.isActive, let last else { return }
-            hold()
-            if let kind = last.kind { category = SystemCategory(kind) }
             // After the whole page is back in place.
             DispatchQueue.main.async { [self] in
                 proxy?.scrollTo(SystemTarget(cardOf: last), anchor: .top)
+                follow()
             }
         }
     }
@@ -148,8 +151,6 @@ final class SystemNavigator {
 
     private func go(to match: SystemReportSearch.Match) {
         self.match = match
-        hold()
-        if let kind = match.kind { category = SystemCategory(kind) }
         markTask?.cancel()
         mark = match
         markTask = Task { [weak self] in
@@ -158,7 +159,10 @@ final class SystemNavigator {
             withAnimation(.easeOut(duration: 0.6)) { self?.mark = nil }
         }
         // Once the page has laid out what the search shows.
-        DispatchQueue.main.async { [self] in reveal(match) }
+        DispatchQueue.main.async { [self] in
+            reveal(match)
+            follow()
+        }
     }
 
     /// Scrolls `match` into view, unless its card already is: the card's top
@@ -187,10 +191,6 @@ final class SystemNavigator {
 
     func releasePosition() {
         anchor = nil
-    }
-
-    private func hold() {
-        heldUntil = Date.now.addingTimeInterval(0.5)
     }
 }
 
@@ -512,6 +512,7 @@ final class SystemScrollTrackerView: NSView {
         guard let clip else { return }
         clip.postsBoundsChangedNotifications = true
         center.addObserver(self, selector: #selector(pageScrolled), name: NSView.boundsDidChangeNotification, object: clip)
+        navigator?.scrolled()
     }
 
     @objc private func pageScrolled(_ notification: Notification) {

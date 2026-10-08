@@ -7,11 +7,16 @@ import SwiftUI
 @Observable
 @MainActor
 final class StorageHover {
+    @ObservationIgnored private var scan: Date?
+
     /// Where the pointer is.
     enum Source {
         case treemap
         case list
     }
+
+    /// The item selected by a click or arrow key, independent of hovering.
+    private(set) var selected: Int?
 
     /// The item under the pointer, in the treemap or the list.
     private(set) var item: Int?
@@ -46,6 +51,21 @@ final class StorageHover {
         inner = nil
     }
 
+    /// A fresh scan numbers its items again; returning to the same scan keeps the selection.
+    func useScan(_ usage: DiskUsage) {
+        guard scan != usage.finishedAt else { return }
+        scan = usage.finishedAt
+        clearMarks()
+        enter(nil)
+    }
+
+    func select(_ item: DiskItem, in usage: DiskUsage) {
+        mark(usage.path(of: item.id), exists: true, in: usage, figure: Format.bytes(item.allocatedSize))
+        // Smaller items share their parent's path but have a row and tile of their own.
+        selected = item.id
+        marked = usage.ancestry(of: item.id).map(\.id)
+    }
+
     /// Marks the item at `path` in `usage`: itself, or what stands for it
     /// there (see `DiskUsage.closestItem`), picked as a file or a change.
     /// `figure` is its size or change, `direction` which way that went.
@@ -53,6 +73,7 @@ final class StorageHover {
               file: String? = nil, change: DiskSizeChange? = nil) {
         let closest = usage.closestItem(to: path, exists: exists)
         let chain = usage.ancestry(of: closest.id).map(\.id)
+        if selected != closest.id { selected = closest.id }
         let pick = StoragePick(path: path, figure: figure, direction: direction, exists: exists,
                                isKept: closest.kind != .smallerItems && usage.path(of: closest.id) == path, change: change)
         if marked != chain { marked = chain }
@@ -67,6 +88,7 @@ final class StorageHover {
     }
 
     func clearMarks() {
+        if selected != nil { selected = nil }
         if !marked.isEmpty { marked = [] }
         if markedFile != nil { markedFile = nil }
         if markedChange != nil { markedChange = nil }
