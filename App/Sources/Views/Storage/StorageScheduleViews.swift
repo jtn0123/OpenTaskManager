@@ -68,23 +68,42 @@ struct StorageScheduleSheet: View {
 }
 
 /// This observes the scheduler alone, so no status work lands on a sampler tick.
+/// One line under the page; the schedules open in a popover, so they never take the treemap's height.
 struct StorageScheduleStatus: View {
     private let scheduler = StorageScheduler.shared
+    @State private var showsList = LaunchArgument.string("openStorageSchedules") == "YES"
 
     var body: some View {
-        if !scheduler.schedules.entries.isEmpty {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(scheduler.schedules.entries) { schedule in
-                        StorageScheduleRow(schedule: schedule, controls: false)
+        let entries = scheduler.schedules.entries
+        if !entries.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "clock").foregroundStyle(.secondaryText)
+                Text(scheduler.schedules.summary(at: .now, waiting: scheduler.waiting.count))
+                    .font(.metadata).foregroundStyle(.secondaryText)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 8)
+                Button(entries.count == 1 ? "Show Schedule" : "Show Schedules") { showsList.toggle() }
+                    .controlSize(.small)
+                    .popover(isPresented: $showsList, arrowEdge: .top) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 14) {
+                                ForEach(entries) { StorageScheduleRow(schedule: $0, controls: false) }
+                                Text("Run Now and Remove are in Settings › Storage.")
+                                    .font(.explanation).foregroundStyle(.secondaryText)
+                            }
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(width: 400)
+                        .frame(maxHeight: 420)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(height: min(CGFloat(scheduler.schedules.entries.count) * 94, 160))
-            .padding(12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.background)
+            .help(entries.map { ($0.path as NSString).abbreviatingWithTildeInPath }.joined(separator: ", "))
         }
     }
 }
@@ -125,6 +144,8 @@ private struct StorageScheduleRow: View {
     let schedule: DiskScanSchedule
     let controls: Bool
     private let scheduler = StorageScheduler.shared
+    /// Closes the page's popover once its saved scans are on their way.
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -136,6 +157,7 @@ private struct StorageScheduleRow: View {
             }
             if !controls {
                 Button("Show Saved Scans") {
+                    dismiss()
                     Task {
                         let store = StorageStore.shared
                         await store.showSavedScans(of: StorageScope.resolve(schedule.path, volumes: store.volumes))

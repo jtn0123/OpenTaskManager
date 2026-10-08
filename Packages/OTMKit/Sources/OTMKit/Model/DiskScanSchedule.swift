@@ -79,6 +79,19 @@ public struct DiskScanSchedules: RawRepresentable, Sendable, Codable, Equatable 
         guard let data = try? encoder.encode(entries) else { return "[]" }
         return String(decoding: data, as: UTF8.self)
     }
+
+    /// Storage's one line: how many, the soonest deadline, and how many need a hand.
+    public func summary(at now: Date, waiting: Int = 0) -> String {
+        guard let next = entries.min(by: { $0.dueAt < $1.dueAt }) else { return "" }
+        let name = (next.path as NSString).lastPathComponent
+        let time = next.dueAt.formatted(date: .abbreviated, time: .shortened)
+        var parts = [entries.count == 1 ? "Automatic scan" : "\(entries.count) automatic scans",
+                     next.dueAt <= now ? "\(name) due since \(time)" : "\(name) next due \(time)"]
+        if waiting > 0 { parts.append("\(waiting) waiting") }
+        let denied = entries.count { $0.lastResult == DiskScanScheduleSafety.permissionNeeded }
+        if denied > 0 { parts.append(denied == 1 ? "1 needs permission" : "\(denied) need permission") }
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// No system reads here: the app supplies these only when its timer fires.

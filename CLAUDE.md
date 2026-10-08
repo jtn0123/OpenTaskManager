@@ -587,7 +587,9 @@ what changed since the last saved scan of that folder, and
 scan paths picked (use it with `-openStorageScope`; it never starts a move).
 Pick a scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
 Documents, Downloads and other apps' containers raise a privacy prompt.
-`-openStorageSchedule <path>` selects Storage and opens its schedule sheet.
+`-openStorageSchedule <path>` selects Storage and opens its schedule sheet;
+`-openStorageSchedules YES` opens the popover listing the schedules from the
+line under the page.
 In debug builds `-scheduleFixture YES` shows two made-up schedules (one due,
 one with Permission needed), never persisted or run. Their actions are disabled.
 

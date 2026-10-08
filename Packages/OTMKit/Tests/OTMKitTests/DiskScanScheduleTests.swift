@@ -27,6 +27,18 @@ struct DiskScanScheduleTests {
         #expect(schedule.status(at: now).hasPrefix("Due since"))
     }
 
+    @Test func summaryNamesTheSoonestDeadlineAndWhatNeedsAHand() {
+        var denied = DiskScanSchedule(path: "/usr", cadence: .daily, now: now, calendar: calendar)
+        denied.finish(at: now, result: DiskScanScheduleSafety.permissionNeeded, calendar: calendar)
+        let both = DiskScanSchedules([denied, due])
+        #expect(both.summary(at: now).hasPrefix("2 automatic scans · Library due since "))
+        #expect(both.summary(at: now, waiting: 1).hasSuffix(" · 1 waiting · 1 needs permission"))
+        let later = DiskScanSchedules([DiskScanSchedule(path: "/Volumes/Data", cadence: .weekly, now: now, calendar: calendar)])
+        #expect(later.summary(at: now).hasPrefix("Automatic scan · Data next due "))
+        #expect(!later.summary(at: now).contains("permission"))
+        #expect(DiskScanSchedules().summary(at: now).isEmpty)
+    }
+
     @Test func refusesEveryUnsafeCondition() {
         var conditions = eligible
         conditions.anotherScanRunning = true
