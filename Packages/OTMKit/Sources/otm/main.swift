@@ -96,6 +96,8 @@ USAGE:
                                  refuses runs that don't compare
   otm captures [--json]          The spike captures the app kept: what crossed,
                                  when, for how long, and the busiest processes
+  otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
+                                 History's processes by name, path, label or PID
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -114,6 +116,7 @@ struct Options {
     var changes = false
     var reconcile = false
     var extremes: Double?
+    var range: String?
     var sustained = false
 }
 
@@ -135,6 +138,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
         case "--changes": options.changes = true
+        case "--range": options.range = iterator.next()
         case "--reconcile": options.reconcile = true
         case "--sustained": options.sustained = true
         case "--extremes":
@@ -868,6 +872,9 @@ case "bench":
 
 case "captures":
     capturesCommand(options)
+
+case "history":
+    await historyCommand(options)
 
 case "threads":
     try await threadsCommand(options)

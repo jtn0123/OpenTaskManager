@@ -152,6 +152,8 @@ struct HistoryMomentSummary: View {
                 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
+            // The process picked under Processes at this moment; one line, so the band keeps its height.
+            HistoryMomentProcessLine(time: point?.time)
         }
         .help(scrubber.hint ?? "")
     }
@@ -211,6 +213,8 @@ struct HistoryMomentDetails: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             figures(point.values)
+            // The process picked under Processes, when there is one.
+            HistoryMomentProcess(time: point.time)
             // A recording from before events were kept has none to list.
             if !events.isEmpty {
                 Divider()

@@ -26,17 +26,20 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// The database's `user_version` is its schema: 0, records and sessions;
 /// 1 added the events table; 2 the hardware series (`HistoryHardwareSeries`:
 /// core loads, clocks, fans, temperatures, power rails), named once each in
-/// `hardware_series` and kept per record in a compact `hardware` column. An
-/// older database is brought up to date when it opens, and an older build
-/// still opens a newer one: it never reads the tables and columns it doesn't
-/// know, and its records simply have no hardware figures.
+/// `hardware_series` and kept per record in a compact `hardware` column; 3
+/// the process history (`process_lifetimes`, `process_watches` and
+/// `process_samples`; see FlightRecorderProcesses); 4 its short runs
+/// (`process_kinds`, `process_short_runs`). An older database is
+/// brought up to date when it opens, and an older build still opens a newer
+/// one: it never reads the tables and columns it doesn't know, and its
+/// records simply have no hardware figures or process history.
 public actor FlightRecorder {
     /// Seconds each record covers.
     public static let span: TimeInterval = 10
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
     /// The schema this build writes (`user_version`).
-    static let schemaVersion: Int32 = 2
+    static let schemaVersion: Int32 = 4
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -66,6 +69,8 @@ public actor FlightRecorder {
     private var lastPrune = Date.distantPast
     /// The hardware series this recorder has written, by ID.
     private let catalogue = HardwareCatalogue()
+    /// This run's process history rows (`ProcessHistoryWriter`).
+    let processWriter = ProcessHistoryWriter()
 
     /// Opens the recording at `url`, creating it and its folder if needed.
     public init(url: URL) throws(FlightRecorderError) {
@@ -101,6 +106,23 @@ public actor FlightRecorder {
         self.connection = connection
     }
 
+    /// The recording at `url` to read, never written or migrated, as the
+    /// `otm` tool reads the app's: it fails when there's no such file.
+    public init(reading url: URL) throws(FlightRecorderError) {
+        let reading = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+        var connection = try Self.open(url.path, flags: reading)
+        sqlite3_busy_timeout(connection.handle, 2_000)
+        if !Self.canRead(connection.handle) {
+            // A WAL database nothing has open (no -shm beside it) can't be
+            // opened read-only; with no writer, reading it as unchanging is safe.
+            let immutable = URL(fileURLWithPath: url.path).absoluteString + "?immutable=1"
+            connection = try Self.open(immutable, flags: reading | SQLITE_OPEN_URI)
+        }
+        self.url = url
+        recordSpan = Self.span
+        self.connection = connection
+    }
+
     /// Where the app keeps its recording.
     public static var defaultURL: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -132,6 +154,7 @@ public actor FlightRecorder {
             sqlite3_bind_double(statement, 1, date.timeIntervalSince1970)
             try step(statement)
         }
+        if try keepsProcessHistory() { try pruneProcesses(before: date) }
     }
 
     // MARK: - Reading
@@ -427,15 +450,25 @@ public actor FlightRecorder {
 
     // MARK: - SQLite
 
-    private static func open(_ path: String) throws(FlightRecorderError) -> Connection {
+    private static let writing = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+
+    private static func open(_ path: String, flags: Int32 = writing) throws(FlightRecorderError) -> Connection {
         var handle: OpaquePointer?
-        guard sqlite3_open_v2(path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK,
+        guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK,
               let handle else {
             let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "can't open \(path)"
             sqlite3_close(handle)
             throw .sqlite(message)
         }
         return Connection(handle)
+    }
+
+    /// Whether a query can read the database: SQLite opens lazily.
+    private static func canRead(_ handle: OpaquePointer) -> Bool {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(handle, "SELECT COUNT(*) FROM sqlite_master", -1, &statement, nil) == SQLITE_OK else { return false }
+        return sqlite3_step(statement) == SQLITE_ROW
     }
 
     /// The first schema's tables, then the steps since (`migrate`).
@@ -475,6 +508,14 @@ public actor FlightRecorder {
                 if try !hasColumn("hardware", in: "records", handle) {
                     try execute("ALTER TABLE records ADD COLUMN hardware BLOB", on: handle)
                 }
+            }
+            if version < 3 {
+                // Process lifetimes, the app's runs that watch them, and the figures records keep.
+                try execute(processTables, on: handle)
+            }
+            if version < 4 {
+                // Short runs, counted by kind rather than each given a lifetime.
+                try execute(shortRunTables, on: handle)
             }
             if version < schemaVersion { try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
             try execute("COMMIT", on: handle)

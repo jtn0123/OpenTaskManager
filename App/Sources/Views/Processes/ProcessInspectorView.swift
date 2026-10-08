@@ -234,6 +234,7 @@ struct ProcessInspectorView: View {
     private func overview(_ process: ProcessSample) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             graphs(process)
+            ProcessHistoryLink(identity: identity, name: process.name)
             if process.isRestricted {
                 Text("macOS shows other users' and system processes' CPU, memory and a few facts. "
                     + "The rest needs admin rights, and says so below.")
@@ -505,5 +506,29 @@ private struct RowGroupNote: View {
         .background(Color.primary.opacity(0.04), in: shape)
         .overlay(shape.strokeBorder(Color.primary.opacity(0.12)))
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Under the inspector's graphs, which cover the last few minutes: a link
+/// to the History page searched for this process, with it picked, to see it
+/// over the hours and days History keeps.
+private struct ProcessHistoryLink: View {
+    @AppStorage("page") private var page: Page = .overview
+    let identity: ProcessIdentity
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Further back:").foregroundStyle(.secondaryText)
+            Button {
+                HistoryProcessStore.shared.show(name, identity: identity)
+                page = .history
+            } label: {
+                Label("Show History", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.link)
+            .help("Open the History page searched for \(name), to see this process over the hours and days History keeps")
+        }
+        .font(.explanation)
     }
 }

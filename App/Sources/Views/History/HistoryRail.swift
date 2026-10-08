@@ -97,6 +97,7 @@ struct HistoryRail: View {
                 if hasEvents {
                     HistoryEventLane(scrubber: scrubber, player: player, events: events, points: points, domain: domain, bucket: bucket)
                 }
+                HistoryProcessLane(domain: domain)
                 // The brackets sit right on the track, their sides running on through it.
                 VStack(alignment: .leading, spacing: 0) {
                     HistoryCompareLaneSlot(scrubber: scrubber, domain: domain)
