@@ -178,6 +178,25 @@ public enum GraphMath {
         return peak
     }
 
+    /// Whether `new` is `old` a sample on: the same values with one more at
+    /// the end or, once the window is full, without the oldest as well.
+    /// Values compare bit for bit, so an unreadable (NaN) one matches itself.
+    public static func advancesOneSample(from old: [Double], to new: [Double]) -> Bool {
+        if new.count == old.count + 1 {
+            return old.elementsEqual(new.dropLast()) { $0.bitPattern == $1.bitPattern }
+        }
+        guard new.count == old.count, !old.isEmpty else { return false }
+        return old.dropFirst().elementsEqual(new.dropLast()) { $0.bitPattern == $1.bitPattern }
+    }
+
+    /// Whether any series in `new` is the one in the same place in `old` a
+    /// sample on (`advancesOneSample`), when the two don't have as many
+    /// series: a live graph then still scrolls a step for a new sample that
+    /// adds or drops a line, such as an app joining a by-app graph.
+    public static func advances(from old: [[Double]], to new: [[Double]]) -> Bool {
+        zip(old, new).contains { advancesOneSample(from: $0, to: $1) }
+    }
+
     private static func longest(_ series: [[Double]]) -> Int {
         var length = 0
         for values in series where values.count > length { length = values.count }

@@ -206,7 +206,10 @@ Manager OG or any other proprietary task manager.
   watching the enclosing clip view's bounds (`StickyHeader` in OTMKit), so it
   moves only on scroll, never per tick; rows are added below it.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
-  per sample and a Core Animation scroll slides them between samples. Changing
+  per sample and a Core Animation scroll slides them between samples. An
+  update without a new sample (pages redraw a few milliseconds after a tick)
+  draws nothing and never cuts a scroll short: that made Performance's details
+  and the inspector step a sample at a time while their sidebars glided. Changing
   numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
   Don't swap either for SwiftUI `Path` or `Text` animations. The History page
   is the exception: its graphs are static Swift Charts, reloaded once per graph

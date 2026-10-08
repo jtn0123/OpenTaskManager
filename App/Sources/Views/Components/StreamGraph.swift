@@ -98,6 +98,18 @@ final class StreamGraphView: NSView {
         var axisUnits: GraphMath.AxisUnits
         var axisNote: String?
         var cornerRadius: CGFloat
+
+        /// Whether `other` draws the same apart from its values (and its axis
+        /// labels' wording, a closure that can't be compared).
+        func drawsLike(_ other: Configuration) -> Bool {
+            lines.count == other.lines.count
+                && zip(lines, other.lines).allSatisfy { $0.color == $1.color && $0.fill == $1.fill && $0.dashed == $1.dashed }
+                && maxValue == other.maxValue && capacity == other.capacity && showsGrid == other.showsGrid
+                && lineWidth == other.lineWidth && glows == other.glows && stacked == other.stacked
+                && minimumCeiling == other.minimumCeiling && maximumCeiling == other.maximumCeiling
+                && (axis == nil) == (other.axis == nil) && axisUnits == other.axisUnits && axisNote == other.axisNote
+                && cornerRadius == other.cornerRadius
+        }
     }
 
     /// Layers for one series. The fill and line live in `scroller`; the
@@ -109,6 +121,8 @@ final class StreamGraphView: NSView {
         let head = CALayer()
         let halo = CALayer()
         let dot = CALayer()
+        /// Where the marker's glide ends: a redraw that keeps it lets the glide run on.
+        var headTarget: CGPoint?
 
         init() {
             fill.mask = fillMask
@@ -174,6 +188,8 @@ final class StreamGraphView: NSView {
     private var configuration: Configuration?
     private var lastValues: [[Double]] = []
     private var lastSize: CGSize = .zero
+    /// The step the paths were last laid out with, which a scroll under way moves by.
+    private var lastStep: CGFloat = 0
     private var ceiling: Double = 1
     private var hasDrawn = false
     /// Counts samples so the vertical grid lines scroll with the data.
@@ -246,11 +262,22 @@ final class StreamGraphView: NSView {
     func update(_ configuration: Configuration, interval: TimeInterval, streams: Bool) {
         let values = configuration.lines.map(\.values)
         let changed = values != lastValues
-        let isNewSample = hasDrawn && changed
-            && configuration.lines.count == self.configuration?.lines.count
-            && configuration.capacity == self.configuration?.capacity
-        if changed { sampleIndex += 1 }
+        let previous = self.configuration
         self.configuration = configuration
+        // A page redrawn between samples (Performance's details and some of
+        // Overview's cards redraw a few milliseconds after each one) hands
+        // its graphs what they already show. Drawing them again cut short
+        // the scroll under way, so they jumped a step a sample; now there's
+        // nothing to draw and the scroll runs on.
+        if !changed, let previous, configuration.drawsLike(previous), interval == self.interval, streams == self.streams {
+            return
+        }
+        // A new sample scrolls the graph a step, one that adds or drops a
+        // line too (an app joining a by-app graph) as long as a line it
+        // shares with the last moved on by a sample.
+        let isNewSample = hasDrawn && changed && configuration.capacity == previous?.capacity
+            && (configuration.lines.count == previous?.lines.count || GraphMath.advances(from: lastValues, to: values))
+        if changed { sampleIndex += 1 }
         self.interval = interval
         self.streams = streams
         lastValues = values
@@ -300,6 +327,10 @@ final class StreamGraphView: NSView {
         let step = plotRect.width / CGFloat(configuration.capacity - 1)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let scrolls = newSample && streams && !reduceMotion
+        // Redrawn between samples at the same step (a new scale, a taller
+        // card), the paths sit where they did, so a scroll under way runs on.
+        let restep = step != lastStep
+        lastStep = step
 
         let raw = configuration.lines.map(\.values)
         let shown = configuration.stacked ? GraphMath.stack(raw) : raw
@@ -309,7 +340,7 @@ final class StreamGraphView: NSView {
             ?? min(GraphMath.ceiling(peak: shown.map { GraphMath.finitePeak($0) }.max() ?? 0,
                                      floor: configuration.minimumCeiling, units: configuration.axisUnits),
                    configuration.maximumCeiling)
-        let rescales = hasDrawn && newSample && previousCeiling != ceiling && !reduceMotion
+        let rescales = hasDrawn && !restep && previousCeiling != ceiling && !reduceMotion
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -359,7 +390,7 @@ final class StreamGraphView: NSView {
             scroll.timingFunction = CAMediaTimingFunction(name: .linear)
             scroll.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
             scroller.add(scroll, forKey: "scroll")
-        } else {
+        } else if restep || !streams || reduceMotion {
             scroller.removeAnimation(forKey: "scroll")
         }
         for (shape, from) in rescaleAnimations {
@@ -500,7 +531,12 @@ final class StreamGraphView: NSView {
         layers.halo.backgroundColor = bright.withAlphaComponent(0.16).cgColor
         layers.dot.backgroundColor = line.color.traceShade.cgColor
         layers.dot.shadowColor = bright.cgColor
-        layers.head.position = CGPoint(x: edge, y: CGFloat(last))
+        let target = CGPoint(x: edge, y: CGFloat(last))
+        layers.head.position = target
+        // Redrawn between samples with the newest value where it was, the
+        // marker's glide runs on with the scroll.
+        if !animated, target == layers.headTarget { return }
+        layers.headTarget = target
         layers.head.removeAnimation(forKey: "glide")
 
         let count = trace.ys.count

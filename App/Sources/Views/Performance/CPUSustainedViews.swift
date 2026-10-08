@@ -271,9 +271,12 @@ struct SustainedChart: View, Equatable {
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
             }
             ForEach(windows, id: \.offset) { _, window in
+                // A curve through the windows, as the live graphs draw theirs;
+                // monotone, so it never swings past a window's figure.
                 LineMark(x: .value("Time", window.start + window.seconds / 2), y: .value("Throughput", window.throughput))
                     .foregroundStyle(tint)
                     .lineStyle(StrokeStyle(lineWidth: 2))
+                    .interpolationMethod(.monotone)
                 PointMark(x: .value("Time", window.start + window.seconds / 2), y: .value("Throughput", window.throughput))
                     .foregroundStyle(tint)
                     .symbolSize(14)

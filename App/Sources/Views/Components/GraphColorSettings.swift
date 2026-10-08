@@ -151,11 +151,7 @@ struct GraphColorPreview: View {
         }
         context.stroke(grid, with: .color((dark ? Color.white : .black).opacity((dark ? 0.065 : 0.11) * emphasis.grid)), lineWidth: 0.5)
         for line in Self.lines {
-            let count = CGFloat(line.values.count - 1)
-            let points = line.values.enumerated().map { index, value in
-                CGPoint(x: size.width * CGFloat(index) / count, y: size.height * (1 - value))
-            }
-            let trace = Path { $0.addLines(points) }
+            let trace = Self.curve(line.values.map { size.height * (1 - $0) }, width: size.width)
             if line.filled {
                 var area = trace
                 area.addLine(to: CGPoint(x: size.width, y: size.height))
@@ -169,6 +165,23 @@ struct GraphColorPreview: View {
             let swatch = palette[line.role]
             let stroke = dark ? swatch.dark : emphasis.trace(swatch.light)
             context.stroke(trace, with: .color(Color(nsColor: GraphColors.nsColor(stroke))), style: line.style)
+        }
+    }
+
+    /// The monotone curve the live graphs draw (`GraphMath.monotoneTangents`),
+    /// through `ys` spread evenly across `width`.
+    private static func curve(_ ys: [Double], width: CGFloat) -> Path {
+        Path { path in
+            guard ys.count > 1 else { return }
+            let step = width / CGFloat(ys.count - 1)
+            let tangents = GraphMath.monotoneTangents(ys)
+            path.move(to: CGPoint(x: 0, y: ys[0]))
+            for index in 1..<ys.count {
+                let x = CGFloat(index) * step
+                path.addCurve(to: CGPoint(x: x, y: ys[index]),
+                              control1: CGPoint(x: x - step * 2 / 3, y: ys[index - 1] + tangents[index - 1] / 3),
+                              control2: CGPoint(x: x - step / 3, y: ys[index] - tangents[index] / 3))
+            }
         }
     }
 
