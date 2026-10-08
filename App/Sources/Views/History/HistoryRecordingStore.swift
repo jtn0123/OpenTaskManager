@@ -214,6 +214,8 @@ struct OpenedRecording: Identifiable, Sendable {
 struct HistoryRecordingBanner: View {
     let recording: OpenedRecording
     let store: HistoryRecordingStore
+    let scrubber: HistoryScrubber
+    let player: HistoryPlayer
 
     var body: some View {
         HStack(spacing: 12) {
@@ -237,6 +239,9 @@ struct HistoryRecordingBanner: View {
             }
             .help("\(recording.url.path)\n\(details)\n\(machine)")
             Spacer(minLength: 8)
+            if let incident = recording.incident {
+                HistoryJumpToSpike(incident: incident, scrubber: scrubber, player: player)
+            }
             Button("Back to Live History") { store.close() }
                 .fixedSize()
                 .help("Close this recording and show this Mac's own history again")
