@@ -20,10 +20,8 @@ func startupCommand(_ options: Options) async {
         if options.json {
             printJSON(report)
         } else {
-            let spans = report.coverage.map {
-                "\($0.start.formatted(date: .abbreviated, time: .shortened))–\($0.end.formatted(date: .abbreviated, time: .shortened))"
-            }
-            print("Watched: " + (spans.isEmpty ? "none in the last 7 days" : spans.joined(separator: ", ")))
+            let spans = LaunchHistoryCoverage.spansText(report.coverage)
+            print("Watched: " + (spans.isEmpty ? "none in the last 7 days" : spans))
             if report.events.isEmpty { print("No stored changes for \(label) in the last 7 days."); return }
             print("\(label) · observed changes; exact times and runs between reads are unknown")
             for event in report.events.reversed() {

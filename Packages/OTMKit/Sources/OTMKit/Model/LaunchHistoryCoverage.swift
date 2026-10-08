@@ -53,6 +53,29 @@ public enum LaunchHistoryCoverage {
         let duration = minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
         return "Watched \(duration) of the last 24 h; changes between reads are bounded, not timed"
     }
+
+    /// Each day once, then its watched spans: "Oct 8, 2026: 9:05 AM–9:07 AM, 9:09 AM–9:12 AM".
+    /// A span that runs past midnight names its end's day too.
+    public static func spansText(_ intervals: [LaunchHistoryInterval], calendar: Calendar = .current,
+                                 locale: Locale = .current) -> String {
+        let day = Date.FormatStyle(date: .abbreviated, time: .omitted, locale: locale, calendar: calendar,
+                                   timeZone: calendar.timeZone)
+        let time = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar,
+                                    timeZone: calendar.timeZone)
+        var days: [(day: String, spans: [String])] = []
+        for interval in merged(intervals) {
+            let start = interval.start.formatted(day)
+            let end = calendar.isDate(interval.start, inSameDayAs: interval.end)
+                ? interval.end.formatted(time) : "\(interval.end.formatted(day)) \(interval.end.formatted(time))"
+            let span = "\(interval.start.formatted(time))–\(end)"
+            if days.last?.day == start {
+                days[days.count - 1].spans.append(span)
+            } else {
+                days.append((start, [span]))
+            }
+        }
+        return days.map { "\($0.day): \($0.spans.joined(separator: ", "))" }.joined(separator: "; ")
+    }
 }
 
 /// One row started, or the same row's end moved on; no row per job or read.

@@ -42,4 +42,23 @@ struct LaunchHistoryCoverageTests {
         #expect(LaunchHistoryCoverage.caption(watched, at: end)
             == "Watched 3 h 10 min of the last 24 h; changes between reads are bounded, not timed")
     }
+
+    @Test func spansNameEachDayOnceAndAMidnightCrossingNamesItsEnd() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let locale = Locale(identifier: "en_US_POSIX")
+        let day = Date.FormatStyle(date: .abbreviated, time: .omitted, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        let time = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+        // 2 Oct 2026 00:00 UTC, then two spans that morning and one over the next midnight.
+        let midnight = date(1_790_899_200)
+        let spans = [LaunchHistoryInterval(start: midnight.addingTimeInterval(32_700), end: midnight.addingTimeInterval(32_820)),
+                     LaunchHistoryInterval(start: midnight.addingTimeInterval(32_940), end: midnight.addingTimeInterval(33_120)),
+                     LaunchHistoryInterval(start: midnight.addingTimeInterval(86_000), end: midnight.addingTimeInterval(87_000))]
+        func at(_ offset: Double, _ style: Date.FormatStyle) -> String { midnight.addingTimeInterval(offset).formatted(style) }
+        #expect(LaunchHistoryCoverage.spansText(spans, calendar: calendar, locale: locale)
+            == "\(at(0, day)): \(at(32_700, time))–\(at(32_820, time)), \(at(32_940, time))–\(at(33_120, time)), "
+            + "\(at(86_000, time))–\(at(87_000, day)) \(at(87_000, time))")
+        #expect(at(0, day) != at(87_000, day))
+        #expect(LaunchHistoryCoverage.spansText([], calendar: calendar, locale: locale).isEmpty)
+    }
 }
