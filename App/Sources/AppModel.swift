@@ -123,14 +123,7 @@ struct UserHistory {
     }
 }
 
-enum UpdateSpeed: Double, CaseIterable, Identifiable {
-    case fast = 0.5
-    case normal = 1
-    case slow = 2
-    case verySlow = 5
-
-    var id: Double { rawValue }
-
+extension UpdateSpeed {
     var label: String {
         switch self {
         case .fast: "Fast (2× per second)"
@@ -311,23 +304,23 @@ final class AppModel {
     /// exposed sockets" on the System page's Firewall card). Cleared once applied.
     var requestedConnectionFilter: ConnectionFilter?
     /// Highest whole-system draw seen on this Mac, kept across launches.
-    private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
+    private(set) var peakSystemWatts = Settings.peakSystemWatts.get()
     /// `SystemSnapshot.measuresProcessEnergy`, read off the tick's walk over
     /// the processes and written only when it changes. Kept across launches,
     /// so a Mac without power sensors (a VM) hides its power figures from the
     /// first frame rather than a second later. nil until a sample has told.
-    private(set) var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
+    private(set) var measuresProcessEnergy = Settings.measuresProcessEnergy.get()
     /// Whether this Mac attributes GPU time to processes (`ProcessFigureReporting`),
     /// kept across launches and written only when it changes, like
     /// `measuresProcessEnergy`. nil until the samples have told.
-    private(set) var reportsProcessGPU = UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+    private(set) var reportsProcessGPU = Settings.reportsProcessGPU.get()
     @ObservationIgnored private var gpuReporting = ProcessFigureReporting(
-        isReported: UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+        isReported: Settings.reportsProcessGPU.get()
     )
     /// Whether any process has held Neural Engine memory, kept like `reportsProcessGPU`.
-    private(set) var reportsProcessNeuralMemory = UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
+    private(set) var reportsProcessNeuralMemory = Settings.reportsProcessNeuralMemory.get()
     @ObservationIgnored private var neuralMemoryReporting = ProcessFigureReporting(
-        isReported: UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
+        isReported: Settings.reportsProcessNeuralMemory.get()
     )
 
     var isPaused = false {
@@ -336,20 +329,20 @@ final class AppModel {
 
     var updateSpeed: UpdateSpeed {
         didSet {
-            UserDefaults.standard.set(updateSpeed.rawValue, forKey: "updateSpeed")
+            Settings.updateSpeed.set(updateSpeed)
             restart()
         }
     }
 
     var includeSystemProcesses: Bool {
         didSet {
-            UserDefaults.standard.set(includeSystemProcesses, forKey: "includeSystemProcesses")
+            Settings.includeSystemProcesses.set(includeSystemProcesses)
             applyMonitorOptions()
         }
     }
 
     var cpuRelativeToSystem: Bool {
-        didSet { UserDefaults.standard.set(cpuRelativeToSystem, forKey: "cpuRelativeToSystem") }
+        didSet { Settings.cpuRelativeToSystem.set(cpuRelativeToSystem) }
     }
 
     var cpuScale: CPUScale {
@@ -363,10 +356,9 @@ final class AppModel {
         let cores = (0..<monitor.topology.logicalCores).map { _ in History<Double>(capacity: Self.historyCapacity) }
         coreHistory = cores
         coreSystemHistory = cores
-        let defaults = UserDefaults.standard
-        updateSpeed = UpdateSpeed(rawValue: defaults.double(forKey: "updateSpeed")) ?? .normal
-        includeSystemProcesses = defaults.object(forKey: "includeSystemProcesses") as? Bool ?? true
-        cpuRelativeToSystem = defaults.object(forKey: "cpuRelativeToSystem") as? Bool ?? true
+        updateSpeed = Settings.updateSpeed.get()
+        includeSystemProcesses = Settings.includeSystemProcesses.get()
+        cpuRelativeToSystem = Settings.cpuRelativeToSystem.get()
         applyMonitorOptions()
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
             Task { @MainActor in self?.runningAppsChanged = true }
@@ -445,7 +437,7 @@ final class AppModel {
         powerDetail.append(snapshot.power, interval: snapshot.interval)
         if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
             peakSystemWatts = watts
-            UserDefaults.standard.set(watts, forKey: "peakSystemWatts")
+            Settings.peakSystemWatts.set(watts)
         }
         for gpu in snapshot.gpus {
             // An unreported load stays out of the history, so no graph draws it as 0%.
@@ -572,17 +564,17 @@ final class AppModel {
         // The rule in `ProcessSample.measuresEnergy`, without a second walk.
         if snapshot.interval > 0, anyPower != measuresProcessEnergy {
             measuresProcessEnergy = anyPower
-            UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
+            Settings.measuresProcessEnergy.set(anyPower)
         }
         gpuReporting.record(anyProcess: anyGPU)
         if let reported = gpuReporting.isReported, reported != reportsProcessGPU {
             reportsProcessGPU = reported
-            UserDefaults.standard.set(reported, forKey: "reportsProcessGPU")
+            Settings.reportsProcessGPU.set(reported)
         }
         neuralMemoryReporting.record(anyProcess: anyNeural)
         if let reported = neuralMemoryReporting.isReported, reported != reportsProcessNeuralMemory {
             reportsProcessNeuralMemory = reported
-            UserDefaults.standard.set(reported, forKey: "reportsProcessNeuralMemory")
+            Settings.reportsProcessNeuralMemory.set(reported)
         }
     }
 

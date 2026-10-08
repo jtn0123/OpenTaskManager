@@ -17,9 +17,6 @@ import SwiftUI
 @MainActor
 final class SpikeCaptureStore {
     static let shared = SpikeCaptureStore()
-    static let enabledKey = "captureSpikes"
-    /// When the list was last opened: captures since then are new.
-    static let seenKey = "spikesSeen"
     /// Two copies of the app catch the same spike within this many seconds of each other.
     static let duplicateWindow: TimeInterval = 120
 
@@ -27,7 +24,7 @@ final class SpikeCaptureStore {
     var isEnabled: Bool {
         didSet {
             guard isEnabled != oldValue else { return }
-            UserDefaults.standard.set(isEnabled, forKey: Self.enabledKey)
+            Settings.captureSpikes.set(isEnabled)
             watching = isEnabled || forced != nil
             if !isEnabled {
                 recorder.reset()
@@ -59,7 +56,7 @@ final class SpikeCaptureStore {
 
     init(library: SpikeCaptureLibrary = SpikeCaptureLibrary()) {
         self.library = library
-        let enabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
+        let enabled = Settings.captureSpikes.get()
         var request: (kind: SpikeKind, updates: Int)?
         #if DEBUG
         if let kind = LaunchArgument.string("captureSpikeNow").flatMap(SpikeKind.init) { request = (kind, 15) }
@@ -135,7 +132,7 @@ final class SpikeCaptureStore {
 
     private func show(_ entries: [SpikeCaptureEntry]) {
         if entries != captures { captures = entries }
-        let seen = UserDefaults.standard.object(forKey: Self.seenKey) as? Date ?? .distantPast
+        let seen = Settings.spikesSeen.get()
         let count = entries.filter { $0.session.start > seen }.count
         if count != unseen { unseen = count }
     }
@@ -143,7 +140,7 @@ final class SpikeCaptureStore {
     /// The list was opened: what's in it is no longer new.
     func markSeen() {
         let newest = captures?.map(\.session.start).max() ?? Date()
-        UserDefaults.standard.set(max(newest, Date()), forKey: Self.seenKey)
+        Settings.spikesSeen.set(max(newest, Date()))
         if unseen != 0 { unseen = 0 }
     }
 

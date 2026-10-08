@@ -5,8 +5,8 @@ import SwiftUI
 struct OpenTaskManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
-    @AppStorage("streamGraphs") private var streamGraphs = true
+    @Setting(Settings.showMenuBarExtra) private var showMenuBarExtra: Bool
+    @Setting(Settings.streamGraphs) private var streamGraphs: Bool
 
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
@@ -52,21 +52,7 @@ struct OpenTaskManagerApp: App {
     }
 }
 
-enum Page: String, CaseIterable, Identifiable {
-    case overview = "Overview"
-    case processes = "Processes"
-    case performance = "Performance"
-    case history = "History"
-    case connections = "Connections"
-    case startup = "Startup"
-    case apps = "Apps"
-    case users = "Users"
-    case system = "System"
-    case drivers = "Drivers"
-    case storage = "Storage"
-
-    var id: String { rawValue }
-
+extension Page {
     var symbol: String {
         switch self {
         case .overview: "gauge.with.dots.needle.67percent"
@@ -147,9 +133,6 @@ private struct PageSwitcher: View {
 }
 
 struct ContentView: View {
-    /// Where the user's own hiding of the sidebar, in a wide window, is kept.
-    private static let sidebarHiddenKey = "sidebarHidden"
-
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @CurrentPage private var page
@@ -161,7 +144,7 @@ struct ContentView: View {
     /// was measured, it flashed by, and its list, focused by then, passed
     /// the focus on to the toolbar's sidebar button.
     @State private var sidebar = SidebarVisibility(
-        hiddenByUser: UserDefaults.standard.bool(forKey: Self.sidebarHiddenKey),
+        hiddenByUser: Settings.sidebarHidden.get(),
         windowWidth: SidebarVisibility.openingWidth(savedFrame: UserDefaults.standard.string(forKey: "NSWindow Frame main"))
     )
 
@@ -216,7 +199,7 @@ struct ContentView: View {
         // With the sidebar hidden, the focus goes to the page's main table
         // or nowhere, not to the toolbar's sidebar button.
         .background(PageFocus(page: page, sidebarShown: sidebar.isShown))
-        .onChange(of: sidebar.hiddenByUser) { UserDefaults.standard.set(sidebar.hiddenByUser, forKey: Self.sidebarHiddenKey) }
+        .onChange(of: sidebar.hiddenByUser) { Settings.sidebarHidden.set(sidebar.hiddenByUser) }
         // With the sidebar hidden, the title still names the page, and the
         // page menu just before it (`PageSwitcher`) and the View menu (⌘1
         // to ⌘9, `PageCommands`) change it.
@@ -485,10 +468,10 @@ struct MenuBarView: View {
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
-    @AppStorage("globalHotKeyEnabled") private var globalHotKeyEnabled = true
-    @AppStorage("heatmap") private var heatmap = true
-    @AppStorage("streamGraphs") private var streamGraphs = true
+    @Setting(Settings.showMenuBarExtra) private var showMenuBarExtra: Bool
+    @Setting(Settings.globalHotKeyEnabled) private var globalHotKeyEnabled: Bool
+    @Setting(Settings.heatmap) private var heatmap: Bool
+    @Setting(Settings.streamGraphs) private var streamGraphs: Bool
 
     var body: some View {
         @Bindable var model = model

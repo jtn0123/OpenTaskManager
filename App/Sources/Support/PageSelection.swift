@@ -1,3 +1,4 @@
+import OTMKit
 import SwiftUI
 
 /// The page the window shows. Each running copy keeps its own: it starts at
@@ -11,18 +12,18 @@ import SwiftUI
 final class PageSelection {
     static let shared = PageSelection()
 
-    private static let key = "page"
-
     var page: Page {
         didSet {
-            if page != oldValue { UserDefaults.standard.set(page.rawValue, forKey: Self.key) }
+            if page != oldValue { Settings.page.set(page) }
         }
     }
 
     private init() {
-        let defaults = UserDefaults.standard
-        let named = defaults.string(forKey: "openPage") ?? defaults.string(forKey: Self.key)
-        page = named.flatMap(Page.init(rawValue:)) ?? .overview
+        if let named = UserDefaults.standard.string(forKey: "openPage") {
+            page = Page(rawValue: named) ?? Settings.page.defaultValue
+        } else {
+            page = Settings.page.get()
+        }
     }
 }
 

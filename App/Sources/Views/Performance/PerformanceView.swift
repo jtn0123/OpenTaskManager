@@ -17,8 +17,8 @@ struct PerformanceView: View {
     /// The page's width, which sets the resource list's.
     @State private var width: CGFloat = 0
     /// Whether the disk images under their heading in the list are shown.
-    @AppStorage("performanceShowsDiskImages") private var showsDiskImages = false
-    @AppStorage(GraphFit.key) private var fitsGraphs = GraphFit.standard
+    @Setting(Settings.performanceShowsDiskImages) private var showsDiskImages: Bool
+    @Setting(Settings.fitsCollectedGraphData) private var fitsGraphs: Bool
     /// The detail pane's visible height, which each device's main graph fills (`Hero`).
     @State private var paneHeight: CGFloat = 0
 

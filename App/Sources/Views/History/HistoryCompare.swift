@@ -118,7 +118,7 @@ private struct HistoryComparisonCard: View {
     let bucket: TimeInterval
     let revision: Date?
     /// Every figure shown under the headline ones.
-    @AppStorage("historyCompareDetails") private var showsDetails = false
+    @Setting(Settings.historyCompareDetails) private var showsDetails: Bool
 
     @State private var comparison: HistoryComparison?
     @State private var busier: [HistoryComparison.AppChange] = []

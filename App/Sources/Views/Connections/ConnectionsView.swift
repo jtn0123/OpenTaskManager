@@ -24,7 +24,7 @@ struct ConnectionsView: View {
     /// Each list keeps its own sort; closed sockets start with the latest to go.
     @State private var openSort = [KeyPathComparator(\ConnectionRow.processName)]
     @State private var closedSort = [KeyPathComparator(\ConnectionRow.stateOrder)]
-    @AppStorage("hiddenConnectionColumns") private var hiddenColumns = HiddenConnectionColumns()
+    @Setting(Settings.hiddenConnectionColumns) private var hiddenColumns: HiddenConnectionColumns
     /// Columns that are on but hidden because the table is too narrow. All
     /// that can give way do until the table has measured its room, so it
     /// never starts out wider than that.
@@ -103,7 +103,7 @@ struct ConnectionsView: View {
                 wantsInspector: selected != nil,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
-                widthKey: "connectionInspectorWidth",
+                widthKey: Settings.connectionInspectorWidth,
                 backTitle: "Connections",
                 // Over a narrow window's table, step through its rows without going back.
                 backAccessory: covered ? AnyView(SocketStepper(

@@ -152,8 +152,8 @@ struct TopAppsCard: View {
 
     /// Every app, busiest first, in the Processes table.
     private func showAll() {
-        UserDefaults.standard.set(column.rawValue, forKey: "processSortKey")
-        UserDefaults.standard.set(false, forKey: "processSortAscending")
+        Settings.processSortKey.set(column)
+        Settings.processSortAscending.set(false)
         page = .processes
     }
 }
