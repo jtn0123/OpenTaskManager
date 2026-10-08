@@ -205,7 +205,12 @@ Manager OG or any other proprietary task manager.
   recorded stretches and step edges bound the track and the moment panel:
   "Footprint about 412 MB (from the memory track)" (Resident for ps RSS),
   "Idle (not kept)" only for a watched idle point without memory, and
-  "Not recorded" for real gaps (`ProcessHistoryLabels` in OTMKit). Compare's figures, `HistoryIntervalStats` and
+  "Not recorded" for real gaps (`ProcessHistoryLabels` in OTMKit). At Latest, a running lifetime may show
+  its latest kept memory for at most one actual record span past the last recorded stretch, with
+  the kept reading's original time and "the latest record", never a newer or extrapolated value.
+  Ended lifetimes and stopped watches cannot borrow that reading. The memory chart has one key:
+  dashed "Memory kept while idle", solid "Busy figures" when present, and the shared hatched
+  "Not recorded" look. Idle stretches carry no repeated memory labels. Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; each interval's column heading gives how much
   of it was recorded, and `HistoryComparison.limitation` (a side under
@@ -723,6 +728,10 @@ the thermal state turns fair), so `-openResource benchmarks
 
 Guided benchmark sessions (`BenchmarkGuidedSheet`, `BenchmarkWorkspace.runGuided`)
 watch a 30 s quiet window, keeping current readings visible for at most 2 min.
+`BenchmarkPreflightStatus` in OTMKit names the current blocking condition, counts the continuous
+quiet streak against its requirement, and gives seconds left before the limit. CPU's row names
+its current load. Battery and Low Power Mode explicitly say they are advisories that do not delay
+readiness. Once quiet the sheet says Ready to proceed, with Proceed as the primary button.
 Wait keeps watching; Proceed or Cancel ends the preflight sooner. The sheet uses only published CPU, memory pressure, thermal and
 power readings from `BenchmarkContextFeed`; no extra sampler or work is added
 to a closed sheet's ticks. Power comes from the published battery's plugged-in
@@ -758,9 +767,17 @@ repeats, with their session blocks. `otm bench list` and `compare` group session
 In a debug build, `-openBenchmarkGuided cpu|gpu|all` selects Performance's
 Benchmarks workspace and opens the preflight without starting a test. Add
 `-guidedFixture YES` (or `-sustainedFixture YES`) for made-up CPU and GPU sessions
-and preflight readings, never saved. Proceed and Run all are disabled for those
+and preflight readings, never saved. The waiting fixture has low CPU and normal memory pressure
+but fair thermal state, so it names heat as the blocker while battery remains an advisory.
+Proceed and Run all are disabled for those
 fixtures. Use `-openResource benchmarks -guidedFixture YES
 -openBenchmarkCompare cpu:1,3` for grouped-session comparison screenshots.
+
+Benchmark results keep a short Debug build badge on every debug result, including saved-run
+pickers and tables. About debug builds folds the full qualification once per resource card or selected
+workspace family, including a comparable pair's debug qualification (exports keep its full wording); CPU workloads
+run slower without optimization, while GPU shaders use the GPU's own clock in either build.
+Comparison refusals and figure-specific timing warnings remain explicit beside the figures.
 
 ## Conventions
 
@@ -886,10 +903,11 @@ fixtures. Use `-openResource benchmarks -guidedFixture YES
   and a show in a narrow one lasts until the window crosses 900
   (`SidebarVisibility` in OTMKit, wired and saved by `SidebarVisibilityStore`).
   The View menu lists the pages (⌘1 to ⌘9).
-  With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
-  "Pages", whatever the page, out of the toolbar's glass so it sits with the
-  title, not the live badge) sits before
-  the title, and in a narrow window Pause drops its word to make room, as do
+  With it hidden, a page menu (`PageSwitcher`: the current page's title and the native menu
+  chevron, out of the toolbar's glass so it sits with the title) sits before
+  the separate navigation title. Keep this toolbar item: a title menu did nothing on macOS 26,
+  and removing the separate title sent the sidebar toggle to overflow. In a narrow window Pause
+  drops its word to make room, as do
   the pages' own items (`compactToolbar`: Startup's, Apps' and Drivers' read
   time loses "Read at" to its tooltip, Processes' Columns becomes a submenu
   of its View menu); keep

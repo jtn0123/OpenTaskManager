@@ -26,8 +26,12 @@ struct CompactRunsList: View {
                         }
                     }
                     .help(run.sessionSummary)
-                    Text(run.build?.title ?? run.context?.optimized.map { $0 ? "Release" : "Debug" } ?? "—")
-                        .foregroundStyle(run.build?.optimized == false ? AnyShapeStyle(BenchmarkLook.debug) : AnyShapeStyle(.secondaryText))
+                    if (run.build?.optimized ?? run.context?.optimized) == false {
+                        DebugBadge()
+                    } else {
+                        Text(run.build?.title ?? run.context?.optimized.map { $0 ? "Release" : "Debug" } ?? "—")
+                            .foregroundStyle(.secondaryText)
+                    }
                     if let figure = run.headline.first {
                         Text("\(figure.name) \(figure.unit.format(figure.value))")
                             .frame(maxWidth: .infinity, alignment: .trailing)

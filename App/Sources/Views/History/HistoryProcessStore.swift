@@ -73,6 +73,7 @@ final class HistoryProcessStore {
         let figures: [ProcessHistoryPoint]
         let memory: [ProcessMemoryStep]
         let memoryCoverage: [ClosedRange<Date>]
+        let recordSpan: TimeInterval
         let memoryPoints: [ProcessMemoryPoint]
         /// Where every record left it out as idle.
         let idle: [ClosedRange<Date>]
@@ -200,7 +201,7 @@ final class HistoryProcessStore {
         let coverage = (try? await recorder.processMemoryCoverage(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? []
         guard !Task.isCancelled, picked == identity else { return }
         let next = Track(match: ProcessHistoryMatch(lifetime: lifetime, summary: summary), points: figures.map(HistoryProcessKey.point),
-                         figures: figures, memory: memory, memoryCoverage: coverage,
+                         figures: figures, memory: memory, memoryCoverage: coverage, recordSpan: recorder.recordSpan,
                          memoryPoints: ProcessMemoryTrack.points(steps: memory, coverage: coverage),
                          idle: ProcessHistoryPoint.idleStretches(figures, bucket: bucket), unwatched: unwatched,
                          isRunning: isRunning(identity), bucket: bucket, domain: domain)

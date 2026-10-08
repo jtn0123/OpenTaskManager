@@ -33,8 +33,8 @@ struct BenchmarkSessionTests {
         watch.append(reading(30))
         let preflight = watch.snapshot(now: epoch.addingTimeInterval(30))
         #expect(preflight.settled)
-        #expect(preflight.verdict == "Quiet window reached")
-        #expect(preflight.rows.first?.text == "CPU load 3% over the last 30 s · quiet")
+        #expect(preflight.verdict == "Ready to proceed")
+        #expect(preflight.rows.first?.text == "CPU load 3% now · quiet")
     }
 
     /// The app's samples land a few milliseconds past each whole-step interval
@@ -49,7 +49,7 @@ struct BenchmarkSessionTests {
             }
             let preflight = watch.snapshot(now: epoch.addingTimeInterval(31 * spacing))
             #expect(preflight.settled, "spacing \(spacing)")
-            #expect(preflight.rows.first?.text == "CPU load 3% over the last 30 s · quiet")
+            #expect(preflight.rows.first?.text == "CPU load 3% now · quiet")
         }
         var paused = BenchmarkSettling(started: epoch)
         for second in 1...40 where !(20...21).contains(second) { paused.append(reading(Double(second))) }
@@ -85,7 +85,7 @@ struct BenchmarkSessionTests {
         for second in 1...30 { watch.append(reading(Double(second), power: .battery)) }
         let battery = watch.snapshot(now: epoch.addingTimeInterval(30))
         #expect(battery.settled)
-        #expect(battery.rows.contains { $0.text == "On battery · results may be lower than on power" })
+        #expect(battery.rows.contains { $0.text == "On battery · results may be lower · advisory only, does not delay readiness" })
         #expect(battery.verdict.contains("review"))
         watch.append(reading(31))
         #expect(!watch.snapshot(now: epoch.addingTimeInterval(31)).settled)
