@@ -317,8 +317,9 @@ struct BenchmarkRunTests {
         #expect(fill.caveat == .timingUnverified)
         #expect(fill.verdict == .timingUnverified)
         #expect(fill.verdictWord == "timing unverified")
-        #expect(later.caveats.contains("Fill rate left out: timing not verified on this GPU"))
-        #expect(fill.caveatNote == "Fill rate: timing unverified in the later run, so this change may not be real.")
+        #expect(fill.caveatNote == "Fill rate: timing unverified in the later run, so its change is left out of the verdicts.")
+        // The row's note already says it's left out: no second line repeats it.
+        #expect(!later.caveats.contains(GPUTimingEvidence.fillExclusion))
         #expect(later.changes.first { $0.id == "compute" }?.caveat == nil)
         // First, since it bears on a row's verdict.
         #expect(later.caveats.first == fill.caveatNote)
@@ -434,7 +435,7 @@ struct BenchmarkExportTests {
         #expect(markdown.contains("| 8.00 Tpixel/s ±1.9% (timing unverified) |"))
         #expect(markdown.contains("| Fill rate | 8.00 Tpixel/s | 8.00 Tpixel/s (timing unverified) |"))
         #expect(markdown.contains("Timing unverified: The GPU's own clock"))
-        #expect(markdown.contains("- Fill rate: timing unverified in the later run, so this change may not be real."))
+        #expect(markdown.contains("- Fill rate: timing unverified in the later run, so its change is left out of the verdicts."))
         let read = try BenchmarkExport.read(export.json())
         #expect(read.runs.first?.measurement("fill")?.caveat == .timingUnverified)
         #expect(read.comparisons.first?.changes?.first { $0.id == "fill" }?.comparedCaveat == .timingUnverified)

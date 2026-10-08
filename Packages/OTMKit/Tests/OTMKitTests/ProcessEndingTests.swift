@@ -27,6 +27,7 @@ struct ProcessDiagnosticReportTests {
 
     private func fixture(in folder: URL, suffix: String, type: String = "309", pid: Int32 = 42, at seconds: Double = 55,
                          path: String = "/Applications/Worker.app/Contents/MacOS/Worker", modified: Double = 60,
+                         termination: String = #"{"namespace":"SIGNAL","code":11,"indicator":"Segmentation fault"}"#,
                          tail: String = "") throws -> URL {
         let url = folder.appendingPathComponent("Worker-\(suffix).ips")
         let timestamp = ISO8601DateFormatter().string(from: endTime(seconds))
@@ -34,7 +35,7 @@ struct ProcessDiagnosticReportTests {
             {"app_name":"Worker","bug_type":"\(type)","timestamp":"\(timestamp)"}
             {"pid":\(pid),"procName":"Worker","procPath":"\(path)",
              "exception":{"type":"EXC_BAD_ACCESS","signal":"SIGSEGV"},
-             "termination":{"namespace":"SIGNAL","code":11,"indicator":"Segmentation fault"}\(tail)}
+             "termination":\(termination)\(tail)}
             """
         try Data(text.utf8).write(to: url)
         try FileManager.default.setAttributes([.modificationDate: endTime(modified)], ofItemAtPath: url.path)
@@ -52,10 +53,17 @@ struct ProcessDiagnosticReportTests {
         _ = try fixture(in: directory, suffix: "other-path", path: "/tmp/Worker")
         let reports = ProcessDiagnosticReports.read(for: endedLifetime(), in: [directory])
         #expect(reportFiles(reports) == [crash, jetsam].map(\.standardizedFileURL))
-        #expect(reports[0].summary.contains("Crash report"))
-        #expect(reports[0].summary.contains("EXC_BAD_ACCESS"))
-        #expect(reports[0].summary.contains("SIGSEGV"))
+        // "SIGNAL code 11" would only repeat SIGSEGV.
+        #expect(reports[0].summary == "Crash report · EXC_BAD_ACCESS · SIGSEGV · Segmentation fault")
         #expect(reports[1].summary.contains("Jetsam / memory report"))
+    }
+
+    @Test func terminationNamespacesOtherThanTheSignalStay() throws {
+        let directory = try folder()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        _ = try fixture(in: directory, suffix: "codesigning", termination: #"{"namespace":"CODESIGNING","code":2,"indicator":"Invalid Page"}"#)
+        let reports = ProcessDiagnosticReports.read(for: endedLifetime(), in: [directory])
+        #expect(reports.first?.summary == "Crash report · EXC_BAD_ACCESS · SIGSEGV · Invalid Page · CODESIGNING code 2")
     }
 
     @Test func missingPathUsesNameAndUnknownTypesStayNeutral() throws {

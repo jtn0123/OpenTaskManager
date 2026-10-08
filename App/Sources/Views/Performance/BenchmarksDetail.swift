@@ -260,7 +260,7 @@ private struct WorkspaceMethodology: View {
                 + "interface, with the same settings, from the same kind of build: a debug build runs the app's own code many "
                 + "times slower.")
             Text("A change counts only when the two runs' ranges of repeats, slowest to fastest, don't overlap. A figure "
-                + "measured once can't show that, and a figure whose timing is unverified may not be real.")
+                + "measured once can't show that, and a figure whose timing is unverified is left out of the verdicts.")
         }
     }
 }

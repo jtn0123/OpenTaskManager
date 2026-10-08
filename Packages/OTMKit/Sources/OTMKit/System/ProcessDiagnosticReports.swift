@@ -56,7 +56,9 @@ public enum ProcessDiagnosticReports {
         let kind = kind(header.bugType.value)
         var details = [body.exception?.type, body.exception?.signal, body.termination?.indicator,
                        body.termination?.reason, jetsam?.reason].compactMap { $0 }.filter { !$0.isEmpty }
-        if let namespace = body.termination?.namespace {
+        // "SIGNAL code 11" only repeats the exception's SIGSEGV; other namespaces
+        // (code signing, a library's own reason) say something the rest doesn't.
+        if let namespace = body.termination?.namespace, namespace != "SIGNAL" || body.exception?.signal == nil {
             let code = body.termination?.code.map { " code \($0)" } ?? ""
             details.append(namespace + code)
         }

@@ -162,11 +162,11 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         return sentence + " The move is beyond both runs' spread, but different conditions can explain it."
     }
 
-    /// "Fill rate: timing unverified in the later run, so this change may not be real."
+    /// "Fill rate: timing unverified in the later run, so its change is left out of the verdicts."
     public var caveatNote: String? {
         guard let caveat else { return nil }
         let runs = baselineCaveat != nil && comparedCaveat != nil ? "both runs" : baselineCaveat != nil ? "the earlier run" : "the later run"
-        return "\(title): \(caveat.title.lowercased()) in \(runs), so this change may not be real."
+        return "\(title): \(caveat.title.lowercased()) in \(runs), so its change is left out of the verdicts."
     }
 
     /// (to − from) / from, nil when `from` isn't a positive figure.
@@ -305,11 +305,9 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     }
 
     private static func caveats(_ baseline: BenchmarkRun, _ compared: BenchmarkRun, changes: [BenchmarkChange]) -> [String] {
-        // Doubts about single figures first: they bear on those rows' verdicts.
+        // Doubts about single figures first: they bear on those rows' verdicts,
+        // and each says its figure is left out, so no second line repeats it.
         var caveats = changes.compactMap(\.caveatNote)
-        if changes.contains(where: { $0.id == "fill" && $0.verdict == .timingUnverified }) {
-            caveats.append(GPUTimingEvidence.fillExclusion)
-        }
         if !baseline.kind.measuresThisMac {
             var line = "Internet figures depend on the connection, the server and other traffic at the time, not on this Mac"
             if let one = baseline.target?.detail, let other = compared.target?.detail, one != other {
