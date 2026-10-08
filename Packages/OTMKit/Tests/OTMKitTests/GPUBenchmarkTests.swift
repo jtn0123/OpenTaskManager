@@ -175,24 +175,35 @@ struct GPUBenchmarkTests {
         }
     }
 
+    /// The cancel lands with the run held between its first and second timed
+    /// repeats, so it's known to fall between two submissions; whether the
+    /// next one went ahead is read from the progress, never from a clock.
     @Test func cancellingTheTaskStopsBetweenSubmissions() async {
         // Thousands of short command buffers: a cancel lands at the next one.
         var long = quick
         long.repeats = 100_000
-        let started = Date()
+        let gate = ProgressGate(holdingAt: 2)
         let task = Task { () async -> GPUBenchmarkError? in
+            defer { gate.runEnded() }
             do throws(GPUBenchmarkError) {
-                _ = try await GPUBenchmark.measure(configuration: long, appVersion: "tests") { _ in }
+                _ = try await GPUBenchmark.measure(configuration: long, appVersion: "tests") { gate.report(fraction: $0.fraction) }
                 return nil
             } catch {
                 return error
             }
         }
-        try? await Task.sleep(for: .milliseconds(200))
+        let held = await gate.waitUntilHeld()
         task.cancel()
+        gate.open()
         let error = await task.value
-        #expect(error == .cancelled || (MTLCreateSystemDefaultDevice() == nil && error == .noDevice))
-        #expect(Date().timeIntervalSince(started) < 5)
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            // Without Metal, a run says so rather than failing some other way.
+            #expect(error == .noDevice)
+            return
+        }
+        #expect(held, "the run finished its first timed repeat")
+        #expect(error == .cancelled)
+        #expect(gate.reportsAfterHold == 0, "the submission after the cancel went ahead")
     }
 
     @Test func summarisesRepeats() {
