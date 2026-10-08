@@ -163,8 +163,8 @@ struct CPUBenchmarkTests {
         #expect(held, "the run reached its first timed repeat")
         #expect(await task.value == .cancelled)
         // Its one worker had 30 s to run: it saw the cancel and stopped partway.
-        #expect(cancellation.stoppedWorkers == 1, "the repeat ran out its time instead of stopping when cancelled")
-        #expect(gate.reportsAfterHold == 0, "no repeat finished after the cancel")
+        #expect(cancellation.stoppedWorkers == 1, "the worker stops when cancelled rather than running out the repeat")
+        #expect(gate.reportsAfterHold == 0, "no repeat finishes after the cancel")
     }
 
     @Test func summarisesRepeats() {

@@ -263,9 +263,13 @@ public final class CPUBenchmarkCancellation: Sendable {
     /// prompt stop from one that waited out the pass.
     var stoppedWorkers: Int { state.withLock { $0.stoppedWorkers } }
 
-    /// A worker's check found the run cancelled, so it stops mid-pass.
-    func workerStopped() {
-        state.withLock { $0.stoppedWorkers += 1 }
+    /// Whether the run is cancelled, so the worker checking stops mid-pass;
+    /// counts it if so.
+    func stopsWorker() -> Bool {
+        state.withLock { state in
+            if state.cancelled { state.stoppedWorkers += 1 }
+            return state.cancelled
+        }
     }
 }
 
@@ -430,8 +434,7 @@ public enum CPUBenchmark {
                     if now >= deadline { break }
                     if now - lastCheck >= checkInterval {
                         lastCheck = now
-                        if let cancellation, cancellation.isCancelled {
-                            cancellation.workerStopped()
+                        if cancellation?.stopsWorker() == true {
                             tally.cancelled = true
                             break
                         }
