@@ -623,7 +623,11 @@ public struct HistoryComparison: Sendable, Equatable {
         let before = Dictionary(b.map { ($0.name, $0.value) }, uniquingKeysWith: max)
         return a.map { AppChange(name: $0.name, a: $0.value, b: before[$0.name] ?? 0) }
             .filter { $0.a - $0.b >= threshold }
-            .sorted { $0.a - $0.b == $1.a - $1.b ? $0.name < $1.name : $0.a - $0.b > $1.a - $1.b }
+            .sorted { (lhs: AppChange, rhs: AppChange) -> Bool in
+                let left = lhs.a - lhs.b
+                let right = rhs.a - rhs.b
+                return left == right ? lhs.name < rhs.name : left > right
+            }
             .prefix(count)
             .map { $0 }
     }
