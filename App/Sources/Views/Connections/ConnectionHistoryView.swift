@@ -157,7 +157,7 @@ struct ConnectionHistoryView: View {
     private func load() async {
         let query = Query(search: search, range: range)
         let end = Date.now
-        let start = range.start(before: end)
+        let start = IncidentNavigation.shared.search != nil ? end.addingTimeInterval(-FlightRecorder.retention) : range.start(before: end)
         do {
             guard let recorder = model.recorder else {
                 error = "The flight recorder could not open its database."
@@ -174,6 +174,11 @@ struct ConnectionHistoryView: View {
             let result = try await recorder.connectionHistoryResult(matching: search, from: start, to: end)
             guard !Task.isCancelled, query == Query(search: search, range: range) else { return }
             rows = result.lifetimes
+            if let socket = IncidentNavigation.shared.socket {
+                selection = rows.first { $0.id == socket }?.id
+                if selection != nil { coversList = true }
+                IncidentNavigation.shared.socket = nil
+            }
             coverage = result.coverage
             error = nil
             loaded = true

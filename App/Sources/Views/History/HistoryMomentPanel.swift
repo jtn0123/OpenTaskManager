@@ -38,6 +38,7 @@ struct HistoryMomentPanel: View {
             HStack(alignment: .center) {
                 HistoryMomentBadge(scrubber: scrubber)
                 Spacer()
+                IncidentInvestigateButton(scrubber: scrubber, latest: points.last?.time)
                 HistoryMomentAction(scrubber: scrubber, player: player)
             }
             Text(HistoryMoment.label(point.time, bucket: bucket))
@@ -112,6 +113,7 @@ struct HistoryMomentSummary: View {
                 .font(.subheadline)
                 .lineLimit(1)
                 Spacer(minLength: 0)
+                IncidentInvestigateButton(scrubber: scrubber, latest: points.last?.time)
                 HistoryMomentAction(scrubber: scrubber, player: player)
                 Button {
                     showsDetails.toggle()

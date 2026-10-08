@@ -2,6 +2,8 @@ import OTMKit
 
 struct Options {
     var command = "ps"
+    var at: String?
+    var incidentMinutes = 2
     var positional: [String] = []
     var count = 20
     var sort = "cpu"
@@ -48,6 +50,12 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--schedule": options.schedule = true
         case "--changes": options.changes = true
         case "--listeners": options.listeners = true
+        case "--at": options.at = iterator.next()
+        case "--minutes":
+            guard let minutes = iterator.next().flatMap(Int.init), (1...15).contains(minutes) else {
+                fail("--minutes takes a number from 1 to 15")
+            }
+            options.incidentMinutes = minutes
         case "--since": options.since = iterator.next()
         case "--range": options.range = iterator.next()
         case "--reconcile": options.reconcile = true

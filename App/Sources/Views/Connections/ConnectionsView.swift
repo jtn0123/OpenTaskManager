@@ -82,6 +82,9 @@ struct ConnectionsView: View {
         }
         // Runs only while the page is on screen; SwiftUI cancels it when the
         // page goes away, and restarts it when updates are paused or resumed.
+        .onChange(of: IncidentNavigation.shared.search, initial: true) { _, requested in
+            if let requested { search = requested; list = .history }
+        }
         .task(id: model.isPaused) {
             let opening = !watching
             watching = true

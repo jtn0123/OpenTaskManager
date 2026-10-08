@@ -104,6 +104,8 @@ USAGE:
                                  refuses runs that don't compare
   otm captures [--json]          The spike captures the app kept: what crossed,
                                  when, for how long, and the busiest processes
+  otm incident --at ISO8601_TIME [--minutes N] [--json]
+                                 One incident window, read-only, redacted evidence
   otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
                                  History's processes by name, path, label or PID
   otm startup [--source NAME] [--json]
@@ -119,6 +121,9 @@ let options = parseOptions(Array(CommandLine.arguments.dropFirst()))
 let monitor = SystemMonitor()
 
 switch options.command {
+case "incident":
+    await incidentCommand(options)
+
 case "help":
     print(usage)
 

@@ -64,9 +64,12 @@ public struct ProcessEnding: Sendable, Codable, Equatable {
     public let lastSeen: Date
     public let ended: Date?
     public let evidence: [Evidence]
+    /// Nil for uncapped inspector reads; true when an incident source query was cut.
+    public let evidenceCut: Bool?
 
     public init(lifetime: ProcessLifetime, reports: [Evidence] = [], events: [HistoryEvent] = [],
-                launchEvents: [LaunchHistoryEvent] = []) {
+                launchEvents: [LaunchHistoryEvent] = [], evidenceCut: Bool? = nil) {
+        self.evidenceCut = evidenceCut
         lastSeen = lifetime.lastSeen
         ended = lifetime.ended
         let end = lifetime.ended ?? lifetime.lastSeen
