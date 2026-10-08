@@ -51,8 +51,14 @@ test:
 	swift test --package-path $(KIT)
 	$(MAKE) test-app
 
+# xcodebuild runs the test bundle through a test runner that may not be
+# allowed into ~/Documents (or another protected folder holding the clone):
+# it then reports the bundle's executable "couldn't be located". So the
+# bundle is built in the temporary folder, one per checkout.
+TEST_DERIVED ?= $(or $(TMPDIR),/tmp/)OpenTaskManagerLogicTests-$(notdir $(CURDIR))
+
 test-app: generate
-	xcodebuild -project $(PROJECT) -scheme $(TEST_SCHEME) -configuration Debug -derivedDataPath $(DERIVED) -destination "$(DEST)" -quiet test
+	xcodebuild -project $(PROJECT) -scheme $(TEST_SCHEME) -configuration Debug -derivedDataPath "$(TEST_DERIVED)" -destination "$(DEST)" -quiet test
 
 coverage:
 	bash scripts/coverage.sh

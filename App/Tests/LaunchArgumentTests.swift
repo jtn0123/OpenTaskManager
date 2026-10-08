@@ -3,38 +3,32 @@ import Testing
 
 @MainActor
 struct LaunchArgumentTests {
-    @Test func savedAndRegisteredValuesAreNotLaunchRequests() throws {
+    @Test func savedValuesAreNotLaunchRequests() throws {
         try withIsolatedDefaults { defaults, _ in
             defaults.set("start", forKey: "openSpeedTest")
             defaults.set("gpu", forKey: "openResource")
             defaults.register(defaults: ["openPage": "Storage"])
-            #expect(LaunchArgument.string("openResource", defaults: defaults) == nil)
-            #expect(LaunchArgument.string("openPage", defaults: defaults) == nil)
-            #expect(!LaunchArgument.startsTest(on: "gpu", defaults: defaults))
+            #expect(LaunchArgument.string("openResource", in: [:]) == nil)
+            #expect(LaunchArgument.string("openPage", in: [:]) == nil)
+            #expect(!LaunchArgument.startsTest(on: "gpu", in: [:]))
+            // The run's own domain holds only its command line, which names none of these.
+            #expect(LaunchArgument.domain["openResource"] == nil)
+            #expect(LaunchArgument.domain["openSpeedTest"] == nil)
         }
     }
 
-    @Test func argumentDomainWinsAndDoesNotPersist() throws {
-        try withIsolatedDefaults { defaults, suite in
-            defaults.set("disk", forKey: "openResource")
-            defaults.setVolatileDomain(["openSpeedTest": "start", "openResource": "network"], forName: UserDefaults.argumentDomain)
-            #expect(LaunchArgument.string("openResource", defaults: defaults) == "network")
-            #expect(LaunchArgument.startsTest(on: "network", defaults: defaults))
-            #expect(!LaunchArgument.startsTest(on: "cpu", defaults: defaults))
-            #expect(defaults.persistentDomain(forName: suite)?["openResource"] as? String == "disk")
-            #expect(defaults.persistentDomain(forName: suite)?["openSpeedTest"] == nil)
-            defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
-            #expect(!LaunchArgument.startsTest(on: "network", defaults: defaults))
-        }
+    @Test func argumentsNameTheDetailWhoseTestStarts() {
+        let arguments: [String: Any] = ["openSpeedTest": "start", "openResource": "network"]
+        #expect(LaunchArgument.string("openResource", in: arguments) == "network")
+        #expect(LaunchArgument.startsTest(on: "network", in: arguments))
+        #expect(!LaunchArgument.startsTest(on: "cpu", in: arguments))
+        #expect(!LaunchArgument.startsTest(on: "network", in: [:]))
     }
 
-    @Test func missingResourceUsesCPUAndNonStringFlagsAreIgnored() throws {
-        try withIsolatedDefaults { defaults, _ in
-            defaults.setVolatileDomain(["openSpeedTest": "start", "openResource": true], forName: UserDefaults.argumentDomain)
-            #expect(LaunchArgument.string("openResource", defaults: defaults) == nil)
-            #expect(LaunchArgument.startsTest(on: "cpu", defaults: defaults))
-            defaults.setVolatileDomain(["openSpeedTest": true], forName: UserDefaults.argumentDomain)
-            #expect(!LaunchArgument.startsTest(on: "cpu", defaults: defaults))
-        }
+    @Test func missingResourceUsesCPUAndNonStringFlagsAreIgnored() {
+        let noResource: [String: Any] = ["openSpeedTest": "start", "openResource": true]
+        #expect(LaunchArgument.string("openResource", in: noResource) == nil)
+        #expect(LaunchArgument.startsTest(on: "cpu", in: noResource))
+        #expect(!LaunchArgument.startsTest(on: "cpu", in: ["openSpeedTest": true]))
     }
 }

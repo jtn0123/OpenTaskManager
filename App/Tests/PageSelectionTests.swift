@@ -6,19 +6,18 @@ import Testing
 struct PageSelectionTests {
     @Test func openingReadsTheSavedPageWithoutWritingIt() throws {
         try withIsolatedDefaults { defaults, suite in
-            let fresh = PageSelection(defaults: defaults)
+            let fresh = PageSelection(defaults: defaults, arguments: [:])
             #expect(fresh.page == .overview)
             #expect(defaults.persistentDomain(forName: suite)?["page"] == nil)
             defaults.set("History", forKey: "page")
-            #expect(PageSelection(defaults: defaults).page == .history)
+            #expect(PageSelection(defaults: defaults, arguments: [:]).page == .history)
         }
     }
 
     @Test func openPageWinsOverPageAndSavedSettings() throws {
         try withIsolatedDefaults { defaults, suite in
             defaults.set("Processes", forKey: "page")
-            defaults.setVolatileDomain(["openPage": "Storage", "page": "Apps"], forName: UserDefaults.argumentDomain)
-            #expect(PageSelection(defaults: defaults).page == .storage)
+            #expect(PageSelection(defaults: defaults, arguments: ["openPage": "Storage", "page": "Apps"]).page == .storage)
             #expect(defaults.persistentDomain(forName: suite)?["page"] as? String == "Processes")
         }
     }
@@ -26,37 +25,31 @@ struct PageSelectionTests {
     @Test func pageArgumentOnlySetsTheStartingPageAndChangesStillSave() throws {
         try withIsolatedDefaults { defaults, suite in
             defaults.set("Processes", forKey: "page")
-            defaults.setVolatileDomain(["page": "History"], forName: UserDefaults.argumentDomain)
-            let selection = PageSelection(defaults: defaults)
+            let selection = PageSelection(defaults: defaults, arguments: ["page": "History"])
             #expect(selection.page == .history)
             selection.page = .users
             #expect(selection.page == .users)
-            // The argument domain still masks the saved setting. Read the suite itself.
-            #expect(defaults.string(forKey: "page") == "History")
             #expect(defaults.persistentDomain(forName: suite)?["page"] as? String == "Users")
-            defaults.removeVolatileDomain(forName: UserDefaults.argumentDomain)
-            #expect(PageSelection(defaults: defaults).page == .users)
+            #expect(PageSelection(defaults: defaults, arguments: [:]).page == .users)
         }
     }
 
     @Test func invalidExplicitPageDoesNotFallBackToTheSavedPage() throws {
         try withIsolatedDefaults { defaults, _ in
             defaults.set("Processes", forKey: "page")
-            defaults.setVolatileDomain(["openPage": "unknown"], forName: UserDefaults.argumentDomain)
-            #expect(PageSelection(defaults: defaults).page == .overview)
+            #expect(PageSelection(defaults: defaults, arguments: ["openPage": "unknown"]).page == .overview)
         }
     }
 
     @Test func selectionsNeverFollowDefaultsOrEachOther() throws {
         try withIsolatedDefaults { defaults, _ in
             defaults.set("Processes", forKey: "page")
-            let first = PageSelection(defaults: defaults)
-            let second = PageSelection(defaults: defaults)
+            let first = PageSelection(defaults: defaults, arguments: [:])
+            let second = PageSelection(defaults: defaults, arguments: [:])
             first.page = .storage
             #expect(second.page == .processes)
-            #expect(PageSelection(defaults: defaults).page == .storage)
+            #expect(PageSelection(defaults: defaults, arguments: [:]).page == .storage)
             defaults.set("Apps", forKey: "page")
-            defaults.setVolatileDomain(["openPage": "History"], forName: UserDefaults.argumentDomain)
             NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: defaults)
             #expect(first.page == .storage)
             #expect(second.page == .processes)
@@ -66,7 +59,7 @@ struct PageSelectionTests {
     @Test func assigningTheSamePageDoesNotOverwriteAnotherCopiesSavedChoice() throws {
         try withIsolatedDefaults { defaults, _ in
             defaults.set("History", forKey: "page")
-            let selection = PageSelection(defaults: defaults)
+            let selection = PageSelection(defaults: defaults, arguments: [:])
             defaults.set("Storage", forKey: "page")
             selection.page = .history
             #expect(defaults.string(forKey: "page") == "Storage")

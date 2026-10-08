@@ -21,9 +21,12 @@ final class PageSelection {
         }
     }
 
-    init(defaults: UserDefaults = .standard) {
+    /// `arguments` is the launch argument domain, which only names the
+    /// starting page; `defaults` holds the saved one.
+    init(defaults: UserDefaults = .standard, arguments: [String: Any] = LaunchArgument.domain) {
         self.defaults = defaults
-        page = Page.starting(openPage: defaults.string(forKey: "openPage"), savedPage: defaults.string(forKey: Self.key))
+        let named = LaunchOptions.string("openPage", in: arguments) ?? LaunchOptions.string(Self.key, in: arguments)
+        page = Page.starting(openPage: named, savedPage: defaults.string(forKey: Self.key))
     }
 }
 

@@ -26,8 +26,13 @@ Manager OG or any other proprietary task manager.
   or `BUNDLE_LOADER`. The project keeps XcodeGen's project presets (including
   warnings) and sets target paths explicitly to avoid its test-host preset.
   Tests inject isolated defaults suites or temporary
-  folders, never the user's settings or Application Support. Keep pure rules
-  in OTMKit; the app tests pin persistence, observation and framework wiring.
+  folders, never the user's settings or Application Support, and pass launch
+  arguments as dictionaries (`LaunchArgument.domain` is the default): the
+  argument domain belongs to the whole test process, so changing it leaks
+  into other tests. The bundle builds under `$TMPDIR` (`TEST_DERIVED`): run
+  from ~/Documents, xcodebuild's test runner couldn't load it ("executable
+  couldn't be located"). Keep pure rules in OTMKit; the app tests pin
+  persistence, observation and framework wiring.
 
 ## Layout
 
