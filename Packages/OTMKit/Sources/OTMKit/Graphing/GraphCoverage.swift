@@ -70,9 +70,28 @@ extension GraphCoverage {
     /// 30 s at most. Past the first step, what's collected fills at least
     /// half the width. Never under 2, never over `span`.
     public static func fittedCapacity(samples: Int, span: Int) -> Int {
+        fittedCapacity(samples: samples, span: span, steps: fitSteps, of: 30)
+    }
+
+    /// The windows a short graph (the Overview's two minutes) steps through,
+    /// in 24ths of the full one: 10, 20, 30 and 45 s, then 1, 1.5 and 2 min.
+    /// Fewer, rounder steps than `fitSteps`, as its window fills in two
+    /// minutes and each step relabels every graph on the page.
+    static let shortFitSteps = [2, 4, 6, 9, 12, 18, 24]
+
+    /// Samples across a short graph that always fits what's been collected,
+    /// as the Overview's do: `fittedCapacity` in `shortFitSteps`. Past the
+    /// first step, what's collected fills at least half the width.
+    public static func shortFittedCapacity(samples: Int, span: Int) -> Int {
+        fittedCapacity(samples: samples, span: span, steps: shortFitSteps, of: 24)
+    }
+
+    /// The first of `steps`, each that many `of`ths of `span`, that holds
+    /// `samples`. Never under 2, never over `span`.
+    private static func fittedCapacity(samples: Int, span: Int, steps: [Int], of parts: Int) -> Int {
         let span = max(span, 2)
-        for step in fitSteps {
-            let capacity = max(Int((Double(span * step) / 30).rounded()), 2)
+        for step in steps {
+            let capacity = max(Int((Double(span * step) / Double(parts)).rounded()), 2)
             if capacity >= samples { return min(capacity, span) }
         }
         return span

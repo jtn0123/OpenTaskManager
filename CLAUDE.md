@@ -41,7 +41,9 @@ Manager OG or any other proprietary task manager.
   Apps page and `otm apps`, and System/AppRemoval finds what an app keeps in
   your Library for its Move to Trash review (tests use a fake home, never
   yours; items go through `NSWorkspace.recycle`, never rm); Layout/ holds the width maths for the details
-  pane, `SplitMath`, and the process table's columns, `ColumnFit`;
+  pane, `SplitMath`, the process table's columns, `ColumnFit`, and the
+  Overview's per-core graphs, `CoreGrid` (core types side by side when they
+  fit one line, otherwise rows of shared columns, a short last row balanced);
   System/NetworkQuality (parses `networkQuality -c`) and System/DiskSpeedTest (one
   unlinked temp file, F_NOCACHE reads, verified, cancellable) back the user-started
   speed tests on Performance's network and disk details (`SpeedTestStores`; nothing
@@ -210,14 +212,14 @@ Manager OG or any other proprietary task manager.
   what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
   Reveal in Finder); "Where the space is" (`StorageReconcilePanel`), folded at
   first, reads the volume's figures once per finished scan, off the main actor),
-  Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
+  Components/Graphs (graphs, bars, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
 
 - Don't attach SwiftUI `.animation` or `.contentTransition` to values that
   change every tick. Each animation frame re-runs layout for the whole window;
   on the Overview page this cost about 75% of a core. Animate with Core
-  Animation layers instead (see `RingGaugeView` and `CoreTileRowView`), which run
+  Animation layers instead (see `StreamGraphView` and `CardSurfaceView`), which run
   in the render server.
 - No blur filters or `.shadow` on views that redraw every tick. Fake the glow
   with wide translucent strokes, or use CALayer shadows with a `shadowPath`.
@@ -249,7 +251,13 @@ Manager OG or any other proprietary task manager.
   now"): `AppModel.graphSpan` on Performance, by-app graphs too (each process's
   history, and each app group's as it stood each tick, is as long, `Float`,
   appended in place, ranked by running totals, `ProcessTotal` of OTMKit's
-  `RunningSum`, never re-summed; a graph reads one ring per app), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
+  `RunningSum`, never re-summed; a graph reads one ring per app), `AppModel.shortGraphSpan` on Overview,
+  which always fits its window to what's been collected until it fills, in steps
+  of 10, 20, 30 and 45 s, then 1, 1.5 and 2 min (`GraphCoverage.shortFittedCapacity`),
+  so readings fill most of each graph from the start. The Overview's cards are
+  mostly their graphs (`OverviewGraphCard`: a headline, a key whose marks draw
+  each line as it's stroked, the graph across the card) and its Cores card a
+  small graph per logical CPU (`CoreGraphsCard`). Top lists (`TopAppsCard`) skip figures that read as zero and hold
   their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump;
   the idle line under the rows is a footer shorter than a row
   (`TopListRoom.height`), so a sparse list alone in its row stays compact.
@@ -482,8 +490,8 @@ the thermal state turns fair), so `-openResource benchmarks
   The toolbar's live badge speaks for the sampled metrics alone; Startup, Apps
   and Drivers say when their lists were read beside their Refresh
   (`InventoryRefresh`).
-- The CPU graphs (Performance's, per core type, per core, by app, and History's
-  CPU chart) share one Auto / 100% setting, `CPUGraphScale` (`cpuGraphScale`).
+- The CPU graphs (Performance's, per core type, per core, by app, the Overview's
+  CPU and Cores, and History's CPU chart) share one Auto / 100% setting, `CPUGraphScale` (`cpuGraphScale`).
   Auto bounds are `AutoScale` in OTMKit's Graphing/: round steps from 10%, grown
   at once, shrunk only after the data stays low; `AutoScaleBounds` keeps each
   live graph's between samples, and the top label says "auto scale". Keep
@@ -512,7 +520,7 @@ the thermal state turns fair), so `-openResource benchmarks
   the process inspector's facts `.font(.tableText)` (13 pt), all from
   `Graphs.swift`. Live graphs' axis labels and coverage caption are 12 pt
   too (`StreamGraphView.captionFont`), placed so the caption still fits under
-  the middle label of the Overview's 72-point graphs. The Thermals table's
+  the middle label of a 72-point graph. The Thermals table's
   rows are 13 pt (body), with its supporting text at 12 pt. Benchmarks'
   comparison table keeps that size in a narrow window by dropping a figure's
   variant under its name and stacking the two spreads (`ViewThatFits`). The

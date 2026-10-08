@@ -232,6 +232,9 @@ final class AppModel {
     @ObservationIgnored private let sensorFixture = SensorFixture.load()
     #endif
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
+    /// The kernel's share of the whole CPU (`CPUSample.system`), for the
+    /// Overview's CPU graph under the total.
+    private(set) var cpuSystemHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
     private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
     private(set) var memoryDetail = MemoryHistory()
@@ -439,6 +442,7 @@ final class AppModel {
         userHistory = histories
 
         cpuHistory.append(snapshot.cpu.usage)
+        cpuSystemHistory.append(snapshot.cpu.system)
         for (index, usage) in snapshot.cpu.coreUsage.enumerated() where index < coreHistory.count {
             coreHistory[index].append(usage)
         }
