@@ -429,6 +429,9 @@ struct HistoryView: View {
             let axis = timeAxis
             let gapMarks = HistoryGapMarks(gaps: gaps, points: points, bucket: bucket, domain: domain, plotWidth: plotWidth)
             HistoryComparisonSlot(scrubber: scrubber, recorder: source, bucket: bucket, revision: points.last?.time, pageScroll: pageScroll)
+            HistoryProcessSection(recorder: source, isFile: opened != nil, points: points, bucket: bucket, domain: domain, gaps: gapMarks,
+                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
+                .historySection("Processes", scroll: pageScroll)
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, bucket: bucket, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
