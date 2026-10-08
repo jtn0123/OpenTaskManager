@@ -99,7 +99,8 @@ struct ListenerReviewView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(change.listener.connection.processName).font(.tableText.weight(.semibold))
                 Text(change.reasons.map(\.label).joined(separator: " · ")).font(.explanation)
-                Text("\(change.id.transport.rawValue) · \(change.id.portLabel(seen: change.listener.connection.local.port)) · \(change.id.scope.label)")
+                let port = change.id.portLabel(seen: change.listener.connection.local.port)
+                Text("\(change.id.transport.rawValue) · \(port) · \(change.id.scope.label)")
                     .font(.tableText).monospacedDigit()
                 CopyableText(value: change.id.executable.path, splitsPath: true)
                 if let team = change.id.executable.teamIdentifier {

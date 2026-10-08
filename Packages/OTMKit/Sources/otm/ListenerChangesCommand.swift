@@ -36,7 +36,8 @@ func listenerChangesCommand(_ options: Options) async {
         if let baseline = report.baseline {
             print("Baseline reviewed \(baseline.reviewedAt.formatted()) with \(baseline.listeners.count) listeners")
             for change in report.changes {
-                print("\(change.id.transport.rawValue) \(change.id.portLabel(seen: change.listener.connection.local.port)) · \(change.id.scope.label) · \(change.id.executable.path)")
+                let port = change.id.portLabel(seen: change.listener.connection.local.port)
+                print("\(change.id.transport.rawValue) \(port) · \(change.id.scope.label) · \(change.id.executable.path)")
                 print("  " + change.reasons.map(\.label).joined(separator: "; "))
                 for holder in change.previousHolders { print("  Previously reviewed: " + holder) }
             }
