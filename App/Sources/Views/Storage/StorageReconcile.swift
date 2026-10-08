@@ -10,14 +10,17 @@ import SwiftUI
 /// read once per scan (`StorageStore.reconciliation`), never per tick.
 struct StorageReconcilePanel: View {
     let store: StorageStore
-    /// The details' natural height, so the scroll view around them is never
-    /// taller than they are, and scrolls only when the window is short.
+    let maximumHeight: Double
+    @State private var headerHeight: CGFloat = 40
+    /// The details' natural height is bounded by the room left after the map,
+    /// so this panel scrolls inside itself rather than squeezing the tiles.
     @State private var detailsHeight: CGFloat = 0
 
     var body: some View {
         let reconciliation = store.reconciliation
         VStack(alignment: .leading, spacing: 0) {
             header(reconciliation)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
             if store.showsReconciliation, let reconciliation {
                 Divider().padding(.horizontal, 12)
                 ScrollView {
@@ -26,7 +29,8 @@ struct StorageReconcilePanel: View {
                         .padding(.vertical, 12)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { detailsHeight = $0 }
                 }
-                .frame(maxHeight: detailsHeight)
+                .frame(height: StorageResultsLayout.reconciliationHeight(content: Double(detailsHeight),
+                                                                         available: maximumHeight, header: Double(headerHeight)))
             }
         }
         .background(CardSurface(tint: Theme.disk, glow: 0))

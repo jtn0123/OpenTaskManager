@@ -14,6 +14,8 @@ struct ConnectionHistoryView: View {
     @State private var isNarrow = false
     @State private var error: String?
     @State private var loaded = false
+    @State private var columns = TableColumnCustomization<ConnectionLifetime>()
+    @State private var hiddenToFit: Set<ConnectionHistoryColumn> = []
 
     private var selected: ConnectionLifetime? { rows.first { $0.id == selection } }
 
@@ -40,7 +42,8 @@ struct ConnectionHistoryView: View {
                     .padding(.bottom, 8)
                     .help(coverage.watchedWords)
             }
-            InspectorSplit(listMinimum: 480, wantsInspector: selected != nil, coversList: $coversList,
+            InspectorSplit(listMinimum: ConnectionHistoryColumn.tableMinimum(userHidden: []), wantsInspector: selected != nil,
+                           coversList: $coversList,
                            isNarrow: $isNarrow, widthKey: Settings.connectionInspectorWidth, backTitle: "Connection History") {
                 if let error {
                     ContentUnavailableView("History unavailable", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -79,37 +82,57 @@ struct ConnectionHistoryView: View {
     }
 
     private var historyTable: some View {
-        Table(rows, selection: $selection) {
+        Table(rows, selection: $selection, columnCustomization: $columns) {
             TableColumn("Process") { row in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.process.name).lineLimit(1).truncationMode(.middle)
-                    Text(verbatim: "PID \(row.socket.connection.pid)").font(.metadata).foregroundStyle(.secondaryText)
+                    Text(verbatim: row.socket.connection.historyIdentity)
+                        .font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
+                        .help(row.socket.connection.historyIdentity)
                 }
                 .help(row.process.path ?? row.process.name)
             }
+            .fitted(ConnectionHistoryColumn.process)
             TableColumn("Local → remote") { row in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(row.socket.connection.local.formatted)
-                    Text(row.socket.connection.remote?.formatted ?? "No remote endpoint").foregroundStyle(.secondaryText)
+                    EndpointLabel(endpoint: row.socket.connection.local)
+                    if let remote = row.socket.connection.remote {
+                        EndpointLabel(endpoint: remote).foregroundStyle(.secondaryText)
+                    } else {
+                        Text("No remote endpoint").foregroundStyle(.secondaryText)
+                    }
                 }
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .help(row.socket.connection.local.formatted + " → " + (row.socket.connection.remote?.formatted ?? "—"))
             }
-            TableColumn("Protocol") { Text($0.socket.connection.transport.rawValue) }.width(60)
+            .fitted(ConnectionHistoryColumn.endpoints)
+            TableColumn("Protocol") { Text($0.socket.connection.transport.rawValue) }
+                .fitted(ConnectionHistoryColumn.transport)
             TableColumn("First / last seen") { row in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(stamp(row.socket.firstSeen))
                     Text(stamp(row.socket.lastSeen)).foregroundStyle(.secondaryText)
                 }
             }
+            .fitted(ConnectionHistoryColumn.seen)
             TableColumn("How it ended") { row in
                 Text(row.endedWords(time: ConnectionClock.time)).lineLimit(3)
+                    .help(row.endedWords(time: ConnectionClock.time))
             }
+            .fitted(ConnectionHistoryColumn.ended)
         }
         .font(.tableText)
         .frame(minWidth: 0, maxWidth: .infinity)
         .fitsTableToRows(rows.count)
+        .background(TableColumnFitter<ConnectionHistoryColumn>(userHidden: [], hiddenToFit: $hiddenToFit))
+        .background(TableColumnSqueeze(columns: ConnectionHistoryColumn.allCases.count,
+                                       shown: ConnectionHistoryColumn.allCases.count - hiddenToFit.count))
+        .onChange(of: hiddenToFit, initial: true) {
+            for column in ConnectionHistoryColumn.allCases {
+                columns[visibility: column.rawValue] = hiddenToFit.contains(column) ? .hidden : .visible
+            }
+        }
         .contextMenu(forSelectionType: String.self) { ids in
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
                 Button("Show in History") { HistoryRecordingStore.shared.showConnectionMoment(row.socket.lastSeen) }
