@@ -57,19 +57,60 @@ public enum GraphFrameRate {
 /// faster than requested. Missed frames catch up by time, never by counting.
 public struct GraphFrameCadence: Sendable {
     public let rate: Double
+    public private(set) var nextFrameTime: Double
     private let start: Double
-    private var lastFrame = -1.0
 
     public init(rate: Double, start: Double) {
         self.rate = rate
         self.start = start
+        nextFrameTime = rate.isFinite && rate > 0 && start.isFinite ? start : .infinity
     }
 
     public mutating func takeFrame(at time: Double) -> Bool {
-        guard rate.isFinite, rate > 0, time.isFinite, start.isFinite, time >= start else { return false }
+        guard time >= nextFrameTime, time.isFinite else { return false }
         let frame = floor((time - start) * rate + 1e-7)
-        guard frame > lastFrame else { return false }
-        lastFrame = frame
+        // The same slack as the frame index keeps exact display boundaries
+        // due despite floating-point rounding. A missed frame never queues work.
+        nextFrameTime = start + (frame + 1 - 1e-7) / rate
         return true
+    }
+}
+
+/// A Hermite segment prepared once per sample. Horner's form needs only
+/// three multiplies and adds for a marker's y on each frame.
+public struct GraphMotionCurve: Sendable {
+    private let cubic: Double
+    private let quadratic: Double
+    private let linear: Double
+    private let constant: Double
+
+    public init(_ segment: GraphMotionSegment) {
+        cubic = 2 * (segment.start - segment.end) + segment.startTangent + segment.endTangent
+        quadratic = 3 * (segment.end - segment.start) - 2 * segment.startTangent - segment.endTangent
+        linear = segment.startTangent
+        constant = segment.start
+    }
+
+    public func value(at progress: Double) -> Double {
+        ((cubic * progress + quadratic) * progress + linear) * progress + constant
+    }
+}
+
+/// Cached timing for one sample's motion. A delayed frame reaches the
+/// current position immediately, and an expired sample settles exactly.
+public struct GraphMotionTiming: Sendable {
+    private let start: Double
+    private let inverseInterval: Double
+
+    public init(start: Double, interval: Double) {
+        self.start = start
+        inverseInterval = interval.isFinite && interval > 0 ? 1 / interval : 0
+    }
+
+    public func progress(at time: Double) -> Double {
+        guard inverseInterval > 0 else { return 1 }
+        let fraction = (time - start) * inverseInterval
+        if fraction < 0 { return 0 }
+        return fraction < 1 ? fraction : 1
     }
 }
