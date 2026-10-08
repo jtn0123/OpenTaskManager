@@ -106,6 +106,19 @@ public struct LaunchItemStatus: Hashable, Sendable, Comparable {
         }
     }
 
+    /// The detail in a narrow column, where the full one doesn't fit:
+    /// "exit 1", "SEGV", "3×". Nil for a PID, which the details give, so a
+    /// running job's cell says just "Running" there. Where even this doesn't
+    /// fit, the cell's tooltip (`summary`) keeps it.
+    public var compactDetail: String? {
+        switch execution {
+        case let .restarting(count): "\(count)×"
+        case let .crashed(signal): LaunchExitStatus.signalName(signal).map { String($0.dropFirst(3)) } ?? "signal \(signal)"
+        case let .failed(code): "exit \(code)"
+        case .running, .notRunning, .disabled, .notLoaded: nil
+        }
+    }
+
     /// Title and detail in one line: "Failed · exit code 1".
     public var summary: String {
         [title, detail].compactMap(\.self).joined(separator: " · ")

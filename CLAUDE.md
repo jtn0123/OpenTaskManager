@@ -123,7 +123,10 @@ Manager OG or any other proprietary task manager.
   a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
   running, Disabled, Not loaded) that the Status column, the details' header
   and the Apps page share, with launchd's Loaded or Not loaded on a line of
-  its own, never in its place; the CPU and Memory cells look launchd's PID up in the
+  its own, never in its place ("exit 1" where the column is narrow, the rest
+  in its tooltip); the details put Program right under it, and a notice
+  (`LaunchJobHealth.notice`) only where it adds something: what a known code
+  or a crash signal means, a failure before the run now, restarts seen; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
   Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
   the main actor when the page opens and on Refresh, then streams bundle sizes in
@@ -320,9 +323,10 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
-  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting):
-  Launches first, then Publisher, Kind, Memory and CPU, so Name and Status
-  keep their room; Kind says Agent or Daemon when narrow.
+  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
+  `StartupColumn`'s order (OTMKit's Layout/): Launches first, then Publisher,
+  Memory, CPU and last Kind, so Name and Status keep their room and a narrow
+  table still says Agent or Daemon.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its

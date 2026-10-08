@@ -151,18 +151,19 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// launchd's figures for the job, then what the property list says. The
-    /// arguments fold away and paths are a name over a folder, so nothing
-    /// here needs a scroll view of its own.
+    /// What it runs first, then a notice where the status line over it can't
+    /// say enough, launchd's figures for the job and what the property list
+    /// says. The arguments fold away and paths are a name over a folder, so
+    /// nothing here needs a scroll view of its own.
     private var details: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let headline = health.headline {
-                trouble(headline)
+            program
+            if let notice = health.notice(for: item, record: record, time: Self.clock) {
+                noticeView(notice)
             }
             facts
             if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
             launches
-            program
             labelled("Property list", item.plistPath)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -221,7 +222,9 @@ struct StartupItemDetail: View {
                 }
                 .font(.callout)
             }
-            FactRow(label: "Last exit", value: lastExit)
+            if let lastExit {
+                FactRow(label: "Last exit", value: lastExit)
+            }
             // A gap rather than a rule, which would read as another region.
             Color.clear.frame(height: 2).gridCellUnsizedAxes(.horizontal)
             FactRow(label: "Kind", value: item.scope.title)
@@ -326,22 +329,25 @@ struct StartupItemDetail: View {
             .gridColumnAlignment(.leading)
     }
 
-    /// What's wrong, in a sentence or two, first in the details.
-    private func trouble(_ headline: String) -> some View {
-        Label {
+    /// What the status line can't say, in a sentence or two: what a known
+    /// exit code or a crash means, in a quiet panel, since the status line
+    /// already carries the warning; or, in a warning panel, a failure the
+    /// status line doesn't show (the job runs again) or restarts seen.
+    private func noticeView(_ notice: LaunchJobNotice) -> some View {
+        let explainsStatus = health.tellsLastExit && item.pid == nil
+        let tint = explainsStatus ? Color.secondary : LaunchJobHealth.tint
+        return Label {
             VStack(alignment: .leading, spacing: 3) {
-                Text(headline).font(.callout.weight(.semibold))
-                if let explanation = health.explanation(for: item, record: record, time: Self.clock) {
-                    Text(explanation).font(.explanation)
-                }
+                Text(notice.headline).font(.callout.weight(.semibold))
+                Text(notice.text).font(.explanation)
             }
             .textSelection(.enabled)
         } icon: {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LaunchJobHealth.tint)
+            Image(systemName: explainsStatus ? "info.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(tint)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LaunchJobHealth.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: Text
@@ -377,8 +383,12 @@ struct StartupItemDetail: View {
         }
     }
 
-    private var lastExit: String {
+    /// launchd's last exit and its reason. Where the status line or the
+    /// notice already gives the exit ("Failed · exit code 1"), only a reason
+    /// launchd adds, or nothing.
+    private var lastExit: String? {
         let reason = service?.lastExitReason.map(LaunchServiceInfo.describe(exitReason:))
+        if health.tellsLastExit { return reason }
         if let exit = item.job?.lastExit { return [exit.description, reason].compactMap(\.self).joined(separator: " · ") }
         return item.job == nil ? "—" : "Hasn't exited"
     }

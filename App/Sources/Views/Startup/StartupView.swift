@@ -412,6 +412,10 @@ private struct SummaryCard: View {
 
 // MARK: - Table
 
+/// The columns, their widths and the order they give way in are
+/// `StartupColumn` in OTMKit: Launches, Publisher, Memory, CPU, then Kind.
+extension StartupColumn: FittingColumn {}
+
 private struct StartupTable: View {
     typealias Column = TableColumnContent<StartupRow, KeyPathComparator<StartupRow>>
 
@@ -551,6 +555,8 @@ private struct StartupTable: View {
         .fitted(StartupColumn.kind)
     }
 
+    /// "Failed exit code 1", "Failed exit 1" in a narrow column, and the
+    /// whole of it in the tooltip where only "Failed" fits.
     private var statusColumn: some Column {
         TableColumn("Status", value: \.status) { row in
             LaunchStateLabel(status: row.status)
@@ -656,23 +662,27 @@ private struct ThirdPartyBadge: View {
 }
 
 /// What a job is doing: a coloured dot and the state, with its detail (the
-/// PID, the exit code, the signal) where there's room. A job that needs a
-/// look has a warning sign for its dot. The table's Status column and the
-/// details' header both show this, so the two never disagree; whether
-/// launchd has the job loaded is the header's line of its own.
+/// PID, the exit code, the signal) where there's room, shortened ("exit 1")
+/// where there's less. A job that needs a look has a warning sign for its
+/// dot. The table's Status column and the details' header both show this,
+/// so the two never disagree; whether launchd has the job loaded is the
+/// header's line of its own.
 struct LaunchStateLabel: View {
     var status: LaunchItemStatus
     @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            label(showsDetail: true)
-            label(showsDetail: false)
+            label(detail: status.detail)
+            if let compact = status.compactDetail {
+                label(detail: compact)
+            }
+            label(detail: nil)
         }
         .accessibilityElement(children: .combine)
     }
 
-    private func label(showsDetail: Bool) -> some View {
+    private func label(detail: String?) -> some View {
         HStack(spacing: 6) {
             if status.needsAttention {
                 // On a selected row it turns white like the row's text.
@@ -683,7 +693,7 @@ struct LaunchStateLabel: View {
                 Circle().fill(status.color).frame(width: 7, height: 7)
             }
             Text(status.title)
-            if showsDetail, let detail = status.detail {
+            if let detail {
                 // Verbatim, so a PID isn't grouped like a quantity ("4,673").
                 Text(verbatim: detail).foregroundStyle(.secondaryText).monospacedDigit()
             }
