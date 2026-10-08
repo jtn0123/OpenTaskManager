@@ -1,4 +1,5 @@
 import AppKit
+import OTMKit
 import SwiftUI
 
 /// A number that counts to each new value instead of jumping to it.
@@ -43,9 +44,9 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
     private var centered = false
     private var pieces: [CALayer] = []
     private var shown: Double?
-    private var from = 0.0
     private var target = 0.0
-    private var start: CFTimeInterval = 0
+    private var timing = GraphMotionTiming(start: 0, interval: AnimatedNumberView.duration)
+    private var curve = GraphMotionCurve(GraphMotionSegment(start: 0, end: 0, startTangent: 0, endTangent: 0))
     private var renderedText = ""
     private var clock: WindowAnimationClock?
     var animationView: NSView? { self }
@@ -93,8 +94,8 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
             draw(value, force: false)
             return
         }
-        from = current
-        start = CACurrentMediaTime()
+        timing = GraphMotionTiming(start: CACurrentMediaTime(), interval: Self.duration)
+        curve = GraphMotionCurve(GraphMotionSegment(start: current, end: value, startTangent: 3 * (value - current), endTangent: 0))
         startTicking()
     }
 
@@ -120,8 +121,12 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
     }
 
     private func startTicking() {
-        clock = WindowAnimationClock.start(self)
-        if clock == nil { animationStopped() }
+        if let next = WindowAnimationClock.start(self) {
+            clock = next
+        } else {
+            stopTicking()
+            animationStopped()
+        }
     }
 
     private func stopTicking() {
@@ -132,9 +137,8 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
     func frameRate(displayRate: Double) -> Double { min(30, displayRate) }
 
     func animate(at time: CFTimeInterval) -> Bool {
-        let progress = min((time - start) / Self.duration, 1)
-        let eased = 1 - pow(1 - progress, 3)
-        let value = from + (target - from) * eased
+        let progress = timing.progress(at: time)
+        let value = progress == 1 ? target : curve.value(at: progress)
         shown = value
         draw(value, force: false)
         return progress < 1

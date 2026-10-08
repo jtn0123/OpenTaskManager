@@ -303,8 +303,17 @@ Manager OG or any other proprietary task manager.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
   per sample and `StreamGraphMotion` moves the scroller and head markers with
   actions disabled between samples. `WindowAnimationClock` shares one display
-  link per visible window with counting numbers, gates each client's commits
-  even on fixed-refresh displays, and stops when idle or occluded. Rate maths
+  link per visible window with counting numbers, batches equal-rate clients
+  under one cached deadline, and moves all due batches in one transaction even
+  on fixed-refresh displays. Rates, batch membership and the link's rate are
+  refreshed between frames on samples or display changes, never per frame;
+  finishing clients are removed after the frame. The clock compares batch
+  deadlines, then walks only due clients and their prepared marker curves over
+  buffer pointers, with no view or visibility queries, dictionaries or array
+  copies. Scroll, window and accessibility notifications handle visibility and
+  Reduce Motion; the link stops when idle or occluded. Graph frames allocate
+  no work arrays; counting numbers still format and compose glyphs only when
+  due, with their existing glyph-cache allocations and view reads. Rate maths
   lives in OTMKit's `GraphMotion`: about one device pixel per frame, 4–60 fps,
   capped by the screen, including a head marker's vertical curve speed. The
   scroller is rasterized; line bloom is a wide translucent stroke, and the
