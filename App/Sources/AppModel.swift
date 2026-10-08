@@ -215,6 +215,11 @@ final class AppModel {
     let topology: CPUTopology
 
     private(set) var snapshot: SystemSnapshot?
+    /// The uptime of the sample `appGroups` were built from, unobserved: for
+    /// a view their change redraws that must tell one sample from the next
+    /// (`TopAppsCard`). Reading `snapshot` there as well drew it about twice
+    /// a tick.
+    @ObservationIgnored private(set) var appGroupsUptime: TimeInterval?
     /// Temperatures and fans, read alongside each snapshot. Empty in a VM.
     private(set) var sensors: SensorSample?
     private(set) var sensorHistory = SensorHistory()
@@ -491,6 +496,7 @@ final class AppModel {
         processMemoryHistory.append(totalMemory)
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
+        appGroupsUptime = snapshot.uptime
         appendGroupHistories()
         record(snapshot, sensorsRead: fixture(or: sensors)?.isEmpty == false, appeared: changes.appeared, gone: changes.gone)
     }

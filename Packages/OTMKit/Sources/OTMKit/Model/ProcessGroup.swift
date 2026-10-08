@@ -152,7 +152,8 @@ public struct ProcessGroupFigures: Sendable, Hashable {
     /// Members macOS shows only CPU and memory for (another user's or the
     /// system's): their disk, GPU and power aren't in the sums.
     public var restrictedCount = 0
-    /// Share of the GPU's time; nil when no member has a GPU reading.
+    /// The members' GPU time over the time that passed, added up; nil when
+    /// no member has a GPU reading.
     public var gpuFraction: Double?
     /// Watts; nil when no member has a power reading, which is missing
     /// data rather than a measured 0 W.

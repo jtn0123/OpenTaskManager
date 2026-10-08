@@ -147,6 +147,39 @@ struct GraphMathTests {
         #expect(GraphMath.finitePeak([-3, -1]) == -1)
     }
 
+    @Test func aSampleOnGrowsTheWindowOrSlidesAFullOne() {
+        // Filling: one more value at the end.
+        #expect(GraphMath.advancesOneSample(from: [1, 2], to: [1, 2, 5]))
+        #expect(GraphMath.advancesOneSample(from: [], to: [4]))
+        // Full: the oldest gone as the newest comes.
+        #expect(GraphMath.advancesOneSample(from: [1, 2, 3], to: [2, 3, 9]))
+        // An unreadable value is still the same value a sample later.
+        #expect(GraphMath.advancesOneSample(from: [.nan, 2, 3], to: [2, 3, .nan]))
+        #expect(GraphMath.advancesOneSample(from: [1, .nan], to: [1, .nan, 0]))
+    }
+
+    @Test func valuesChangedInPlaceOrTwoSamplesOnAreNotOneSampleOn() {
+        // Rescaled in place (a setting), not moved on.
+        #expect(!GraphMath.advancesOneSample(from: [1, 2, 3], to: [2, 4, 6]))
+        // Two samples on, or fewer values.
+        #expect(!GraphMath.advancesOneSample(from: [1, 2, 3], to: [3, 4, 5]))
+        #expect(!GraphMath.advancesOneSample(from: [1, 2], to: [1, 2, 3, 4]))
+        #expect(!GraphMath.advancesOneSample(from: [1, 2, 3], to: [2, 3]))
+        #expect(!GraphMath.advancesOneSample(from: [], to: []))
+    }
+
+    @Test func aGraphGainingALineStillAdvancesOnTheLinesItKeeps() {
+        // An app joins a by-app graph: the first app's line moved on.
+        #expect(GraphMath.advances(from: [[1, 2, 3], [5, 5, 5]], to: [[2, 3, 4], [9, 9, 9], [5, 5, 6]]))
+        // The second app leaves: the first one's line moved on.
+        #expect(GraphMath.advances(from: [[1, 2, 3], [7, 7, 7]], to: [[2, 3, 4]]))
+        // The first app leaves, so the line in its place was another's.
+        #expect(!GraphMath.advances(from: [[7, 8, 9], [1, 2, 3]], to: [[1, 2, 3]]))
+        // Every line changed in place: a redraw, not a sample.
+        #expect(!GraphMath.advances(from: [[1, 2, 3], [3, 4, 5]], to: [[2, 4, 6], [6, 8, 10], [1, 1, 1]]))
+        #expect(!GraphMath.advances(from: [], to: [[1]]))
+    }
+
     @Test func timeTicksLandOnRoundTimesAwayFromTheEnds() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(identifier: "UTC"))
