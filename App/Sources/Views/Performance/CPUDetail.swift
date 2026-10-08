@@ -234,13 +234,13 @@ struct CPUDetail: View {
         }
         let tiles = runs.flatMap { run in
             run.cpus.map { cpu in
-                CoreTile(cpu: cpu, kind: several ? String(run.tier.name.prefix(1)) : "",
-                         kindName: several ? "\(run.tier.name) core" : "", color: Theme.tier(run.tier.level),
-                         busy: histories[cpu], kernel: kernels.indices.contains(cpu) ? kernels[cpu] : [])
+                CoreGraphGrid.Tile(cpu: cpu, kind: several ? String(run.tier.name.prefix(1)) : "",
+                                   kindName: several ? "\(run.tier.name) core" : "", color: Theme.tier(run.tier.level),
+                                   busy: histories[cpu], kernel: kernels.indices.contains(cpu) ? kernels[cpu] : [])
             }
         }
-        return CoreGrid(tiles: tiles, groups: runs.map(\.cpus.count).filter { $0 > 0 }, top: top, height: height,
-                        kernelColor: Theme.wired)
+        return CoreGraphGrid(tiles: tiles, groups: runs.map(\.cpus.count).filter { $0 > 0 }, top: top, height: height,
+                             kernelColor: Theme.wired)
     }
 }
 

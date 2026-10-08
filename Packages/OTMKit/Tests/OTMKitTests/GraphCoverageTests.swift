@@ -75,6 +75,32 @@ struct GraphCoverageTests {
         #expect(!GraphCoverage.canFit(samples: 302, span: 300))
     }
 
+    @Test(arguments: [
+        (0, 10), (1, 10), (10, 10), (11, 20), (20, 20), (21, 30), (31, 45), (45, 45), (46, 60), (61, 90), (90, 90),
+        (91, 120), (120, 120), (302, 120),
+    ])
+    func shortWindowStepsInRoundSpans(samples: Int, expected: Int) {
+        #expect(GraphCoverage.shortFittedCapacity(samples: samples, span: 120) == expected)
+    }
+
+    @Test func shortWindowHoldsEverySampleAndFillsAtLeastHalfPastTheFirstStep() {
+        var previous = 0
+        for samples in 1...120 {
+            let capacity = GraphCoverage.shortFittedCapacity(samples: samples, span: 120)
+            #expect(capacity >= samples && capacity <= 120)
+            #expect(capacity >= previous, "a window never shrinks as samples come in")
+            if samples > 10 { #expect(Double(samples) / Double(capacity) > 0.5) }
+            previous = capacity
+        }
+        #expect(GraphCoverage.shortFittedCapacity(samples: 0, span: 1) == 2)
+    }
+
+    @Test func aShortWindowsCaptionNamesItsStep() {
+        let capacity = GraphCoverage.shortFittedCapacity(samples: 25, span: 120)
+        #expect(GraphCoverage(samples: 25, capacity: capacity, interval: 1).caption == "25 s collected · 30 s window")
+        #expect(GraphCoverage(samples: 120, capacity: GraphCoverage.shortFittedCapacity(samples: 120, span: 120), interval: 1).caption == nil)
+    }
+
     @Test func aFittedCaptionNamesTheFittedWindow() {
         let capacity = GraphCoverage.fittedCapacity(samples: 35, span: 300)
         #expect(GraphCoverage(samples: 35, capacity: capacity, interval: 1).caption == "35 s collected · 40 s window")

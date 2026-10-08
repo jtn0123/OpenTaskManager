@@ -226,7 +226,8 @@ final class AppModel {
     @ObservationIgnored private let sensorFixture = SensorFixture.load()
     #endif
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
-    /// The whole CPU's kernel (system) share, drawn as a line in its busy time.
+    /// The kernel's share of the whole CPU (`CPUSample.system`), for the
+    /// Overview's CPU graph under the total and the CPU page's line in its busy time.
     private(set) var cpuSystemHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
     /// Each logical CPU's kernel share, indexed as `coreHistory`.
