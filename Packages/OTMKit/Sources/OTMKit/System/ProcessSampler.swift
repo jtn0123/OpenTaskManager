@@ -15,6 +15,7 @@ final class ProcessSampler {
         let interval: TimeInterval
         let gpuTime: [Int32: UInt64]
         let restrictedLive: Bool
+        let details: Bool
     }
 
     private struct Key: Hashable {
@@ -54,7 +55,8 @@ final class ProcessSampler {
         return Self.rusage(getpid(), &usage, flavor: RUSAGE_INFO_V6)
     }()
 
-    func sample(interval: TimeInterval, gpuTime: [Int32: UInt64], restrictedLive: Bool = true) -> [ProcessSample] {
+    func sample(interval: TimeInterval, gpuTime: [Int32: UInt64], restrictedLive: Bool = true,
+                details: Bool = true) -> [ProcessSample] {
         let kernelList = Self.listProcesses()
         var samples: [ProcessSample] = []
         samples.reserveCapacity(kernelList.count)
@@ -63,7 +65,7 @@ final class ProcessSampler {
 
         for (index, info) in kernelList.enumerated() {
             let key = Key(pid: info.pid, start: info.startMicroseconds)
-            guard let native = readNative(info.pid) else {
+            guard let native = readNative(info.pid, details: details) else {
                 restricted.append(index)
                 continue
             }
@@ -94,7 +96,8 @@ final class ProcessSampler {
         }
 
         if includeRestricted, !restricted.isEmpty {
-            appendRestricted(kernelList, indices: restricted, tick: Tick(interval: interval, gpuTime: gpuTime, restrictedLive: restrictedLive),
+            let tick = Tick(interval: interval, gpuTime: gpuTime, restrictedLive: restrictedLive, details: details)
+            appendRestricted(kernelList, indices: restricted, tick: tick,
                              current: &current, samples: &samples)
         } else {
             restrictedCache = RestrictedProcessCache()
@@ -199,7 +202,7 @@ final class ProcessSampler {
         let time = ProcessInfo.processInfo.systemUptime
         let reads = restrictedCadence.shouldRead(at: time, live: tick.restrictedLive)
         let fallback = reads ? PSReader.read() : [:]
-        let threads = reads && threadCadence.shouldRead(at: time, live: false) ? PSReader.readThreadCounts() : [:]
+        let threads = reads && tick.details && threadCadence.shouldRead(at: time, live: false) ? PSReader.readThreadCounts() : [:]
         var identities: Set<ProcessIdentity> = []
         for index in indices {
             let info = list[index]
@@ -242,11 +245,14 @@ final class ProcessSampler {
         var neuralMemoryPeak: UInt64?
     }
 
-    private func readNative(_ pid: Int32) -> Native? {
+    private func readNative(_ pid: Int32, details: Bool) -> Native? {
         // Each local C record has the flavor's exact size and stays live until the synchronous kernel call returns.
         var task = proc_taskinfo()
         let size = Int32(MemoryLayout<proc_taskinfo>.size)
-        guard pid > 0, unsafe proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) == size else { return nil }
+        guard pid > 0 else { return nil }
+        // History and spikes need the rusage figures, not a second kernel
+        // call for resident memory, running threads and thread counts.
+        if details, unsafe proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) != size { return nil }
 
         if supportsV6 {
             var usage = rusage_info_v6()

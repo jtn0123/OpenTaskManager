@@ -85,7 +85,7 @@ struct NetworkAppsSection: View {
             + [GraphSeries(values: other, color: Theme.other)]
         let peak = ranking.rows.compactMap { history.latest[$0]?.total }.max() ?? 0
         // The throughput graph's window, in the store's readings.
-        let span = NetworkActivityStore.graphSpan(interval: model.updateSpeed.rawValue, samples: window)
+        let span = NetworkActivityStore.graphSpan(interval: model.samplingInterval, samples: window)
         return VStack(alignment: .leading, spacing: 10) {
             VStack(spacing: 3) {
                 GraphView(series: series, capacity: span, glows: true, stacked: true,

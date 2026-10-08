@@ -14,6 +14,8 @@ final class UserUsageStore {
         self.historyCapacity = historyCapacity
     }
 
+    func resetHistories() { histories = [:] }
+
     func ingest(_ processes: [ProcessSample], interval: Double, live: Bool) {
         if live { users = UserUsageBuilder.build(processes) }
         guard interval > 0 else { return }

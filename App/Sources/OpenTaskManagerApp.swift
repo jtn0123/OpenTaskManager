@@ -11,8 +11,9 @@ struct OpenTaskManagerApp: App {
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
             ContentView()
+                .samplingDemand(.window)
                 .environment(model)
-                .environment(\.sampleInterval, model.updateSpeed.rawValue)
+                .environment(\.sampleInterval, model.samplingInterval)
                 .environment(\.streamsGraphs, streamGraphs)
                 .frame(minWidth: 820, minHeight: 480)
         }
@@ -36,13 +37,15 @@ struct OpenTaskManagerApp: App {
 
         Settings {
             SettingsView()
+                .samplingDemand(.window)
                 .environment(model)
         }
 
         MenuBarExtra(isInserted: $showMenuBarExtra) {
             MenuBarView()
+                .samplingDemand(.window)
                 .environment(model)
-                .environment(\.sampleInterval, model.updateSpeed.rawValue)
+                .environment(\.sampleInterval, model.samplingInterval)
                 .environment(\.streamsGraphs, streamGraphs)
         } label: {
             MenuBarLabel()
@@ -276,7 +279,7 @@ private struct LiveBadge: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(isPaused && !replaying ? Color.orange : Color.primary)
                     if !isPaused {
-                        Text("· " + Format.timeSpan(model.updateSpeed.rawValue))
+                        Text("· " + Format.timeSpan(model.samplingInterval))
                             .foregroundStyle(.secondaryText)
                             .monospacedDigit()
                     }
@@ -303,12 +306,12 @@ private struct LiveBadge: View {
     }
 
     private func help(replaying: Bool) -> String {
-        let every = Format.timeSpan(model.updateSpeed.rawValue)
+        let every = Format.timeSpan(model.samplingInterval)
         guard replaying else {
             let lists = "Startup, Apps and Drivers are lists read when their page opens and on Refresh, which says when."
             return model.isPaused
                 ? "Metrics are frozen. Press ⇧⌘P to resume. \(lists)"
-                : "Metrics (CPU, memory, GPU, disk, network, power) update \(Self.every(model.updateSpeed.rawValue)). "
+                : "Metrics (CPU, memory, GPU, disk, network, power) update \(Self.every(model.samplingInterval)). "
                     + "\(lists) Click to change the speed."
         }
         return model.isPaused

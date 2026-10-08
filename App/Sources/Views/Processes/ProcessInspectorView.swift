@@ -408,11 +408,13 @@ struct ProcessInspectorView: View {
         guard shownTab == .overview else { return }
         let identity = identity
         while !Task.isCancelled {
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled else { return }
             let loaded = await Task.detached(priority: .utility) {
                 Details(identity: identity, arguments: ProcessInspector.arguments(of: identity.pid),
                         directory: ProcessInspector.currentDirectory(of: identity.pid))
             }.value
-            if !Task.isCancelled, loaded != details { details = loaded }
+            if !Task.isCancelled, model.samplingDemand.hasVisibleWindow, loaded != details { details = loaded }
             try? await Task.sleep(for: .seconds(3))
         }
     }
@@ -422,10 +424,12 @@ struct ProcessInspectorView: View {
         guard shownTab == .files else { return }
         let identity = identity
         while !Task.isCancelled {
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled else { return }
             let loaded = await Task.detached(priority: .utility) {
                 OpenFiles(identity: identity, files: ProcessInspector.openFiles(of: identity.pid))
             }.value
-            if !Task.isCancelled, loaded != openFiles { openFiles = loaded }
+            if !Task.isCancelled, model.samplingDemand.hasVisibleWindow, loaded != openFiles { openFiles = loaded }
             try? await Task.sleep(for: .seconds(3))
         }
     }

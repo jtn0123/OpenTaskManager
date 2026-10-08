@@ -42,7 +42,7 @@ struct GraphFitToggle: View {
     @Setting(Settings.fitsCollectedGraphData) private var fits: Bool
 
     var body: some View {
-        let window = Format.timeSpan(Double(AppModel.graphSpan) * model.updateSpeed.rawValue)
+        let window = Format.timeSpan(Double(AppModel.graphSpan) * model.samplingInterval)
         Toggle("Fit collected data", isOn: $fits)
             .toggleStyle(.checkbox)
             .controlSize(.small)

@@ -286,6 +286,8 @@ struct HistoryView: View {
             guard opened == nil else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(bucket))
+                await model.samplingDemand.waitUntilVisible()
+                guard !Task.isCancelled else { return }
                 await load()
             }
         }
@@ -546,6 +548,8 @@ struct HistoryView: View {
     }
 
     private func load() async {
+        await model.samplingDemand.waitUntilVisible()
+        guard !Task.isCancelled else { return }
         if let opened {
             await load(opened)
         } else if let recorder = model.recorder {
@@ -563,7 +567,7 @@ struct HistoryView: View {
         let seconds = (try? await recorder.recordedSeconds(from: shown.lowerBound, to: shown.upperBound)) ?? 0
         let span = try? await recorder.recordedSpan(from: shown.lowerBound, to: shown.upperBound)
         let happened = (try? await recorder.events(from: shown.lowerBound, to: shown.upperBound)) ?? []
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
         recorded = seconds
         earliest = nil
         recordedSpan = span
@@ -605,7 +609,7 @@ struct HistoryView: View {
         let sessions = (try? await recorder.sessions()) ?? []
         let happened = (try? await recorder.events(from: shown.lowerBound, to: shown.upperBound)) ?? []
         // The range changed or a file opened meanwhile: this load is stale.
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
         if events != happened { events = happened }
         recorded = seconds
         earliest = first

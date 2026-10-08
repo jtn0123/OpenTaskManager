@@ -117,9 +117,12 @@ struct UsersView: View {
     /// ten seconds rather than every sample.
     private func followSessions() async {
         while !Task.isCancelled {
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled else { return }
             let (user, list) = await Task.detached(priority: .utility) {
                 (UserAccounts.consoleUser(), UserAccounts.sessions())
             }.value
+            guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { continue }
             if user != console { console = user }
             if list != sessions { sessions = list }
             try? await Task.sleep(for: .seconds(10))

@@ -267,7 +267,33 @@ Manager OG or any other proprietary task manager.
   rates. Its thread walk (`ps -M`, a line per thread) stays at most every 5 s.
   `RestrictedProcessCache` holds rows by PID and start time
   and computes CPU over the real interval between reads, never the app tick.
-  The native process list, CPU, memory, disks, network, GPU and power stay live.
+  While any content window is visible, the native process list, CPU, memory,
+  disks, network, GPU and power stay live. `SamplingDemand.window` counts the
+  main window, Settings and the menu popup, never the status icon. Application
+  hiding, display sleep and screen lock override the count; showing a window
+  interrupts the sampler's wait and takes a fresh sample.
+- With no visible content window, `BackgroundSamplingPolicy` in OTMKit keeps
+  a system feed at the chosen update speed, never faster than 1 s, so a hidden
+  window never samples more often than a visible one: `HistoryAccumulator`
+  averages ticks and keeps their CPU peak, not just cumulative counters every
+  10 s. Its top-app memory lists keep the highest sampled footprint, so native
+  rusage figures and the kernel process list keep the same step. The latter keeps observed lifetimes and short
+  runs correct; `ProcessHistoryTracker` takes native CPU and disk from cumulative
+  counters and integrates restricted CPU between ps reads. Hidden sampling
+  skips `PROC_PIDTASKINFO`, `ps -M` and the per-process GPU walk. With spike
+  capture off, ps stays at 5 s after priming; with it on, ps reads each second
+  for the capture's top processes. Spikes cap a slower visible update speed at
+  1 s. System GPU and component power still feed the flight recorder.
+- Hidden ticks update `BackgroundSamplingState`, not observable snapshots,
+  process/group/user graph rings, sensor rows or published ranges. Raw sensor
+  ranges continue in the unobserved state. A bounded ring keeps real system ticks for resume, and the separate icon ring keeps consecutive
+  CPU points for its 2 s drawing limit (no icon publication while asleep or locked).
+  At the same graph cadence, resume appends those retained ticks; process and user graphs restart with the
+  unrecorded look. A changed cadence or sleep gap restarts system graphs too,
+  never stretching a held figure into invented points. Energy and peak power
+  keep measured hidden ticks without publishing them. View-only nettop, sockets,
+  inspector files, launchd, user sessions and live History refreshes wait on
+  visibility notifications while hidden, rather than polling their sources.
 - `MenuBarLabel` observes only `MenuBarIconStore.drawing`, never the snapshot
   or full CPU history. OTMKit's `MenuBarDrawing` compares the last 14 bars at
   half-point resolution and the rounded text. The icon alone publishes changes
@@ -275,8 +301,8 @@ Manager OG or any other proprietary task manager.
   sample and consecutive graph points. Identical pixels publish nothing;
   `MenuBarIcon` also reuses the same image. No extra setting is needed.
 - Keep process, app-group, user, sensor and hardware histories continuous when
-  their page is hidden. Sensor readings are held between slow reads, appended
-  each tick and included in every 10 s hardware record; this adds no HID reads.
+  their page is hidden but another content window is visible. Sensor readings
+  are held between slow reads, appended each tick and included in every 10 s hardware record; this adds no HID reads.
   App-group histories still append every tick because by-app and inspector
   graphs and the recorder need the groups as they stood then. Sensor ranges
   also keep every tick's clocks and power, but table sorting and row publication
