@@ -253,8 +253,9 @@ Manager OG or any other proprietary task manager.
 - Don't attach SwiftUI `.animation` or `.contentTransition` to values that
   change every tick. Each animation frame re-runs layout for the whole window;
   on the Overview page this cost about 75% of a core. Animate with Core
-  Animation layers instead (see `StreamGraphView` and `CardSurfaceView`), which run
-  in the render server.
+  Animation layers instead (see `StreamGraphView` and `CardSurfaceView`). Keep
+  continuous motion to the rate its device-pixel travel needs, since render
+  server frames cost CPU too.
 - No blur filters or `.shadow` on views that redraw every tick. Fake the glow
   with wide translucent strokes, or use CALayer shadows with a `shadowPath`.
 - The process table updates rows in place: `OrderedDiff` moves, inserts and
@@ -268,11 +269,21 @@ Manager OG or any other proprietary task manager.
   watching the enclosing clip view's bounds (`StickyHeader` in OTMKit), so it
   moves only on scroll, never per tick; rows are added below it.
 - Graphs go through `GraphView` (`StreamGraph.swift`): paths are rebuilt once
-  per sample and a Core Animation scroll slides them between samples. An
+  per sample and `StreamGraphMotion` moves the scroller and head markers with
+  actions disabled between samples. `WindowAnimationClock` shares one display
+  link per visible window with counting numbers, gates each client's commits
+  even on fixed-refresh displays, and stops when idle or occluded. Rate maths
+  lives in OTMKit's `GraphMotion`: about one device pixel per frame, 4–60 fps,
+  capped by the screen, including a head marker's vertical curve speed. The
+  scroller is rasterized; line bloom is a wide translucent stroke, and the
+  marker, axis labels and card halo have explicit shadow paths. An
   update without a new sample (pages redraw a few milliseconds after a tick)
   draws nothing and never cuts a scroll short: that made Performance's details
   and the inspector step a sample at a time while their sidebars glided. Changing
-  numbers go through `AnimatedNumber`, which composes cached glyph bitmaps.
+  numbers go through `AnimatedNumber`, which composes cached glyph bitmaps at
+  up to 30 fps only during a visible change, settling after 0.6 s. Changes that
+  format to the same text need no counting frames; unchanged card glow never
+  restarts its 0.6 s ease.
   Don't swap either for SwiftUI `Path` or `Text` animations. The History page
   is the exception: its graphs are static Swift Charts, reloaded once per graph
   point, and its scrubber line is an overlay that alone reads the pointer, so
