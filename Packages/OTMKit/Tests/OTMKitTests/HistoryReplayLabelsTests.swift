@@ -112,10 +112,10 @@ struct HistoryReplayLabelsTests {
         #expect(moment(1_105, gone: true) == .notRecorded)
         #expect(moment(1_070) == .notRecorded, "the live edge cannot fill an earlier gap")
         let label = ProcessHistoryLabels.latestMemoryMoment(step)
-        #expect(label == "Footprint about 49 MB at \(step.time.formatted(date: .omitted, time: .standard)), the latest record")
+        #expect(label == "Footprint about 49.0 MB at \(step.time.formatted(date: .omitted, time: .standard)), the latest record")
         #expect(!label.contains(date(1_105).formatted(date: .omitted, time: .standard)))
         let resident = ProcessMemoryStep(time: step.time, footprint: step.footprint, measure: .resident)
-        #expect(ProcessHistoryLabels.latestMemoryMoment(resident).hasPrefix("Resident about 49 MB at "))
+        #expect(ProcessHistoryLabels.latestMemoryMoment(resident).hasPrefix("Resident about 49.0 MB at "))
     }
 
     @Test func keptZeroAndPartialIdleAreFiguresAndAnEndedLifetimeIsNotRunning() {
