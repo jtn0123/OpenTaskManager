@@ -269,11 +269,19 @@ Manager OG or any other proprietary task manager.
   copies one level into /Library/Extensions and the Applications folders, never
   /System, and Model/ExtensionMatching ties each to what's registered or loaded
   by identifier and version, the rest being rows "Installed, not in use" or,
-  when that can't be told, "Unknown"; tests use fake bundles in a temp dir),
+  when that can't be told, "Unknown"; vendor and Status (All, Loaded, Not in
+  use) filters combine, and summary cards toggle the rows behind their count
+  with an accent outline while selected (`DriversStatusFilter` and
+  `DriverSummaryFilter` in OTMKit); tests use fake bundles in a temp dir),
   Views/Storage (disk space: `StorageStore` keeps the session's last scan and
   scans only on Scan or a scope pick, never on launch or per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
-  layer alone reads the pointer; each finished scan's summary is saved once, off
+  layer and the fixed-height strip below it read the pointer; the strip names
+  the hovered item, else the selection, with its path below the scan root,
+  size and share. A click selects and brings its folder-list row into view;
+  double-click or Return opens a folder. Arrow keys follow tile geometry
+  (`TreemapNavigation` in OTMKit), including tiny tiles and drawn children;
+  each region has a spoken name and size. Each finished scan's summary is saved once, off
   the main actor, to Application Support/OpenTaskManager/Scans, and the Changes
   list colours the treemap by what changed since an earlier scan; the change
   picked there is named above the map, not in a tag over it (`PickedChangeBar`:
@@ -425,6 +433,9 @@ Manager OG or any other proprietary task manager.
   The System page's jump bar and search (`SystemNavigator`; the matching is
   `SystemReportSearch` in OTMKit) scroll to stable ids (`SystemTarget`) through
   a `ScrollViewReader`, and follow the scrolling from the clip view's bounds.
+  `ScrollSpy.nearestHeader` chooses the group whose first header is nearest
+  the visible top, including after a jump stops short at the page's end;
+  no timed hold pins the last click. Only the jump bar reads that group.
   The bar is in-page links, not tabs: "Jump to" and a link per group, the one
   at the top underlined (a menu when narrow). A search marks its finds in the
   cards' titles, labels and values (`SearchMarks`, ranges from
@@ -495,7 +506,7 @@ selects the first matching socket on the Connections page so its details show
 `-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
 (add `-openAppRemoval YES` to open its Move to Trash review),
 `-openDriver <text>` selects the first extension on the Drivers page whose name
-or bundle ID contains it (switching the Third party/Apple filter if it hides it),
+or bundle ID contains it (switching the vendor and status filters if they hide it),
 `-openUser <name>` opens that user's top processes on the Users page (and
 the system accounts, for root or a service account), `-openSystemSearch <text>`
 searches the System page and `-openSystemCategory network` (or another group

@@ -345,7 +345,7 @@ private struct StorageResultsView: View {
         }
         .padding(16)
         // A new scan's items are numbered afresh.
-        .onChange(of: usage.finishedAt) { hover.clearMarks() }
+        .onChange(of: usage.finishedAt, initial: true) { hover.useScan(usage) }
         .onChange(of: ChangesFocus(showsChanges: store.list == .changes, since: comparison?.earlier.scannedAt, folder: folder.id),
                   initial: true) {
             focusChanges(comparison, in: folder)
@@ -385,6 +385,8 @@ private struct StorageResultsView: View {
     /// In Changes, keeps a change picked: the largest in the open folder,
     /// unless the one picked is still listed there. Leaving Changes drops it.
     private func focusChanges(_ comparison: DiskScanComparison?, in folder: DiskItem) {
+        // Reset fresh item IDs before the initial change is picked, whichever callback arrives first.
+        hover.useScan(result.usage)
         guard store.list == .changes, let comparison else {
             if hover.markedChange != nil { hover.clearMarks() }
             return
@@ -558,6 +560,9 @@ private struct TreemapCard: View {
                 if usage.children(of: folder).contains(where: { $0.allocatedSize > 0 }) {
                     StorageTreemap(usage: usage, folder: folder, hover: hover, changes: changes, quietsUnchanged: changesOnly) { item in
                         open(item.id)
+                    } select: { item in
+                        store.list = .contents
+                        hover.select(item, in: usage)
                     } menu: { item in
                         StorageItemMenu(path: usage.path(of: item.id), isFolder: item.isFolder, store: store)
                     }
@@ -566,8 +571,10 @@ private struct TreemapCard: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Divider()
+            TreemapSelectionStrip(usage: usage, folder: folder, hover: hover)
             HStack(spacing: 8) {
-                TreemapCaption(usage: usage, folder: folder, hover: hover, changes: changes, quietsUnchanged: changesOnly)
+                TreemapCaption(changes: changes, quietsUnchanged: changesOnly)
                 Spacer(minLength: 8)
                 if let changes {
                     // The list beside says which scan the colours compare with.
