@@ -462,6 +462,7 @@ enum HistoryMoment {
 /// (or names the gap under the pointer) and a click or drag pins one, and
 /// the moment markers.
 struct HistoryPlotOverlay: View {
+    @Environment(\.historySpikeIncident) private var incident
     let plot: CGRect
     let domain: ClosedRange<Date>
     let points: [HistoryPoint]
@@ -473,6 +474,9 @@ struct HistoryPlotOverlay: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            if let incident {
+                HistorySpikeChartMarks(incident: incident, plot: plot, domain: domain)
+            }
             ForEach(labels.indices, id: \.self) { index in
                 Text(labels[index])
                     .font(.system(size: 11, weight: .medium).monospacedDigit())

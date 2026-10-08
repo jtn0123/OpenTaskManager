@@ -185,6 +185,8 @@ struct HistoryView: View {
     @Setting(Settings.historyFitsRecording) private var fitsRecording: Bool
     @State private var scrubber = HistoryScrubber()
     @State private var player = HistoryPlayer()
+    @State private var shownRecording: UUID?
+    @State private var initializedRecording: UUID?
     /// Folds the pinned rail to a strip among the charts; only the rail reads it.
     @State private var pageScroll = HistoryPageScroll()
     private let store = HistoryRecordingStore.shared
@@ -225,7 +227,7 @@ struct HistoryView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let opened {
-                HistoryRecordingBanner(recording: opened, store: store)
+                HistoryRecordingBanner(recording: opened, store: store, scrubber: scrubber, player: player)
             }
             HStack(alignment: .top, spacing: 0) {
                 ScrollView {
@@ -258,6 +260,7 @@ struct HistoryView: View {
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         }
+        .environment(\.historySpikeIncident, opened?.incident)
         .background {
             HistoryReplayReporter(player: player, store: store, showsFile: opened != nil)
             HistoryOpeningFocus()
@@ -280,6 +283,12 @@ struct HistoryView: View {
             }
         }
         .task(id: LoadKey(range: range, fits: fitsRecording, recording: opened?.id)) {
+            if shownRecording != opened?.id {
+                player.pause()
+                scrubber.reset()
+                shownRecording = opened?.id
+                initializedRecording = nil
+            }
             scrubber.showsFile = opened != nil
             await load()
             // A recording file never changes; the live history gains a point every `bucket` seconds.
@@ -290,10 +299,6 @@ struct HistoryView: View {
                 guard !Task.isCancelled else { return }
                 await load()
             }
-        }
-        .onChange(of: opened?.id) {
-            player.pause()
-            scrubber.reset()
         }
         .onDisappear { player.pause() }
     }
@@ -567,7 +572,7 @@ struct HistoryView: View {
         let seconds = (try? await recorder.recordedSeconds(from: shown.lowerBound, to: shown.upperBound)) ?? 0
         let span = try? await recorder.recordedSpan(from: shown.lowerBound, to: shown.upperBound)
         let happened = (try? await recorder.events(from: shown.lowerBound, to: shown.upperBound)) ?? []
-        guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
+        guard !Task.isCancelled, store.opened?.id == opened.id, model.samplingDemand.hasVisibleWindow else { return }
         recorded = seconds
         earliest = nil
         recordedSpan = span
@@ -579,6 +584,10 @@ struct HistoryView: View {
         gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown)
         if events != happened { events = happened }
         player.points = loaded
+        if initializedRecording != opened.id {
+            scrubber.playhead = SpikeReplay.openingMoment(incident: opened.incident)
+            initializedRecording = opened.id
+        }
         openLaunchComparison()
         if let speed = store.takeLaunchSpeed() {
             player.speed = speed

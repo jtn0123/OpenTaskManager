@@ -193,7 +193,13 @@ Manager OG or any other proprietary task manager.
   block (`SpikeIncident`: what crossed, when, the contributing processes), to
   Application Support/OpenTaskManager/Captures (`SpikeCaptureLibrary`: newest 20,
   at most 100 MB); a replay's `FlightRecorder.recordSpan` is the file's record
-  length, so it buckets by the second; a `-sensorFixture` run captures nothing;
+  length, so it buckets by the second; spike replays open at the first trigger's
+  time (`SpikeReplay` in OTMKit), including `-openRecording` and playback started
+  with `-openPlayback`. The banner's Jump to Spike pauses there from anywhere,
+  with every trigger's time in its help. Every time chart marks the triggers
+  with the rail's bolt and a thin rule, laid out once without reading the
+  scrubber (`HistorySpikeChartMarks`); ordinary recordings still open at the end.
+  A `-sensorFixture` run captures nothing;
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
