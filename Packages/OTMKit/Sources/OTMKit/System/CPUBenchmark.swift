@@ -184,6 +184,9 @@ public struct CPUBenchmarkResult: SpeedTestRecord, Equatable, Identifiable {
     /// The whole run, setup included.
     public var seconds: Double
     public var workloads: [CPUWorkloadResult]
+    /// The Mac's state as the run started and ended; nil in runs saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
 
     public var historyKey: String { machine.key }
 
@@ -240,15 +243,34 @@ public enum CPUBenchmarkError: Error, Equatable, Sendable {
 
 /// Stops a running benchmark from another thread; workers notice within a few milliseconds.
 public final class CPUBenchmarkCancellation: Sendable {
-    private let flag = OSAllocatedUnfairLock(initialState: false)
+    private struct State {
+        var cancelled = false
+        var stoppedWorkers = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 
     public func cancel() {
-        flag.withLock { $0 = true }
+        state.withLock { $0.cancelled = true }
     }
 
-    public var isCancelled: Bool { flag.withLock { $0 } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    /// Workers that saw the cancel partway through a pass and stopped there,
+    /// rather than running on to the pass's end. Tests read it to tell a
+    /// prompt stop from one that waited out the pass.
+    var stoppedWorkers: Int { state.withLock { $0.stoppedWorkers } }
+
+    /// Whether the run is cancelled, so the worker checking stops mid-pass;
+    /// counts it if so.
+    func stopsWorker() -> Bool {
+        state.withLock { state in
+            if state.cancelled { state.stoppedWorkers += 1 }
+            return state.cancelled
+        }
+    }
 }
 
 /// A CPU benchmark the user starts: integer, floating-point and memory
@@ -332,7 +354,15 @@ public enum CPUBenchmark {
     public static func measure(configuration: CPUBenchmarkConfiguration = .standard, workers: Int = defaultWorkers, appVersion: String,
                                progress: @escaping @Sendable (CPUBenchmarkProgress) -> Void) async throws(CPUBenchmarkError)
         -> CPUBenchmarkResult {
-        let cancellation = CPUBenchmarkCancellation()
+        try await measure(configuration: configuration, workers: workers, appVersion: appVersion, cancellation: CPUBenchmarkCancellation(),
+                          progress: progress)
+    }
+
+    /// `measure`, with the cancellation that cancelling the task sets, so a
+    /// test can see how the run stopped.
+    static func measure(configuration: CPUBenchmarkConfiguration, workers: Int, appVersion: String, cancellation: CPUBenchmarkCancellation,
+                        progress: @escaping @Sendable (CPUBenchmarkProgress) -> Void) async throws(CPUBenchmarkError)
+        -> CPUBenchmarkResult {
         let outcome: Result<CPUBenchmarkResult, CPUBenchmarkError> = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 Thread.detachNewThread {
@@ -388,32 +418,33 @@ public enum CPUBenchmark {
         let deadline = BenchmarkClock.now + UInt64(max(seconds, 0) * 1e9)
         let checkInterval: UInt64 = 5_000_000
         for index in 0..<workers {
-            let worker = kernel.makeWorker(index, of: workers)
             group.enter()
             let thread = Thread {
-                var tally = WorkerTally(start: BenchmarkClock.now)
-                var lastCheck = tally.start
-                var unit = 0
-                while true {
-                    if !worker.run(unit: unit) {
-                        tally.failed = true
-                        break
-                    }
-                    unit += 1
-                    let now = BenchmarkClock.now
-                    if now >= deadline { break }
-                    if now - lastCheck >= checkInterval {
-                        lastCheck = now
-                        if cancellation?.isCancelled == true {
-                            tally.cancelled = true
+                kernel.withWorker(index, of: workers) { worker in
+                    var tally = WorkerTally(start: BenchmarkClock.now)
+                    var lastCheck = tally.start
+                    var unit = 0
+                    while true {
+                        if !worker.run(unit: unit) {
+                            tally.failed = true
                             break
                         }
+                        unit += 1
+                        let now = BenchmarkClock.now
+                        if now >= deadline { break }
+                        if now - lastCheck >= checkInterval {
+                            lastCheck = now
+                            if cancellation?.stopsWorker() == true {
+                                tally.cancelled = true
+                                break
+                            }
+                        }
                     }
+                    tally.units = unit
+                    tally.end = BenchmarkClock.now
+                    let finished = tally
+                    tallies.withLock { $0.append(finished) }
                 }
-                tally.units = unit
-                tally.end = BenchmarkClock.now
-                let finished = tally
-                tallies.withLock { $0.append(finished) }
                 group.leave()
             }
             thread.qualityOfService = .userInitiated
@@ -441,13 +472,18 @@ public enum CPUBenchmark {
 
         func kernel(_ workload: CPUWorkload) -> any BenchmarkKernel {
             if let kernel = made[workload] { return kernel }
-            let kernel: any BenchmarkKernel = switch workload {
-            case .integer: HashKernel(bytes: configuration.hashBytes, seed: configuration.seed)
-            case .floatingPoint: MatrixKernel(size: configuration.matrixSize, seed: configuration.seed)
-            case .memory: MemoryKernel(bytes: configuration.memoryBytes, chunkBytes: configuration.memoryChunkBytes, seed: configuration.seed)
-            }
+            let kernel = makeKernel(workload, configuration: configuration)
             made[workload] = kernel
             return kernel
+        }
+    }
+
+    /// A workload's inputs at `configuration`'s sizes, filled from its seed.
+    static func makeKernel(_ workload: CPUWorkload, configuration: CPUBenchmarkConfiguration) -> any BenchmarkKernel {
+        switch workload {
+        case .integer: HashKernel(bytes: configuration.hashBytes, seed: configuration.seed)
+        case .floatingPoint: MatrixKernel(size: configuration.matrixSize, seed: configuration.seed)
+        case .memory: MemoryKernel(bytes: configuration.memoryBytes, chunkBytes: configuration.memoryChunkBytes, seed: configuration.seed)
         }
     }
 }

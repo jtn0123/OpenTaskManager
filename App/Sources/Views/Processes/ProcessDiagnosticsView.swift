@@ -64,7 +64,7 @@ struct ProcessFieldRow: View, Equatable {
                 Text("—").help(ProcessAccess.unavailableHelp)
             }
         }
-        .font(.callout)
+        .font(.tableText)
     }
 }
 
@@ -173,7 +173,7 @@ struct ProcessDiagnosticsSections: View {
                 }
             }
         }
-        .font(.callout)
+        .font(.tableText)
     }
 
     // MARK: Scheduling
@@ -258,7 +258,7 @@ struct ProcessAncestryList: View {
             }
             if process.responsiblePID != process.pid { responsible }
         }
-        .font(.callout)
+        .font(.tableText)
     }
 
     private func row(_ member: ProcessSample, depth: Int) -> some View {

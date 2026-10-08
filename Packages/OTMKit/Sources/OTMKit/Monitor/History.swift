@@ -39,6 +39,30 @@ public struct History<Element: Sendable>: Sendable {
         return storage[(head + storage.count - 1) % storage.count]
     }
 
+    /// Adds each value, through `figure`, to `sums`, aligned on the newest,
+    /// which goes into the last element; values older than `sums` has room
+    /// for are left out. Sums many histories without building each one's
+    /// `values` first.
+    public func addValues(to sums: inout [Double], _ figure: (Element) -> Double) {
+        let count = min(storage.count, sums.count)
+        guard count > 0 else { return }
+        let length = storage.count
+        var index = (head + length - count) % length
+        var slot = sums.count - count
+        let end = sums.count
+        // A while loop over pointers, as `GraphMath.monotoneTangents` explains.
+        storage.withUnsafeBufferPointer { storageBuffer in
+            sums.withUnsafeMutableBufferPointer { sumsBuffer in
+                guard let element = storageBuffer.baseAddress, let sum = sumsBuffer.baseAddress else { return }
+                while slot < end {
+                    sum[slot] += figure(element[index])
+                    index = index + 1 == length ? 0 : index + 1
+                    slot += 1
+                }
+            }
+        }
+    }
+
     public mutating func removeAll() {
         storage.removeAll(keepingCapacity: true)
         head = 0

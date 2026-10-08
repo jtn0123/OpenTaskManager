@@ -12,7 +12,7 @@ public enum LaunchExitStatus: Sendable, Codable, Hashable, CustomStringConvertib
         case .code(0):
             return "Exited normally (0)"
         case let .code(code) where code < 0:
-            let name = Self.signalNames[-code].map { " (SIG\($0))" } ?? ""
+            let name = Self.signalName(-code).map { " (\($0))" } ?? ""
             return "Killed by signal \(-code)\(name)"
         case let .code(code):
             return "Exited with code \(code)"
@@ -23,6 +23,11 @@ public enum LaunchExitStatus: Sendable, Codable, Hashable, CustomStringConvertib
         case let .reason(reason):
             return "Ended for reason \"\(reason)\""
         }
+    }
+
+    /// "SIGSEGV" for 11; nil for a signal without a common name.
+    public static func signalName(_ signal: Int32) -> String? {
+        signalNames[signal].map { "SIG\($0)" }
     }
 
     private static let signalNames: [Int32: String] = [

@@ -19,9 +19,10 @@ final class NetworkActivityStore {
     /// Readings across the graphs: the same minutes as the main sampler's
     /// graphs at `interval` seconds per sample (100 readings, five minutes,
     /// at the normal speed), so the by-app graph lines up with the
-    /// throughput graph above it.
-    static func graphSpan(interval: TimeInterval) -> Int {
-        max(Int((Double(AppModel.graphSpan) * interval / refreshSeconds).rounded()), 2)
+    /// throughput graph above it; or, for a page whose graphs are fitted to
+    /// what's been collected, the same minutes as its window of `samples`.
+    static func graphSpan(interval: TimeInterval, samples: Int = AppModel.graphSpan) -> Int {
+        max(Int((Double(samples) * interval / refreshSeconds).rounded()), 2)
     }
     /// Started again after a longer gap than this, the graphs begin afresh
     /// instead of joining old readings to new ones.

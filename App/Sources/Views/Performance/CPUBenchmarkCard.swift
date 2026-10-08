@@ -3,16 +3,19 @@ import SwiftUI
 
 /// "Benchmark" on the CPU detail: when asked, times integer, floating-point
 /// and memory workloads on one worker and then on one per logical CPU, and
-/// shows each one's speed, spread and scaling, with the last runs on this
-/// Mac. It has no inputs and reads only `CPUBenchmarkStore`, so it redraws
-/// with the run's progress, not per tick. Figures from a debug build, which
-/// runs the workloads many times slower, carry a badge by the title and a
-/// line just above them, so they're never read as this Mac's speed; a
-/// release build's carry nothing extra. The figures come first; what the
-/// workloads do and how they're timed fold away under Methodology.
+/// shows each one's speed, spread and scaling. The last runs on this Mac fold
+/// away under Saved runs, beside a link to compare them in the Benchmarks
+/// workspace, which charts their trends. It has no inputs and reads only
+/// `CPUBenchmarkStore`, so it redraws with the run's progress, not per tick.
+/// Figures from a debug build, which runs the workloads many times slower,
+/// carry a badge by the title and a line just above them, so they're never
+/// read as this Mac's speed; a release build's carry nothing extra. The
+/// figures come first; what the workloads do and how they're timed fold away
+/// under Methodology. The sustained run (`CPUSustainedPanel`) follows, its
+/// own section; only one of the two runs goes at a time.
 struct CPUBenchmarkCard: View, Equatable {
-    /// Debug builds' figures, in the badge and the history's Build column.
-    fileprivate static let debugColor = Theme.data(0.96, 0.50, 0.08)
+    /// Debug builds' figures, in the badge.
+    private static let debugColor = BenchmarkLook.debug
 
     var body: some View {
         let store = CPUBenchmarkStore.shared
@@ -46,7 +49,8 @@ struct CPUBenchmarkCard: View, Equatable {
                 }
             }
             if results.count > 1 {
-                CPUBenchmarkHistory(results: results)
+                SavedRunsDisclosure(kind: .cpu, runs: results.map(BenchmarkRun.init), place: "on this Mac")
+                    .equatable()
             }
             MethodologyDisclosure(preview: "Integer, floating point and memory, on 1 and \(CPUBenchmark.defaultWorkers) workers · "
                 + "about \(Self.plannedSeconds) s") {
@@ -55,6 +59,8 @@ struct CPUBenchmarkCard: View, Equatable {
                     Text(Self.details(latest))
                 }
             }
+            CPUSustainedPanel()
+                .equatable()
         }
         .task { store.handleLaunchArgument() }
     }
@@ -102,8 +108,11 @@ struct CPUBenchmarkCard: View, Equatable {
                 Button("Cancel") { store.cancel() }
                     .help("Stop the benchmark")
             } else {
+                let sustained = CPUSustainedStore.shared.running != nil
                 Button("Run Benchmark") { store.start() }
-                    .help("Measure this Mac's CPU and memory speed for about \(Self.plannedSeconds) s")
+                    .disabled(sustained)
+                    .help(sustained ? "Wait for the sustained run to finish"
+                        : "Measure this Mac's CPU and memory speed for about \(Self.plannedSeconds) s")
             }
         }
     }
@@ -194,96 +203,6 @@ private struct BenchmarkTile: View {
         guard let single, let multi, single.median > 0 else { return " " }
         let scaling = multi.median / single.median
         return "×\(Format.fixed(scaling, 1)) scaling · ±\(Format.percent(single.spread / 2)) / ±\(Format.percent(multi.spread / 2))"
-    }
-}
-
-/// The last runs on this Mac: each workload on one worker and on all, in
-/// the unit that suits the column. Once a debug build's run is among them,
-/// a Build column tags each run, and debug runs' figures are in the
-/// secondary colour, so they don't read as level with release runs.
-private struct CPUBenchmarkHistory: View {
-    let results: [CPUBenchmarkResult]
-
-    var body: some View {
-        let workers = results.first?.workloads.first?.multi.workers ?? CPUBenchmark.defaultWorkers
-        let scales = CPUWorkload.allCases.map(scale)
-        let showsBuild = results.contains { !$0.optimized }
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Recent runs on this Mac").font(.callout.weight(.semibold))
-            Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
-                // A title wraps over its unit rather than truncate where the
-                // card is narrow (820 pt windows).
-                GridRow(alignment: .bottom) {
-                    Text("").gridColumnAlignment(.leading)
-                    if showsBuild { Text("").gridColumnAlignment(.leading) }
-                    ForEach(CPUWorkload.allCases.indices, id: \.self) { index in
-                        Text("\(CPUWorkload.allCases[index].title) \(scales[index].unit)")
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .gridCellColumns(2)
-                            .gridCellAnchor(.center)
-                    }
-                    Text("")
-                }
-                GridRow {
-                    Text("When")
-                    if showsBuild { Text("Build") }
-                    ForEach(CPUWorkload.allCases, id: \.self) { _ in
-                        Text("1")
-                        Text("\(workers)")
-                    }
-                    Text("")
-                }
-                .help("One worker, then one per logical CPU")
-                ForEach(results) { result in
-                    GridRow {
-                        Text(result.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
-                            .fixedSize()
-                        if showsBuild {
-                            Text(result.optimized ? "Release" : "Debug")
-                                .fontWeight(result.optimized ? .regular : .semibold)
-                                .foregroundStyle(result.optimized ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(CPUBenchmarkCard.debugColor))
-                        }
-                        ForEach(CPUWorkload.allCases.indices, id: \.self) { index in
-                            let measured = result.result(CPUWorkload.allCases[index])
-                            Text(measured.map { number($0.single.median, scales[index].divisor) } ?? "—")
-                            Text(measured.map { number($0.multi.median, scales[index].divisor) } ?? "—")
-                        }
-                        Text(note(result)).foregroundStyle(.secondaryText).gridColumnAlignment(.leading)
-                    }
-                    .foregroundStyle(result.optimized ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
-                    .help("\(result.optimized ? "Release" : "Debug") build · \(result.appVersion) · \(result.osVersion) · "
-                        + "thermal state \(result.worstThermalState.rawValue)")
-                }
-            }
-            .font(.tableText)
-            .foregroundStyle(.secondaryText)
-            .monospacedDigit()
-            .lineLimit(1)
-        }
-    }
-
-    /// GB/s or MB/s (GFLOP/s or MFLOP/s), by the column's largest figure.
-    private func scale(_ workload: CPUWorkload) -> (unit: String, divisor: Double) {
-        let largest = results.compactMap { $0.result(workload)?.multi.median }.max() ?? 0
-        let giga = largest >= 1e9
-        if workload.countsBytes { return giga ? ("GB/s", 1e9) : ("MB/s", 1e6) }
-        return giga ? ("GFLOP/s", 1e9) : ("MFLOP/s", 1e6)
-    }
-
-    private func number(_ value: Double, _ divisor: Double) -> String {
-        let scaled = value / divisor
-        return Format.fixed(scaled, scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2)
-    }
-
-    /// What else sets a run apart from the newest: other workloads, or heat.
-    private func note(_ result: CPUBenchmarkResult) -> String {
-        var notes: [String] = []
-        if let newest = results.first, result.suiteVersion != newest.suiteVersion { notes.append("v\(result.suiteVersion)") }
-        if result.worstThermalState != .nominal { notes.append(result.worstThermalState.rawValue) }
-        if result.lowPowerMode { notes.append("low power") }
-        return notes.joined(separator: ", ")
     }
 }
 

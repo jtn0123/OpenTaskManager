@@ -3,7 +3,7 @@ import OTMKit
 
 /// Columns of the socket table. The raw value is the column's customization ID.
 enum ConnectionColumn: String, CaseIterable {
-    case process, pid, transport = "protocol", local, remote, state, scope
+    case process, pid, transport = "protocol", local, remote, state, age, scope
 
     var title: String {
         switch self {
@@ -13,13 +13,15 @@ enum ConnectionColumn: String, CaseIterable {
         case .local: "Local"
         case .remote: "Remote"
         case .state: "State"
+        // The time this page has seen the socket, never how old it is.
+        case .age: "Seen for"
         case .scope: "Scope"
         }
     }
 
     /// Narrowest the column gets, and the width it starts at before the table
     /// shares out its room: enough for its usual values whole at the table's
-    /// 13 points ("47744", "Established", "127.0.0.1:54321"). Longer
+    /// 13 points ("47744", "Established", "127.0.0.1:54321", "1 h 5 min"). Longer
     /// addresses are cut in the middle, never their port; Scope keeps just its
     /// symbol, and Protocol the short "TCP4".
     var minWidth: CGFloat {
@@ -29,6 +31,7 @@ enum ConnectionColumn: String, CaseIterable {
         case .transport: 54
         case .local, .remote: 112
         case .state: 74
+        case .age: 66
         case .scope: 44
         }
     }
@@ -39,6 +42,7 @@ enum ConnectionColumn: String, CaseIterable {
         case .pid: 80
         case .transport: 110
         case .state: 130
+        case .age: 110
         case .scope: 170
         case .process, .local, .remote: nil
         }
@@ -47,11 +51,14 @@ enum ConnectionColumn: String, CaseIterable {
     /// When the table runs short of room, columns give way lowest priority
     /// first (`ColumnFit`, as on the Processes table), so the ones that say
     /// whose socket a row is, between which ends and in what state, keep
-    /// their width. The details pane gives all three that hide.
+    /// their width. The details pane gives all four that hide. How long a
+    /// socket has been seen outlasts its PID and protocol; Scope, which
+    /// flags an exposed socket in a symbol's width, outlasts that.
     var priority: Int? {
         switch self {
         case .process, .local, .remote, .state: nil
-        case .scope: 3
+        case .scope: 4
+        case .age: 3
         case .pid: 2
         // The State column already tells TCP ("Listening") from UDP ("Bound").
         case .transport: 1

@@ -115,7 +115,8 @@ enum ProcessColumn: String, CaseIterable {
     var headerHelp: String? {
         switch self {
         case .memory: MemoryMeasure.column
-        case .gpu: "GPU: the share of the GPU's time each process used. \"—\" for a process that hasn't used the GPU."
+        case .gpu: "GPU: each process's GPU time ÷ elapsed time (10% is 0.1 s of GPU work each second). "
+            + "\"—\" for a process that hasn't used the GPU."
         case .neuralMemory: MemoryMeasure.neuralColumn
         default: nil
         }
@@ -135,24 +136,20 @@ enum ProcessColumn: String, CaseIterable {
         self != .name && self != .user && self != .kind
     }
 
-    /// Colour of the meter bar behind busy values, matching the Performance page.
-    @MainActor var meterColor: NSColor? {
+    /// Colour of the meter bar behind busy values, matching the Performance
+    /// page. The meters sit behind the numbers, so they keep the pastel fill
+    /// shade; a palette change shows at the next restyle.
+    var meterColor: NSColor? {
         switch self {
-        case .cpu: Self.colors.cpu
-        case .memory: Self.colors.memory
-        case .power: Self.colors.power
-        case .gpu: Self.colors.gpu
-        case .disk: Self.colors.disk
-        case .wakeups: Self.colors.wakeups
+        case .cpu: GraphColors.shared.fill(.cpu)
+        case .memory: GraphColors.shared.fill(.memory)
+        case .power: GraphColors.shared.fill(.power)
+        case .gpu: GraphColors.shared.fill(.gpu)
+        case .disk: GraphColors.shared.fill(.disk)
+        case .wakeups: GraphColors.shared.fill(.network)
         default: nil
         }
     }
-
-    /// The meters sit behind the numbers, so they keep the pastel fill shade.
-    @MainActor private static let colors = (
-        cpu: NSColor(Theme.cpu).fillShade, memory: NSColor(Theme.memory).fillShade, power: NSColor(Theme.power).fillShade,
-        gpu: NSColor(Theme.gpu).fillShade, disk: NSColor(Theme.disk).fillShade, wakeups: NSColor(Theme.network).fillShade
-    )
 
     /// Gap between columns, narrower than AppKit's 17 so every default
     /// column fits beside the inspector in the default window.

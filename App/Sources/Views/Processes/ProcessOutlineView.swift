@@ -778,15 +778,18 @@ extension ProcessOutlineView.Coordinator {
     }
 
     /// Expands the sections and rows above `item`, outermost first, through
-    /// the delegate, which records each as expanded by the user.
+    /// the delegate, which records each as expanded by the user. Found in
+    /// the rows' own tree: the outline knows nothing of the rows under one
+    /// it has never expanded (a group member picked in the inspector).
     func expandParents(of item: Item, in outline: NSOutlineView) {
-        var ancestors: [Any] = []
-        var ancestor = outline.parent(forItem: item)
-        while let current = ancestor {
-            ancestors.insert(current, at: 0)
-            ancestor = outline.parent(forItem: current)
+        func path(to id: Int64, in items: [Item]) -> [Item]? {
+            for candidate in items {
+                if candidate.id == id { return [] }
+                if let below = path(to: id, in: candidate.children) { return [candidate] + below }
+            }
+            return nil
         }
-        ancestors.forEach { outline.expandItem($0) }
+        path(to: item.id, in: roots)?.forEach { outline.expandItem($0) }
     }
 
     /// Scrolls the row to the middle of the table, unless it's in view

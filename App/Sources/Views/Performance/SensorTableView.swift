@@ -19,13 +19,16 @@ struct SensorReadingTable: NSViewRepresentable {
     /// How the lowest and highest are kept, on hover.
     var sinceHelp: String
     var reset: @MainActor () -> Void
+    /// Read where the table is made, so the page redraws it when the graph
+    /// colours change.
+    private let colors = GraphColors.shared.revision
 
     func makeNSView(context: Context) -> SensorTableView {
         SensorTableView()
     }
 
     func updateNSView(_ view: SensorTableView, context: Context) {
-        view.update(rows: rows, extremes: extremes, thermalState: thermalState)
+        view.update(rows: rows, extremes: extremes, thermalState: thermalState, colors: colors)
         view.showSince(since, help: sinceHelp, reset: reset)
     }
 
@@ -72,13 +75,16 @@ extension ThermalState {
 
 /// Where each column sits in a row of a given width: the name takes what
 /// the three figures leave, and the range bar shows once there's room for it
-/// beside a name of at least `labelMinimum`.
+/// beside a name of at least `labelMinimum`. In a narrow window the bar gives
+/// way to the name, down to `barNarrowest`, before it's left out.
 struct SensorColumns: Equatable {
     static let inset: CGFloat = 8
     static let spacing: CGFloat = 12
-    static let value: CGFloat = 80
+    /// The widest figure at the rows' size ("−1,520 mA") and the cell's margins.
+    static let value: CGFloat = 76
     static let labelMinimum: CGFloat = 150
     static let barMinimum: CGFloat = 96
+    static let barNarrowest: CGFloat = 56
     static let barMaximum: CGFloat = 260
     /// The dot and the gap before the name.
     static let dotWidth: CGFloat = 13
@@ -96,8 +102,9 @@ struct SensorColumns: Equatable {
 
     init(width: CGFloat) {
         let available = max(width - 2 * Self.inset - 3 * (Self.value + Self.spacing), 0)
-        let bar = min(max(((available - Self.spacing) * 0.42).rounded(), Self.barMinimum), Self.barMaximum)
-        barWidth = available - Self.spacing - bar >= Self.labelMinimum ? bar : 0
+        let roomy = min(max(((available - Self.spacing) * 0.42).rounded(), Self.barMinimum), Self.barMaximum)
+        let bar = min(roomy, available - Self.spacing - Self.labelMinimum)
+        barWidth = bar >= Self.barNarrowest ? bar : 0
         labelX = Self.inset
         labelWidth = available - (barWidth > 0 ? barWidth + Self.spacing : 0)
         nowX = labelX + labelWidth + Self.spacing
@@ -107,17 +114,30 @@ struct SensorColumns: Equatable {
     }
 }
 
-/// Fonts and colours shared by the table's rows.
+/// Fonts and colours shared by the table's rows. The readings are what the
+/// page is for, so the rows take the body size (13 pt), a step up from other
+/// tables' rows, with every figure in equal-width digits; what supports them
+/// (the since line, column titles, where readings come from, the key) is
+/// 12 pt in `.secondaryText`.
 @MainActor
 private enum SensorStyle {
-    static let size = NSFont.preferredFont(forTextStyle: .callout).pointSize
+    static let size = NSFont.preferredFont(forTextStyle: .body).pointSize
     static let label = NSFont.systemFont(ofSize: size)
     static let now = NSFont.numeric(size: size, weight: .medium)
     static let range = NSFont.numeric(size: size, weight: .regular)
     static let groupTitle = NSFont.systemFont(ofSize: size, weight: .semibold)
-    static let metadata = NSFont.preferredFont(forTextStyle: .subheadline)
-    /// A one-line label's height at the table's text size.
-    static let lineHeight = ceil(NSTextField(labelWithString: "Xg").intrinsicContentSize.height)
+    static let supporting = NSFont.preferredFont(forTextStyle: .callout)
+    static let columnTitle = NSFont.systemFont(ofSize: supporting.pointSize, weight: .medium)
+    /// A one-line label's height at the rows' size.
+    static let lineHeight = height(label)
+    /// A one-line label's height at the supporting size.
+    static let supportingHeight = height(supporting)
+
+    private static func height(_ font: NSFont) -> CGFloat {
+        let field = NSTextField(labelWithString: "Xg")
+        field.font = font
+        return ceil(field.intrinsicContentSize.height)
+    }
 
     static func field(font: NSFont, alignment: NSTextAlignment = .left, color: NSColor = .labelColor) -> NSTextField {
         let field = NSTextField(labelWithString: "")
@@ -142,9 +162,9 @@ final class SensorTableView: NSView {
         var height: CGFloat {
             switch self {
             case .header: SensorHeaderView.height
-            case .pressure: 24
-            case .group: 30
-            case .reading: 22
+            case .pressure: 26
+            case .group: 32
+            case .reading: 24
             }
         }
     }
@@ -174,6 +194,8 @@ final class SensorTableView: NSView {
     private var rowViews: [String: SensorRowView] = [:]
     /// Each group's sources as its heading shows them, to notice a change.
     private var groupSources: [SensorGroup: String] = [:]
+    /// The graph colours' revision the rows were coloured for.
+    private var colorRevision: Int?
     /// The page's clip view, whose scrolling moves the heading.
     private weak var clipView: NSClipView?
 
@@ -193,8 +215,18 @@ final class SensorTableView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(rows: [SensorReading], extremes: SensorExtremes, thermalState: ThermalState?) {
+    /// `colors` is the graph colours' revision: when it changes, the rows are
+    /// coloured again and the headings made again.
+    func update(rows: [SensorReading], extremes: SensorExtremes, thermalState: ThermalState?, colors: Int) {
         let lines = Self.lines(rows: rows, pressure: thermalState != nil)
+        if colors != colorRevision {
+            colorRevision = colors
+            groupViews.values.forEach { $0.removeFromSuperview() }
+            groupViews = [:]
+            groupSources = [:]
+            header.recolor()
+            self.lines = []
+        }
         if lines != self.lines {
             rebuild(lines, rows: rows)
         }
@@ -350,20 +382,20 @@ final class SensorTableView: NSView {
 /// hairline only then, so at rest it reads as part of the card.
 private final class SensorHeaderView: NSView {
     nonisolated static let sinceHeight: CGFloat = 28
-    nonisolated static let titlesHeight: CGFloat = 20
+    nonisolated static let titlesHeight: CGFloat = 22
     nonisolated static let height = sinceHeight + titlesHeight
     static let rangeHelp = "Each bar spans the sensor's scale. The coloured band runs from the lowest to the highest "
         + "reading since the reset, and the tick marks the reading now."
 
-    private let since = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
+    private let since = SensorStyle.field(font: SensorStyle.supporting, color: .secondaryText)
     private let resetButton = NSButton(title: "Reset", target: nil, action: nil)
     private let key = SensorRangeKey()
-    // The column titles, at the rows' size.
-    private let name = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
-    private let now = SensorStyle.field(font: SensorStyle.label, alignment: .right, color: .secondaryText)
-    private let low = SensorStyle.field(font: SensorStyle.label, alignment: .right, color: .secondaryText)
-    private let high = SensorStyle.field(font: SensorStyle.label, alignment: .right, color: .secondaryText)
-    private let range = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
+    // The column titles.
+    private let name = SensorStyle.field(font: SensorStyle.columnTitle, color: .secondaryText)
+    private let now = SensorStyle.field(font: SensorStyle.columnTitle, alignment: .right, color: .secondaryText)
+    private let low = SensorStyle.field(font: SensorStyle.columnTitle, alignment: .right, color: .secondaryText)
+    private let high = SensorStyle.field(font: SensorStyle.columnTitle, alignment: .right, color: .secondaryText)
+    private let range = SensorStyle.field(font: SensorStyle.columnTitle, color: .secondaryText)
     private let rangeInfo = NSImageView()
     private let rule = SensorRuleView()
 
@@ -412,6 +444,12 @@ private final class SensorHeaderView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// After a change of graph colours: the key's bar and the pinned fill.
+    func recolor() {
+        key.recolor()
+        needsDisplay = true
     }
 
     func showSince(_ text: String, help: String) {
@@ -471,13 +509,13 @@ private final class SensorRangeKey: NSView {
     private static let gap: CGFloat = 6
 
     private let bar = SensorRangeBar()
-    private let text = SensorStyle.field(font: SensorStyle.label, color: .secondaryText)
+    private let text = SensorStyle.field(font: SensorStyle.supporting, color: .secondaryText)
 
     override var isFlipped: Bool { true }
 
     init() {
         super.init(frame: .zero)
-        bar.color = NSColor(Theme.thermal)
+        recolor()
         bar.set(scale: 0...1, lowest: 0.2, highest: 0.75, now: 0.55)
         text.stringValue = "band: lowest to highest · tick: now"
         for view in [self, bar, text] as [NSView] { view.toolTip = SensorHeaderView.rangeHelp }
@@ -494,6 +532,10 @@ private final class SensorRangeKey: NSView {
         Self.barWidth + Self.gap + ceil(text.fittingSize.width)
     }
 
+    func recolor() {
+        bar.color = NSColor(Theme.thermal)
+    }
+
     override func layout() {
         super.layout()
         bar.frame = NSRect(x: 0, y: ((bounds.height - 10) / 2).rounded(), width: Self.barWidth, height: 10)
@@ -508,7 +550,7 @@ private final class SensorRangeKey: NSView {
 private final class SensorGroupView: NSView {
     private let swatch = SensorDotView()
     private let title = SensorStyle.field(font: SensorStyle.groupTitle)
-    private let sourceField = SensorStyle.field(font: SensorStyle.metadata, alignment: .right, color: .secondaryText)
+    private let sourceField = SensorStyle.field(font: SensorStyle.supporting, alignment: .right, color: .secondaryText)
     private let rule = SensorRuleView()
 
     var sources = "" {
@@ -543,10 +585,13 @@ private final class SensorGroupView: NSView {
         let height = SensorStyle.lineHeight
         let y = bounds.height - height - 3
         rule.frame = NSRect(x: inset, y: 6, width: max(bounds.width - 2 * inset, 0), height: 1)
-        swatch.frame = NSRect(x: inset, y: y + (height - 8) / 2, width: 8, height: 8)
+        swatch.frame = NSRect(x: inset, y: (y + (height - 8) / 2).rounded(), width: 8, height: 8)
         // The cell draws its text inset, so its fitting width, not its text width.
         let sourceWidth = min(ceil(sourceField.fittingSize.width), bounds.width * 0.45)
-        sourceField.frame = NSRect(x: bounds.width - inset - sourceWidth, y: y + 1, width: sourceWidth, height: height)
+        let sourceHeight = SensorStyle.supportingHeight
+        // On the title's baseline (descenders are negative).
+        let sourceY = y + height - sourceHeight + SensorStyle.groupTitle.descender - SensorStyle.supporting.descender
+        sourceField.frame = NSRect(x: bounds.width - inset - sourceWidth, y: sourceY.rounded(), width: sourceWidth, height: sourceHeight)
         let titleX = inset + SensorColumns.dotWidth
         title.frame = NSRect(x: titleX, y: y, width: max(sourceField.frame.minX - titleX - 8, 0), height: height)
     }
@@ -656,7 +701,7 @@ final class SensorRowView: NSView {
         super.layout()
         let height = SensorStyle.lineHeight
         let y = ((bounds.height - height) / 2).rounded()
-        dot.frame = NSRect(x: columns.labelX, y: (bounds.height - 7) / 2, width: 7, height: 7)
+        dot.frame = NSRect(x: columns.labelX, y: ((bounds.height - 7) / 2).rounded(), width: 7, height: 7)
         let labelX = columns.labelX + SensorColumns.dotWidth
         label.frame = NSRect(x: labelX, y: y, width: max(columns.labelWidth - SensorColumns.dotWidth, 0), height: height)
         now.frame = NSRect(x: columns.nowX, y: y, width: SensorColumns.value, height: height)

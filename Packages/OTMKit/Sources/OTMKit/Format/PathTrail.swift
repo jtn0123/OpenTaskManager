@@ -20,3 +20,24 @@ extension Format {
         return (inside ? names.dropFirst(base.count) : names[...]).map(String.init)
     }
 }
+
+/// A path as a details pane shows it: the name it ends in, which tells one
+/// file from another, over the folder that holds it. Trailing slashes don't
+/// count; a bare name or the root has no folder.
+public struct PathParts: Sendable, Hashable {
+    public var name: String
+    public var folder: String?
+
+    public init(_ path: String) {
+        var trimmed = Substring(path)
+        while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed = trimmed.dropLast() }
+        guard trimmed.count > 1, let slash = trimmed.lastIndex(of: "/") else {
+            name = String(trimmed)
+            folder = nil
+            return
+        }
+        name = String(trimmed[trimmed.index(after: slash)...])
+        // "/bin" is in "/", not in an empty folder.
+        folder = slash == trimmed.startIndex ? "/" : String(trimmed[..<slash])
+    }
+}

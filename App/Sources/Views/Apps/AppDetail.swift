@@ -8,8 +8,11 @@ struct AppDetail: View {
     var size: UInt64?
     var isMeasuring: Bool
     var pids: [Int32]
-    /// Opens the Startup page on this app's launch items.
-    var showInStartup: () -> Void
+    /// What the Startup page has seen of launchd's jobs, for each launch item's state.
+    var launchJobs: LaunchJobWatch
+    /// Opens the Startup page on this app's launch items, with one of them
+    /// selected when it's given.
+    var showInStartup: (LaunchItem?) -> Void
     /// Opens the removal review; nil for apps it isn't offered for.
     var moveToTrash: (() -> Void)?
 
@@ -18,8 +21,8 @@ struct AppDetail: View {
 
     /// Who the app is stays at the top and what can be done with it in a
     /// footer, and everything read about it scrolls between them, in the
-    /// pane's only scroll view. Paths keep to one line and the certificate
-    /// chain folds away, so nothing needs a scroll view of its own.
+    /// pane's only scroll view. Paths show their name over their folder and
+    /// the certificate chain folds away, so nothing needs a scroll view of its own.
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -38,9 +41,9 @@ struct AppDetail: View {
         VStack(alignment: .leading, spacing: 14) {
             if let warning = ArchitectureWarning(app.architecture) { warning }
             facts
-            labelled("Location", app.path)
+            pathField("Location", app.path)
             if AppDetail.differs(app.resolvedPath, from: app.path) {
-                labelled("Links to", app.resolvedPath)
+                pathField("Links to", app.resolvedPath)
             }
             Divider()
             launchItems
@@ -58,11 +61,10 @@ struct AppDetail: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(app.name).font(.headline).lineLimit(2)
                 if let identifier = app.bundleIdentifier {
-                    Text(identifier)
-                        .font(.callout.monospaced()).foregroundStyle(.secondaryText)
-                        .lineLimit(1).truncationMode(.middle)
-                        .textSelection(.enabled)
-                        .help(identifier)
+                    // Copied with the button that shows on hover: the
+                    // footer's room went to Copy Path.
+                    CopyableText(value: identifier, truncatesMiddle: true)
+                        .font(.callout).foregroundStyle(.secondaryText)
                 }
             }
         }
@@ -146,14 +148,28 @@ struct AppDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 ForEach(app.launchItems) { item in
+                    // The state the Startup page gives it, so the two pages say the same.
+                    let status = LaunchItemStatus(item: item, health: launchJobs.health(of: item))
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Circle().fill(item.state.color).frame(width: 7, height: 7)
+                        if status.needsAttention {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .imageScale(.small)
+                                .foregroundStyle(LaunchJobHealth.tint)
+                        } else {
+                            Circle().fill(status.color).frame(width: 7, height: 7)
+                        }
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(item.name).font(.callout).lineLimit(1).truncationMode(.middle)
-                                .help(item.label)
-                            Text("\(item.scope.title) · \(item.launchSummary) · \(item.state.title)")
+                            // Opens it on the Startup page, selected among the app's other items.
+                            Button { showInStartup(item) } label: {
+                                Text(item.name).lineLimit(1).truncationMode(.middle)
+                            }
+                            .buttonStyle(.link)
+                            .font(.callout)
+                            .help("Show \(item.label) on the Startup page")
+                            Text("\(item.scope.title) · \(item.launchSummary) · \(status.title)")
                                 .font(.callout).foregroundStyle(.secondaryText)
                                 .lineLimit(1)
+                                .help("\(status.summary). launchd: \(status.registration.title)")
                         }
                     }
                 }
@@ -163,18 +179,19 @@ struct AppDetail: View {
         }
     }
 
+    /// Reveal in Finder and Copy Path side by side, for the bundle.
     private var actions: some View {
         Grid(horizontalSpacing: 8, verticalSpacing: 8) {
             GridRow {
                 Button { AppActions.open(app) } label: { Text("Open").frame(maxWidth: .infinity) }
-                Button { AppActions.reveal(app) } label: { Text("Reveal in Finder").frame(maxWidth: .infinity) }
-            }
-            GridRow {
-                Button(action: showInStartup) { Text("Show in Startup").frame(maxWidth: .infinity) }
+                Button { showInStartup(nil) } label: { Text("Show in Startup").frame(maxWidth: .infinity) }
                     .disabled(app.launchItems.isEmpty)
                     .help(app.launchItems.isEmpty ? "This app has no launch items" : "Open the Startup page on this app's launch items")
-                Button { AppActions.copy(app.bundleIdentifier ?? "") } label: { Text("Copy Bundle ID").frame(maxWidth: .infinity) }
-                    .disabled(app.bundleIdentifier == nil)
+            }
+            GridRow {
+                Button { AppActions.reveal(app) } label: { Text("Reveal in Finder").frame(maxWidth: .infinity) }
+                Button { AppActions.copy(app.path) } label: { Text("Copy Path").frame(maxWidth: .infinity) }
+                    .help("Copy the app's whole path")
             }
             // A row of its own, apart from the everyday actions, and red
             // because it ends in the Trash (after a review).
@@ -219,12 +236,21 @@ struct AppDetail: View {
         InstalledApps.normalized(resolved) != InstalledApps.normalized(path)
     }
 
-    /// A path or identifier keeps to one line, cut in the middle, with the
-    /// whole of it in a tooltip and a copy button.
+    /// An identifier keeps to one line, cut in the middle, with the whole
+    /// of it in a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
             CopyableText(value: value, truncatesMiddle: true).font(.callout)
+        }
+    }
+
+    /// A path's name over its folder, which wraps, so the folders that tell
+    /// two copies apart are never cut out.
+    private func pathField(_ label: String, _ path: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            CopyableText(value: path, splitsPath: true).font(.callout)
         }
     }
 }

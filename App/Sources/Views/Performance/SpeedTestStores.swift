@@ -48,7 +48,11 @@ final class NetworkQualityStore {
         failures[interface] = nil
         task = Task { [weak self] in
             do throws(NetworkQualityError) {
-                let result = try await NetworkQuality.run(interface: interface)
+                let context = await BenchmarkContextFeed.capture()
+                if Task.isCancelled { throw .cancelled }
+                var measured = try await NetworkQuality.run(interface: interface)
+                measured.context = context.ended()
+                let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.networkQuality.append(result) }.value
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
@@ -228,7 +232,11 @@ final class DiskSpeedStore {
         }
         task = Task { [weak self] in
             do throws(DiskSpeedError) {
-                let result = try await DiskSpeedTest.measure(in: target.path, progress: report)
+                let context = await BenchmarkContextFeed.capture()
+                if Task.isCancelled { throw .cancelled }
+                var measured = try await DiskSpeedTest.measure(in: target.path, progress: report)
+                measured.context = context.ended()
+                let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.diskSpeed.append(result) }.value
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }

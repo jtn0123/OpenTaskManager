@@ -52,7 +52,7 @@ struct AppRow: Identifiable {
 /// it costs nothing while it sits open.
 struct AppsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     @AppStorage("appsFilter") private var filter: AppsFilter = .all
     @AppStorage("showAppsInspector") private var showInspector = true
     @State private var store = InstalledAppStore()
@@ -158,7 +158,8 @@ struct AppsView: View {
             } detail: {
                 if let row = all.first(where: { $0.id == selection }) {
                     AppDetail(app: row.app, size: row.size, isMeasuring: store.sizesLeft > 0, pids: row.pids,
-                              showInStartup: { showInStartup(row.app) },
+                              launchJobs: model.launchJobs.watch,
+                              showInStartup: { showInStartup(row.app, item: $0) },
                               moveToTrash: AppActions.offersRemoval(row.app) ? { removing = row.app } : nil)
                 } else {
                     ContentUnavailableView("No app selected", systemImage: "info.circle",
@@ -212,8 +213,14 @@ struct AppsView: View {
 
     /// Opens the Startup page searching for this app's launch items.
     private func showInStartup(_ app: InstalledApp) {
+        showInStartup(app, item: nil)
+    }
+
+    /// The same, with `item` selected there and its row in view.
+    private func showInStartup(_ app: InstalledApp, item: LaunchItem?) {
         guard let query = app.startupSearchText else { return }
         model.requestedStartupSearch = query
+        model.requestedStartupItem = item?.id
         page = .startup
     }
 }

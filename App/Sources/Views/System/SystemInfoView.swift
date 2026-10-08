@@ -7,14 +7,17 @@ import SwiftUI
 /// network, its configuration and shares, the firewall, attached devices,
 /// battery, software and security. Read once when the page opens and again
 /// on Refresh (displays also when they change), never per sample; the
-/// slower hardware report once a session (`HardwareInventoryStore`).
+/// slower hardware report once a session (`HardwareInventoryStore`). A jump
+/// bar over the cards goes to a group of them, and the toolbar's search
+/// narrows them to what matches (`SystemReportSearch`), marking each find
+/// (`SearchMarks`) and going to each match.
 struct SystemInfoView: View {
     /// Below this page width the toolbar's buttons drop their titles, so an
     /// 820-point window keeps Save Report out of the overflow menu.
     private nonisolated static let titledButtonsWidth: CGFloat = 900
 
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     @State private var info: SystemInfo?
     @State private var displays: [DisplayInfo] = []
     @State private var devices: PeripheralInventory?
@@ -29,6 +32,10 @@ struct SystemInfoView: View {
     @State private var showsIdentifiers = false
     @State private var copied = false
     @State private var saving = false
+    @State private var query = ""
+    @State private var navigator = SystemNavigator()
+    @State private var openedRequest = false
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         Group {
@@ -39,10 +46,19 @@ struct SystemInfoView: View {
             }
         }
         .onGeometryChange(for: Bool.self) { $0.size.width >= Self.titledButtonsWidth } action: { showsButtonTitles = $0 }
+        .searchable(text: $query, placement: .toolbar, prompt: "Label or value")
+        .modifier(SearchFocus(isFocused: $searchFocused))
+        .onSubmit(of: .search) { navigator.step(match: 1) }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await refresh() }
+                    Task {
+                        // The card at the top stays put while the reads arrive.
+                        navigator.holdPosition()
+                        await refresh()
+                        try? await Task.sleep(for: .milliseconds(500))
+                        navigator.releasePosition()
+                    }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
@@ -76,30 +92,59 @@ struct SystemInfoView: View {
     }
 
     private func content(_ info: SystemInfo) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HeroCard(info: info, showsIdentifiers: $showsIdentifiers)
-                // Only the uptime moves, so a minute is often enough.
-                TimelineView(.everyMinute) { context in
-                    let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, firewall: firewall,
-                                                         hardware: HardwareInventoryStore.shared.inventory, now: context.date)
-                    let links = networkLinks(info)
-                    let exposedSockets: () -> Void = { openExposedSockets() }
-                    // Columns that each run their own length, so a short card
-                    // (Displays, an empty Bluetooth) beside a long one (Storage,
-                    // a full USB list) leaves no hole, inside it or below it.
-                    // One column in a narrow window.
-                    ColumnGrid(minimum: 340) {
-                        ForEach(sections) { section in
-                            InfoCard(section: section, showsIdentifiers: showsIdentifiers, links: section.kind.isNetwork ? links : nil,
-                                     showExposedSockets: section.kind == .firewall ? exposedSockets : nil)
+        // Only the uptime moves, so a minute is often enough.
+        TimelineView(.everyMinute) { context in
+            let sections = SystemReport.sections(info, displays: displays, devices: devices, security: security, firewall: firewall,
+                                                 hardware: HardwareInventoryStore.shared.inventory, now: context.date)
+            let search = SystemReportSearch(sections, query: query, overview: SystemReport.overview(info.hardware),
+                                            includesIdentifiers: showsIdentifiers)
+            let shown = search.isActive ? sections.filter { search.card($0.kind) != nil } : sections
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    SystemJumpBar(navigator: navigator, categories: SystemCategory.present(in: shown.map(\.kind)), search: search,
+                                  query: $query) { searchFocused = true }
+                    Divider()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if !search.isActive || search.matches.contains(.overview) {
+                                HeroCard(info: info, showsIdentifiers: $showsIdentifiers)
+                                    .systemCardMark(.overview, navigator: navigator)
+                                    .systemTarget(.overview, navigator: navigator)
+                            }
+                            if search.isActive, search.matches.isEmpty {
+                                NoMatches(query: query)
+                            }
+                            cards(shown, info: info, search: search)
                         }
+                        // Every find in the cards' titles, labels and values is marked.
+                        .environment(\.searchTerms, search.terms)
+                        .padding(20)
+                        .background(SystemScrollTracker(navigator: navigator))
+                        .coordinateSpace(.named(SystemNavigator.space))
                     }
+                    .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
                 }
+                .onAppear { navigator.proxy = proxy }
             }
-            .padding(20)
         }
-        .defaultScrollAnchor(LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top)
+    }
+
+    private func cards(_ sections: [InfoSection], info: SystemInfo, search: SystemReportSearch) -> some View {
+        let links = networkLinks(info)
+        let exposedSockets: () -> Void = { openExposedSockets() }
+        // Columns that each run their own length, so a short card
+        // (Displays, an empty Bluetooth) beside a long one (Storage,
+        // a full USB list) leaves no hole, inside it or below it.
+        // One column in a narrow window.
+        return ColumnGrid(minimum: 340) {
+            ForEach(sections) { section in
+                let found = search.card(section.kind)
+                InfoCard(section: section, shown: found?.rows, opens: found?.opens ?? [], showsIdentifiers: showsIdentifiers,
+                         navigator: navigator, links: section.kind.isNetwork ? links : nil,
+                         showExposedSockets: section.kind == .firewall ? exposedSockets : nil)
+                    .systemTarget(.card(section.kind), navigator: navigator)
+            }
+        }
     }
 
     /// The ports Performance graphs (Wi-Fi, Ethernet and cellular with an
@@ -146,6 +191,20 @@ struct SystemInfoView: View {
         // The memory, controller and reader details, once a session, after
         // the devices so two system_profiler runs don't compete.
         await HardwareInventoryStore.shared.load()
+        await openRequest()
+    }
+
+    /// `-openSystemSearch <text>` searches and `-openSystemCategory <group>`
+    /// (hardware, network, devices…) jumps, once the page is read, for screenshots.
+    private func openRequest() async {
+        guard !openedRequest else { return }
+        openedRequest = true
+        if let text = LaunchArgument.string("openSystemSearch") { query = text }
+        if let name = LaunchArgument.string("openSystemCategory"), let category = SystemCategory(rawValue: name.lowercased()) {
+            // After the cards are laid out.
+            try? await Task.sleep(for: .milliseconds(300))
+            navigator.jump(to: category)
+        }
     }
 
     /// Reads the hardware, network configuration, firewall and devices again.
@@ -243,8 +302,8 @@ private struct HeroCard: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(hardware.displayName).font(.largeTitle.weight(.semibold))
-                        Text(([info.software.computerName, hardware.modelIdentifier].compactMap { $0 }).joined(separator: " · "))
+                        MarkedText(hardware.displayName).font(.largeTitle.weight(.semibold))
+                        MarkedText(([info.software.computerName, hardware.modelIdentifier].compactMap { $0 }).joined(separator: " · "))
                             .font(.title3)
                             .foregroundStyle(.secondaryText)
                     }
@@ -286,7 +345,7 @@ private struct HeroCard: View {
     private func identifierRows(_ hardware: MacHardware) -> some View {
         ForEach(SystemReport.identifiers(hardware), id: \.label) { row in
             HStack(spacing: 5) {
-                Text(row.label).foregroundStyle(.secondaryText)
+                MarkedText(row.label).foregroundStyle(.secondaryText)
                 if showsIdentifiers {
                     CopyableText(value: row.value)
                 } else {
@@ -350,22 +409,38 @@ private struct NetworkLinks {
 /// One section as label/value rows. Headings (a display, a drive, a network
 /// port) start a group and indent the rows under them. On an attached-device
 /// card each device is one compact row instead, opening onto its details.
+/// During a search it shows only the rows found (`shown`, by index among the
+/// section's rows), with the devices whose facts matched opened, the words
+/// found marked wherever they are (`MarkedText`) and the match gone to
+/// outlined.
 private struct InfoCard: View {
     var section: InfoSection
+    /// nil shows every row.
+    var shown: [Int]?
+    /// Device headings a search opens.
+    var opens: Set<Int> = []
     var showsIdentifiers: Bool
+    /// Outlines the row a search goes to.
+    let navigator: SystemNavigator
     /// On the Network card: each port's link to its traffic.
     var links: NetworkLinks?
     /// On the Firewall card: opens the Connections page's exposed sockets.
     var showExposedSockets: (() -> Void)?
-    /// Devices opened to show their details, by position and name.
+    /// Devices opened to show their details, by place in the card and name.
     @State private var opened: Set<String> = []
+    /// Those a search opened, closed again when the search moves on.
+    @State private var searchOpened: Set<String> = []
 
     var body: some View {
         let style = SystemStyle(section.kind)
         Card(tint: style.tint) {
-            Label(section.title, systemImage: style.symbol)
-                .font(.headline)
-                .foregroundStyle(style.tint)
+            Label {
+                MarkedText(section.title)
+            } icon: {
+                Image(systemName: style.symbol)
+            }
+            .font(.headline)
+            .foregroundStyle(style.tint)
             Group {
                 if section.hasDetails {
                     deviceList
@@ -374,7 +449,9 @@ private struct InfoCard: View {
                 }
             }
             .font(.callout)
-            if let note = section.note {
+            .markedRowBackground(flashing: navigator.mark != nil)
+            // A card cut down by a search leaves out what explains the whole.
+            if let note = section.note, shown == nil || shown?.count == section.rows.count {
                 Text(note)
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
@@ -388,16 +465,37 @@ private struct InfoCard: View {
                     .help("Open the Connections page on the sockets listening on addresses other devices could try to reach")
             }
         }
+        .systemCardMark(.card(section.kind), navigator: navigator)
+        .onChange(of: opens, initial: true) {
+            // Close what an earlier search opened and this one doesn't, and
+            // open this one's, leaving devices opened by hand alone.
+            let keys = Set(opens.map(key))
+            opened.subtract(searchOpened.subtracting(keys))
+            let added = keys.subtracting(opened)
+            opened.formUnion(added)
+            searchOpened = searchOpened.intersection(keys).union(added)
+        }
+    }
+
+    /// The row of this card the search has gone to.
+    private var current: Int? {
+        if case let .row(kind, index) = navigator.match, kind == section.kind { index } else { nil }
     }
 
     private var rowGrid: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
-            ForEach(Array(section.rows.enumerated()), id: \.offset) { index, row in
+        let indices = shown ?? Array(section.rows.indices)
+        let firstHeading = section.rows.firstIndex(where: \.isHeading)
+        let current = current
+        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+            ForEach(indices, id: \.self) { index in
+                let row = section.rows[index]
                 if row.isHeading {
-                    heading(row, isFirst: index == 0)
+                    heading(row, isFirst: index == indices.first)
+                        .id(SystemTarget.row(section.kind, index))
+                        .markedRow(current == index)
                 } else {
-                    InfoGridRow(row: row, showsIdentifiers: showsIdentifiers,
-                                indent: section.rows[..<index].contains(where: \.isHeading) ? 10 : 0)
+                    InfoGridRow(row: row, showsIdentifiers: showsIdentifiers, indent: firstHeading.map { $0 < index } == true ? 10 : 0,
+                                target: .row(section.kind, index), isCurrent: current == index)
                 }
             }
         }
@@ -407,12 +505,12 @@ private struct InfoCard: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Group {
-                    Text(row.label).fontWeight(.semibold).lineLimit(1)
+                    MarkedText(row.label).fontWeight(.semibold).lineLimit(1)
                     if !row.value.isEmpty {
-                        Text(row.value).foregroundStyle(.secondaryText).lineLimit(1)
+                        MarkedText(row.value).foregroundStyle(.secondaryText).lineLimit(1)
                     }
                     if let state = row.state {
-                        Text(state)
+                        MarkedText(state)
                             .font(.explanation.weight(.medium))
                             .foregroundStyle(SystemStyle(section.kind).tint)
                             .padding(.horizontal, 6)
@@ -440,22 +538,25 @@ private struct InfoCard: View {
     }
 
     private var deviceList: some View {
-        let blocks = Array(section.blocks.enumerated())
-        let keys = blocks.compactMap { index, block in
-            if case let .device(heading, details) = block, !details.isEmpty { Self.key(index, heading) } else { nil }
+        let blocks = section.blockIndices(showing: shown)
+        let keys = blocks.compactMap { block in
+            if case let .device(heading, details) = block, !details.isEmpty { key(heading) } else { nil }
         }
+        let current = current
         return VStack(alignment: .leading, spacing: 6) {
-            ForEach(blocks, id: \.offset) { index, block in
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
-                case let .rows(rows):
+                case let .rows(run):
                     Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
-                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                            InfoGridRow(row: row, showsIdentifiers: showsIdentifiers)
+                        ForEach(run, id: \.self) { index in
+                            InfoGridRow(row: section.rows[index], showsIdentifiers: showsIdentifiers, target: .row(section.kind, index),
+                                        isCurrent: current == index)
                         }
                     }
                 case let .device(heading, details):
-                    let key = Self.key(index, heading)
-                    DeviceRow(heading: heading, details: details, showsIdentifiers: showsIdentifiers, isOpen: opened.contains(key)) { all in
+                    let key = key(heading)
+                    DeviceRow(section: section, heading: heading, details: details, showsIdentifiers: showsIdentifiers,
+                              isOpen: opened.contains(key), current: current) { all in
                         let opening = !opened.contains(key)
                         if all {
                             opened = opening ? Set(keys) : []
@@ -470,8 +571,10 @@ private struct InfoCard: View {
         }
     }
 
-    private static func key(_ index: Int, _ heading: InfoRow) -> String {
-        "\(index) \(heading.label)"
+    /// A device by its heading's place in the whole card and its name, so it
+    /// keeps its state while a search shows part of the card.
+    private func key(_ heading: Int) -> String {
+        "\(heading) \(section.rows[heading].label)"
     }
 }
 
@@ -480,14 +583,21 @@ private struct InfoGridRow: View {
     var row: InfoRow
     var showsIdentifiers: Bool
     var indent: CGFloat = 0
+    /// Where the page scrolls to reach it.
+    var target: SystemTarget
+    /// The match a search has gone to.
+    var isCurrent = false
 
     var body: some View {
         GridRow {
-            Text(row.label)
+            MarkedText(row.label)
                 .foregroundStyle(.secondaryText)
                 .fixedSize()
                 .padding(.leading, indent)
+                .id(target)
+                .markedRow(isCurrent)
             InfoValue(row: row, showsIdentifiers: showsIdentifiers)
+                .markedRow(isCurrent)
         }
     }
 }
@@ -512,7 +622,7 @@ private struct InfoValue: View {
                 CopyableText(value: row.value,
                              forms: row.isAddress ? AddressBreaks.forms(row.value) : AddressBreaks.dottedForms(row.value))
             } else {
-                Text(row.value)
+                MarkedText(row.value)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -527,38 +637,52 @@ private struct InfoValue: View {
 /// (maker, bus, power, identifiers); Option-click opens or closes them all.
 /// Devices plugged into a hub sit indented under it.
 private struct DeviceRow: View {
-    var heading: InfoRow
-    var details: [InfoRow]
+    var section: InfoSection
+    /// The device's heading and its facts, by index among the section's rows.
+    var heading: Int
+    var details: [Int]
     var showsIdentifiers: Bool
     var isOpen: Bool
+    /// The card's row a search has gone to, if it's this device or one of its facts.
+    var current: Int?
     /// Called with true when Option is held.
     var toggle: (_ all: Bool) -> Void
+    @Environment(\.searchTerms) private var searchTerms
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if details.isEmpty {
-                summary
-            } else {
-                Button {
-                    toggle(NSEvent.modifierFlags.contains(.option))
-                } label: {
-                    summary.contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(isOpen ? "Hide the details" : "Show the details. Option-click shows every device's.")
-                .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
-                if isOpen {
-                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
-                        ForEach(Array(details.enumerated()), id: \.offset) { _, row in
-                            InfoGridRow(row: row, showsIdentifiers: showsIdentifiers)
-                        }
+            Group {
+                if details.isEmpty {
+                    summary
+                } else {
+                    Button {
+                        toggle(NSEvent.modifierFlags.contains(.option))
+                    } label: {
+                        summary.contentShape(Rectangle())
                     }
-                    .padding(.leading, 15)
-                    .padding(.bottom, 4)
+                    .buttonStyle(.plain)
+                    .help(isOpen ? "Hide the details" : "Show the details. Option-click shows every device's.")
+                    .accessibilityValue(isOpen ? "Expanded" : "Collapsed")
                 }
             }
+            .id(SystemTarget.row(section.kind, heading))
+            .markedRow(current == heading)
+            if isOpen, !details.isEmpty {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 4) {
+                    ForEach(details, id: \.self) { index in
+                        InfoGridRow(row: section.rows[index], showsIdentifiers: showsIdentifiers, target: .row(section.kind, index),
+                                    isCurrent: current == index)
+                    }
+                }
+                .padding(.leading, 15)
+                .padding(.bottom, 4)
+            }
         }
-        .padding(.leading, CGFloat(heading.depth) * 14)
+        .padding(.leading, CGFloat(row.depth) * 14)
+    }
+
+    private var row: InfoRow {
+        section.rows[heading]
     }
 
     /// On one line while it fits, otherwise the status under the name.
@@ -586,15 +710,56 @@ private struct DeviceRow: View {
     }
 
     private var name: Text {
-        let note = heading.value.isEmpty ? Text("") : Text("  " + heading.value).foregroundStyle(.secondaryText)
-        return Text(heading.label).fontWeight(.medium) + note
+        let isCurrent = current == heading
+        let note = row.value.isEmpty ? Text("")
+            : (Text("  ") + SearchMarks.text(row.value, terms: searchTerms, current: isCurrent)).foregroundStyle(.secondaryText)
+        return SearchMarks.text(row.label, terms: searchTerms, current: isCurrent).fontWeight(.medium) + note
     }
 
     @ViewBuilder
     private var state: some View {
-        if let state = heading.state {
-            Text(state).foregroundStyle(.secondaryText).lineLimit(1)
+        if let state = row.state {
+            MarkedText(state).foregroundStyle(.secondaryText).lineLimit(1)
         }
+    }
+}
+
+/// Lets ⌘F put the cursor in the toolbar's search field, where macOS has the
+/// API for it (15 and later).
+private struct SearchFocus: ViewModifier {
+    var isFocused: FocusState<Bool>.Binding
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.searchFocused(isFocused)
+        } else {
+            content
+        }
+    }
+}
+
+/// In place of the cards when a search finds nothing.
+private struct NoMatches: View {
+    var query: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(.secondaryText)
+                .accessibilityHidden(true)
+            Text("Nothing on this page matches \u{201C}\(query.trimmingCharacters(in: .whitespaces))\u{201D}")
+                .font(.headline)
+                .multilineTextAlignment(.center)
+            Text("Search looks for every word in the cards' labels and values, the headings over them and their titles. "
+                + "Hidden identifiers match by their labels alone.")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 }
 

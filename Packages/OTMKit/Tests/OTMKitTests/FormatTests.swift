@@ -73,6 +73,23 @@ struct FormatTests {
         #expect(Format.trail("/other/file.bin", under: "/demo") == "other › file.bin")
         #expect(Format.trail("/demo", under: "/demo/Projects") == "demo")
     }
+
+    @Test func pathPartsPutTheNameOverItsFolder() {
+        let kext = PathParts("/System/Library/Extensions/apfs.kext")
+        #expect(kext.name == "apfs.kext")
+        #expect(kext.folder == "/System/Library/Extensions")
+        #expect(PathParts("/Applications/Safari.app/") == PathParts("/Applications/Safari.app"), "trailing slashes don't count")
+        #expect(PathParts("/Applications/Safari.app//").name == "Safari.app")
+        #expect(PathParts("/bin").folder == "/", "a name at the root is in /")
+        #expect(PathParts("Projects/webapp").folder == "Projects", "a relative path keeps its folder")
+    }
+
+    @Test(arguments: [("sleep", "sleep"), ("/", "/"), ("//", "/"), ("", "")])
+    func pathPartsWithoutAFolder(path: String, name: String) {
+        let parts = PathParts(path)
+        #expect(parts.name == name)
+        #expect(parts.folder == nil)
+    }
 }
 
 struct HistoryTests {
@@ -100,6 +117,24 @@ struct HistoryTests {
         #expect(history.values == [6, 7, 8])
         history.removeAll()
         #expect(history.append(9) == nil)
+    }
+
+    @Test func addsValuesAlignedOnTheNewest() {
+        var wrapped = History<Int>(capacity: 3)
+        for value in 1...5 { wrapped.append(value) }
+        var short = History<Int>(capacity: 4)
+        short.append(10)
+        var sums = [Double](repeating: 0, count: 4)
+        // Each history's newest lands in the last slot, whatever its length.
+        wrapped.addValues(to: &sums) { Double($0) }
+        short.addValues(to: &sums) { Double($0) * 2 }
+        #expect(sums == [0, 3, 4, 25])
+        // A history longer than the sums gives only its newest values.
+        var two = [Double](repeating: 0, count: 2)
+        wrapped.addValues(to: &two) { Double($0) }
+        #expect(two == [4, 5])
+        History<Int>(capacity: 2).addValues(to: &two) { Double($0) }
+        #expect(two == [4, 5])
     }
 
     @Test func runningSumFollowsTheWindow() {

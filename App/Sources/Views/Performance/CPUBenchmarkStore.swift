@@ -30,12 +30,6 @@ final class CPUBenchmarkStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var handledLaunchArgument = false
 
-    /// "OpenTaskManager 0.1".
-    private static var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        return "OpenTaskManager \(version)".trimmingCharacters(in: .whitespaces)
-    }
-
     private init() {
         let key = CPUBenchmarkMachine.current().key
         machineKey = key
@@ -43,7 +37,7 @@ final class CPUBenchmarkStore {
     }
 
     func start() {
-        guard running == nil else { return }
+        guard running == nil, CPUSustainedStore.shared.running == nil else { return }
         generation += 1
         let generation = generation
         let workers = CPUBenchmark.defaultWorkers
@@ -56,10 +50,14 @@ final class CPUBenchmarkStore {
                 self.progress = progress
             }
         }
-        let appVersion = Self.appVersion
+        let appVersion = BenchmarkContextFeed.appVersion
         task = Task { [weak self] in
             do throws(CPUBenchmarkError) {
-                let result = try await CPUBenchmark.measure(workers: workers, appVersion: appVersion, progress: report)
+                let context = await BenchmarkContextFeed.capture()
+                if Task.isCancelled { throw .cancelled }
+                var measured = try await CPUBenchmark.measure(workers: workers, appVersion: appVersion, progress: report)
+                measured.context = context.ended()
+                let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.cpuBenchmark.append(result) }.value
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }

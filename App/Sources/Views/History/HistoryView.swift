@@ -90,7 +90,15 @@ final class HistoryScrubber {
     /// The event picked on the rail or from the events menu.
     var selectedEvent: HistoryEvent?
     /// Two stretches being compared.
-    var compare: HistoryCompareDraft?
+    var compare: HistoryCompareDraft? {
+        didSet {
+            if (compare != nil) != comparing { comparing = compare != nil }
+        }
+    }
+    /// Whether a comparison is open, apart from `compare`, which a drag
+    /// picking A or B changes many times: the rail's selected look and the
+    /// Compare button read only this.
+    private(set) var comparing = false
     /// Showing a recording file, whose last moment is its end rather than the latest.
     var showsFile = false
 
@@ -184,6 +192,8 @@ struct HistoryView: View {
     @AppStorage("historyFitsRecording") private var fitsRecording = false
     @State private var scrubber = HistoryScrubber()
     @State private var player = HistoryPlayer()
+    /// Folds the pinned rail to a strip among the charts; only the rail reads it.
+    @State private var pageScroll = HistoryPageScroll()
     private let store = HistoryRecordingStore.shared
     @State private var points: [HistoryPoint]?
     @State private var domain = Date.now.addingTimeInterval(-HistoryRange.hour.seconds)...Date.now
@@ -226,9 +236,13 @@ struct HistoryView: View {
             }
             HStack(alignment: .top, spacing: 0) {
                 ScrollView {
-                    // The rail is a pinned header, so it stays over the charts as they scroll.
-                    LazyVStack(alignment: .leading, spacing: 16, pinnedViews: .sectionHeaders) {
+                    // The rail is a pinned header, so it stays over the charts as
+                    // they scroll, folded to a strip once they've scrolled under it.
+                    LazyVStack(alignment: .leading, spacing: HistoryPageScroll.spacing, pinnedViews: .sectionHeaders) {
                         header
+                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(HistoryPageScroll.space)).maxY } action: {
+                                pageScroll.setHeaderBottom($0)
+                            }
                         Section {
                             content
                         } header: {
@@ -236,6 +250,8 @@ struct HistoryView: View {
                         }
                     }
                     .padding(20)
+                    .background(HistoryScrollTracker(scroll: pageScroll))
+                    .coordinateSpace(.named(HistoryPageScroll.space))
                 }
                 if !compact {
                     // In a scroll view of its own, so it sits under the toolbar like the charts.
@@ -254,6 +270,9 @@ struct HistoryView: View {
             HistoryOpeningFocus()
         }
         .toolbar {
+            ToolbarItem {
+                HistorySpikesButton()
+            }
             ToolbarItem {
                 HistoryRecordingsMenu(store: store, scrubber: scrubber, recorder: model.recorder, domain: domain, show: show)
             }
@@ -409,11 +428,18 @@ struct HistoryView: View {
         } else if let points {
             let axis = timeAxis
             let gapMarks = HistoryGapMarks(gaps: gaps, points: points, bucket: bucket, domain: domain, plotWidth: plotWidth)
-            HistoryComparisonSlot(scrubber: scrubber, recorder: source, bucket: bucket, revision: points.last?.time)
+            HistoryComparisonSlot(scrubber: scrubber, recorder: source, bucket: bucket, revision: points.last?.time, pageScroll: pageScroll)
+            HistoryProcessSection(recorder: source, isFile: opened != nil, points: points, bucket: bucket, domain: domain, gaps: gapMarks,
+                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
+                .historySection("Processes", scroll: pageScroll)
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, bucket: bucket, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
+                    .historySection(spec.title, scroll: pageScroll)
             }
+            HistoryHardwareSection(recorder: source, points: points, bucket: bucket, domain: domain, earliest: earliest,
+                                   isFile: opened != nil, gaps: gapMarks, ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
+                .historySection("Hardware", scroll: pageScroll)
         }
     }
 
@@ -423,23 +449,22 @@ struct HistoryView: View {
     }
 
     /// The timeline over the charts, once there's something to pick from,
-    /// and in a narrow window the moment's summary above it.
+    /// and in a narrow window the moment's summary above it; a strip once
+    /// the charts have scrolled under it.
     @ViewBuilder private var rail: some View {
         if let points, !points.isEmpty, source != nil {
-            VStack(alignment: .leading, spacing: 10) {
-                if compact {
-                    HistoryMomentSummary(scrubber: scrubber, player: player, points: points, bucket: bucket, recorder: source,
-                                         events: events)
-                }
-                // Sessions are marked in the live recording; a file is read-only.
-                HistoryRail(scrubber: scrubber, player: player, store: store, recorder: opened == nil ? model.recorder : nil,
-                            points: points, gaps: gaps, events: events, domain: domain, bucket: bucket)
-            }
-            .padding(.top, 4)
-            .padding(.bottom, 8)
-            // Covers the charts as they scroll under the pinned rail.
-            .background(.background)
+            // Sessions are marked in the live recording; a file is read-only.
+            HistoryPinnedRail(scroll: pageScroll, scrubber: scrubber, player: player, store: store,
+                              recorder: opened == nil ? model.recorder : nil, source: source, points: points, gaps: gaps,
+                              events: events, domain: domain, bucket: bucket, compact: compact, span: stripSpan)
         }
+    }
+
+    /// The span shown, as the folded rail names it: "Last hour", "41 min
+    /// span" fitted, "20 min recording" for a file.
+    private var stripSpan: String {
+        if opened != nil { return "\(Format.roughDuration(shownSpan)) recording" }
+        return fitted ? "\(Format.roughDuration(shownSpan)) span" : range.title
     }
 
     /// Where the time axis is labelled: the range's own steps, or round
@@ -481,8 +506,8 @@ struct HistoryView: View {
 
     /// The end of the coverage line: how often records are written, and the size on disk.
     private var status: String {
-        var parts = [opened == nil ? "a record every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept 7 days"
-            : "a record every \(Int(FlightRecorder.span)) s"]
+        var parts = [opened.map { "a record every \(Format.timeSpan($0.recordSeconds))" }
+            ?? "a record every \(Int(FlightRecorder.span)) s while OpenTaskManager runs, kept 7 days"]
         if !shortStatus.isEmpty { parts.append(shortStatus) }
         return parts.joined(separator: " · ")
     }
@@ -540,7 +565,7 @@ struct HistoryView: View {
         let recorder = opened.recorder
         let session = opened.session
         let shown = session.start...max(session.end, session.start.addingTimeInterval(60))
-        let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound))
+        let step = FlightRecorder.bucket(for: shown.upperBound.timeIntervalSince(shown.lowerBound), record: recorder.recordSpan)
         let loaded = (try? await recorder.points(from: shown.lowerBound, to: shown.upperBound, bucket: step)) ?? []
         let seconds = (try? await recorder.recordedSeconds(from: shown.lowerBound, to: shown.upperBound)) ?? 0
         let span = try? await recorder.recordedSpan(from: shown.lowerBound, to: shown.upperBound)
@@ -557,10 +582,21 @@ struct HistoryView: View {
         gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown)
         if events != happened { events = happened }
         player.points = loaded
+        openLaunchComparison()
         if let speed = store.takeLaunchSpeed() {
             player.speed = speed
             player.play(scrubber)
         }
+    }
+
+    /// Opens the comparison `-openHistoryCompare` asks for, once, its
+    /// stretches counted back from the end of what's shown.
+    private func openLaunchComparison() {
+        guard let request = store.takeLaunchComparison(showingFile: opened != nil) else { return }
+        var draft = HistoryCompareDraft(selection: request.a.range(before: domain.upperBound))
+        draft.b = request.b?.range(before: domain.upperBound)
+        scrubber.draft = nil
+        scrubber.compare = draft
     }
 
     /// The range shown of the live recording, and its saved sessions.
@@ -589,6 +625,7 @@ struct HistoryView: View {
         gaps = HistoryGap.gaps(in: loaded, bucket: step, within: shown, since: first)
         player.points = loaded
         store.update(sessions)
+        openLaunchComparison()
         // A pinned moment or playhead that has slid out of the range goes back to the latest.
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }
         if let playhead = scrubber.playhead, !domain.contains(playhead) { player.stop(scrubber) }

@@ -62,6 +62,8 @@ struct ProcessInspectorView: View {
     @State private var confirmingForceQuit = false
     @State private var showsCommandLine = false
     @State private var showsEnvironment = false
+    /// The thread clicked in the Threads tab, shown whole under its list.
+    @State private var pickedThread: PickedThread?
 
     /// Read every few seconds while the Overview shows.
     struct Details: Equatable {
@@ -80,12 +82,16 @@ struct ProcessInspectorView: View {
         case overview = "Overview"
         case threads = "Threads"
         case files = "Files & Ports"
+        /// The row's process and those nested under it, as a whole
+        /// (`ProcessGroupView`); offered only when there are some.
+        case group = "Group"
 
-        /// `-openProcessTab threads|files`, with `-openProcess`, for screenshots.
+        /// `-openProcessTab threads|files|group`, with `-openProcess`, for screenshots.
         static var requestedAtLaunch: Tab {
             switch LaunchArgument.string("openProcessTab") {
             case "threads": .threads
             case "files": .files
+            case "group": .group
             default: .overview
             }
         }
@@ -93,33 +99,57 @@ struct ProcessInspectorView: View {
 
     private var pid: Int32 { identity.pid }
 
+    /// The tab on screen: Group falls back to the Overview for a row with
+    /// nothing nested under it, and comes back for the next one that has.
+    private var shownTab: Tab {
+        tab == .group && group == nil ? .overview : tab
+    }
+
     var body: some View {
         if let process = model.process(identity) {
             VStack(alignment: .leading, spacing: 12) {
                 header(process)
-                if let group {
+                if let group, shownTab != .group {
                     RowGroupNote(text: group.summary(name: model.displayName(for: process),
                                                      cpu: model.cpuScale.format(group.totals.cpuPercent)),
-                                 showTitle: group.isExpanded ? nil : group.showTitle, show: group.show)
+                                 showTitle: group.isExpanded ? nil : group.showTitle, show: group.show,
+                                 count: group.totals.processCount, openGroup: { tab = .group })
                 }
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                Picker("", selection: Binding(get: { shownTab }, set: { tab = $0 })) {
+                    ForEach(Tab.allCases.filter { $0 != .group || group != nil }, id: \.self) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
 
+                // Edge to edge, so the scroller runs down the pane's margin
+                // rather than over the content's right edge (the Threads
+                // tab's Priority column).
                 ScrollView {
-                    switch tab {
-                    case .overview: overview(process)
-                    case .threads: ProcessThreadsView(process: process)
-                    case .files: files
+                    Group {
+                        switch shownTab {
+                        case .overview: overview(process)
+                        case .threads: ProcessThreadsView(process: process, picked: $pickedThread)
+                        case .files: files
+                        case .group: ProcessGroupView(root: identity, mode: group?.mode ?? .grouped, onSelect: onSelect)
+                        }
                     }
+                    .padding(.horizontal, 12)
                 }
-                actions(process)
+                .padding(.horizontal, -12)
+                if shownTab == .threads, let pickedThread {
+                    ThreadDetailLine(thread: pickedThread)
+                }
+                if shownTab == .group, let group {
+                    ProcessGroupActions(root: identity, mode: group.mode, canEnd: !process.isRestricted)
+                } else {
+                    actions(process)
+                }
             }
             .padding(12)
-            .task(id: tab == .overview ? identity : nil) { await loadDetails() }
-            .task(id: tab == .files ? identity : nil) { await loadOpenFiles() }
+            .samplingDemand(.restrictedProcesses)
+            .task(id: shownTab == .overview ? identity : nil) { await loadDetails() }
+            .task(id: shownTab == .files ? identity : nil) { await loadOpenFiles() }
+            .onChange(of: identity) { pickedThread = nil }
         }
     }
 
@@ -205,6 +235,7 @@ struct ProcessInspectorView: View {
     private func overview(_ process: ProcessSample) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             graphs(process)
+            ProcessHistoryLink(identity: identity, name: process.name)
             if process.isRestricted {
                 Text("macOS shows other users' and system processes' CPU, memory and a few facts. "
                     + "The rest needs admin rights, and says so below.")
@@ -251,22 +282,22 @@ struct ProcessInspectorView: View {
     }
 
     /// Where it runs from and how it was started. Long values fold away;
-    /// paths keep to one line, cut in the middle.
+    /// paths show their name over their folder.
     private func command(_ process: ProcessSample) -> some View {
         let details = details?.identity == identity ? details : nil
         return VStack(alignment: .leading, spacing: 8) {
             InspectorHeading("Command")
             if let path = process.executablePath {
-                labelled("Executable") { CopyableText(value: path, truncatesMiddle: true).font(.callout) }
+                labelled("Executable") { CopyableText(value: path, splitsPath: true).font(.tableText) }
             }
             if let directory = details?.directory {
-                labelled("Working directory") { CopyableText(value: directory, truncatesMiddle: true).font(.callout) }
+                labelled("Working directory") { CopyableText(value: directory, splitsPath: true).font(.tableText) }
             } else if details != nil, process.isRestricted {
                 deniedRow("Working directory")
             }
             if let arguments = details?.arguments {
                 DetailDisclosure("Command line", preview: arguments.commandLine, isExpanded: $showsCommandLine) {
-                    CopyableText(value: arguments.commandLine).font(.callout)
+                    CopyableText(value: arguments.commandLine).font(.tableText)
                 }
                 environment(arguments.environment)
             } else if details != nil {
@@ -283,15 +314,15 @@ struct ProcessInspectorView: View {
                 Text("Environment").foregroundStyle(.secondaryText)
                 Text("None shown")
             }
-            .font(.callout)
+            .font(.tableText)
             .help("macOS gave no environment variables for it. It keeps them back for some processes, Apple's own among them.")
         } else {
             DetailDisclosure("Environment", preview: "\(variables.count) variables", isExpanded: $showsEnvironment) {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(variables) { variable in
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(variable.name).font(.callout.weight(.semibold))
-                            Text(variable.value).font(.callout.monospaced()).textSelection(.enabled).lineLimit(4)
+                            Text(variable.name).font(.tableText.weight(.semibold))
+                            Text(variable.value).font(.tableText.monospaced()).textSelection(.enabled).lineLimit(4)
                         }
                         .padding(.vertical, 2)
                     }
@@ -311,7 +342,7 @@ struct ProcessInspectorView: View {
                             Image(systemName: symbol(for: file))
                                 .foregroundStyle(file.socket?.isListening == true ? .green : .secondary)
                                 .frame(width: 14)
-                            Text(file.detail).font(.callout.monospaced()).textSelection(.enabled).lineLimit(2)
+                            Text(file.detail).font(.tableText.monospaced()).textSelection(.enabled).lineLimit(2)
                         }
                     }
                     if shown.isEmpty {
@@ -339,6 +370,8 @@ struct ProcessInspectorView: View {
                 }
                 Button("Sample Process") { model.sampleProcess(pid) }
                 Button("Reveal in Finder") { model.revealInFinder(pid) }
+                Button("Copy Path") { copy(process.executablePath ?? "") }
+                    .disabled(process.executablePath == nil)
                 Button("Search Online") { model.searchOnline(pid) }
             } label: {
                 Image(systemName: "ellipsis.circle")
@@ -372,7 +405,7 @@ struct ProcessInspectorView: View {
     /// Arguments and working directory, every few seconds while the Overview
     /// shows; state changes only when they do.
     private func loadDetails() async {
-        guard tab == .overview else { return }
+        guard shownTab == .overview else { return }
         let identity = identity
         while !Task.isCancelled {
             let loaded = await Task.detached(priority: .utility) {
@@ -386,7 +419,7 @@ struct ProcessInspectorView: View {
 
     /// Open files and sockets, every few seconds while Files & Ports shows.
     private func loadOpenFiles() async {
-        guard tab == .files else { return }
+        guard shownTab == .files else { return }
         let identity = identity
         while !Task.isCancelled {
             let loaded = await Task.detached(priority: .utility) {
@@ -395,6 +428,11 @@ struct ProcessInspectorView: View {
             if !Task.isCancelled, loaded != openFiles { openFiles = loaded }
             try? await Task.sleep(for: .seconds(3))
         }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func labelled<Value: View>(_ label: String, @ViewBuilder value: () -> Value) -> some View {
@@ -409,7 +447,7 @@ struct ProcessInspectorView: View {
             Text(label).foregroundStyle(.secondaryText)
             Text(ProcessAccess.denied).foregroundStyle(.secondaryText)
         }
-        .font(.callout)
+        .font(.tableText)
         .help(ProcessAccess.deniedHelp)
     }
 
@@ -432,13 +470,17 @@ struct ProcessInspectorView: View {
 
 /// Under the inspector's header when the selected row has processes nested
 /// under it: the figures below are this process's alone, what the table's
-/// row adds, and a button that expands the row to show them one by one.
+/// row adds, and a button that expands the row to show them one by one,
+/// and a link to the Group tab, which takes them together.
 private struct RowGroupNote: View {
     /// `ProcessRowGroup.summary`.
     var text: String
     /// The button's title; nil once the row is expanded.
     var showTitle: String?
     var show: () -> Void
+    /// The row's processes, this one included.
+    var count: Int
+    var openGroup: () -> Void
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 8)
@@ -454,6 +496,10 @@ private struct RowGroupNote: View {
                 }
             }
             Text(text).font(.explanation).foregroundStyle(.secondaryText)
+            Button(count == 2 ? "See both together" : "See all \(count) together", action: openGroup)
+                .buttonStyle(.link)
+                .font(.explanation)
+                .help("Open the Group tab: their CPU over time, their figures added up, and each of them with why it's in the group")
         }
         .font(.callout)
         .padding(.horizontal, 10)
@@ -461,5 +507,29 @@ private struct RowGroupNote: View {
         .background(Color.primary.opacity(0.04), in: shape)
         .overlay(shape.strokeBorder(Color.primary.opacity(0.12)))
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// Under the inspector's graphs, which cover the last few minutes: a link
+/// to the History page searched for this process, with it picked, to see it
+/// over the hours and days History keeps.
+private struct ProcessHistoryLink: View {
+    @CurrentPage private var page
+    let identity: ProcessIdentity
+    let name: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Further back:").foregroundStyle(.secondaryText)
+            Button {
+                HistoryProcessStore.shared.show(name, identity: identity)
+                page = .history
+            } label: {
+                Label("Show History", systemImage: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.link)
+            .help("Open the History page searched for \(name), to see this process over the hours and days History keeps")
+        }
+        .font(.explanation)
     }
 }

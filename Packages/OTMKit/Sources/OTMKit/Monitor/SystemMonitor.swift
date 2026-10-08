@@ -48,7 +48,7 @@ public actor SystemMonitor {
         self.options = options
     }
 
-    public func sample() -> SystemSnapshot {
+    public func sample(restrictedProcessesLive: Bool = true) -> SystemSnapshot {
         let now = ContinuousClock.now
         let interval = lastSample.map { Self.seconds(now - $0) } ?? 0
         lastSample = now
@@ -57,7 +57,7 @@ public actor SystemMonitor {
         let powerResult = power.sample(includeComponents: options.includeComponentPower)
         processes.includeRestricted = options.includeRestrictedProcesses
         let processList = options.includeProcesses
-            ? processes.sample(interval: interval, gpuTime: gpuResult.processGPUTime)
+            ? processes.sample(interval: interval, gpuTime: gpuResult.processGPUTime, restrictedLive: restrictedProcessesLive)
             : []
 
         // Volume capacity changes slowly and querying it can touch the disk.

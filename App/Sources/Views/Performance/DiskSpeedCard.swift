@@ -3,8 +3,9 @@ import SwiftUI
 
 /// "Speed test" on a disk's detail: pick a volume or folder, and a test
 /// on its own thread writes, reads back and checks one temporary file, then
-/// deletes it. Shows MB/s and IOPS for each phase as it finishes, and the
-/// last few results for the volume. Its inputs don't change from tick to
+/// deletes it. Shows MB/s and IOPS for each phase as it finishes; the last
+/// few results for the volume fold away under Saved runs, beside a link to
+/// compare them in the Benchmarks workspace. Its inputs don't change from tick to
 /// tick and it reads only `DiskSpeedStore`, so it redraws with the test's
 /// progress, not per tick. What the test writes stays in a line over the
 /// figures; how it measures folds away under Methodology.
@@ -61,8 +62,10 @@ struct DiskSpeedCard: View, Equatable {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if results.count > 1, let target {
-                history(results, on: target)
+            if results.count > 1 {
+                SavedRunsDisclosure(kind: .disk, runs: results.map(BenchmarkRun.init),
+                                    place: "on \(results.first?.volume.name ?? target?.title ?? "this volume")")
+                    .equatable()
             }
             MethodologyDisclosure(preview: "1 MB blocks in sequence, then 4K blocks at random, in one checked file") {
                 Text(caption)
@@ -162,35 +165,6 @@ struct DiskSpeedCard: View, Equatable {
         }
     }
 
-    private func history(_ results: [DiskSpeedResult], on target: DiskSpeedTarget) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Recent tests on \(results.first?.volume.name ?? target.title)").font(.callout.weight(.semibold))
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
-                GridRow {
-                    Text("When")
-                    Text("Seq. read").gridColumnAlignment(.trailing)
-                    Text("Seq. write").gridColumnAlignment(.trailing)
-                    Text("4K read").gridColumnAlignment(.trailing)
-                    Text("4K write").gridColumnAlignment(.trailing)
-                }
-                .font(.tableText)
-                .foregroundStyle(.secondaryText)
-                ForEach(results) { result in
-                    GridRow {
-                        Text(result.date.formatted(date: .abbreviated, time: .shortened))
-                        Text(Format.megabytesPerSecond(result.sequentialRead.bytesPerSecond))
-                        Text(Format.megabytesPerSecond(result.sequentialWrite.bytesPerSecond))
-                        Text(Format.operationsPerSecond(result.randomRead.operationsPerSecond))
-                        Text(Format.operationsPerSecond(result.randomWrite.operationsPerSecond))
-                    }
-                    .font(.tableText)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .help("\(Format.bytes(result.configuration.fileSize)) test file in \(result.folder)")
-                }
-            }
-        }
-    }
 }
 
 /// One phase's figures: MB/s large, IOPS under it.

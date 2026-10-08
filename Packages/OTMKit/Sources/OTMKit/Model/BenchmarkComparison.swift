@@ -16,10 +16,13 @@ public enum BenchmarkRefusal: Sendable, Equatable {
         switch self {
         case .sameRun:
             return "That's the same run twice. Pick two different runs."
+        case let .differentTests(baseline, compared) where Set([baseline, compared]) == [.cpu, .sustained]:
+            return "A sustained run is compared only with other sustained runs: its figures are the speed the CPU held over minutes, "
+                + "the CPU benchmark's a few seconds' burst."
         case let .differentTests(baseline, compared):
             return "These are different tests (\(baseline.title) and \(compared.title)), so their figures don't measure the same thing."
         case let .differentVersions(kind, baseline, compared):
-            let outcome = kind == .cpu || kind == .gpu ? "they didn't do the same work" : "they didn't measure the same way"
+            let outcome = kind.runsAppCode ? "they didn't do the same work" : "they didn't measure the same way"
             return "The runs used different versions of the \(kind.versionName) (v\(baseline) and v\(compared)), so \(outcome). "
                 + "Compare two runs of the same version."
         case let .differentBuilds(baselineOptimized):
@@ -103,6 +106,22 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         baselineCaveat ?? comparedCaveat
     }
 
+    /// The verdict in a word or two, to sit beside the change: for a change
+    /// that counts, which way it went, "faster" or "slower" for a speed and
+    /// "higher" or "lower" for any other figure (a delay, responsiveness);
+    /// otherwise why it doesn't count: "within spread", "negligible",
+    /// "measured once", or "unchanged".
+    public var verdictWord: String {
+        switch verdict {
+        case .better, .worse:
+            let up = compared > baseline
+            if unit.isSpeed { return up ? "faster" : "slower" }
+            return up ? "higher" : "lower"
+        case .withinSpread, .negligible, .measuredOnce, .unchanged:
+            return verdict.title.lowercased()
+        }
+    }
+
     /// "Fill rate: timing unverified in the later run, so this change may not be real."
     public var caveatNote: String? {
         guard let caveat else { return nil }
@@ -145,6 +164,18 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     /// What the figures can't show: other macOS or app versions, heat, a
     /// cache that wasn't bypassed, a test that measures once.
     public var caveats: [String]
+    /// How the two runs' starts differed (power, heat, CPU load, memory),
+    /// from their contexts: warnings beside the figures, never a refusal.
+    public var contextWarnings: [BenchmarkContextWarning]
+
+    public init(baseline: String, compared: String, changes: [BenchmarkChange], caveats: [String],
+                contextWarnings: [BenchmarkContextWarning] = []) {
+        self.baseline = baseline
+        self.compared = compared
+        self.changes = changes
+        self.caveats = caveats
+        self.contextWarnings = contextWarnings
+    }
 
     public enum Outcome: Sendable, Equatable {
         case compared(BenchmarkComparison)
@@ -159,7 +190,17 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
             compared.measurement(measurement.id).map { BenchmarkChange(baseline: measurement, compared: $0) }
         }
         return .compared(BenchmarkComparison(baseline: baseline.id, compared: compared.id, changes: changes,
-                                             caveats: caveats(baseline, compared, changes: changes)))
+                                             caveats: caveats(baseline, compared, changes: changes),
+                                             contextWarnings: contextWarnings(baseline, compared)))
+    }
+
+    /// What differed between the two runs' starts, leaving out what the
+    /// refusal rules and caveats already cover: a Mac or a build the runs
+    /// record themselves.
+    public static func contextWarnings(_ baseline: BenchmarkRun, _ compared: BenchmarkRun) -> [BenchmarkContextWarning] {
+        BenchmarkContext.warnings(earlier: baseline.context, later: compared.context,
+                                  runsRecordBuild: baseline.build != nil && compared.build != nil,
+                                  runsRecordMachine: baseline.machine != nil && compared.machine != nil)
     }
 
     /// Why `baseline` and `compared` can't be compared, or nil when they can.

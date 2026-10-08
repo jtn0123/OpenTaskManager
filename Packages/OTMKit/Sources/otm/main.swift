@@ -58,12 +58,15 @@ USAGE:
                                  Each thread's CPU over the interval, CPU time,
                                  state and priority (your own processes, or
                                  any with sudo)
-  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--json]
+  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--reconcile] [--json]
                                  What's using the space under PATH (default: the
                                  current folder): biggest folders and files,
                                  space by category; --changes saves the scan
                                  (as the Storage page does) and shows what grew
-                                 and shrank since the last saved one
+                                 and shrank since the last saved one;
+                                 --reconcile adds where the space is: the
+                                 volume's figures, its APFS container and
+                                 snapshots, and what the scan doesn't account for
   otm netquality [INTERFACE] [--json]
                                  Internet download and upload capacity and
                                  responsiveness (macOS's networkQuality); fills
@@ -78,13 +81,23 @@ USAGE:
                                  Integer, floating-point and memory speed on one
                                  worker and on every core, about 20 s; layout
                                  shows the chip's core types, clusters and caches
+  otm cpubench --sustained [2|5] [--json]
+                                 The floating-point workload on every core for 2
+                                 (default) or 5 minutes, timed in 10 s windows:
+                                 the first window, the level it held over the
+                                 last third, and the thermal state macOS gave
   otm gpubench [--json]          FP32 compute, memory bandwidth and fill rate on
                                  the GPU (Metal), timed by the GPU, about 10 s
   otm bench [list|compare A B] [--json]
-                                 Every saved CPU, GPU, disk and Internet result,
-                                 numbered newest first; compare shows each
-                                 figure's change between runs A and B of one
-                                 test, and refuses runs that don't compare
+                                 Every saved CPU, GPU, disk, Internet and
+                                 sustained result, numbered newest first; compare
+                                 shows each figure's change between runs A and B
+                                 of one test, how their starts differed, and
+                                 refuses runs that don't compare
+  otm captures [--json]          The spike captures the app kept: what crossed,
+                                 when, for how long, and the busiest processes
+  otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
+                                 History's processes by name, path, label or PID
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -101,7 +114,10 @@ struct Options {
     var depth = 1
     var sizes = false
     var changes = false
+    var reconcile = false
     var extremes: Double?
+    var range: String?
+    var sustained = false
 }
 
 func parseOptions(_ arguments: [String]) -> Options {
@@ -122,6 +138,9 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
         case "--changes": options.changes = true
+        case "--range": options.range = iterator.next()
+        case "--reconcile": options.reconcile = true
+        case "--sustained": options.sustained = true
         case "--extremes":
             guard let seconds = iterator.next().flatMap(Double.init), seconds >= 0 else { fail("--extremes needs a number of seconds") }
             options.extremes = seconds
@@ -294,13 +313,16 @@ func listeningPorts(_ connections: [Connection]) -> [ListeningPort] {
     .sorted { ($0.port, $0.pid, $0.proto) < ($1.port, $1.pid, $1.proto) }
 }
 
-/// System extensions, then kexts, with what needs approval called out.
+/// System extensions, then kexts, then copies on disk that aren't in use
+/// (with where they are), with what needs approval called out.
 func extensionTable(_ items: [ExtensionItem]) -> String {
-    var lines = [" " + pad("STATUS", 21) + pad("KIND", 21) + pad("PUBLISHER", 13) + pad("VERSION", 14) + "NAME (BUNDLE ID)"]
+    var lines = [" " + pad("STATUS", 23) + pad("KIND", 21) + pad("PUBLISHER", 13) + pad("VERSION", 14) + "NAME (BUNDLE ID)"]
     for item in items {
         let marker = item.status.needsAttention ? "!" : " "
-        lines.append(marker + pad(item.status.title, 21) + pad(item.kind, 21) + pad(item.publisher.title, 13)
-            + pad(item.version.isEmpty ? "-" : item.version, 14) + "\(item.name) (\(item.bundleID))")
+        var name = "\(item.name) (\(item.bundleID.isEmpty ? "unreadable" : item.bundleID))"
+        if item.status.isDiskCopy, let path = item.diskPath { name += "  \(path)" }
+        lines.append(marker + pad(item.status.title, 23) + pad(item.kind, 21) + pad(item.publisher.title, 13)
+            + pad(item.version.isEmpty ? "-" : item.version, 14) + name)
     }
     return lines.joined(separator: "\n")
 }
@@ -368,9 +390,12 @@ struct DiskUsageReport: Encodable {
     let categories: [CategoryEntry]
     /// With `--changes`, when an earlier scan was saved.
     let changes: DiskChangesReport?
+    /// With `--reconcile`.
+    let reconciliation: DiskReconciliationReport?
 
-    init(_ usage: DiskUsage, depth: Int, count: Int, changes: DiskChangesReport? = nil) {
+    init(_ usage: DiskUsage, depth: Int, count: Int, changes: DiskChangesReport? = nil, reconciliation: DiskReconciliationReport? = nil) {
         self.changes = changes
+        self.reconciliation = reconciliation
         func entries(_ item: DiskItem, depth: Int) -> [Entry] {
             usage.children(of: item).prefix(count).map { child in
                 Entry(name: child.kind == .smallerItems ? "\(child.itemCount) smaller items" : child.name, kind: child.kind.rawValue,
@@ -759,7 +784,7 @@ case "drivers":
         printJSON(shown)
     } else {
         if shown.isEmpty {
-            print("No system extensions or third-party kernel extensions are loaded.")
+            print("No system extensions or third-party kernel extensions are loaded or on disk.")
         } else {
             print(extensionTable(shown))
         }
@@ -770,8 +795,19 @@ case "drivers":
         if waiting > 0 {
             notes.append("! \(waiting) waiting for approval in System Settings > General > Login Items & Extensions.")
         }
-        let apple = scan.items.filter { $0.category == .kernel && $0.publisher == .apple }.count
+        let unused = shown.filter { $0.status == .notInUse }.count
+        if unused > 0 {
+            notes.append("\(unused) installed but not in use: on disk, but not registered or loaded, so not running. "
+                + "That alone isn't a problem.")
+        }
+        let unknown = shown.filter { $0.status == .useUnknown }.count
+        if unknown > 0 { notes.append("\(unknown) on disk, but whether macOS uses them couldn't be told (--json gives why).") }
+        let apple = scan.items.filter { $0.kernelExtension != nil && $0.publisher == .apple }.count
         if !options.all && apple > 0 { notes.append("\(apple) Apple kernel extensions are loaded too (--all lists them).") }
+        let appleCopies = scan.items.filter { $0.status.isDiskCopy && $0.category == .kernel && $0.publisher == .apple }.count
+        if !options.all && appleCopies > 0 {
+            notes.append("\(appleCopies) of Apple's kexts are on disk but not loaded (--all lists them).")
+        }
         if !notes.isEmpty { print("\n" + notes.joined(separator: "\n")) }
     }
 
@@ -804,9 +840,11 @@ case "du":
         }
         comparison = earlier.map { DiskScanComparison(earlier: $0, later: summary) }
     }
+    let reconciliation = options.reconcile ? DiskReconciliationReader.read(usage, request: request) : nil
     if options.json {
         printJSON(DiskUsageReport(usage, depth: options.depth, count: options.count,
-                                  changes: comparison.map { DiskChangesReport($0, count: options.count) }))
+                                  changes: comparison.map { DiskChangesReport($0, count: options.count) },
+                                  reconciliation: reconciliation.map(DiskReconciliationReport.init)))
     } else {
         print(diskUsageSummary(usage, depth: options.depth, count: options.count))
         if let comparison {
@@ -814,6 +852,7 @@ case "du":
         } else if options.changes {
             print("\nNo earlier scan of this folder was saved. This one is, so the next `otm du --changes` can compare with it.")
         }
+        if let reconciliation { print(diskReconciliationSummary(reconciliation)) }
     }
 
 case "netquality":
@@ -830,6 +869,12 @@ case "gpubench":
 
 case "bench":
     benchCommand(options)
+
+case "captures":
+    capturesCommand(options)
+
+case "history":
+    await historyCommand(options)
 
 case "threads":
     try await threadsCommand(options)

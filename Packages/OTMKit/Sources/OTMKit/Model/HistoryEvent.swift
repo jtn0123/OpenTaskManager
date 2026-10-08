@@ -3,7 +3,8 @@ import Foundation
 /// Something that happened on the Mac while the flight recorder ran, kept
 /// beside its records so the History page can line a spike up with what
 /// coincided with it: an app launched or quit, a busy background process
-/// started or exited, the network changed, the Mac went to sleep or woke.
+/// started or exited, the network changed, the Mac went to sleep or woke, a
+/// spike was captured.
 ///
 /// Most times come from notifications and are exact. Process starts and
 /// exits are found by comparing one update's process list with the next
@@ -22,6 +23,9 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
         case networkChanged
         case sleep
         case wake
+        /// The spike recorder kept a capture (`SpikeTrigger.event`): the
+        /// kind that crossed as its name, what crossed as its detail.
+        case spike
     }
 
     public var id: String { "\(time.timeIntervalSince1970) \(kind.rawValue) \(name)" }

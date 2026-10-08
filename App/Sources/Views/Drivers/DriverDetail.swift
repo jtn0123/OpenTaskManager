@@ -2,7 +2,8 @@ import OTMKit
 import SwiftUI
 
 /// The pane beside the Drivers table: what the selected extension is, where
-/// it came from, and for a kext, what it links against and what uses it.
+/// it came from (its app and its copy on disk), and for a kext, what it links
+/// against and what uses it.
 struct DriverDetail: View {
     /// Links beyond this many are counted rather than listed.
     private static let linkLimit = 10
@@ -23,11 +24,18 @@ struct DriverDetail: View {
                 VStack(alignment: .leading, spacing: 14) {
                     if item.status.needsAttention { approvalNote }
                     facts
+                    if item.status.isDiskCopy { diskCopyNote }
                     Text(about)
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
-                    labelled("Bundle ID", item.bundleID)
+                    if item.bundleID.isEmpty {
+                        labelledNote("Bundle ID", "Couldn't be read from its Info.plist")
+                    } else {
+                        labelled("Bundle ID", item.bundleID)
+                    }
+                    if let team = item.teamID { labelled("Team ID", team) }
+                    location
                     if let system = item.systemExtension { systemDetails(system) }
                     if let kext = item.kernelExtension { kernelDetails(kext) }
                 }
@@ -68,6 +76,18 @@ struct DriverDetail: View {
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    /// Why a copy on disk isn't in use, or why that's unknown. Informative,
+    /// not a warning: a copy that doesn't run isn't a problem.
+    private var diskCopyNote: some View {
+        Label {
+            Text(item.statusExplanation)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "info.circle").foregroundStyle(.secondaryText)
+        }
+        .font(.explanation)
+    }
+
     private var facts: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             GridRow {
@@ -77,6 +97,10 @@ struct DriverDetail: View {
             .font(.callout)
             FactRow(label: "Publisher", value: item.publisher.title)
             FactRow(label: "Version", value: version)
+            if let bundle = item.bundle {
+                FactRow(label: "Signature", value: bundle.signer.title)
+                    .help(bundle.signer.explanation)
+            }
             if let kext = item.kernelExtension {
                 // Verbatim, so the tag isn't grouped like a quantity ("1,234").
                 GridRow {
@@ -91,18 +115,50 @@ struct DriverDetail: View {
         }
     }
 
+    /// The app it came with, by icon and name, and its copy on disk. A
+    /// system extension's footer holds System Settings, so its Reveal in
+    /// Finder and Copy Path sit here; a kext's are in the footer.
     @ViewBuilder
-    private func systemDetails(_ system: SystemExtension) -> some View {
-        if let team = system.teamID { labelled("Team ID", team) }
-        if let app = system.appPath {
-            VStack(alignment: .leading, spacing: 4) {
-                labelled("Installed by", app, oneLine: true)
-                if let path = DriverActions.revealablePath(item) {
-                    Button("Reveal in Finder") { DriverActions.reveal(path) }
-                        .controlSize(.small)
+    private var location: some View {
+        let copy = item.bundle?.path
+        // A loaded kext's own path already shows under its kernel details.
+        let showsCopy = copy != nil && copy != item.kernelExtension?.path
+        if item.appPath != nil || showsCopy {
+            VStack(alignment: .leading, spacing: 10) {
+                if let app = item.appPath { owner(app) }
+                if showsCopy, let copy { pathField("On disk", copy) }
+                if item.systemExtension != nil, let path = DriverActions.revealablePath(item) {
+                    HStack(spacing: 8) {
+                        Button("Reveal in Finder") { DriverActions.reveal(path) }
+                        Button("Copy Path") { DriverActions.copy(path) }
+                            .help(copy == nil ? "Copy the installing app's whole path" : "Copy the extension's whole path")
+                    }
+                    .controlSize(.small)
                 }
             }
         }
+    }
+
+    /// The app's icon and name, its whole path in the tooltip.
+    private func owner(_ app: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.systemExtension?.appPath != nil ? "Installed by" : "Comes with")
+                .font(.callout)
+                .foregroundStyle(.secondaryText)
+            HStack(spacing: 8) {
+                Image(nsImage: IconCache.icon(forBundle: app))
+                    .resizable()
+                    .frame(width: 20, height: 20)
+                Text(Extensions.appName(app))
+                    .font(.callout)
+                    .lineLimit(2)
+            }
+            .help(app)
+        }
+    }
+
+    @ViewBuilder
+    private func systemDetails(_ system: SystemExtension) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Reported as").font(.callout).foregroundStyle(.secondaryText)
             Text(verbatim: system.state)
@@ -121,7 +177,7 @@ struct DriverDetail: View {
     @ViewBuilder
     private func kernelDetails(_ kext: KernelExtension) -> some View {
         if let uuid = kext.uuid { labelled("UUID", uuid, oneLine: true) }
-        if let path = kext.path { labelled("Path", path, oneLine: true) }
+        if let path = kext.path { pathField("Path", path) }
         if let address = kext.loadAddress {
             labelled("Load address", "0x" + String(address, radix: 16))
         }
@@ -134,23 +190,40 @@ struct DriverDetail: View {
         item.systemExtension != nil || DriverActions.revealablePath(item) != nil
     }
 
-    /// One button, so it always fits the pane: System Settings for a system
-    /// extension (its app is revealed beside its path), Finder for a kext.
+    /// What fits the pane: System Settings for a system extension (its copy
+    /// or app is revealed and copied beside its path), Finder and the path
+    /// for a kext or a copy on disk that macOS doesn't report.
     @ViewBuilder
     private var buttons: some View {
         if item.systemExtension != nil {
             Button("Open Login Items & Extensions Settings") { DriverActions.openSettings() }
                 .help("System Settings > General > Login Items & Extensions, where system extensions are allowed and turned off")
         } else if let path = DriverActions.revealablePath(item) {
-            Button("Reveal in Finder") { DriverActions.reveal(path) }
+            HStack(spacing: 8) {
+                Button("Reveal in Finder") { DriverActions.reveal(path) }
+                    .help(item.appPath == nil ? "Show the extension in Finder" : "Show the extension in Finder, inside its app")
+                Button("Copy Path") { DriverActions.copy(path) }
+                    .help("Copy the extension's whole path")
+            }
         }
     }
 
     // MARK: Text
 
+    /// The short version with the build beside it where they differ: from
+    /// systemextensionsctl, or from the Info.plist of a copy on disk. A loaded
+    /// kext has only the one the kernel gives.
     private var version: String {
-        let build = item.systemExtension?.build
-        switch (item.version.isEmpty ? nil : item.version, build) {
+        let short: String?
+        let build: String?
+        if let system = item.systemExtension {
+            (short, build) = (system.version, system.build)
+        } else if item.kernelExtension == nil, let bundle = item.bundle {
+            (short, build) = (bundle.version, bundle.build)
+        } else {
+            (short, build) = (item.version.isEmpty ? nil : item.version, nil)
+        }
+        switch (short, build) {
         case let (version?, build?) where build != version: return "\(version) (\(build))"
         case let (version?, _): return version
         case let (nil, build?): return build
@@ -208,13 +281,30 @@ struct DriverDetail: View {
         }
     }
 
-    /// `oneLine` for paths and the UUID: cut in the middle, whole in the
-    /// tooltip and when copied, where wrapping left a lone character on a
-    /// line of its own in a narrow pane.
+    /// `oneLine` for the UUID: cut in the middle, whole in the tooltip and
+    /// when copied, where wrapping left a lone character on a line of its
+    /// own in a narrow pane.
     private func labelled(_ label: String, _ value: String, oneLine: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
             CopyableText(value: value, truncatesMiddle: oneLine).font(.callout)
+        }
+    }
+
+    /// A label over a sentence saying why its value is missing.
+    private func labelledNote(_ label: String, _ note: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            Text(note).font(.explanation).foregroundStyle(.secondaryText)
+        }
+    }
+
+    /// A path's name over its folder, which wraps, so the folders that tell
+    /// two copies apart are never cut out.
+    private func pathField(_ label: String, _ path: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.callout).foregroundStyle(.secondaryText)
+            CopyableText(value: path, splitsPath: true).font(.callout)
         }
     }
 }

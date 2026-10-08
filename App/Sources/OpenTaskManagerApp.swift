@@ -8,15 +8,6 @@ struct OpenTaskManagerApp: App {
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
     @AppStorage("streamGraphs") private var streamGraphs = true
 
-    init() {
-        // `--args -openPage Processes` picks the starting page. It's copied into the
-        // saved value once, because passing `-page` itself would pin that setting
-        // for the whole run and the sidebar would stop switching pages.
-        if let start = UserDefaults.standard.string(forKey: "openPage"), Page(rawValue: start) != nil {
-            UserDefaults.standard.set(start, forKey: "page")
-        }
-    }
-
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
             ContentView()
@@ -103,7 +94,7 @@ enum Page: String, CaseIterable, Identifiable {
 /// first nine: a way between pages that doesn't need the sidebar, which a
 /// window under 900 points hides.
 private struct PageCommands: Commands {
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
@@ -117,9 +108,12 @@ private struct PageCommands: Commands {
     }
 }
 
-/// The toolbar's page menu, there only while the sidebar is hidden: the
-/// page's icon with a chevron, just before the title that names the page,
-/// and every page in its menu, the current one ticked, with its ⌘ shortcut.
+/// The toolbar's page menu, there only while the sidebar is hidden: one
+/// glyph of its own, a list, whatever the page, with a chevron, just before
+/// the title that names the page, and every page in its menu, the current
+/// one ticked, with its ⌘ shortcut. The page's own icon there changed with
+/// every page and, in a glass capsule beside the live badge's, read as one
+/// more monitoring control; out of the glass it sits with the title.
 /// A narrow window hides the sidebar, and with it every page that could be
 /// seen; the View menu's list has to be known about. A real toolbar item,
 /// since a menu on the title itself did nothing on macOS 26. The title keeps
@@ -127,6 +121,9 @@ private struct PageCommands: Commands {
 /// sent the sidebar's own toggle to the overflow menu, for good, once the
 /// sidebar was shown in a narrow window (macOS 26).
 private struct PageSwitcher: View {
+    /// Not the sidebar's own glyph, which its toggle beside it has.
+    private static let symbol = "list.bullet"
+
     @Binding var page: Page
 
     var body: some View {
@@ -138,15 +135,14 @@ private struct PageSwitcher: View {
                 .keyboardShortcut(item.shortcut)
             }
         } label: {
-            Label(page.rawValue, systemImage: page.symbol)
+            Label("Pages", systemImage: Self.symbol)
                 .labelStyle(.iconOnly)
         }
         .fixedSize()
-        .help("Go to another page. ⌘1 to ⌘9 switch from anywhere, and the sidebar, hidden while the window "
-            + "is narrow, lists them too.")
-        .accessibilityLabel("Page")
+        .help("Pages")
+        .accessibilityLabel("Pages")
         .accessibilityValue(page.rawValue)
-        .accessibilityHint("Shows the list of pages")
+        .accessibilityHint("Shows the list of pages, which ⌘1 to ⌘9 also switch between")
     }
 }
 
@@ -156,7 +152,7 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// In a window under 900 points the sidebar steps aside, so the page gets
     /// the fifth of the width it took, and comes back when the window
     /// widens; the user's own show or hide wins (`SidebarVisibility` in OTMKit).
@@ -211,6 +207,7 @@ struct ContentView: View {
             // overflows inside the column instead (the window's minimum
             // height never followed the pages either).
             .frame(minHeight: 0, maxHeight: .infinity)
+            .environment(\.compactToolbar, sidebar.isNarrow == true)
         }
         // Only crossing the breakpoint matters, not every step of a resize.
         .onGeometryChange(for: Bool.self) { SidebarVisibility.isNarrow(width: $0.size.width) } action: { narrow in
@@ -231,19 +228,24 @@ struct ContentView: View {
                 } label: {
                     Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
-                // Just the icon while the page menu shares a narrow window's
-                // toolbar: the word pushed Startup's, Apps' and Drivers'
-                // Refresh, and System's Copy Summary, into the overflow menu.
-                .labelStyle(showsTitle: sidebar.isShown || sidebar.isNarrow != true)
+                // Just the icon in a narrow window, whether the page menu or
+                // the sidebar shares it: the word pushed Startup's, Apps' and
+                // Drivers' Refresh, System's Copy Summary and, with the
+                // sidebar shown, Processes' End Task into the overflow menu.
+                .labelStyle(showsTitle: sidebar.isNarrow != true)
                 .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
             }
             ToolbarItem(placement: .navigation) {
                 LiveBadge()
             }
             if !sidebar.isShown {
+                // Without a glass capsule of its own, so it sits with the
+                // title it changes rather than reading as one more control
+                // beside the live badge's.
                 ToolbarItem(placement: .navigation) {
                     PageSwitcher(page: $page)
                 }
+                .withoutSharedBackground()
             }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })) {
@@ -255,6 +257,26 @@ struct ContentView: View {
             WindowOpener.openMainWindow = { openWindow(id: "main") }
         }
     }
+}
+
+private extension ToolbarContent {
+    /// The item drawn on the toolbar itself, out of the glass capsule macOS
+    /// 26 puts toolbar items in (earlier versions have none).
+    @ToolbarContentBuilder func withoutSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Whether the window is narrow (under 900 points, where the page menu
+    /// joins the toolbar), so the pages' toolbar items take their short
+    /// forms: Startup's "Read at" goes to a tooltip, Processes folds Columns
+    /// into its View menu. Without them, items went to the overflow menu.
+    @Entry var compactToolbar = false
 }
 
 private extension View {
@@ -380,11 +402,20 @@ struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
+    @State private var tracksIcon = false
+
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(history: model.cpuHistory.values, usage: model.snapshot?.cpu.usage ?? 0))
-            .accessibilityLabel("CPU \(Format.percent(model.snapshot?.cpu.usage ?? 0))")
+        Image(nsImage: MenuBarIcon.image(model.menuBarIcon.drawing))
+            .accessibilityLabel("CPU \(model.menuBarIcon.drawing.text)")
+            .help("CPU · latest sample, icon refreshed every 2 s or at the chosen slower update speed")
             .onAppear {
                 WindowOpener.openMainWindow = { openWindow(id: "main") }
+                if !tracksIcon { model.samplingDemand.add(.menuBarIcon) }
+                tracksIcon = true
+            }
+            .onDisappear {
+                if tracksIcon { model.samplingDemand.remove(.menuBarIcon) }
+                tracksIcon = false
             }
     }
 }
@@ -468,6 +499,7 @@ struct SettingsView: View {
                 }
                 Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
+            GraphColorSettings()
             Section("Processes") {
                 Toggle("Include system and other users' processes", isOn: $model.includeSystemProcesses)
                 Toggle("Meter bars behind busy values", isOn: $heatmap)
@@ -476,6 +508,7 @@ struct SettingsView: View {
                     Text("100% per core, like Activity Monitor").tag(false)
                 }
             }
+            SpikeCaptureSettings()
             Section("Access") {
                 Toggle("Show in menu bar", isOn: $showMenuBarExtra)
                 Toggle("Open with ⌃⇧⎋ from anywhere", isOn: $globalHotKeyEnabled)

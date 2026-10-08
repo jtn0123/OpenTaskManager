@@ -80,6 +80,17 @@ public enum UserUsageBuilder {
         return ordered(Array(byUID.values), consoleUID: consoleUID)
     }
 
+    /// The CPU and memory graphs stay continuous while the page is hidden.
+    /// Avoid names, display ordering and the totals no graph uses then.
+    public static func historyTotals(_ processes: [ProcessSample]) -> [UInt32: UsageTotals] {
+        var totals: [UInt32: UsageTotals] = [:]
+        for process in processes {
+            totals[process.uid, default: UsageTotals()].cpuPercent += process.cpuPercent
+            totals[process.uid, default: UsageTotals()].memory += process.memory
+        }
+        return totals
+    }
+
     /// A stable order, so cards don't jump around as load changes: the
     /// signed-in user, then other people by name, then system accounts with
     /// root first and the rest by name.
@@ -90,7 +101,8 @@ public enum UserUsageBuilder {
             return user.uid == 0 ? 2 : 3
         }
         return users.sorted { lhs, rhs in
-            let left = rank(lhs), right = rank(rhs)
+            let left = rank(lhs)
+            let right = rank(rhs)
             if left != right { return left < right }
             // Leading underscores would otherwise sort every daemon account together, apart from the rest.
             let order = displayKey(lhs.name).localizedStandardCompare(displayKey(rhs.name))

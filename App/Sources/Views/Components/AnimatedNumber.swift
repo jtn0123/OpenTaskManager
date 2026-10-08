@@ -27,12 +27,11 @@ struct AnimatedNumber: NSViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: AnimatedNumberView, context: Context) -> CGSize? {
-        let measured = (format(value) as NSString).size(withAttributes: [.font: font])
-        return CGSize(width: ceil(measured.width) + 1, height: GlyphCache.lineHeight(font))
+        CGSize(width: ceil(GlyphCache.width(of: format(value), font: font)) + 1, height: GlyphCache.lineHeight(font))
     }
 }
 
-final class AnimatedNumberView: NSView {
+final class AnimatedNumberView: NSView, WindowAnimationClient {
     private static let duration: CFTimeInterval = 0.6
     private static let noAnimations: [String: any CAAction] = [
         "contents": NSNull(), "position": NSNull(), "bounds": NSNull(), "hidden": NSNull(), "contentsScale": NSNull(),
@@ -48,7 +47,8 @@ final class AnimatedNumberView: NSView {
     private var target = 0.0
     private var start: CFTimeInterval = 0
     private var renderedText = ""
-    private var link: CADisplayLink?
+    private var clock: WindowAnimationClock?
+    var animationView: NSView? { self }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -74,6 +74,7 @@ final class AnimatedNumberView: NSView {
     func set(_ value: Double) {
         guard value.isFinite else { return }
         guard let current = shown, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            stopTicking()
             target = value
             shown = value
             draw(value, force: false)
@@ -81,11 +82,18 @@ final class AnimatedNumberView: NSView {
         }
         guard value != target else {
             // Same value, but the formatter may have changed (units, digits).
-            if link == nil { draw(value, force: false) }
+            if clock == nil { draw(value, force: false) }
+            return
+        }
+        target = value
+        // A change hidden by rounding or units needs no counting frames.
+        if format(current) == format(value) {
+            stopTicking()
+            shown = value
+            draw(value, force: false)
             return
         }
         from = current
-        target = value
         start = CACurrentMediaTime()
         startTicking()
     }
@@ -107,30 +115,35 @@ final class AnimatedNumberView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { stopTicking() }
+        stopTicking()
+        animationStopped()
     }
 
     private func startTicking() {
-        guard link == nil else { return }
-        let link = displayLink(target: self, selector: #selector(tick(_:)))
-        // Thirty changes a second reads as fluid counting, at half the cost of 60.
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 24, maximum: 30, preferred: 30)
-        link.add(to: .main, forMode: .common)
-        self.link = link
+        clock = WindowAnimationClock.start(self)
+        if clock == nil { animationStopped() }
     }
 
     private func stopTicking() {
-        link?.invalidate()
-        link = nil
+        clock?.remove(self)
+        clock = nil
     }
 
-    @objc private func tick(_ link: CADisplayLink) {
-        let progress = min((CACurrentMediaTime() - start) / Self.duration, 1)
+    func frameRate(displayRate: Double) -> Double { min(30, displayRate) }
+
+    func animate(at time: CFTimeInterval) -> Bool {
+        let progress = min((time - start) / Self.duration, 1)
         let eased = 1 - pow(1 - progress, 3)
         let value = from + (target - from) * eased
         shown = value
         draw(value, force: false)
-        if progress >= 1 { stopTicking() }
+        return progress < 1
+    }
+
+    func animationStopped() {
+        clock = nil
+        shown = target
+        draw(target, force: false)
     }
 
     private func draw(_ value: Double, force: Bool) {
@@ -209,6 +222,26 @@ enum GlyphCache {
 
     static func lineHeight(_ font: NSFont) -> CGFloat {
         ceil(font.ascender - font.descender)
+    }
+
+    private struct WidthKey: Hashable {
+        let text: String
+        let font: NSFont
+    }
+
+    private static var widths: [WidthKey: CGFloat] = [:]
+
+    /// `text`'s width in `font`, typeset once. SwiftUI asks every number on a
+    /// page for its size on each layout pass, and setting the text each time
+    /// cost about 3% of a core on Overview.
+    static func width(of text: String, font: NSFont) -> CGFloat {
+        let key = WidthKey(text: text, font: font)
+        if let width = widths[key] { return width }
+        // Figures come and go; a cap keeps the cache to recent ones.
+        if widths.count >= 4_096 { widths.removeAll(keepingCapacity: true) }
+        let width = (text as NSString).size(withAttributes: [.font: font]).width
+        widths[key] = width
+        return width
     }
 
     static func glyph(_ text: String, font: NSFont, color: NSColor, scale: CGFloat) -> Glyph? {

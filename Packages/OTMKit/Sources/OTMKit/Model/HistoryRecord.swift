@@ -19,6 +19,12 @@ public struct HistoryValues: Sendable, Equatable {
     public var networkIn = 0.0
     public var networkOut = 0.0
     public var chipCelsius: Double?
+    /// Hardware figures by `HistoryHardwareSeries.id`, averaged over the
+    /// updates that read them. A series missing here wasn't read: null, never zero.
+    public var hardware: [String: Double] = [:]
+    /// Each logical CPU's load, 0...1, by CPU number; nil for a CPU with no
+    /// reading, and empty when none were recorded.
+    public var coreLoads: [Double?] = []
 
     public init() {}
 
@@ -93,12 +99,16 @@ public struct HistoryRecord: Sendable, Equatable {
     public var values: HistoryValues
     public var topCPU: [HistoryApp]
     public var topMemory: [HistoryApp]
+    /// What each of `values.hardware`'s series is, in chart order.
+    public var hardwareSeries: [HistoryHardwareSeries]
 
-    public init(time: Date, values: HistoryValues, topCPU: [HistoryApp] = [], topMemory: [HistoryApp] = []) {
+    public init(time: Date, values: HistoryValues, topCPU: [HistoryApp] = [], topMemory: [HistoryApp] = [],
+                hardwareSeries: [HistoryHardwareSeries] = []) {
         self.time = time
         self.values = values
         self.topCPU = topCPU
         self.topMemory = topMemory
+        self.hardwareSeries = hardwareSeries
     }
 
     /// The top apps across several stretches: CPU averaged over all of them
@@ -137,6 +147,10 @@ public struct HistoryAccumulator: Sendable {
     private var peak = 0.0
     private var appCPU: [String: Double] = [:]
     private var appMemory: [String: Double] = [:]
+    /// Hardware figures times the seconds they cover, and those seconds.
+    private var hardware: [String: (sum: Double, covered: Double)] = [:]
+    private var hardwareSeries: [String: HistoryHardwareSeries] = [:]
+    private var cores: [(sum: Double, covered: Double)] = []
 
     public init(span: TimeInterval) {
         self.span = span
@@ -148,8 +162,11 @@ public struct HistoryAccumulator: Sendable {
     ///
     /// A tick longer than a whole stretch (the first after a pause or sleep)
     /// is dropped, and a gap between ticks starts a fresh stretch, so a
-    /// record never spans time the app didn't watch.
-    public mutating func add(_ values: HistoryValues, apps: [AppUsage], interval: TimeInterval, at time: Date) -> HistoryRecord? {
+    /// record never spans time the app didn't watch. Each of `hardware`'s
+    /// figures is averaged over the ticks that read it, as the optional
+    /// figures are.
+    public mutating func add(_ values: HistoryValues, hardware sample: HistoryHardwareSample? = nil, apps: [AppUsage],
+                             interval: TimeInterval, at time: Date) -> HistoryRecord? {
         if let last, time.timeIntervalSince(last) > interval + span || interval > span {
             reset()
         }
@@ -163,6 +180,7 @@ public struct HistoryAccumulator: Sendable {
             optionalCovered[index] += interval
         }
         peak = max(peak, values.cpuPeak)
+        if let sample { add(sample, interval: interval) }
         for app in apps {
             if app.cpuPercent > 0 { appCPU[app.name, default: 0] += app.cpuPercent * interval }
             appMemory[app.name] = max(appMemory[app.name] ?? 0, app.memory)
@@ -175,14 +193,32 @@ public struct HistoryAccumulator: Sendable {
             average[keyPath: path] = sum[keyPath: path].map { $0 / optionalCovered[index] }
         }
         average.cpuPeak = peak
+        average.hardware = hardware.compactMapValues { $0.covered > 0 ? $0.sum / $0.covered : nil }
+        average.coreLoads = cores.map { $0.covered > 0 ? $0.sum / $0.covered : nil }
         let record = HistoryRecord(
             time: time, values: average,
             topCPU: HistoryRecord.ranked(appCPU.mapValues { $0 / covered }, count: Self.appsKept),
-            topMemory: HistoryRecord.ranked(appMemory, count: Self.appsKept)
+            topMemory: HistoryRecord.ranked(appMemory, count: Self.appsKept),
+            hardwareSeries: hardwareSeries.values.filter { average.hardware[$0.id] != nil }.sorted()
         )
         reset()
         last = time
         return record
+    }
+
+    private mutating func add(_ sample: HistoryHardwareSample, interval: TimeInterval) {
+        for (id, value) in sample.values where value.isFinite {
+            let previous = hardware[id] ?? (0, 0)
+            hardware[id] = (previous.sum + value * interval, previous.covered + interval)
+        }
+        for series in sample.series { hardwareSeries[series.id] = series }
+        if cores.count < sample.coreLoads.count {
+            cores += Array(repeating: (0, 0), count: sample.coreLoads.count - cores.count)
+        }
+        for (index, load) in sample.coreLoads.enumerated() {
+            guard let load else { continue }
+            cores[index] = (cores[index].sum + load * interval, cores[index].covered + interval)
+        }
     }
 
     private mutating func reset() {
@@ -193,6 +229,9 @@ public struct HistoryAccumulator: Sendable {
         peak = 0
         appCPU = [:]
         appMemory = [:]
+        hardware = [:]
+        hardwareSeries = [:]
+        cores = []
     }
 }
 
@@ -240,6 +279,70 @@ public struct HistoryPoint: Sendable, Identifiable, Equatable {
         }
         return points[low]
     }
+
+    /// Where a line through `points` runs unbroken: each point's run, nil
+    /// where `value` has nothing for it. A run ends at a gap (the segment
+    /// changes) and at a point without a value, so a graph never draws a
+    /// line across a missing reading.
+    public static func runs(_ points: [HistoryPoint], value: (HistoryValues) -> Double?) -> [Int?] {
+        var run = -1
+        var previous: HistoryPoint?
+        var previousHad = false
+        return points.map { point in
+            defer { previous = point }
+            guard value(point.values) != nil else {
+                previousHad = false
+                return nil
+            }
+            if !previousHad || previous?.segment != point.segment { run += 1 }
+            previousHad = true
+            return run
+        }
+    }
+
+    /// The points (by index) where a line breaks off for a missing reading
+    /// and where it picks up again, within a segment: `runs`' ends that
+    /// border a point without a value rather than a gap.
+    public static func breaks(_ points: [HistoryPoint], runs: [Int?]) -> [Int] {
+        points.indices.filter { index in
+            guard index < runs.count, runs[index] != nil else { return false }
+            let before = index > 0 && runs[index - 1] == nil && points[index - 1].segment == points[index].segment
+            let after = index + 1 < points.count && index + 1 < runs.count && runs[index + 1] == nil
+                && points[index + 1].segment == points[index].segment
+            return before || after
+        }
+    }
+
+    /// The `runs` too short on the chart to fill under: those whose stretch
+    /// within `domain` lasts less than `minimumSpan` seconds, a run of one
+    /// point among them. A fill a few points wide reads as a bar rising from
+    /// the axis rather than a stretch of readings; such a run keeps its line,
+    /// with a dot at each end (`ends`), so a single reading is a dot.
+    public static func unfilled(_ points: [HistoryPoint], runs: [Int?], within domain: ClosedRange<Date>,
+                                minimumSpan: TimeInterval) -> Set<Int> {
+        var spans: [Int: (first: Date, last: Date)] = [:]
+        for (point, run) in zip(points, runs) {
+            guard let run else { continue }
+            spans[run] = (spans[run]?.first ?? point.time, point.time)
+        }
+        return Set(spans.compactMap { run, span in
+            // Only what the chart shows of it counts: a run that starts before the window is cut at its edge.
+            let shown = min(span.last, domain.upperBound).timeIntervalSince(max(span.first, domain.lowerBound))
+            return shown < minimumSpan ? run : nil
+        })
+    }
+
+    /// The first and last point (by index) of each of `chosen` among
+    /// `runs`, oldest first; one index for a run of one point.
+    public static func ends(of chosen: Set<Int>, in runs: [Int?]) -> [Int] {
+        guard !chosen.isEmpty else { return [] }
+        var ends: [Int: (first: Int, last: Int)] = [:]
+        for (index, run) in runs.enumerated() {
+            guard let run, chosen.contains(run) else { continue }
+            ends[run] = (ends[run]?.first ?? index, index)
+        }
+        return Set(ends.values.flatMap { [$0.first, $0.last] }).sorted()
+    }
 }
 
 // MARK: - Export
@@ -253,7 +356,8 @@ extension HistoryRecord {
 
     /// The records as CSV, one row per record, with ISO 8601 times. CPU
     /// for apps is in Activity Monitor percent (100 = one core). Figures the
-    /// Mac didn't report are left empty.
+    /// Mac didn't report are left empty. Hardware series, when the records
+    /// have any, follow in chart order ("fan_0_rpm"), then each core's load.
     public static func csv(_ records: [HistoryRecord]) -> String {
         func number(_ value: Double?, scale: Double = 1, digits: Int = 2) -> String {
             guard let value, value.isFinite else { return "" }
@@ -264,7 +368,10 @@ extension HistoryRecord {
             return "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         let time = ISO8601DateFormatter()
-        var lines = [csvHeader.joined(separator: ",")]
+        let series = Set(records.flatMap(\.hardwareSeries)).sorted()
+        let cores = records.map(\.values.coreLoads.count).max() ?? 0
+        let header = csvHeader + series.map(csvColumn) + (0..<cores).map { "core_\($0)_percent" }
+        var lines = [header.joined(separator: ",")]
         for record in records {
             let values = record.values
             let row = [
@@ -278,9 +385,26 @@ extension HistoryRecord {
                 number(values.chipCelsius, digits: 1),
                 field(record.topCPU.map { "\($0.name) \(number($0.value, digits: 1))%" }.joined(separator: "; ")),
                 field(record.topMemory.map { "\($0.name) \(Format.bytes($0.value))" }.joined(separator: "; ")),
-            ]
+            ] + series.map { series in
+                let fraction = series.unit == .fraction
+                return number(values.hardware[series.id], scale: fraction ? 100 : 1, digits: fraction || series.unit == .celsius ? 1 : 2)
+            } + (0..<cores).map { index in
+                number(index < values.coreLoads.count ? values.coreLoads[index] : nil, scale: 100, digits: 1)
+            }
             lines.append(row.joined(separator: ","))
         }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// A hardware series' CSV column: its ID and unit, "cpu_load_super_percent".
+    static func csvColumn(_ series: HistoryHardwareSeries) -> String {
+        let unit = switch series.unit {
+        case .fraction: "percent"
+        case .megahertz: "mhz"
+        case .celsius: "celsius"
+        default: series.unit.rawValue
+        }
+        let key = series.id.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "_" }.joined()
+        return "\(key)_\(unit)"
     }
 }
