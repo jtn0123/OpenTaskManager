@@ -663,20 +663,6 @@ final class AppModel {
         }
     }
 
-    /// launchd's label for each process it was running at the Startup page's
-    /// latest read of its list, gathered again only after another read.
-    private func launchdLabels() -> [ProcessIdentity: String] {
-        let watch = launchJobs.watch
-        guard watch.lastRead != jobLabels.read else { return jobLabels.labels }
-        var labels: [ProcessIdentity: String] = [:]
-        for (key, record) in watch.records {
-            guard let instance = record.instance else { continue }
-            labels[ProcessIdentity(pid: instance.pid, startTime: instance.started)] = key.label
-        }
-        jobLabels = (watch.lastRead, labels)
-        return labels
-    }
-
     // MARK: - Queries
 
     func process(_ pid: Int32) -> ProcessSample? {
@@ -854,5 +840,21 @@ final class AppModel {
         if let error, (error[NSAppleScript.errorNumber] as? Int) != -128 {
             lastError = error[NSAppleScript.errorMessage] as? String ?? "The command failed."
         }
+    }
+}
+
+extension AppModel {
+    /// launchd's label for each process it was running at the Startup page's
+    /// latest read of its list, gathered again only after another read.
+    private func launchdLabels() -> [ProcessIdentity: String] {
+        let watch = launchJobs.watch
+        guard watch.lastRead != jobLabels.read else { return jobLabels.labels }
+        var labels: [ProcessIdentity: String] = [:]
+        for (key, record) in watch.records {
+            guard let instance = record.instance else { continue }
+            labels[ProcessIdentity(pid: instance.pid, startTime: instance.started)] = key.label
+        }
+        jobLabels = (watch.lastRead, labels)
+        return labels
     }
 }
