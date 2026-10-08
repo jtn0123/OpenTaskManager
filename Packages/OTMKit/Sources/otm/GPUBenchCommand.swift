@@ -59,13 +59,21 @@ func gpuBenchSummary(_ result: GPUBenchmarkResult) -> String {
         lines.append(pad(workload.workload.title, 16) + pad(workload.workload.format(measurement.median), 18)
             + pad("±" + spread(measurement.spread / 2), 10) + pad(milliseconds(measurement.medianGPUSeconds), 12)
             + milliseconds(measurement.medianWallSeconds) + flag)
-        lines.append("  Timing source: " + measurement.timingSource + " · " + measurement.timingDescription(for: workload.workload))
+        // The verdict alone: the note below defines the fill interval once.
+        let verdict: String = switch workload.workload == .fill ? measurement.fillTimingVerdict
+            : measurement.gpuTimeLooksShort ? .qualified(.gpuTimeShort) : nil {
+        case .verified: "verified"
+        case let .qualified(reason): "unverified: " + reason.reason
+        case nil: "not checked against counters"
+        }
+        lines.append("  Timing: " + measurement.timingSource + " · " + verdict)
     }
     lines += [
         "",
         "Medians of \(result.configuration.repeats) timed repeats after a warm-up; ± is half the gap between the slowest "
-            + "and fastest. GPU time uses render-pass counters for fill where available, otherwise command-buffer time. Commit to done adds "
-            + "scheduling and the wake-up. Every result was checked.",
+            + "and fastest. GPU time is the command buffer's; for fill, where the GPU samples them, render-pass counters from the first "
+            + "pass's vertex start to the last pass's fragment end, verified against it. Commit to done adds scheduling and the wake-up. "
+            + "Every result was checked.",
     ]
     for workload in GPUWorkload.allCases {
         lines.append("\(workload.title): \(workload.summary).")

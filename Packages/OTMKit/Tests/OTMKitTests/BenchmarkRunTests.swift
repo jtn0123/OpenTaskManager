@@ -417,7 +417,7 @@ struct BenchmarkExportTests {
         #expect(markdown.contains("| FP32 compute | 8.00 TFLOP/s | 9.20 TFLOP/s | +15% | ±1.9% / ±1.1% | better |"))
         #expect(markdown.contains("## Internet quality\n\nThese figures measure the Internet connection"))
         #expect(markdown.contains("| When | On | Download | Upload | Responsiveness | Idle latency | Notes |"))
-        #expect(markdown.contains("Workloads v1."))
+        #expect(markdown.contains("Workloads v2."))
         #expect(markdown.contains("Test v1. Settings: Mode parallel."))
         // GPU before Internet, as the workspace orders them.
         let gpu = try #require(markdown.range(of: "## GPU"))
