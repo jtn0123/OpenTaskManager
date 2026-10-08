@@ -70,22 +70,36 @@ enum SystemExtensionList {
         return parts.count >= 3 && !parts[1].isEmpty ? String(parts[1]) : nil
     }
 
-    /// Fills in each extension's app from the database's `container.bundlePath`.
-    /// Anything unexpected in the file leaves the paths empty.
+    /// Fills in each extension's app from the database's `container.bundlePath`,
+    /// and the copy it was installed from from `originPath`, for the entry of
+    /// the same version. Anything unexpected in the file leaves the paths empty.
     static func attachApps(_ extensions: [SystemExtension], database: Data) -> [SystemExtension] {
         guard let plist = try? PropertyListSerialization.propertyList(from: database, format: nil) as? [String: Any],
               let entries = plist["extensions"] as? [[String: Any]] else { return extensions }
         var apps: [String: String] = [:]
+        var origins: [String: String] = [:]
         for entry in entries {
-            guard let identifier = entry["identifier"] as? String,
-                  let path = (entry["container"] as? [String: Any])?["bundlePath"] as? String, !path.isEmpty else { continue }
-            // An update and the copy it replaces come from the same app.
-            if apps[identifier] == nil { apps[identifier] = path }
+            guard let identifier = entry["identifier"] as? String else { continue }
+            if let path = (entry["container"] as? [String: Any])?["bundlePath"] as? String, !path.isEmpty,
+               // An update and the copy it replaces come from the same app.
+               apps[identifier] == nil {
+                apps[identifier] = path
+            }
+            let versions = entry["bundleVersion"] as? [String: Any]
+            if let origin = entry["originPath"] as? String, !origin.isEmpty {
+                let key = originKey(identifier, versions?["CFBundleShortVersionString"] as? String, versions?["CFBundleVersion"] as? String)
+                if origins[key] == nil { origins[key] = origin }
+            }
         }
         return extensions.map { item in
             var item = item
             item.appPath = apps[item.bundleID]
+            item.originPath = origins[originKey(item.bundleID, item.version, item.build)]
             return item
         }
+    }
+
+    private static func originKey(_ identifier: String, _ version: String?, _ build: String?) -> String {
+        "\(identifier)\n\(version ?? "")\n\(build ?? "")"
     }
 }
