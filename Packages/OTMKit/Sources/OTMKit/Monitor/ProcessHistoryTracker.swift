@@ -2,9 +2,9 @@ import Foundation
 
 /// Follows the processes from tick to tick for History's process history:
 /// notes each process the tick it's first seen and the tick it's gone, and
-/// at each record's end takes every process's average CPU and disk over the
-/// record from the cumulative counters the sampler already read, so between
-/// records a tick costs work only for the processes that started or ended.
+/// at each record's end takes native CPU and disk from cumulative counters.
+/// Restricted CPU is integrated from the sampler's held rates between ps
+/// reads, so a repeated counter cannot turn a busy record into zero.
 ///
 /// Stretches follow `HistoryAccumulator`'s: a tick longer than a record, or
 /// a gap between ticks, starts afresh, so a record's figures never cover
@@ -72,6 +72,9 @@ public struct ProcessHistoryTracker: Sendable {
     /// Each process's counters at the start of the stretch, or at its own
     /// start within it.
     private var baselines: [ProcessIdentity: Counters] = [:]
+    /// Restricted counters can be five seconds old. Integrate the held CPU
+    /// rate so a record boundary between reads never invents an idle stretch.
+    private var restrictedCPU: [ProcessIdentity: Double] = [:]
     private var needsBaselines = true
     private var finished: [Finished] = []
     private var covered = 0.0
@@ -116,16 +119,21 @@ public struct ProcessHistoryTracker: Sendable {
         }
         guard interval > 0, interval <= span else { return }
         last = time
+        for process in samples where process.isRestricted {
+            let seconds = process.startTime.map { min(interval, max(time.timeIntervalSince($0), 0)) } ?? interval
+            restrictedCPU[process.identity, default: 0] += process.cpuPercent / 100 * seconds
+        }
         if needsBaselines {
-            baselines = Dictionary(samples.map { ($0.identity, Counters(before: $0, interval: interval, at: time)) },
+            baselines = Dictionary(samples.map { ($0.identity, baseline(before: $0, interval: interval, at: time)) },
                                    uniquingKeysWith: { first, _ in first })
             needsBaselines = false
         } else {
-            for process in appeared { baselines[process.identity] = Counters(before: process, interval: interval, at: time) }
+            for process in appeared { baselines[process.identity] = baseline(before: process, interval: interval, at: time) }
         }
         for process in disappeared {
+            defer { restrictedCPU.removeValue(forKey: process.identity) }
             guard let base = baselines.removeValue(forKey: process.identity) else { continue }
-            finished.append(Finished(identity: process.identity, used: Self.used(Counters(process), since: base),
+            finished.append(Finished(identity: process.identity, used: Self.used(counters(process), since: base),
                                      memory: process.memory, isRestricted: process.isRestricted))
         }
         covered += interval
@@ -142,7 +150,7 @@ public struct ProcessHistoryTracker: Sendable {
             figures.reserveCapacity(samples.count + finished.count)
             for process in samples {
                 guard let base = baselines[process.identity] else { continue }
-                figures.append(figure(process.identity, used: Self.used(Counters(process), since: base), memory: process.memory,
+                figures.append(figure(process.identity, used: Self.used(counters(process), since: base), memory: process.memory,
                                       isRestricted: process.isRestricted))
             }
             for process in finished {
@@ -170,7 +178,7 @@ public struct ProcessHistoryTracker: Sendable {
         if !needsBaselines {
             var next: [ProcessIdentity: Counters] = [:]
             next.reserveCapacity(samples.count)
-            for process in samples { next[process.identity] = Counters(process) }
+            for process in samples { next[process.identity] = counters(process) }
             baselines = next
         }
         return batch
@@ -215,7 +223,22 @@ public struct ProcessHistoryTracker: Sendable {
                  diskWrite: max(now.diskWrite - base.diskWrite, 0))
     }
 
+    private func counters(_ process: ProcessSample) -> Counters {
+        var result = Counters(process)
+        if process.isRestricted { result.cpuSeconds = restrictedCPU[process.identity] ?? 0 }
+        return result
+    }
+
+    private func baseline(before process: ProcessSample, interval: TimeInterval, at time: Date) -> Counters {
+        guard process.isRestricted else { return Counters(before: process, interval: interval, at: time) }
+        var result = counters(process)
+        let seconds = process.startTime.map { min(interval, max(time.timeIntervalSince($0), 0)) } ?? interval
+        result.cpuSeconds -= process.cpuPercent / 100 * seconds
+        return result
+    }
+
     private mutating func resetStretch() {
+        restrictedCPU = [:]
         baselines = [:]
         needsBaselines = true
         finished = []

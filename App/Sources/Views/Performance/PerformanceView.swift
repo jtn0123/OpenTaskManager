@@ -317,6 +317,7 @@ private struct ResourceRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, select)
+        .samplingDemand(.sensors, when: resource == .sensors)
     }
 
     @ViewBuilder private var sparkline: some View {
@@ -411,6 +412,7 @@ private struct ResourcePicker: View {
                                  color: resource.color, selected: resource == selection) {
                         selection = resource
                     }
+                    .samplingDemand(.sensors, when: resource == .sensors)
                 }
             }
         }

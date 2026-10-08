@@ -402,11 +402,20 @@ struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
+    @State private var tracksIcon = false
+
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(history: model.cpuHistory.values, usage: model.snapshot?.cpu.usage ?? 0))
-            .accessibilityLabel("CPU \(Format.percent(model.snapshot?.cpu.usage ?? 0))")
+        Image(nsImage: MenuBarIcon.image(model.menuBarIcon.drawing))
+            .accessibilityLabel("CPU \(model.menuBarIcon.drawing.text)")
+            .help("CPU · latest sample, icon refreshed every 2 s or at the chosen slower update speed")
             .onAppear {
                 WindowOpener.openMainWindow = { openWindow(id: "main") }
+                if !tracksIcon { model.samplingDemand.add(.menuBarIcon) }
+                tracksIcon = true
+            }
+            .onDisappear {
+                if tracksIcon { model.samplingDemand.remove(.menuBarIcon) }
+                tracksIcon = false
             }
     }
 }

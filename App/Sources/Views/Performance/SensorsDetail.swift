@@ -35,7 +35,9 @@ struct SensorsDetail: View {
                 }
             }
             sensorTable(thermalState)
+                .samplingDemand(.sensorTable)
         }
+        .samplingDemand(.sensors)
     }
 
     /// The thermal pressure, where the level bar gives the hottest die; with

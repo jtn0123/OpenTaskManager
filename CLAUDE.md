@@ -120,8 +120,9 @@ Manager OG or any other proprietary task manager.
   row per record and kind (`process_kinds`: name, path, user) in
   `process_short_runs`, and the app's own such children (ps, nettop,
   launchctl) not at all;
-  `ProcessHistoryTracker` takes each record's average CPU and disk from the
-  cumulative counters the sampler already reads (no new reads per tick), and
+  `ProcessHistoryTracker` takes native CPU and disk from the cumulative
+  counters the sampler already reads; restricted CPU integrates the held
+  rates between `ps` reads, so record boundaries never invent idle time, and
   `ProcessHistoryKeep` keeps figures only for the 5 largest footprints, busy disk
   and CPU users, 40 at most, so a missing row while it ran is "idle, not stored",
   never zero, and a stretch without records a gap; History's Processes section
@@ -184,7 +185,9 @@ Manager OG or any other proprietary task manager.
   the main actor when the page opens and on Refresh, then streams bundle sizes in
   from a few GCD threads, and follows launches and quits through NSWorkspace,
   never per tick),
-  Views/Users (per-user totals; the grouping is `UserUsageBuilder` in OTMKit),
+  Views/Users (per-user totals; `UserUsageStore` builds sorted display totals
+  only on screen, keeping just CPU and memory sums for continuous histories
+  otherwise; the grouping is `UserUsageBuilder` in OTMKit),
   Views/System (hardware and security facts, read once when the page opens, never
   per tick; the rows come from `SystemReport` in OTMKit, and attached devices from
   one `system_profiler -json` run, `PeripheralReader` in OTMKit's System/Peripherals,
@@ -222,6 +225,31 @@ Manager OG or any other proprietary task manager.
 
 ## Performance rules (the app must stay light)
 
+- Slow sources follow visible demand, counted across windows by
+  `SamplingDemandStore` and `SamplingDemand` in OTMKit. A demand view releases
+  its count when removed, scrolled out, minimized or occluded. The Overview's
+  CPU and Power cards, Performance's Thermals rail row or chip, and the Thermals
+  detail need sensors each tick; otherwise `SensorMonitor` reads every 5 s.
+  Processes, its inspector and Users need `ps`'s CPU and memory walk each
+  tick; otherwise it runs every 5 s after two initial reads establish CPU
+  rates. Its thread walk (`ps -M`, a line per thread) stays at most every 5 s.
+  `RestrictedProcessCache` holds rows by PID and start time
+  and computes CPU over the real interval between reads, never the app tick.
+  The native process list, CPU, memory, disks, network, GPU and power stay live.
+- `MenuBarLabel` observes only `MenuBarIconStore.drawing`, never the snapshot
+  or full CPU history. OTMKit's `MenuBarDrawing` compares the last 14 bars at
+  half-point resolution and the rounded text. The icon alone publishes changes
+  at most once every 2 s (or the chosen slower update speed), with the newest
+  sample and consecutive graph points. Identical pixels publish nothing;
+  `MenuBarIcon` also reuses the same image. No extra setting is needed.
+- Keep process, app-group, user, sensor and hardware histories continuous when
+  their page is hidden. Sensor readings are held between slow reads, appended
+  each tick and included in every 10 s hardware record; this adds no HID reads.
+  App-group histories still append every tick because by-app and inspector
+  graphs and the recorder need the groups as they stood then. Sensor ranges
+  also keep every tick's clocks and power, but table sorting and row publication
+  wait for the Thermals detail. Hidden Users keeps only CPU and memory sums,
+  leaving its full display totals and name sorting until it is visible.
 - Don't attach SwiftUI `.animation` or `.contentTransition` to values that
   change every tick. Each animation frame re-runs layout for the whole window;
   on the Overview page this cost about 75% of a core. Animate with Core

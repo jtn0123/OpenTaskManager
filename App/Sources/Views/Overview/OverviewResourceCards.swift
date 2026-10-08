@@ -43,6 +43,7 @@ struct CPUGraphCard: View {
                 axisNote: scale == .auto ? CPUGraphScale.autoNote : nil, cornerRadius: 8
             )
         }
+        .samplingDemand(.sensors)
     }
 }
 
@@ -139,6 +140,7 @@ struct PowerGraphCard: View {
                           glows: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
             }
         }
+        .samplingDemand(.sensors)
     }
 
     /// The measured parts of the chip, then the rest of the system, which

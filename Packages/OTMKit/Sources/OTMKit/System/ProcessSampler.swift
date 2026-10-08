@@ -11,6 +11,12 @@ import Foundation
 final class ProcessSampler {
     var includeRestricted = true
 
+    private struct Tick {
+        let interval: TimeInterval
+        let gpuTime: [Int32: UInt64]
+        let restrictedLive: Bool
+    }
+
     private struct Key: Hashable {
         let pid: Int32
         let start: Int64
@@ -38,14 +44,17 @@ final class ProcessSampler {
     /// its executable's path and name, and the process responsible for it.
     private var lasting: [Key: Lasting] = [:]
     private var userNames: [UInt32: String] = [:]
-    private var restrictedThreads: [Int32: Int] = [:]
-    private var restrictedThreadsRead = Date.distantPast
+    private var restrictedCadence = SamplingCadence(primingReads: 2)
+    /// `ps -M` lists one line per thread, too much output to parse every
+    /// tick, so thread counts stay at most every 5 s, live or not.
+    private var threadCadence = SamplingCadence()
+    private var restrictedCache = RestrictedProcessCache()
     private lazy var supportsV6: Bool = {
         var usage = rusage_info_v6()
         return Self.rusage(getpid(), &usage, flavor: RUSAGE_INFO_V6)
     }()
 
-    func sample(interval: TimeInterval, gpuTime: [Int32: UInt64]) -> [ProcessSample] {
+    func sample(interval: TimeInterval, gpuTime: [Int32: UInt64], restrictedLive: Bool = true) -> [ProcessSample] {
         let kernelList = Self.listProcesses()
         var samples: [ProcessSample] = []
         samples.reserveCapacity(kernelList.count)
@@ -85,27 +94,11 @@ final class ProcessSampler {
         }
 
         if includeRestricted, !restricted.isEmpty {
-            let fallback = PSReader.read()
-            let threads = restrictedThreadCounts()
-            for index in restricted {
-                let info = kernelList[index]
-                let key = Key(pid: info.pid, start: info.startMicroseconds)
-                var sample = makeSample(info, key: key, restricted: true)
-                if let row = fallback[info.pid] {
-                    let counters = Counters(
-                        cpuSeconds: row.cpuSeconds, topTierSeconds: nil, energyNanojoules: nil,
-                        diskRead: 0, diskWrite: 0, wakeups: nil, gpuNanoseconds: gpuTime[info.pid]
-                    )
-                    current[key] = counters
-                    sample.cpuTime = row.cpuSeconds
-                    sample.memory = row.residentBytes
-                    sample.residentMemory = row.residentBytes
-                    if let state = row.state, sample.state != .zombie { sample.state = state }
-                    apply(counters, before: previous[key], interval: interval, to: &sample)
-                }
-                sample.threadCount = threads[info.pid] ?? 0
-                samples.append(sample)
-            }
+            appendRestricted(kernelList, indices: restricted, tick: Tick(interval: interval, gpuTime: gpuTime, restrictedLive: restrictedLive),
+                             current: &current, samples: &samples)
+        } else {
+            restrictedCache = RestrictedProcessCache()
+            restrictedCadence = SamplingCadence(primingReads: 2)
         }
 
         previous = current
@@ -195,14 +188,39 @@ final class ProcessSampler {
         return name
     }
 
-    /// Thread counts for processes we cannot read natively. `ps -M` lists one
-    /// line per thread, which is too much output to parse every tick.
-    private func restrictedThreadCounts() -> [Int32: Int] {
-        if Date().timeIntervalSince(restrictedThreadsRead) > 5 {
-            restrictedThreads = PSReader.readThreadCounts()
-            restrictedThreadsRead = Date()
+    /// The figures' walk keeps the live cadence; the thread walk rides along
+    /// on one of its reads at most every 5 s. The native process list still
+    /// tells us about exits each tick, so held rows never keep an ended
+    /// process alive.
+    private func appendRestricted(_ list: [KernelProcess], indices: [Int], tick: Tick,
+                                  current: inout [Key: Counters], samples: inout [ProcessSample]) {
+        let time = ProcessInfo.processInfo.systemUptime
+        let reads = restrictedCadence.shouldRead(at: time, live: tick.restrictedLive)
+        let fallback = reads ? PSReader.read() : [:]
+        let threads = reads && threadCadence.shouldRead(at: time, live: false) ? PSReader.readThreadCounts() : [:]
+        var identities: Set<ProcessIdentity> = []
+        for index in indices {
+            let info = list[index]
+            let key = Key(pid: info.pid, start: info.startMicroseconds)
+            var sample = makeSample(info, key: key, restricted: true)
+            identities.insert(sample.identity)
+            if reads { restrictedCache.update(sample.identity, row: fallback[info.pid], threads: threads[info.pid], at: time) }
+            if let row = restrictedCache.reading(for: sample.identity) {
+                let counters = Counters(cpuSeconds: row.cpuSeconds, topTierSeconds: nil, energyNanojoules: nil,
+                                        diskRead: 0, diskWrite: 0, wakeups: nil, gpuNanoseconds: tick.gpuTime[info.pid])
+                current[key] = counters
+                sample.cpuTime = row.cpuSeconds
+                sample.memory = row.residentBytes
+                sample.residentMemory = row.residentBytes
+                sample.threadCount = row.threads
+                if let state = row.state, sample.state != .zombie { sample.state = state }
+                // GPU counters still arrive each tick. CPU uses ps's own interval.
+                apply(counters, before: previous[key], interval: tick.interval, to: &sample)
+                sample.cpuPercent = row.cpuPercent
+            }
+            samples.append(sample)
         }
-        return restrictedThreads
+        restrictedCache.retain(identities)
     }
 
     // MARK: - Native reads
