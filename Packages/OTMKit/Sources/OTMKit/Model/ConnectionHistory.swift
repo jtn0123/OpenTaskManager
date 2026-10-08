@@ -67,6 +67,15 @@ public struct ConnectionLifetime: Sendable, Codable, Identifiable {
     }
 }
 
+extension Connection {
+    /// ConnectionWatch's key as text, so a stored lifetime can carry on after watching stopped
+    /// or the app relaunched. Nil without a process start time, where a reused PID can't be told apart.
+    public var historyKey: String? {
+        guard let processStart else { return nil }
+        return "\(id.pid):\(processStart.timeIntervalSince1970):\(id.fd):\(transport.rawValue):\(id.socket)"
+    }
+}
+
 public struct ConnectionHistoryBatch: Sendable {
     public var rows: [ConnectionLifetime] = []
     public var active: Set<String> = []
@@ -84,12 +93,21 @@ public struct ConnectionHistoryTracker: Sendable {
     private var coverage = ConnectionCoverageTracker()
     public init() {}
 
+    /// `resumable` holds stored rows not seen closing, by `Connection.historyKey`: one whose socket
+    /// is still there carries on instead of starting a second row for the same socket.
     public mutating func observe(_ watch: ConnectionWatch, at time: Date, spacing: TimeInterval,
-                                 hidden: Int, unreadable: Set<Int32> = [], processes: [ProcessIdentity: ConnectionProcess] = [:])
+                                 hidden: Int, unreadable: Set<Int32> = [], processes: [ProcessIdentity: ConnectionProcess] = [:],
+                                 resumable: [String: ConnectionLifetime] = [:])
         -> ConnectionHistoryBatch {
         var batch = ConnectionHistoryBatch()
+        var resumable = resumable
         let interval = coverage.observe(at: time, spacing: spacing, hidden: hidden)
-        if interval.id != coverageID, interval.start == time { batch = stopRows() }
+        if interval.id != coverageID, interval.start == time {
+            batch = stopRows()
+            for row in batch.rows {
+                if let key = row.socket.connection.historyKey { resumable[key] = row }
+            }
+        }
         coverageID = interval.id
         batch.interval = interval
         let found = Set(watch.open.map(\.id))
@@ -103,11 +121,20 @@ public struct ConnectionHistoryTracker: Sendable {
             if entry.row.ending != .closed { entry.row.ending = .stopped }
             batch.rows.append(entry.row)
         }
+        var resumed = Set<String>()
         for socket in watch.open {
-            var entry = tracked[socket.id] ?? Tracked(row: ConnectionLifetime(
-                socket: socket.segment(since: time), process: processes[socket.connection.process]
-                    ?? ConnectionProcess(name: socket.connection.processName, path: nil, user: "Not recorded")
-            ), written: .distantPast)
+            var entry: Tracked
+            if let current = tracked[socket.id] {
+                entry = current
+            } else if let carried = Self.resume(socket, from: resumable, at: time) {
+                entry = carried
+                resumed.insert(carried.row.id)
+            } else {
+                entry = Tracked(row: ConnectionLifetime(
+                    socket: socket.segment(since: time), process: processes[socket.connection.process]
+                        ?? ConnectionProcess(name: socket.connection.processName, path: nil, user: "Not recorded")
+                ), written: .distantPast)
+            }
             entry.row.socket = entry.row.socket.observing(socket.connection, at: time)
             if let state = socket.connection.tcpState, !entry.row.states.contains(state) { entry.row.states.append(state) }
             if time.timeIntervalSince(entry.written) >= 60 {
@@ -117,7 +144,18 @@ public struct ConnectionHistoryTracker: Sendable {
             }
             tracked[socket.id] = entry
         }
+        // A row stopped at a break and carried on in the same walk is written once, open.
+        batch.rows.removeAll { resumed.contains($0.id) && $0.ending != .watching }
         return batch
+    }
+
+    private static func resume(_ socket: ObservedConnection, from rows: [String: ConnectionLifetime], at time: Date) -> Tracked? {
+        guard let key = socket.connection.historyKey, var row = rows[key], row.ending != .closed,
+              row.socket.lastSeen < time, ConnectionWatch.continues(row.socket.connection, as: socket.connection) else { return nil }
+        row.ending = .watching
+        row.closedBy = nil
+        row.socket = row.socket.resumed(socket.connection, at: time)
+        return Tracked(row: row, written: .distantPast)
     }
 
     private var coverageID: String?

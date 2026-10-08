@@ -11,6 +11,8 @@ actor ConnectionHistoryWorker {
     private var watch = ConnectionWatch(maximumSpacing: 121)
     private var history = ConnectionHistoryTracker()
     private var lastSpacing: TimeInterval = 3
+    /// After a start or a stop, the first walk looks up stored rows it can carry on.
+    private var looksForStoredRows = true
     private static let log = Logger(subsystem: "OpenTaskManager", category: "ConnectionHistory")
 
     func read(recorder: FlightRecorder?, spacing: TimeInterval, processes: [ProcessIdentity: ConnectionProcess]) async -> Reading {
@@ -24,12 +26,21 @@ actor ConnectionHistoryWorker {
             metadata[identity] = ConnectionProcess(name: process.name, path: process.path ?? metadata[identity]?.path,
                                                    user: process.user)
         }
+        var resumable: [String: ConnectionLifetime] = [:]
+        if let recorder, looksForStoredRows {
+            // One indexed lookup per start, by the keys of the sockets open now.
+            let keys = watch.open.compactMap(\.connection.historyKey)
+            do { resumable = try await recorder.resumableConnections(keys: keys) } catch {
+                Self.log.error("Socket history lookup failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         let batch = next.observe(watch, at: snapshot.time, spacing: spacing, hidden: snapshot.hiddenProcesses,
-                                 unreadable: snapshot.unreadablePIDs, processes: metadata)
+                                 unreadable: snapshot.unreadablePIDs, processes: metadata, resumable: resumable)
         if let recorder {
             do {
                 try await recorder.appendConnections(batch)
                 history = next
+                looksForStoredRows = false
             } catch { Self.log.error("Socket history write failed: \(error.localizedDescription, privacy: .public)") }
         }
         Self.log.debug("Socket walk: wall \(snapshot.duration, privacy: .public) s, thread CPU \(snapshot.cpuDuration, privacy: .public) s")
@@ -43,6 +54,7 @@ actor ConnectionHistoryWorker {
             do {
                 try await recorder.appendConnections(batch)
                 history = next
+                looksForStoredRows = true
             } catch { Self.log.error("Socket history end failed: \(error.localizedDescription, privacy: .public)") }
         }
     }

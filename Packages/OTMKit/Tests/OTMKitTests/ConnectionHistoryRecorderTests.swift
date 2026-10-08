@@ -9,11 +9,15 @@ struct ConnectionHistoryRecorderTests {
         FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("history.sqlite")
     }
 
+    private var socket: Connection {
+        Connection(id: .init(pid: 7, fd: 3, socket: 10), processName: "Browser", transport: .tcp, family: .ipv4,
+                   local: Endpoint(address: "127.0.0.1", port: 50_000), remote: Endpoint(address: "192.0.2.1", port: 443),
+                   tcpState: .established, processStart: date(1))
+    }
+
     private func batch(at time: Double, tracker: inout ConnectionHistoryTracker, watch: inout ConnectionWatch,
                        open: Bool = true) -> ConnectionHistoryBatch {
-        let socket = Connection(id: .init(pid: 7, fd: 3, socket: 10), processName: "Browser", transport: .tcp, family: .ipv4,
-                                local: Endpoint(address: "127.0.0.1", port: 50_000), remote: Endpoint(address: "192.0.2.1", port: 443),
-                                tcpState: .established, processStart: date(1))
+        let socket = socket
         watch.observe(open ? [socket] : [], at: date(time))
         return tracker.observe(watch, at: date(time), spacing: 3, hidden: 2,
                                processes: [socket.process: .init(name: "Browser", path: "/Applications/Browser.app", user: "me")])
@@ -104,6 +108,36 @@ struct ConnectionHistoryRecorderTests {
         #expect(try await recorder.connectionHistory(from: date(0), to: date(200)).isEmpty)
     }
 
+    @Test func aRelaunchCarriesOnTheRowOfASocketStillOpen() async throws {
+        let url = url()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        do {
+            var watch = ConnectionWatch()
+            var tracker = ConnectionHistoryTracker()
+            let recorder = try FlightRecorder(url: url)
+            try await recorder.appendConnections(batch(at: 100, tracker: &tracker, watch: &watch))
+        }
+        // The next run has a fresh recorder, watch and tracker.
+        let recorder = try FlightRecorder(url: url)
+        var watch = ConnectionWatch()
+        var tracker = ConnectionHistoryTracker()
+        let key = try #require(socket.historyKey)
+        let stored = try await recorder.resumableConnections(keys: [key, "8:1.0:3:TCP:10"])
+        #expect(stored.count == 1)
+        watch.observe([socket], at: date(300))
+        try await recorder.appendConnections(tracker.observe(watch, at: date(300), spacing: 3, hidden: 0, resumable: stored))
+        let rows = try await recorder.connectionHistory(from: date(0), to: date(400))
+        #expect(rows.count == 1)
+        #expect(rows.first?.socket.firstSeen == date(100))
+        #expect(rows.first?.socket.lastSeen == date(300))
+        #expect(rows.first?.ending == .watching)
+        // Seen closing, the row keeps no key and is never carried on.
+        watch.observe([], at: date(303))
+        try await recorder.appendConnections(tracker.observe(watch, at: date(303), spacing: 3, hidden: 0))
+        #expect(try await recorder.resumableConnections(keys: [key]).isEmpty)
+        #expect(try await recorder.connectionHistory(from: date(0), to: date(400)).first?.ending == .closed)
+    }
+
     @Test func moreClosuresThanTheRecentListStillKeepEveryClosingStep() async throws {
         let url = url()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -136,7 +170,7 @@ struct ConnectionHistoryRecorderTests {
         #expect(sqlite3_exec(handle, """
             WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n < 50002)
             INSERT INTO connection_lifetimes SELECT CAST(n AS TEXT), n, n, CASE WHEN n = 1 THEN 1 ELSE 0 END,
-                '{}', 'fixture', '', 7, 0, 0 FROM numbers;
+                '{}', 'fixture', '', 7, 0, 0, NULL FROM numbers;
             """, nil, nil, nil) == SQLITE_OK)
         var watch = ConnectionWatch()
         var tracker = ConnectionHistoryTracker()

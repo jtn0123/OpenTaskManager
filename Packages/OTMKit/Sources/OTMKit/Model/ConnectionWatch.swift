@@ -119,6 +119,14 @@ public struct ObservedConnection: Sendable, Identifiable, Codable {
         return socket
     }
 
+    /// Found again after watching stopped: the unwatched stretch is a step, and the first sighting stays.
+    func resumed(_ connection: Connection, at time: Date) -> ObservedConnection {
+        var socket = self
+        socket.closedBy = nil
+        socket.see(connection, at: time, after: lastSeen, isAfterGap: true)
+        return socket
+    }
+
     /// A closing step even when a large walk overflowed the recently closed list.
     func ending(at time: Date) -> ObservedConnection {
         var socket = self

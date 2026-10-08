@@ -5,8 +5,9 @@ extension FlightRecorder {
     static let connectionTables = """
         CREATE TABLE IF NOT EXISTS connection_lifetimes (id TEXT PRIMARY KEY, first_seen REAL NOT NULL,
             last_seen REAL NOT NULL, active INTEGER NOT NULL, payload TEXT NOT NULL, writer TEXT NOT NULL,
-            search TEXT NOT NULL, pid INTEGER NOT NULL, local_port INTEGER, remote_port INTEGER);
+            search TEXT NOT NULL, pid INTEGER NOT NULL, local_port INTEGER, remote_port INTEGER, open_key TEXT);
         CREATE INDEX IF NOT EXISTS connection_lifetimes_time ON connection_lifetimes (last_seen, first_seen);
+        CREATE INDEX IF NOT EXISTS connection_lifetimes_open ON connection_lifetimes (open_key) WHERE open_key IS NOT NULL;
         CREATE INDEX IF NOT EXISTS connection_lifetimes_cap ON connection_lifetimes (active, last_seen, id);
         CREATE TABLE IF NOT EXISTS connection_coverage (id TEXT PRIMARY KEY, start REAL NOT NULL, end REAL NOT NULL,
             spacing REAL NOT NULL, hidden INTEGER NOT NULL, walks INTEGER NOT NULL);
@@ -39,9 +40,10 @@ extension FlightRecorder {
         guard !batch.rows.isEmpty else { return }
         // This actor owns the connection and finalizes the statement after the batch; text bindings are copied.
         let statement = unsafe try Self.prepare("""
-            INSERT INTO connection_lifetimes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
+            INSERT INTO connection_lifetimes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
                 last_seen = excluded.last_seen, active = excluded.active, payload = excluded.payload, writer = excluded.writer,
-                search = excluded.search, local_port = excluded.local_port, remote_port = excluded.remote_port
+                search = excluded.search, local_port = excluded.local_port, remote_port = excluded.remote_port,
+                open_key = excluded.open_key
             """, on: database)
         defer { unsafe sqlite3_finalize(statement) }
         for row in batch.rows {
@@ -59,6 +61,10 @@ extension FlightRecorder {
             unsafe sqlite3_bind_int(statement, 8, row.socket.connection.pid)
             unsafe sqlite3_bind_int64(statement, 9, Int64(row.socket.connection.local.port ?? 0))
             unsafe sqlite3_bind_int64(statement, 10, Int64(row.socket.connection.remote?.port ?? 0))
+            // Only a row not seen closing can carry on; a closed one keeps no key.
+            if row.ending != .closed, let key = row.socket.connection.historyKey {
+                unsafe Self.bind(key, to: statement, at: 11)
+            }
             unsafe try connectionStep(statement)
         }
     }
@@ -130,6 +136,37 @@ extension FlightRecorder {
             status = unsafe sqlite3_step(statement)
         }
         guard status == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
+        return rows
+    }
+
+    /// Stored rows not seen closing whose sockets have these keys, the latest per key: what a watch
+    /// that starts again (a page visit, a relaunch) carries on rather than starting a second row.
+    public func resumableConnections(keys: [String]) throws(FlightRecorderError) -> [String: ConnectionLifetime] {
+        guard !keys.isEmpty, try keepsConnectionHistory() else { return [:] }
+        var rows: [String: ConnectionLifetime] = [:]
+        // Chunks stay under SQLite's bound-parameter limit; the actor finalizes each statement.
+        for start in stride(from: 0, to: keys.count, by: 500) {
+            let chunk = Array(keys[start..<min(start + 500, keys.count)])
+            let marks = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
+            let statement = unsafe try Self.prepare(
+                "SELECT open_key, payload FROM connection_lifetimes WHERE open_key IN (\(marks))", on: database
+            )
+            defer { unsafe sqlite3_finalize(statement) }
+            for (index, key) in chunk.enumerated() { unsafe Self.bind(key, to: statement, at: Int32(index + 1)) }
+            var status = unsafe sqlite3_step(statement)
+            while status == SQLITE_ROW {
+                guard let key = unsafe Self.text(statement, 0), let payload = unsafe Self.text(statement, 1) else {
+                    throw .sqlite("Missing socket lifetime")
+                }
+                let row: ConnectionLifetime
+                do { row = try JSONDecoder().decode(ConnectionLifetime.self, from: Data(payload.utf8)) } catch {
+                    throw .sqlite(error.localizedDescription)
+                }
+                if row.ending != .closed, rows[key].map({ $0.socket.lastSeen < row.socket.lastSeen }) ?? true { rows[key] = row }
+                status = unsafe sqlite3_step(statement)
+            }
+            guard status == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
+        }
         return rows
     }
 
