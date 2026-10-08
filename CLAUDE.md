@@ -6,12 +6,16 @@ Manager OG or any other proprietary task manager.
 
 ## Build and test
 
-- Use the Makefile: `make build`, `make run`, `make test`, `make cli`, `make lint`.
+- Use the Makefile: `make build`, `make run`, `make test`, `make coverage`, `make cli`, `make lint`.
   It points `DEVELOPER_DIR` at full Xcode, because `xcode-select` may point at
   the Command Line Tools, which lack xcodebuild and Swift Testing. For raw
   `swift`, `xcodebuild` or `swiftlint` commands, export
   `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer` (or
   Xcode.app) first.
+- `make coverage` runs OTMKit's tests with coverage and uses `xcrun llvm-cov`
+  to report each library source file and its total line coverage, excluding
+  tests and the CLI. CI uses the same target and adds its table to the job
+  summary; there is no coverage threshold yet.
 - `project.yml` is the source of truth. The `.xcodeproj` is generated and
   ignored; new files under `App/Sources` are picked up by `make generate`.
 - All tests must pass and lint must be clean (`swiftlint lint --strict`).
@@ -321,6 +325,17 @@ Manager OG or any other proprietary task manager.
   properties per tick either: even `processIdentifier` can wait on a
   LaunchServices round trip; `AppModel` rebuilds its app list when NSWorkspace
   reports a launch or quit.
+
+- CPU benchmark inputs are immutable Sendable values. Each worker and its
+  borrowed pointers stay on one thread inside `BenchmarkKernel.withWorker`;
+  scratch allocation and pointer borrowing happen before that worker's timer.
+  Keep the versioned units' pointer loops unchanged, with no locks, atomics,
+  allocations or added indirection in them.
+- History observer tokens and the network monitor's CF store stay inside
+  `OSAllocatedUnfairLock` scopes, including cleanup. These handles are not
+  Sendable, so the lock uses `uncheckedState`; its checked `withLock` prevents
+  them from escaping. The network callback retains a weak context rather
+  than an unretained monitor, so queued callbacks cannot outlive their target.
 
 ## Screenshots and UI checks
 

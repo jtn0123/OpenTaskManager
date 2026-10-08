@@ -28,8 +28,8 @@ jobs:
       - name: Lint
         run: swiftlint lint --strict --quiet
 
-      - name: Test OTMKit
-        run: swift test --package-path Packages/OTMKit
+      - name: Test OTMKit with coverage
+        run: make coverage
 
       - name: Build otm (release)
         run: swift build --package-path Packages/OTMKit -c release --product otm

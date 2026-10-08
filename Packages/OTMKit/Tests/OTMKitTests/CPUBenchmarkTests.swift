@@ -41,7 +41,7 @@ private final class FailingKernel: BenchmarkKernel, BenchmarkWorker {
     }
 
     var workPerUnit: Double { 1 }
-    func makeWorker(_ index: Int, of count: Int) -> any BenchmarkWorker { self }
+    func withWorker(_ index: Int, of count: Int, _ body: (any BenchmarkWorker) -> Void) { body(self) }
     func run(unit index: Int) -> Bool { index != failingUnit }
 }
 
@@ -61,17 +61,62 @@ struct CPUBenchmarkTests {
 
     @Test func everyUnitChecksOutWhereverItStarts() {
         let hash = HashKernel(bytes: 4 << 10, seed: 7)
-        #expect((0..<200).allSatisfy { hash.run(unit: $0) })
+        hash.withWorker(0, of: 1) { worker in
+            #expect((0..<200).allSatisfy { worker.run(unit: $0) })
+        }
 
         let matrix = MatrixKernel(size: 12, seed: 7)
-        let matrixWorker = matrix.makeWorker(0, of: 1)
-        #expect((0..<40).allSatisfy { matrixWorker.run(unit: $0) })
+        matrix.withWorker(0, of: 1) { worker in
+            #expect((0..<40).allSatisfy { worker.run(unit: $0) })
+        }
 
         let memory = MemoryKernel(bytes: 256 << 10, chunkBytes: 16 << 10, seed: 7)
         #expect(memory.chunkCount == 16)
         for index in 0..<5 {
-            let worker = memory.makeWorker(index, of: 5)
-            #expect((0..<40).allSatisfy { worker.run(unit: $0) })
+            memory.withWorker(index, of: 5) { worker in
+                #expect((0..<40).allSatisfy { worker.run(unit: $0) })
+            }
+        }
+    }
+
+    @Test func smallestWorkloadsKeepTheirGeometry() {
+        let kernels: [any BenchmarkKernel] = [
+            HashKernel(bytes: 0, seed: 7),
+            MatrixKernel(size: 0, seed: 7),
+            MemoryKernel(bytes: 0, chunkBytes: 0, seed: 7),
+        ]
+        #expect(kernels.map(\.workPerUnit) == [64, 2, 32])
+        for kernel in kernels {
+            kernel.withWorker(0, of: 1) { worker in
+                #expect((0..<20).allSatisfy { worker.run(unit: $0) })
+            }
+        }
+    }
+
+    /// Shared inputs serve overlapping workers without sharing their scratch buffers.
+    @Test func workersBorrowSharedInputsConcurrently() async {
+        let kernels: [any BenchmarkKernel] = [
+            HashKernel(bytes: 4 << 10, seed: 7),
+            MatrixKernel(size: 12, seed: 7),
+            MemoryKernel(bytes: 256 << 10, chunkBytes: 16 << 10, seed: 7),
+        ]
+        for kernel in kernels {
+            await withTaskGroup(of: Bool.self) { group in
+                for index in 0..<5 {
+                    group.addTask {
+                        var passed = false
+                        kernel.withWorker(index, of: 5) { worker in
+                            passed = (0..<80).allSatisfy { worker.run(unit: $0) }
+                        }
+                        return passed
+                    }
+                }
+                for await passed in group { #expect(passed) }
+            }
+            // A later pass borrows the same storage after every earlier worker has returned.
+            kernel.withWorker(0, of: 1) { worker in
+                #expect((0..<80).allSatisfy { worker.run(unit: $0) })
+            }
         }
     }
 

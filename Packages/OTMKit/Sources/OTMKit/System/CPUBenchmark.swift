@@ -418,32 +418,33 @@ public enum CPUBenchmark {
         let deadline = BenchmarkClock.now + UInt64(max(seconds, 0) * 1e9)
         let checkInterval: UInt64 = 5_000_000
         for index in 0..<workers {
-            let worker = kernel.makeWorker(index, of: workers)
             group.enter()
             let thread = Thread {
-                var tally = WorkerTally(start: BenchmarkClock.now)
-                var lastCheck = tally.start
-                var unit = 0
-                while true {
-                    if !worker.run(unit: unit) {
-                        tally.failed = true
-                        break
-                    }
-                    unit += 1
-                    let now = BenchmarkClock.now
-                    if now >= deadline { break }
-                    if now - lastCheck >= checkInterval {
-                        lastCheck = now
-                        if cancellation?.stopsWorker() == true {
-                            tally.cancelled = true
+                kernel.withWorker(index, of: workers) { worker in
+                    var tally = WorkerTally(start: BenchmarkClock.now)
+                    var lastCheck = tally.start
+                    var unit = 0
+                    while true {
+                        if !worker.run(unit: unit) {
+                            tally.failed = true
                             break
                         }
+                        unit += 1
+                        let now = BenchmarkClock.now
+                        if now >= deadline { break }
+                        if now - lastCheck >= checkInterval {
+                            lastCheck = now
+                            if cancellation?.stopsWorker() == true {
+                                tally.cancelled = true
+                                break
+                            }
+                        }
                     }
+                    tally.units = unit
+                    tally.end = BenchmarkClock.now
+                    let finished = tally
+                    tallies.withLock { $0.append(finished) }
                 }
-                tally.units = unit
-                tally.end = BenchmarkClock.now
-                let finished = tally
-                tallies.withLock { $0.append(finished) }
                 group.leave()
             }
             thread.qualityOfService = .userInitiated
