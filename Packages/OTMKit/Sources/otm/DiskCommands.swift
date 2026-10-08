@@ -201,8 +201,9 @@ func diskChangesSummary(_ comparison: DiskScanComparison, count: Int) -> String 
 
 func diskUsageCommand(_ options: Options) {
     let path = ((options.positional.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
+    // FileManager borrows this local directory flag only until the call returns.
     var isFolder: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), isFolder.boolValue else { fail("no folder at \(path)") }
+    guard unsafe FileManager.default.fileExists(atPath: path, isDirectory: &isFolder), isFolder.boolValue else { fail("no folder at \(path)") }
     let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
     let request = url.path == "/" ? DiskScanRequest.volume(mountPoint: "/", isRoot: true) : DiskScanRequest(root: url)
     let showsProgress = isatty(STDERR_FILENO) == 1 && !options.json

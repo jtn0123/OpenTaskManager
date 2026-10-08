@@ -138,7 +138,15 @@ public enum Format {
     }
 
     public static func fixed(_ value: Double, _ digits: Int) -> String {
-        String(format: "%.\(max(digits, 0))f", value)
+        // The numeric format specifiers match the arguments passed to Foundation's C formatting API.
+        unsafe String(format: "%.\(max(digits, 0))f", value)
+    }
+
+    /// Hex digits for a color component or device ID, padded to its display width.
+    static func hexadecimal(_ value: Int, width: Int, uppercase: Bool = false) -> String {
+        // These fields use the low 32 bits, as the C %x conversion did.
+        let digits = String(UInt32(truncatingIfNeeded: value), radix: 16, uppercase: uppercase)
+        return String(repeating: "0", count: width > digits.count ? width - digits.count : 0) + digits
     }
 
     private static func pad(_ value: Int) -> String {

@@ -130,6 +130,7 @@ public struct SpikeRecorder: Sendable {
     // MARK: - Ring
 
     private mutating func store(_ sample: SpikeSample, processes list: [ProcessSample]) {
+        // Each slot owns processesPerSlot elements; the three bounded top lists and the input stay borrowed throughout this loop.
         let slot = next
         next = next + 1 == capacity ? 0 : next + 1
         if count < capacity { count += 1 }
@@ -140,23 +141,23 @@ public struct SpikeRecorder: Sendable {
         processes.withUnsafeMutableBufferPointer { buffer in
             list.withUnsafeBufferPointer { input in
                 guard let out = buffer.baseAddress, let first = input.baseAddress else { return }
-                let cpu = out + offset
-                let memory = cpu + Self.topCPUKept
-                let disk = memory + Self.topMemoryKept
+                let cpu = unsafe out + offset
+                let memory = unsafe cpu + Self.topCPUKept
+                let disk = unsafe memory + Self.topMemoryKept
                 var index = 0
                 while index < input.count {
-                    let process = first + index
-                    let load = process.pointee.cpuPercent
-                    if load > 0, cpuCount < Self.topCPUKept || load > cpu[cpuCount - 1].value {
-                        Self.insert(process, value: load, into: cpu, count: &cpuCount, kept: Self.topCPUKept)
+                    let process = unsafe first + index
+                    let load = unsafe process.pointee.cpuPercent
+                    if load > 0, unsafe cpuCount < Self.topCPUKept || load > cpu[cpuCount - 1].value {
+                        unsafe Self.insert(process, value: load, into: cpu, count: &cpuCount, kept: Self.topCPUKept)
                     }
-                    let footprint = Double(process.pointee.memory)
-                    if footprint > 0, memoryCount < Self.topMemoryKept || footprint > memory[memoryCount - 1].value {
-                        Self.insert(process, value: footprint, into: memory, count: &memoryCount, kept: Self.topMemoryKept)
+                    let footprint = unsafe Double(process.pointee.memory)
+                    if footprint > 0, unsafe memoryCount < Self.topMemoryKept || footprint > memory[memoryCount - 1].value {
+                        unsafe Self.insert(process, value: footprint, into: memory, count: &memoryCount, kept: Self.topMemoryKept)
                     }
-                    let bytes = process.pointee.diskReadRate + process.pointee.diskWriteRate
-                    if bytes > 0, diskCount < Self.topDiskKept || bytes > disk[diskCount - 1].value {
-                        Self.insert(process, value: bytes, into: disk, count: &diskCount, kept: Self.topDiskKept)
+                    let bytes = unsafe process.pointee.diskReadRate + process.pointee.diskWriteRate
+                    if bytes > 0, unsafe diskCount < Self.topDiskKept || bytes > disk[diskCount - 1].value {
+                        unsafe Self.insert(process, value: bytes, into: disk, count: &diskCount, kept: Self.topDiskKept)
                     }
                     index += 1
                 }
@@ -169,12 +170,13 @@ public struct SpikeRecorder: Sendable {
     /// entry when full. A tie goes after what's there.
     private static func insert(_ process: UnsafePointer<ProcessSample>, value: Double, into list: UnsafeMutablePointer<SpikeProcess>,
                                count: inout Int, kept: Int) {
+        // The caller supplies kept initialized entries and 0...kept count; every shifted index stays inside that list.
         var position = count < kept ? count : kept - 1
-        while position > 0, list[position - 1].value < value {
-            list[position] = list[position - 1]
+        while position > 0, unsafe list[position - 1].value < value {
+            unsafe list[position] = list[position - 1]
             position -= 1
         }
-        list[position] = SpikeProcess(name: process.pointee.name, pid: process.pointee.pid, startTime: process.pointee.startTime,
+        unsafe list[position] = SpikeProcess(name: process.pointee.name, pid: process.pointee.pid, startTime: process.pointee.startTime,
                                       value: value)
         if count < kept { count += 1 }
     }

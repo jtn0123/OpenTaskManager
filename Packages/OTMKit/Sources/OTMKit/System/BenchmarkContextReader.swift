@@ -69,8 +69,9 @@ public enum BenchmarkContextReader {
 
     /// What's powering the Mac, as IOPowerSources reports it.
     public static func powerSource() -> BenchmarkPowerSource? {
-        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? else { return nil }
+        // The retained power-source info keeps Get descriptions live while their values are copied.
+        guard let info = unsafe IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = unsafe IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? else { return nil }
         return powerSource(type)
     }
 
@@ -86,10 +87,11 @@ public enum BenchmarkContextReader {
 
     /// Whether the Mac has an internal battery.
     public static func hasBattery() -> Bool? {
-        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
+        // The retained power-source info keeps Get descriptions live while their values are copied.
+        guard let info = unsafe IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = unsafe IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
         return sources.contains { source in
-            let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any]
+            let description = unsafe IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any]
             return description?[kIOPSTypeKey] as? String == kIOPSInternalBatteryType
         }
     }

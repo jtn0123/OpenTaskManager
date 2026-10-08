@@ -138,6 +138,11 @@ struct GraphMathTests {
         #expect(GraphMath.remainder(of: [], minus: [[1]]).isEmpty)
     }
 
+    @Test(arguments: [0, -1, Int.min])
+    func finitePeakHasNoValuesInANonpositiveTail(count: Int) {
+        #expect(GraphMath.finitePeak([1, 2, 3], last: count) == 0)
+    }
+
     @Test func finitePeakSkipsUnreadableValuesAndLooksOnlyAtTheTail() {
         #expect(GraphMath.finitePeak([1, .nan, 7, .infinity, 3]) == 7)
         #expect(GraphMath.finitePeak([9, 1, 2], last: 2) == 2)

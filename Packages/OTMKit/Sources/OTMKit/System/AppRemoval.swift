@@ -191,8 +191,9 @@ public enum AppRemoval {
 
     /// The labels under `SMPrivilegedExecutables` in the bundle's Info.plist.
     static func privilegedHelperLabels(inBundleAt bundle: String) -> Set<String> {
+        // The optional format output is nil; Foundation owns the decoded plist values.
         guard let data = FileManager.default.contents(atPath: bundle + "/Contents/Info.plist"),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let plist = unsafe try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let helpers = plist["SMPrivilegedExecutables"] as? [String: Any] else { return [] }
         return Set(helpers.keys)
     }
@@ -337,23 +338,26 @@ public enum AppRemoval {
     /// moving it rewrites its parent link. Root-owned bundles from installer
     /// packages fail the second test, as they do in Finder.
     public static func canRemove(_ path: String) -> Bool {
+        // The C calls borrow the path and aligned local stat record only until they return.
         guard FileManager.default.isDeletableFile(atPath: path) else { return false }
         var info = stat()
-        guard lstat(path, &info) == 0 else { return false }
-        if info.st_mode & S_IFMT == S_IFDIR { return access(path, W_OK) == 0 }
+        guard unsafe lstat(path, &info) == 0 else { return false }
+        if info.st_mode & S_IFMT == S_IFDIR { return unsafe access(path, W_OK) == 0 }
         return true
     }
 
     /// "owned by root", or `fallback` when its owner isn't the reason.
     static func ownership(of path: String, fallback: String) -> String {
+        // The C calls borrow the path and aligned local stat record only until they return.
         var info = stat()
-        guard lstat(path, &info) == 0, info.st_uid == 0 else { return fallback }
+        guard unsafe lstat(path, &info) == 0, info.st_uid == 0 else { return fallback }
         return "owned by root"
     }
 
     private static func isSymbolicLink(_ path: String) -> Bool {
+        // The C calls borrow the path and aligned local stat record only until they return.
         var info = stat()
-        return lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFLNK
+        return unsafe lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFLNK
     }
 
     // MARK: Size
@@ -362,8 +366,9 @@ public enum AppRemoval {
     /// everything in a folder. A link counts as itself, not what it points
     /// to. Nil if it's gone or told to stop.
     public static func allocatedSize(atPath path: String, isCancelled: () -> Bool = { false }) -> UInt64? {
+        // The C calls borrow the path and aligned local stat record only until they return.
         var info = stat()
-        guard lstat(path, &info) == 0 else { return nil }
+        guard unsafe lstat(path, &info) == 0 else { return nil }
         if info.st_mode & S_IFMT == S_IFDIR {
             return InstalledApps.allocatedSize(ofBundleAt: path, isCancelled: isCancelled)
         }
@@ -408,18 +413,19 @@ public enum AppRemoval {
     /// Paths of other users' processes are readable too, so a root helper
     /// running from the bundle shows up.
     public static func runningProcesses(inside bundles: [String]) -> [BundleProcess] {
+        // Kernel calls receive the arrays' byte capacities and the local C record's exact size.
         let estimate = proc_listallpids(nil, 0)
         guard estimate > 0 else { return [] }
         var pids = [Int32](repeating: 0, count: Int(estimate) + 64)
-        let written = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        let written = pids.withUnsafeMutableBytes { unsafe proc_listallpids($0.baseAddress, Int32($0.count)) }
         guard written > 0 else { return [] }
         let all: [BundleProcess] = pids.prefix(Int(written)).compactMap { pid in
             guard pid > 0 else { return nil }
             var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-            guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+            guard unsafe proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
             var info = proc_bsdshortinfo()
             let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { return nil }
+            guard unsafe proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { return nil }
             let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             return BundleProcess(pid: pid, uid: info.pbsi_uid, path: path)
         }

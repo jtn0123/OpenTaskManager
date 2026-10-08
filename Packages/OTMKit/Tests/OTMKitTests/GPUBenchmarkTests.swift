@@ -102,25 +102,26 @@ struct GPUBenchmarkTests {
     }
 
     @Test func checksCatchAWrongOrMissingUnit() {
+        // Each array stays borrowed through verification, and its span never leaves the closure.
         let compute = GPUComputeReference(groups: 4, iterations: 10, seed: 3)
         var results = (0..<64).map { compute.expected[$0 % 4] &* 3 }
-        #expect(results.withUnsafeBufferPointer { compute.verify($0, units: 3) })
-        #expect(!results.withUnsafeBufferPointer { compute.verify($0, units: 2) })
+        #expect(results.withUnsafeBufferPointer { compute.verify(unsafe Span(_unsafeElements: $0), units: 3) })
+        #expect(!results.withUnsafeBufferPointer { compute.verify(unsafe Span(_unsafeElements: $0), units: 2) })
         results[41] &+= 1
-        #expect(!results.withUnsafeBufferPointer { compute.verify($0, units: 3) })
+        #expect(!results.withUnsafeBufferPointer { compute.verify(unsafe Span(_unsafeElements: $0), units: 3) })
 
         let memory = GPUMemoryReference(bytes: 16 << 10, lanes: 64, seed: 3)
         var sums = memory.expected.map { $0 &* 5 }
-        #expect(sums.withUnsafeBufferPointer { memory.verify($0, units: 5) })
-        #expect(!sums.withUnsafeBufferPointer { memory.verify($0, units: 4) })
+        #expect(sums.withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 5) })
+        #expect(!sums.withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 4) })
         sums[200] ^= 1
-        #expect(!sums.withUnsafeBufferPointer { memory.verify($0, units: 5) })
-        #expect(!Array(memory.expected.dropLast()).withUnsafeBufferPointer { memory.verify($0, units: 1) })
+        #expect(!sums.withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 5) })
+        #expect(!Array(memory.expected.dropLast()).withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 1) })
 
         var pixels = [Float](repeating: 24, count: 100)
-        #expect(pixels.withUnsafeBufferPointer { GPUFillReference.verify($0, units: 3, layers: 8) })
+        #expect(pixels.withUnsafeBufferPointer { GPUFillReference.verify(unsafe Span(_unsafeElements: $0), units: 3, layers: 8) })
         pixels[99] = 23
-        #expect(!pixels.withUnsafeBufferPointer { GPUFillReference.verify($0, units: 3, layers: 8) })
+        #expect(!pixels.withUnsafeBufferPointer { GPUFillReference.verify(unsafe Span(_unsafeElements: $0), units: 3, layers: 8) })
     }
 
     @Test func sizesCommandBuffersFromTheWarmUp() {

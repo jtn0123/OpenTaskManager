@@ -686,19 +686,20 @@ extension DefaultRoute {
     /// records, each followed by the socket addresses its `rtm_addrs` bits
     /// name. `interfaceName` turns an interface index into its BSD name.
     public static func parse(routingTable buffer: [UInt8], interfaceName: (Int) -> String?) -> [DefaultRoute] {
+        // The borrowed bytes outlive the walk; each unaligned header load is bounded by the remaining bytes.
         var routes: [DefaultRoute] = []
         let headerSize = MemoryLayout<rt_msghdr>.size
         buffer.withUnsafeBytes { raw in
             var offset = 0
             while offset + headerSize <= raw.count {
-                let header = raw.loadUnaligned(fromByteOffset: offset, as: rt_msghdr.self)
+                let header = unsafe raw.loadUnaligned(fromByteOffset: offset, as: rt_msghdr.self)
                 let length = Int(header.rtm_msglen)
                 guard length >= headerSize, offset + length <= raw.count else { break }
                 defer { offset += length }
                 let flags = header.rtm_flags
                 guard flags & RTF_UP != 0, flags & (RTF_HOST | RTF_REJECT | RTF_BLACKHOLE) == 0,
                       let name = interfaceName(Int(header.rtm_index)) else { continue }
-                let addresses = socketAddresses(raw, from: offset + headerSize, to: offset + length, present: header.rtm_addrs)
+                let addresses = unsafe socketAddresses(raw, from: offset + headerSize, to: offset + length, present: header.rtm_addrs)
                 guard let destination = addresses[RTA_DST], let family = family(destination),
                       let mask = addresses[RTA_NETMASK] else { continue }
                 let width = family == .ipv4 ? 4 : 16
@@ -720,13 +721,14 @@ extension DefaultRoute {
     /// The socket addresses after a header, by their `RTA_` bit. Each is
     /// padded to 4 bytes, and an empty one (a /0 netmask) still takes 4.
     private static func socketAddresses(_ raw: UnsafeRawBufferPointer, from start: Int, to end: Int, present: Int32) -> [Int32: [UInt8]] {
+        // The caller bounds start and end within raw; each address read is clipped to that message's end.
         var result: [Int32: [UInt8]] = [:]
         var cursor = start
         for bit in 0..<Int32(RTAX_MAX) where present & (1 << bit) != 0 {
             guard cursor < end else { break }
-            let length = Int(raw[cursor])
+            let length = unsafe Int(raw[cursor])
             let padded = length > 0 ? 1 + ((length - 1) | 3) : 4
-            result[1 << bit] = Array(raw[cursor..<min(cursor + max(length, 1), end)])
+            result[1 << bit] = unsafe Array(raw[cursor..<min(cursor + max(length, 1), end)])
             cursor += padded
         }
         return result
@@ -750,6 +752,7 @@ extension DefaultRoute {
     }
 
     private static func text(_ address: [UInt8], family: InterfaceAddress.Family) -> String? {
+        // The source holds exactly four or sixteen address bytes, and the output has room for an IPv6 string and its NUL.
         var bytes = addressBytes(address, family: family, count: family == .ipv4 ? 4 : 16)
         // The kernel keeps a link-local address's zone in its second 16 bits.
         if family == .ipv6, bytes[0] == 0xFE, bytes[1] & 0xC0 == 0x80 {
@@ -758,7 +761,7 @@ extension DefaultRoute {
         }
         var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
         let ok = bytes.withUnsafeBytes { source in
-            inet_ntop(family == .ipv4 ? AF_INET : AF_INET6, source.baseAddress, &buffer, socklen_t(buffer.count)) != nil
+            unsafe inet_ntop(family == .ipv4 ? AF_INET : AF_INET6, source.baseAddress, &buffer, socklen_t(buffer.count)) != nil
         }
         return ok ? String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) : nil
     }
