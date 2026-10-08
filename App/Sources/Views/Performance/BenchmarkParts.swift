@@ -81,13 +81,13 @@ struct SavedRunsDisclosure: View, Equatable {
     let runs: [BenchmarkRun]
     /// Where they ran, for the tooltips: "on this Mac", "on Macintosh HD".
     let place: String
-    @AppStorage private var isExpanded: Bool
+    @Setting<Bool, Bool> private var isExpanded: Bool
 
     init(kind: BenchmarkKind, runs: [BenchmarkRun], place: String) {
         self.kind = kind
         self.runs = runs
         self.place = place
-        _isExpanded = AppStorage(wrappedValue: false, "benchmarkCardShowsRuns.\(kind.rawValue)")
+        _isExpanded = Setting(Settings.benchmarkCardShowsRuns(kind))
     }
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {

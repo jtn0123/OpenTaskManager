@@ -13,7 +13,7 @@ struct ProcessThreadsView: View {
     var process: ProcessSample
     /// The thread clicked, as last read; kept by the inspector, which shows it.
     @Binding var picked: PickedThread?
-    @AppStorage("threadSortKey") private var sortKey: ThreadSortKey = .cpu
+    @Setting(Settings.threadSortKey) private var sortKey: ThreadSortKey
     @State private var tracker = ThreadActivityTracker()
     @State private var rows: [ThreadActivity] = []
     @State private var failure: ProcessReadFailure?

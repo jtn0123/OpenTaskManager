@@ -446,8 +446,8 @@ Documents, Downloads and other apps' containers raise a privacy prompt.
 (`PageSelection`): it reads the saved page, or the one these arguments name,
 once at launch, and saves each change for the next launch. It never follows
 another copy, so a capture's copy and the user's own don't move each other.
-Don't read the page through `@AppStorage("page")`: a launch argument would pin
-it for the whole run and the sidebar would stop switching pages. Get the
+Don't read the page through `@Setting(Settings.page)` (or raw `@AppStorage`):
+a launch argument would pin it for the whole run and the sidebar would stop switching pages. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
 
@@ -465,6 +465,20 @@ the thermal state turns fair), so `-openResource benchmarks
 
 ## Conventions
 
+- Persisted preferences are declared only in OTMKit's `Settings` registry
+  (`SettingKey<Value, Stored>`): the key, typed default and meaning live there,
+  and the stored type preserves each existing property-list encoding. Views
+  use `@Setting(Settings.someKey)`; other code calls the key's `get`, `set` or
+  `remove`. Add keys to `Settings.all` and pin their strings and encoded defaults
+  in `SettingsTests`. Never construct a string key at a call site.
+  `Setting` wraps `AppStorage`, so SwiftUI still observes changes. The page
+  deliberately uses direct reads and writes in `PageSelection`, never `@Setting`:
+  it reads once at launch and never follows another copy's page.
+  AppKit's `NSWindow Frame main` and launch-only arguments (`openPage` and
+  `LaunchArgument`) stay outside this registry; window frames belong to AppKit,
+  and arguments are commands for a run, not preferences. Benchmark and speed-test
+  result files belong to their history components; their disclosure, comparison
+  and baseline preferences are settings and are registered.
 - Process CPU is stored as Activity Monitor-style percent (100 = one core) and
   displayed through OTMKit's `CPUScale`, which defaults to share of the whole CPU.
 - Restricted processes (root and other users) only have CPU and memory, read

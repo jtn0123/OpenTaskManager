@@ -5,14 +5,13 @@ import SwiftUI
 /// lasting hide is saved; measuring a narrow window never changes that setting.
 @MainActor @Observable
 final class SidebarVisibilityStore {
-    private static let hiddenKey = "sidebarHidden"
     @ObservationIgnored private let defaults: UserDefaults
     private var visibility: SidebarVisibility
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         visibility = SidebarVisibility(
-            hiddenByUser: defaults.bool(forKey: Self.hiddenKey),
+            hiddenByUser: Settings.sidebarHidden.get(in: defaults),
             windowWidth: SidebarVisibility.openingWidth(savedFrame: defaults.string(forKey: "NSWindow Frame main"))
         )
     }
@@ -32,7 +31,7 @@ final class SidebarVisibilityStore {
         let wasHidden = visibility.hiddenByUser
         visibility.userSets(shown: shown)
         if visibility.hiddenByUser != wasHidden {
-            defaults.set(visibility.hiddenByUser, forKey: Self.hiddenKey)
+            Settings.sidebarHidden.set(visibility.hiddenByUser, in: defaults)
         }
     }
 }

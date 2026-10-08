@@ -2,16 +2,7 @@ import OTMKit
 import SwiftUI
 
 /// Which apps the Apps table shows.
-enum AppsFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case thirdParty = "Third party"
-    case appStore = "App Store"
-    case apple = "Apple"
-    case intel = "Intel only"
-    case running = "Running"
-
-    var id: String { rawValue }
-
+extension AppsFilter {
     func includes(_ row: AppRow) -> Bool {
         switch self {
         case .all: true
@@ -53,8 +44,8 @@ struct AppRow: Identifiable {
 struct AppsView: View {
     @Environment(AppModel.self) private var model
     @CurrentPage private var page
-    @AppStorage("appsFilter") private var filter: AppsFilter = .all
-    @AppStorage("showAppsInspector") private var showInspector = true
+    @Setting(Settings.appsFilter) private var filter: AppsFilter
+    @Setting(Settings.showAppsInspector) private var showInspector: Bool
     @State private var store = InstalledAppStore()
     @State private var search = ""
     @State private var selection: InstalledApp.ID?
@@ -148,7 +139,7 @@ struct AppsView: View {
                 wantsInspector: showInspector && selection != nil,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
-                widthKey: "appsInspectorWidth",
+                widthKey: Settings.appsInspectorWidth,
                 backTitle: "Apps"
             ) {
                 AppsTable(rows: rows, isMeasuring: store.sizesLeft > 0, selection: $selection, sortOrder: $sortOrder,

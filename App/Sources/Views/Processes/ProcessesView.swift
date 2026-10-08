@@ -3,12 +3,12 @@ import SwiftUI
 
 struct ProcessesView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("processViewMode") private var mode: ProcessViewMode = .grouped
-    @AppStorage("processSortKey") private var sortKey: ProcessSortKey = .cpu
-    @AppStorage("processSortAscending") private var ascending = false
-    @AppStorage("heatmap") private var heatmap = true
-    @AppStorage("showInspector") private var showInspector = true
-    @AppStorage("hiddenProcessColumns") private var hiddenColumns = HiddenProcessColumns.defaults
+    @Setting(Settings.processViewMode) private var mode: ProcessViewMode
+    @Setting(Settings.processSortKey) private var sortKey: ProcessSortKey
+    @Setting(Settings.processSortAscending) private var ascending: Bool
+    @Setting(Settings.heatmap) private var heatmap: Bool
+    @Setting(Settings.showInspector) private var showInspector: Bool
+    @Setting(Settings.hiddenProcessColumns) private var hiddenColumns: HiddenProcessColumns
     @State private var search = ""
     /// By PID and start time, so a selected process that ends never hands
     /// its inspector, or End Task, to a later process given its PID.
@@ -39,7 +39,7 @@ struct ProcessesView: View {
                     wantsInspector: showInspector && !selection.isEmpty,
                     coversList: $showsFullDetail,
                     isNarrow: $isNarrow,
-                    widthKey: "processInspectorWidth",
+                    widthKey: Settings.processInspectorWidth,
                     backTitle: "Processes"
                 ) {
                     ProcessOutlineView(

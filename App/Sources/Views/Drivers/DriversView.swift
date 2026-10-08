@@ -3,13 +3,7 @@ import SwiftUI
 
 /// Which extensions the Drivers table shows. Third party comes first: on most
 /// Macs everything else is part of macOS.
-enum DriversFilter: String, CaseIterable, Identifiable {
-    case thirdParty = "Third party"
-    case apple = "Apple"
-    case all = "All"
-
-    var id: String { rawValue }
-
+extension DriversFilter {
     func includes(_ item: ExtensionItem) -> Bool {
         switch self {
         case .thirdParty: item.publisher == .thirdParty
@@ -32,8 +26,8 @@ enum DriversFilter: String, CaseIterable, Identifiable {
 /// opens and again on Refresh. It never follows the sampling tick, and reads
 /// nothing from `AppModel`, so it costs nothing while it sits open.
 struct DriversView: View {
-    @AppStorage("driversFilter") private var filter: DriversFilter = .thirdParty
-    @AppStorage("showDriversInspector") private var showInspector = true
+    @Setting(Settings.driversFilter) private var filter: DriversFilter
+    @Setting(Settings.showDriversInspector) private var showInspector: Bool
     @State private var scan: ExtensionScan?
     @State private var scannedAt: Date?
     @State private var isScanning = false
@@ -126,7 +120,7 @@ struct DriversView: View {
             wantsInspector: showInspector && selected != nil,
             coversList: $showsFullDetail,
             isNarrow: $isNarrow,
-            widthKey: "driversInspectorWidth",
+            widthKey: Settings.driversInspectorWidth,
             backTitle: "Drivers"
         ) {
             DriverTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,

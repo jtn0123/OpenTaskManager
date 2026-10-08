@@ -4,16 +4,7 @@ import SwiftUI
 
 /// The hardware charts the History page can show below its own: one at a
 /// time, picked from what the recording holds.
-enum HistoryHardwareChart: String, CaseIterable, Identifiable {
-    case cores
-    case eachCore
-    case clocks
-    case temperatures
-    case fans
-    case power
-
-    var id: String { rawValue }
-
+extension HistoryHardwareChart {
     var title: String {
         switch self {
         case .cores: "Core types"
@@ -137,8 +128,8 @@ struct HistoryHardwareSection: View {
     let timeLabels: Date.FormatStyle
     let scrubber: HistoryScrubber
 
-    @AppStorage("historyHardwareShown") private var shown = false
-    @AppStorage("historyHardwareChart") private var picked = HistoryHardwareChart.cores
+    @Setting(Settings.historyHardwareShown) private var shown: Bool
+    @Setting(Settings.historyHardwareChart) private var picked: HistoryHardwareChart
     @State private var track: HistoryHardwareTrack?
 
     private struct LoadKey: Equatable {

@@ -30,7 +30,7 @@ struct InspectorSplit<Content: View, Detail: View>: View {
     var content: Content
     var detail: Detail
 
-    @AppStorage private var preferredWidth: Double
+    @Setting<Double, Double> private var preferredWidth: Double
     @State private var available: CGFloat?
     @State private var drag: (start: Double, width: Double)?
 
@@ -39,7 +39,7 @@ struct InspectorSplit<Content: View, Detail: View>: View {
         wantsInspector: Bool,
         coversList: Binding<Bool>,
         isNarrow: Binding<Bool>,
-        widthKey: String,
+        widthKey: SettingKey<Double, Double>,
         backTitle: String,
         backAccessory: AnyView? = nil,
         @ViewBuilder content: () -> Content,
@@ -49,7 +49,7 @@ struct InspectorSplit<Content: View, Detail: View>: View {
         self.wantsInspector = wantsInspector
         _coversList = coversList
         _isNarrow = isNarrow
-        _preferredWidth = AppStorage(wrappedValue: 320, widthKey)
+        _preferredWidth = Setting(widthKey)
         self.backTitle = backTitle
         self.backAccessory = backAccessory
         self.content = content()

@@ -5,8 +5,8 @@ import SwiftUI
 struct OpenTaskManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
-    @AppStorage("streamGraphs") private var streamGraphs = true
+    @Setting(Settings.showMenuBarExtra) private var showMenuBarExtra: Bool
+    @Setting(Settings.streamGraphs) private var streamGraphs: Bool
 
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
@@ -440,10 +440,10 @@ struct MenuBarView: View {
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
-    @AppStorage("globalHotKeyEnabled") private var globalHotKeyEnabled = true
-    @AppStorage("heatmap") private var heatmap = true
-    @AppStorage("streamGraphs") private var streamGraphs = true
+    @Setting(Settings.showMenuBarExtra) private var showMenuBarExtra: Bool
+    @Setting(Settings.globalHotKeyEnabled) private var globalHotKeyEnabled: Bool
+    @Setting(Settings.heatmap) private var heatmap: Bool
+    @Setting(Settings.streamGraphs) private var streamGraphs: Bool
 
     var body: some View {
         @Bindable var model = model

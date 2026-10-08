@@ -19,8 +19,6 @@ final class CPUSustainedStore {
         let configuration: CPUSustainedConfiguration
     }
 
-    private static let minutesKey = "sustainedMinutes"
-
     /// This Mac's saved runs, newest first.
     private(set) var history: [CPUSustainedResult]
     private(set) var running: Run?
@@ -29,7 +27,7 @@ final class CPUSustainedStore {
     private(set) var failure: String?
     /// How long the next run lasts: 2 or 5 minutes, remembered.
     var minutes: Int {
-        didSet { UserDefaults.standard.set(minutes, forKey: Self.minutesKey) }
+        didSet { Settings.sustainedMinutes.set(minutes) }
     }
 
     @ObservationIgnored private let machineKey: String
@@ -43,7 +41,7 @@ final class CPUSustainedStore {
     private init() {
         let machine = CPUBenchmarkMachine.current()
         machineKey = machine.key
-        let saved = UserDefaults.standard.integer(forKey: Self.minutesKey)
+        let saved = Settings.sustainedMinutes.get()
         minutes = CPUSustainedConfiguration.offeredMinutes.contains(saved) ? saved : CPUSustainedConfiguration.offeredMinutes[0]
         if let fixture = Self.fixture(machine: machine) {
             history = fixture
