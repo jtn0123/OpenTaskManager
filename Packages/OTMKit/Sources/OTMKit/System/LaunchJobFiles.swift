@@ -29,7 +29,9 @@ public enum LaunchJobFiles {
 
     private static func safeURL(_ path: String, home: String) -> URL? {
         guard allows(path, home: home) else { return nil }
-        var candidate = URL(fileURLWithPath: path).standardizedFileURL.path
+        // `standardized`, not `standardizedFileURL`: the latter drops a leading
+        // /private, so /private/tmp would turn back into the /tmp link forever.
+        var candidate = URL(fileURLWithPath: path).standardized.path
         // Read each link's destination without following it. Check the whole
         // substituted path before touching its target, so an allowed folder's
         // link into Documents cannot raise a privacy prompt while resolving it.
@@ -44,7 +46,7 @@ public enum LaunchJobFiles {
                     : URL(fileURLWithPath: prefix).deletingLastPathComponent().appendingPathComponent(target).path
                 let remainder = parts.dropFirst(index + 1).joined(separator: "/")
                 let base = URL(fileURLWithPath: destination)
-                candidate = (remainder.isEmpty ? base : base.appendingPathComponent(remainder)).standardizedFileURL.path
+                candidate = (remainder.isEmpty ? base : base.appendingPathComponent(remainder)).standardized.path
                 guard allows(candidate, home: home) else { return nil }
                 followed = true
                 break

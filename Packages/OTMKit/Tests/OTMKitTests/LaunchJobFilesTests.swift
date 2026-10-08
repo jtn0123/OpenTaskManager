@@ -29,6 +29,9 @@ struct LaunchJobFilesTests {
         try Data((1...50).map { "line \($0)" }.joined(separator: "\n").appending("\n").utf8).write(to: log)
         let checked = LaunchJobFiles.log(log.path, label: "StandardOutPath")
         #expect(checked.lines == (31...50).map { "line \($0)" })
+        // /tmp and /var are links into /private: both spellings read, without looping.
+        let viaLink = "/tmp/" + log.path.dropFirst("/private/tmp/".count)
+        #expect(LaunchJobFiles.log(viaLink, label: "StandardOutPath").lines == checked.lines)
         try Data().write(to: log)
         #expect(LaunchJobFiles.log(log.path, label: "log").lines.isEmpty)
         #expect(LaunchJobFiles.log(log.path, label: "log").status == "Readable · last 0 lines")
