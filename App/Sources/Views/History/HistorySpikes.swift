@@ -331,6 +331,7 @@ struct HistorySpikeIncidentLine: View {
 struct SpikeCaptureSettings: View {
     @Bindable private var store = SpikeCaptureStore.shared
     @Setting(Settings.backgroundConnections) private var backgroundConnections: Bool
+    @Setting(Settings.listenerChangeNotifications) private var listenerNotifications: Bool
 
     var body: some View {
         Section("History") {
@@ -339,6 +340,13 @@ struct SpikeCaptureSettings: View {
             Text("While the flight recorder is on, read sockets once a minute away from Connections. Short connections may be missed.")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
+            Toggle("Notify when listener changes are found", isOn: $listenerNotifications)
+                .disabled(ConnectionStore.shared.showsListenerFixture)
+                .onChange(of: listenerNotifications) { _, enabled in
+                    if enabled { ConnectionStore.shared.requestListenerNotifications() }
+                }
+            Text("Notifications need background connection watching. Review and accept listener changes in Connections.")
+                .font(.explanation).foregroundStyle(.secondaryText)
             Text(HistorySpikeStyle.explanation + " Open them from History's Spikes button.")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)

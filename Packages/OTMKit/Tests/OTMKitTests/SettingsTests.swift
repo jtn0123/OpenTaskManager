@@ -50,6 +50,7 @@ struct SettingsTests {
         "sustainedMinutes": .integer(2),
         "captureSpikes": .bool(false),
         "backgroundConnections": .bool(false),
+        "listenerChangeNotifications": .bool(false),
         "spikesSeen": .date(.distantPast),
         "systemReportFormat": .string("markdown"),
         "graphPalette": .string("standard"),

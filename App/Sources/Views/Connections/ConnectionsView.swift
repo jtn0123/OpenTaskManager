@@ -12,6 +12,7 @@ struct ConnectionsView: View {
     /// Open sockets, or those seen closing.
     @State private var list: ConnectionList = .open
     @State private var search = ""
+    @State private var showsListenerChanges = false
     /// Open or closed: a socket that closes while selected keeps its details.
     @State private var selection: ObservedConnection.ID?
     @State private var openedRequest = false
@@ -31,7 +32,7 @@ struct ConnectionsView: View {
     @State private var hiddenToFit = ConnectionColumn.givingWay
     /// Back from the details, the table shows the row they ended on.
     @State private var scrollTarget: ObservedConnection.ID?
-    /// The page is wide enough for the six summary cards in one row.
+    /// The page is wide enough for the seven summary cards in one row.
     @State private var cardsFit = true
     /// The details are open, so the summary folds into a strip and the
     /// table beside them gets its height.
@@ -66,8 +67,12 @@ struct ConnectionsView: View {
             .padding(.vertical, 8)
         }
         .onAppear {
+            if LaunchArgument.string("openListenerChanges") == "YES" { showsListenerChanges = true }
             if LaunchArgument.string("openConnectionList") == "history" { list = .history }
             if let query = LaunchArgument.string("openConnectionSearch") { search = query; list = .history }
+        }
+        .sheet(isPresented: $showsListenerChanges) {
+            ListenerReviewView(showProcess: showProcess)
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Process, address or port")
         .toolbar {
@@ -102,16 +107,16 @@ struct ConnectionsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-            // The five counts and the traffic card: cards in one row while they
+            // The five counts, listener review and the traffic card: cards in one row while they
             // fit it and the table has the page to itself, otherwise a strip of
             // chips (one line beside the details in the default window, two in
             // the narrowest), so the table keeps its height. Only a resize or
             // the details opening switch them, never a tick.
             Group {
                 if cardsFit, !inspectorFolds {
-                    SummaryCards(summary: store.summary)
+                    SummaryCards(summary: store.summary, reviewListeners: { showsListenerChanges = true })
                 } else {
-                    SummaryStrip(summary: store.summary)
+                    SummaryStrip(summary: store.summary, reviewListeners: { showsListenerChanges = true })
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -169,7 +174,7 @@ struct ConnectionsView: View {
         }
         // The split view sizes the page by asking for its smallest size with
         // no width to offer. Laid out at the table's narrowest instead, the
-        // counts make two rows there, not a column of six too tall for the window.
+        // counts make two rows there, not a column of seven too tall for the window.
         .frame(minWidth: ConnectionColumn.tableMinimum(userHidden: hiddenColumns.columns))
         // A Bool, so only crossing the width the cards need runs this.
         .onGeometryChange(for: Bool.self) { SummaryCards.fitOneRow(width: $0.size.width - 32) } action: { cardsFit = $0 }
@@ -601,11 +606,12 @@ private struct SummaryCards: View {
     private nonisolated static let minimum: CGFloat = 140
     private nonisolated static let spacing: CGFloat = 12
     /// The counts and the traffic card.
-    private nonisolated static let count = SummaryFigure.allCases.count + 1
+    private nonisolated static let count = SummaryFigure.allCases.count + 2
 
     var summary: ConnectionSummary
+    var reviewListeners: () -> Void
 
-    /// Whether all six cards fit one row `width` wide. Nonisolated, for the
+    /// Whether all seven cards fit one row `width` wide. Nonisolated, for the
     /// page's geometry closure.
     nonisolated static func fitOneRow(width: CGFloat) -> Bool {
         GridMath.rows(count: count, width: Double(width), minimum: Double(minimum), spacing: Double(spacing)).count == 1
@@ -617,6 +623,7 @@ private struct SummaryCards: View {
                 SummaryCard(figure: figure, summary: summary)
             }
             // Reads the model every tick in a view of its own, so the counts and table aren't rebuilt.
+            ListenerReviewEntry(compact: false, open: reviewListeners)
             NetworkTrafficCard(title: "Network traffic", compact: true)
         }
     }
@@ -657,17 +664,19 @@ private struct SummaryCard: View {
     }
 }
 
-/// The same six as a strip of chips, each in its card's colour with the
+/// The same seven as a strip of chips, each in its card's colour with the
 /// number and a word or two: one line while it fits, else even columns
 /// that line up (`GridMath.stripRows`).
 private struct SummaryStrip: View {
     var summary: ConnectionSummary
+    var reviewListeners: () -> Void
 
     var body: some View {
         ChipStrip(spacing: 8) {
             ForEach(SummaryFigure.allCases, id: \.self) { figure in
                 SummaryChip(figure: figure, summary: summary)
             }
+            ListenerReviewEntry(compact: true, open: reviewListeners)
             TrafficChip()
         }
     }

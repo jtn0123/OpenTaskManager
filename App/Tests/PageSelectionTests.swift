@@ -31,6 +31,15 @@ struct PageSelectionTests {
         }
     }
 
+    @Test func listenerReviewArgumentOpensConnectionsWithoutSavingThePage() throws {
+        try withIsolatedDefaults { defaults, suite in
+            defaults.set("Processes", forKey: "page")
+            let selection = PageSelection(defaults: defaults, arguments: ["openListenerChanges": "YES"])
+            #expect(selection.page == .connections)
+            #expect(defaults.persistentDomain(forName: suite)?["page"] as? String == "Processes")
+        }
+    }
+
     @Test func pageArgumentOnlySetsTheStartingPageAndChangesStillSave() throws {
         try withIsolatedDefaults { defaults, suite in
             defaults.set("Processes", forKey: "page")

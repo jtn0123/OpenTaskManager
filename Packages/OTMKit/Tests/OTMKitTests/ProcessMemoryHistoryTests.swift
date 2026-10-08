@@ -138,7 +138,7 @@ struct ProcessMemoryRecorderTests {
         #expect(before.peakFootprint == nil)
         #expect(try await old.processMemory(before).isEmpty)
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 7)
+        #expect(try await recorder.schemaVersionOnDisk() == 8)
         let after = try #require(try await recorder.processLifetime(memoryIdentity))
         #expect(after == before)
         #expect(try await recorder.processMemoryCoverage(after, from: memoryDate(0), to: memoryDate(30)).isEmpty)
@@ -148,7 +148,7 @@ struct ProcessMemoryRecorderTests {
         #expect(sqlite3_column_int64(statement, 0) == 41_943_040)
         sqlite3_finalize(statement)
         #expect(try await recorder.processMemory(after).isEmpty)
-        #expect(try await FlightRecorder(url: url).schemaVersionOnDisk() == 7)
+        #expect(try await FlightRecorder(url: url).schemaVersionOnDisk() == 8)
     }
 
     @Test func idleMemorySearchPeakGrowthRetentionAndReadOnlyReopen() async throws {

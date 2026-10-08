@@ -134,6 +134,9 @@ public enum Settings {
     public static let backgroundConnections = SettingKey<Bool, Bool>(
         "backgroundConnections", default: false, meaning: "Whether sockets are watched once a minute away from Connections."
     )
+    public static let listenerChangeNotifications = SettingKey<Bool, Bool>(
+        "listenerChangeNotifications", default: false, meaning: "Notify when background socket walks find listener changes."
+    )
     public static let captureSpikes = SettingKey<Bool, Bool>(
         "captureSpikes", default: false, meaning: "Whether spikes are captured automatically."
     )
@@ -273,6 +276,7 @@ public enum Settings {
         sustainedMinutes.descriptor,
         captureSpikes.descriptor,
         backgroundConnections.descriptor,
+        listenerChangeNotifications.descriptor,
         spikesSeen.descriptor,
         systemReportFormat.descriptor,
         graphPalette.descriptor,

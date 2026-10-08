@@ -5,27 +5,31 @@ extension ConnectionStore {
     /// Only the deadline check uses sampler wakeups; a walk and its metadata are made once a minute at most.
     func sampleBackground(model: AppModel, processes: [ProcessSample]) {
         guard visibleVisits == 0 || !model.samplingDemand.hasVisibleWindow else { return }
-        let enabled = Settings.backgroundConnections.get() && model.recorder != nil && !model.showsSensorFixture && !model.isPaused
+        let enabled = Settings.backgroundConnections.get() && model.recorder != nil
+            && !model.showsSensorFixture && !showsListenerFixture && !model.isPaused
         guard enabled else {
             stopUnlessBackground(force: true)
             return
         }
-        guard walkTask == nil, Date.now >= nextBackgroundWalk else { return }
+        guard walkTask == nil, !acceptingListeners, Date.now >= nextBackgroundWalk else { return }
         nextBackgroundWalk = Date.now.addingTimeInterval(60)
         historyRecorder = model.recorder
         let metadata = connectionProcesses(processes, model: model)
+        let acceptance = listenerAcceptance
         let pendingStop = stoppingTask
         let recorder = model.recorder
         let task = Task {
             if let pendingStop { await pendingStop.value }
             return await historyWorker.read(recorder: recorder, spacing: 60, processes: metadata)
         }
+        watchActive = true
         walkTask = task
         Task {
             let reading = await task.value
+            applyListeners(reading.listeners, acceptance: acceptance)
             watch = reading.watch
             walkTask = nil
-            // No view state is published while the page is away.
+            // Only changed listener review state is published while the page is away.
         }
     }
 
@@ -40,9 +44,10 @@ extension ConnectionStore {
 
     func stopUnlessBackground(force: Bool = false) {
         guard force || !(Settings.backgroundConnections.get() && historyRecorder != nil) else { return }
-        guard stoppingTask == nil, historyRecorder != nil else { return }
+        guard stoppingTask == nil, historyRecorder != nil || watchActive else { return }
         let recorder = historyRecorder
         historyRecorder = nil
+        watchActive = false
         let running = walkTask
         stoppingTask = Task {
             if let running { _ = await running.value }
