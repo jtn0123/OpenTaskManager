@@ -44,6 +44,8 @@ public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
     public let exit: LaunchExitStatus?
     /// Set only when a watched process ended, never for an ambiguous replacement.
     public let exitedIdentity: ProcessIdentity?
+    /// The observed running instance, when the bulk read also knew its kernel start time.
+    public let observedIdentity: ProcessIdentity?
     public let detail: String
     public let configuration: LaunchJobConfiguration?
 
@@ -51,7 +53,7 @@ public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
 
     public init(key: LaunchHistoryKey, time: Date, since: Date? = nil, kind: Kind, pid: Int32? = nil,
                 exit: LaunchExitStatus? = nil, detail: String = "", configuration: LaunchJobConfiguration? = nil,
-                exitedIdentity: ProcessIdentity? = nil) {
+                exitedIdentity: ProcessIdentity? = nil, observedIdentity: ProcessIdentity? = nil) {
         self.key = key
         self.time = time
         self.since = since
@@ -59,6 +61,7 @@ public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
         self.pid = pid
         self.exit = exit
         self.exitedIdentity = exitedIdentity
+        self.observedIdentity = observedIdentity
         self.detail = detail
         self.configuration = configuration
     }
@@ -109,7 +112,10 @@ public enum LaunchHistoryDerivation {
                    exitedIdentity: ProcessIdentity? = nil) -> LaunchHistoryEvent {
             LaunchHistoryEvent(key: after.key, time: after.time, since: before?.time, kind: kind,
                                pid: after.job?.pid, exit: exit, detail: detail,
-                               configuration: kind == .configuration ? after.configuration : nil, exitedIdentity: exitedIdentity)
+                               configuration: kind == .configuration ? after.configuration : nil, exitedIdentity: exitedIdentity,
+                               observedIdentity: after.instance.flatMap { instance in
+                                   instance.started.map { ProcessIdentity(pid: instance.pid, startTime: $0) }
+                               })
         }
         guard let before else {
             let state = after.job?.pid.map { "First observed running · PID \($0)" }
@@ -231,7 +237,8 @@ public struct LaunchHistoryTracker: Sendable {
             if continuous, let old = instances[key], !instance.isSame(as: old) {
                 if !events.contains(where: { $0.kind == .restarted }) {
                     events.append(LaunchHistoryEvent(key: key, time: snapshot.time, since: before?.time,
-                                                    kind: .restarted, pid: instance.pid))
+                                                    kind: .restarted, pid: instance.pid,
+                                                    observedIdentity: instance.started.map { ProcessIdentity(pid: instance.pid, startTime: $0) }))
                 }
                 if snapshot.job?.lastExit?.isFailure == true || snapshot.keepsAlive {
                     var recent = restarts[key, default: []].filter { snapshot.time.timeIntervalSince($0) <= 900 }

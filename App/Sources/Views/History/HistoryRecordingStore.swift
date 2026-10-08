@@ -12,6 +12,8 @@ import UniformTypeIdentifiers
 final class HistoryRecordingStore {
     static let shared = HistoryRecordingStore()
     var connectionMoment: Date?
+    var incidentWindow: IncidentWindow?
+    var opensLatestIncident = false
 
     /// A recording file, `.otmrecording`, declared in the app's Info.plist.
     static let contentType = UTType(exportedAs: RecordingFile.format, conformingTo: .json)
@@ -121,6 +123,14 @@ final class HistoryRecordingStore {
     func handleLaunchArguments() {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
+        if let request = LaunchArgument.string("openIncident") {
+            if request == "latest", !AppModel.usesIncidentFixture {
+                opensLatestIncident = true
+            } else if let time = request == "latest" ? Date.now : IncidentLaunchTime.parse(request) {
+                incidentWindow = IncidentWindow(at: time)
+            }
+            PageSelection.shared.page = .history
+        }
         if let speed = LaunchArgument.string("openPlayback").flatMap(Double.init), HistoryPlayback.speeds.contains(speed) {
             launchSpeed = speed
         }

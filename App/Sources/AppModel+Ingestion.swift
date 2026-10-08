@@ -290,7 +290,7 @@ extension AppModel {
                                    at: ProcessInfo.processInfo.systemUptime)
             }
         }
-        guard !showsSensorFixture else { return }
+        guard !showsSensorFixture, !Self.usesIncidentFixture else { return }
         let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))
         SpikeCaptureStore.shared.add(values, snapshot: snapshot, history: recorder)
         guard let recorder else { return }

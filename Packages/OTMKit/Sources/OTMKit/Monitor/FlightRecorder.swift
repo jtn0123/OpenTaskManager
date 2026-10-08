@@ -34,7 +34,7 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// observation coverage (see FlightRecorderConnections); 7 coarse process memory
 /// steps and lifetime peaks (see FlightRecorderProcessMemory); 8 listener baselines
 /// and pending reviews (see FlightRecorderListeners); 9 keeps separate app-ending
-/// events for processes with the same name. An older database is
+/// events for processes with the same name; 10 adds incident window indexes. An older database is
 /// brought up to date when it opens, and an older build still opens a newer
 /// one: it never reads the tables and columns it doesn't know, and its
 /// records simply have no hardware figures or process history.
@@ -44,7 +44,7 @@ public actor FlightRecorder {
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
     /// The schema this build writes (`user_version`).
-    static let schemaVersion: Int32 = 9
+    static let schemaVersion: Int32 = 10
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -271,15 +271,16 @@ public actor FlightRecorder {
     /// The figures between two dates summed up, gaps left out
     /// (`HistoryIntervalStats`). Reads the figures alone, not the top
     /// apps, so a week's records cost little.
-    public func stats(from start: Date, to end: Date) throws(FlightRecorderError) -> HistoryIntervalStats {
+    public func stats(from start: Date, to end: Date, limit: Int = -1) throws(FlightRecorderError) -> HistoryIntervalStats {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let series = unsafe try HardwareCatalogue.load(on: database)
         let statement = unsafe try prepare("""
-            SELECT time, \(Self.columns.joined(separator: ", ")), hardware FROM records WHERE time > ? AND time <= ? ORDER BY time
+            SELECT time, \(Self.columns.joined(separator: ", ")), hardware FROM records WHERE time > ? AND time <= ? ORDER BY time LIMIT ?3
             """)
         defer { unsafe sqlite3_finalize(statement) }
         unsafe sqlite3_bind_double(statement, 1, min(start, end).timeIntervalSince1970)
         unsafe sqlite3_bind_double(statement, 2, max(start, end).timeIntervalSince1970)
+        unsafe sqlite3_bind_int64(statement, 3, Int64(limit))
         var records: [HistoryRecord] = []
         var seen: Set<HistoryHardwareSeries> = []
         while unsafe sqlite3_step(statement) == SQLITE_ROW {
@@ -344,14 +345,15 @@ public actor FlightRecorder {
     }
 
     /// The events from `start` to `end`, both included, oldest first.
-    public func events(from start: Date, to end: Date) throws(FlightRecorderError) -> [HistoryEvent] {
+    public func events(from start: Date, to end: Date, limit: Int = -1) throws(FlightRecorderError) -> [HistoryEvent] {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let statement = unsafe try prepare("""
-            SELECT time, kind, name, detail, count, approximate FROM events WHERE time >= ? AND time <= ? ORDER BY time, rowid
+            SELECT time, kind, name, detail, count, approximate FROM events WHERE time >= ? AND time <= ? ORDER BY time, rowid LIMIT ?3
             """)
         defer { unsafe sqlite3_finalize(statement) }
         unsafe sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
         unsafe sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
+        unsafe sqlite3_bind_int64(statement, 3, Int64(limit))
         var events: [HistoryEvent] = []
         while unsafe sqlite3_step(statement) == SQLITE_ROW {
             // A kind from a newer build is left out rather than misread.
@@ -585,6 +587,7 @@ public actor FlightRecorder {
                         (kind, name, CAST(time AS INTEGER), CASE WHEN kind = 'endedByApp' THEN detail ELSE '' END);
                     """, on: handle)
             }
+            if version < 10 { unsafe try execute(incidentIndexes, on: handle) }
             if version < schemaVersion { unsafe try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
             unsafe try execute("COMMIT", on: handle)
         } catch {

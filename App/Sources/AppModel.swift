@@ -25,7 +25,7 @@ final class AppModel {
     @ObservationIgnored let backgroundSampling = BackgroundSamplingState()
     let menuBarIcon = MenuBarIconStore()
     /// The on-disk history behind the History page. Nil if it can't be opened.
-    let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
+    let recorder = AppModel.makeIncidentRecorder()
     /// Network traffic by app, read with nettop only while a view shows it.
     let networkActivity = NetworkActivityStore()
     /// Restarts of launchd's jobs, counted from the Startup page's reads.

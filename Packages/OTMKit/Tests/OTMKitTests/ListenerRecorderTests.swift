@@ -71,7 +71,7 @@ struct ListenerRecorderTests {
         #expect(try await oldReader.listenerReview() == nil)
         #expect(try await oldReader.schemaVersionOnDisk() == 7)
         let migrated = try FlightRecorder(url: url)
-        #expect(try await migrated.schemaVersionOnDisk() == 9)
+        #expect(try await migrated.schemaVersionOnDisk() == 10)
         #expect(try await migrated.listenerReview() == nil)
         #expect(try await migrated.events(from: time, to: time.addingTimeInterval(1)) == [event])
         let initial = try await migrated.observeListeners([listener(port: 8_080)], confirmed: [], at: time)

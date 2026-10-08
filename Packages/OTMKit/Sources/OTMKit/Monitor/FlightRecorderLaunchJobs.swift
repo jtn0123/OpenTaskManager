@@ -61,19 +61,20 @@ extension FlightRecorder {
     }
 
     /// Exact label matching; an omitted domain returns both agents and daemons.
-    public func launchJobEvents(label: String, domain: String? = nil, from start: Date, to end: Date) throws(FlightRecorderError)
+    public func launchJobEvents(label: String, domain: String? = nil, from start: Date, to end: Date, limit: Int = -1) throws(FlightRecorderError)
         -> [LaunchHistoryEvent] {
         guard try keepsLaunchJobHistory() else { return [] }
         // The actor owns the connection; column strings are copied before stepping and the statement is finalized here.
         let statement = unsafe try Self.prepare("""
             SELECT payload FROM launch_job_events WHERE label = ?1 AND (?2 = '' OR domain = ?2)
-                AND time >= ?3 AND time <= ?4 ORDER BY time, id
+                AND time >= ?3 AND time <= ?4 ORDER BY time, id LIMIT ?5
             """, on: database)
         defer { unsafe sqlite3_finalize(statement) }
         unsafe Self.bind(label, to: statement, at: 1)
         unsafe Self.bind(domain ?? "", to: statement, at: 2)
         unsafe sqlite3_bind_double(statement, 3, start.timeIntervalSince1970)
         unsafe sqlite3_bind_double(statement, 4, end.timeIntervalSince1970)
+        unsafe sqlite3_bind_int64(statement, 5, Int64(limit))
         return unsafe try Self.readLaunchEvents(statement, on: database)
     }
 
@@ -100,7 +101,7 @@ extension FlightRecorder {
         try pruneLaunchState(before: date)
     }
 
-    private static func readLaunchEvents(_ statement: OpaquePointer, on handle: OpaquePointer) throws(FlightRecorderError)
+    static func readLaunchEvents(_ statement: OpaquePointer, on handle: OpaquePointer) throws(FlightRecorderError)
         -> [LaunchHistoryEvent] {
         // The caller owns the connection and statement; each SQLite text value is copied before the next step.
         var events: [LaunchHistoryEvent] = []

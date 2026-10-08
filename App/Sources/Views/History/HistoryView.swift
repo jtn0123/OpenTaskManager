@@ -231,23 +231,36 @@ struct HistoryView: View {
                 HistoryRecordingBanner(recording: opened, store: store, scrubber: scrubber, player: player)
             }
             HStack(alignment: .top, spacing: 0) {
-                ScrollView {
-                    // The rail is a pinned header, so it stays over the charts as
-                    // they scroll, folded to a strip once they've scrolled under it.
-                    LazyVStack(alignment: .leading, spacing: HistoryPageScroll.spacing, pinnedViews: .sectionHeaders) {
-                        header
-                            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(HistoryPageScroll.space)).maxY } action: {
-                                pageScroll.setHeaderBottom($0)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        // The rail is a pinned header, so it stays over the charts as
+                        // they scroll, folded to a strip once they've scrolled under it.
+                        LazyVStack(alignment: .leading, spacing: HistoryPageScroll.spacing, pinnedViews: .sectionHeaders) {
+                            header
+                                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(HistoryPageScroll.space)).maxY } action: {
+                                    pageScroll.setHeaderBottom($0)
+                                }
+                            Section {
+                                content
+                            } header: {
+                                rail
                             }
-                        Section {
-                            content
-                        } header: {
-                            rail
+                        }
+                        .padding(20)
+                        .background(HistoryScrollTracker(scroll: pageScroll))
+                        .coordinateSpace(.named(HistoryPageScroll.space))
+                    }
+                    .onChange(of: store.connectionMoment) { _, moment in
+                        guard moment != nil else { return }
+                        Task {
+                            await load()
+                            if IncidentNavigation.shared.revealsProcess {
+                                IncidentNavigation.shared.revealsProcess = false
+                                await LaunchArgument.afterTableLayout()
+                                proxy.scrollTo("incidentProcess", anchor: .top)
+                            }
                         }
                     }
-                    .padding(20)
-                    .background(HistoryScrollTracker(scroll: pageScroll))
-                    .coordinateSpace(.named(HistoryPageScroll.space))
                 }
                 if !compact {
                     // In a scroll view of its own, so it sits under the toolbar like the charts.
@@ -300,6 +313,17 @@ struct HistoryView: View {
                 await model.samplingDemand.waitUntilVisible()
                 guard !Task.isCancelled else { return }
                 await load()
+            }
+        }
+        .sheet(item: Binding(get: { store.incidentWindow }, set: { store.incidentWindow = $0 })) { window in
+            IncidentView(initialWindow: window, recorder: source, fixture: AppModel.usesIncidentFixture)
+        }
+        .onChange(of: store.opensLatestIncident, initial: true) { _, requested in
+            guard requested else { return }
+            store.opensLatestIncident = false
+            Task {
+                let latest = try? await source?.latestIncidentMoment()
+                store.incidentWindow = IncidentWindow(at: latest ?? Date.now)
             }
         }
         .onDisappear { player.pause() }
@@ -434,6 +458,7 @@ struct HistoryView: View {
             HistoryProcessSection(recorder: source, isFile: opened != nil, points: points, bucket: bucket, domain: domain, gaps: gapMarks,
                                   ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)
                 .historySection("Processes", scroll: pageScroll)
+                .id("incidentProcess")
             ForEach(HistoryChartSpec.all(for: points)) { spec in
                 HistoryChartCard(spec: spec, points: points, bucket: bucket, domain: domain, earliest: earliest, gaps: gapMarks,
                                  ticks: axis.ticks, timeLabels: axis.labels, scrubber: scrubber)

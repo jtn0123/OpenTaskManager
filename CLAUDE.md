@@ -471,6 +471,30 @@ Manager OG or any other proprietary task manager.
   never automatic. A new scan clears cleanup selection; nothing runs per tick),
   Components/Graphs (graphs, bars, cards), and Support (icons, hot key, menu bar icon).
 
+History’s Investigate action opens a fixed incident window (±2 minutes by default,
+with ±1/2/5/15 choices or the marked/compare interval unchanged). `IncidentTimeline`
+and `FlightRecorderIncident` gather resource/baseline summaries, process starts and
+ends, launchd transitions by domain, socket changes, pending listener reviews and
+events in one actor transaction. Schema 10 adds indexed process start/end, watch
+and socket start/closure queries. Each lane and coverage query is capped at 200
+rows with explicit cut notices; ending evidence loads for at most 20 lifetimes.
+Only exact recorded process identities link lanes. Each lane's coverage is a strip
+in History's track look (`IncidentCoverageStrip`), its exact spans in the help;
+records within History's gap spacing (2.5 record spans) count as one watched
+stretch. Resource figures and the five busiest above zero keep their order and
+show no time, since they sum up the window. A ±N window opens on its own choice;
+"Picked range" appears only for a marked or Compare interval. Happened together sequences
+state observations, never causes. Incident exports choose Markdown or JSON in
+NSSavePanel, redacting home paths, user names and remote addresses (/24 or /48)
+by default. Accepted listener changes are not a historical audit log. Event observer coverage
+is not independently persisted; the event lane labels recording spans and event
+sightings as inferred coverage rather than claiming continuous observation.
+`-openIncident <ISO8601|latest>` opens the sheet on History; debug-only
+`-incidentFixture YES` uses made-up values, disables the persistent recorder and
+spike captures, and leaves automatic storage schedules stopped.
+`otm incident --at <ISO8601> [--minutes N (1–15)] [--json]` reads without migration.
+The incident sheet queries only on a window change, never on a timer or tick.
+
 ## Performance rules (the app must stay light)
 
 - Find Owner runs exactly one bounded descriptor walk per search, off the main

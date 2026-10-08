@@ -187,15 +187,16 @@ extension FlightRecorder {
     }
 
     /// Coverage is independent of the search: no match says nothing about an unwatched stretch.
-    public func connectionCoverage(from start: Date, to end: Date) throws(FlightRecorderError) -> ConnectionHistoryCoverage {
+    public func connectionCoverage(from start: Date, to end: Date, limit: Int = -1) throws(FlightRecorderError) -> ConnectionHistoryCoverage {
         guard try keepsConnectionHistory() else { return ConnectionHistoryCoverage(from: start, to: end, intervals: []) }
         // The actor owns both statements; copied IDs outlive the column's next step.
         let statement = unsafe try Self.prepare("""
-            SELECT id, start, end, spacing, hidden, walks FROM connection_coverage WHERE end >= ? AND start <= ? ORDER BY start
+            SELECT id, start, end, spacing, hidden, walks FROM connection_coverage WHERE end >= ? AND start <= ? ORDER BY start LIMIT ?3
             """, on: database)
         defer { unsafe sqlite3_finalize(statement) }
         unsafe sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
         unsafe sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
+        unsafe sqlite3_bind_int64(statement, 3, Int64(limit))
         var intervals: [ConnectionWatchInterval] = []
         var status = unsafe sqlite3_step(statement)
         while status == SQLITE_ROW {

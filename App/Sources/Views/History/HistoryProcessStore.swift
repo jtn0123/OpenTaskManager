@@ -167,8 +167,14 @@ final class HistoryProcessStore {
             if results != nil { results = nil }
             return
         }
-        let found = (try? await recorder.processLifetimes(matching: text, from: domain.lowerBound, to: domain.upperBound,
+        var found = (try? await recorder.processLifetimes(matching: text, from: domain.lowerBound, to: domain.upperBound,
                                                           limit: Self.limit, sort: order)) ?? []
+        if case .identity(let identity) = pending, !found.contains(where: { $0.lifetime.identity == identity }),
+           let lifetime = try? await recorder.processLifetime(identity) {
+            // An inspector request must survive the search cap, including many earlier runs with a reused PID.
+            let summary = (try? await recorder.processSummary(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? .empty
+            found.insert(ProcessHistoryMatch(lifetime: lifetime, summary: summary), at: 0)
+        }
         let short = (try? await recorder.processShortRuns(matching: text, from: domain.lowerBound, to: domain.upperBound,
                                                           limit: Self.limit)) ?? []
         guard !Task.isCancelled, text == query, order == sort else { return }

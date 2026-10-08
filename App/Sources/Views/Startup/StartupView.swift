@@ -116,7 +116,7 @@ struct StartupView: View {
             if source != nil { filter = .all }
             requestedItem = model.requestedStartupItem
             model.requestedStartupItem = nil
-            if items == nil { await scan() }
+            if items == nil || IncidentNavigation.shared.job != nil { await scan() }
         }
         // The selected row may have moved out of view; these are the user's
         // own changes, never a tick or a read of launchd's list.
@@ -345,6 +345,15 @@ struct StartupView: View {
             }
         }
         // `--args -openStartupItem <text>` picks the first item whose label or name contains it, once, for screenshots.
+        if let key = IncidentNavigation.shared.job {
+            await LaunchArgument.afterTableLayout()
+            filter = .all
+            source = nil
+            search = key.label
+            select(visibleRows(scanned, watch: model.launchJobs.watch).first { LaunchHistoryKey($0.item) == key }?.id)
+            if selection != nil { openDetails() }
+            IncidentNavigation.shared.job = nil
+        }
         if !openedRequest, let query = LaunchArgument.string("openStartupItem") {
             openedRequest = true
             await LaunchArgument.afterTableLayout()
