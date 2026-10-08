@@ -52,6 +52,9 @@ public struct ProcessHistoryTracker: Sendable {
     }
 
     public let span: TimeInterval
+    /// Whether other users' and system processes are sampled. While they
+    /// aren't, one gone from the list hasn't necessarily ended.
+    public var watchesRestricted = true
     /// Each process's counters at the start of the stretch, or at its own
     /// start within it.
     private var baselines: [ProcessIdentity: Counters] = [:]
@@ -71,18 +74,20 @@ public struct ProcessHistoryTracker: Sendable {
     /// Notes one tick covering `interval` seconds up to `time`. `samples` is
     /// every process now; `appeared`, those that weren't in the previous
     /// tick; `disappeared`, the previous tick's samples of those gone since.
-    /// While `watchesRestricted` is false, other users' and system processes
-    /// aren't sampled, so their going isn't their end.
+    /// One gone after a gap (a pause, sleep) ended when it was last seen,
+    /// not across the gap.
     public mutating func add(_ samples: [ProcessSample], appeared: [ProcessSample], disappeared: [ProcessSample],
-                             watchesRestricted: Bool, interval: TimeInterval, at time: Date) {
+                             interval: TimeInterval, at time: Date) {
+        let afterGap = interval > span || last.map { time.timeIntervalSince($0) > interval + span } ?? false
+        let endTime = afterGap ? last ?? time : time
         for process in appeared { started.append(ProcessHistoryBatch.Start(process, at: time)) }
         for process in disappeared {
-            ended.append(ProcessHistoryBatch.End(identity: process.identity, time: time,
+            ended.append(ProcessHistoryBatch.End(identity: process.identity, time: endTime,
                                                  isEnded: watchesRestricted || !process.isRestricted))
             labelsNoted.removeValue(forKey: process.identity)
         }
 
-        if let last, time.timeIntervalSince(last) > interval + span || interval > span {
+        if afterGap {
             resetStretch()
         }
         guard interval > 0, interval <= span else { return }

@@ -87,6 +87,11 @@ USAGE:
                                  test, and refuses runs that don't compare
   otm captures [--json]          The spike captures the app kept: what crossed,
                                  when, for how long, and the busiest processes
+  otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
+                                 Processes the app's History saw (default: the
+                                 last 24 hours) by name, path, bundle ID,
+                                 launchd label or PID, latest first: when each
+                                 ran, average and peak CPU, peak memory, disk
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -104,6 +109,7 @@ struct Options {
     var sizes = false
     var changes = false
     var extremes: Double?
+    var range: String?
 }
 
 func parseOptions(_ arguments: [String]) -> Options {
@@ -124,6 +130,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
         case "--changes": options.changes = true
+        case "--range": options.range = iterator.next()
         case "--extremes":
             guard let seconds = iterator.next().flatMap(Double.init), seconds >= 0 else { fail("--extremes needs a number of seconds") }
             options.extremes = seconds
@@ -835,6 +842,9 @@ case "bench":
 
 case "captures":
     capturesCommand(options)
+
+case "history":
+    await historyCommand(options)
 
 case "threads":
     try await threadsCommand(options)

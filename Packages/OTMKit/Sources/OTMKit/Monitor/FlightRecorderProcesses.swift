@@ -170,9 +170,10 @@ extension FlightRecorder {
         sqlite3_bind_double(records, 2, recordSpan)
         sqlite3_bind_double(records, 3, window.lowerBound.timeIntervalSince1970)
         sqlite3_bind_double(records, 4, window.upperBound.timeIntervalSince1970)
-        var buckets: [(key: Int64, time: Double, records: Int)] = []
+        var buckets: [RecordBucket] = []
         while sqlite3_step(records) == SQLITE_ROW {
-            buckets.append((sqlite3_column_int64(records, 0), sqlite3_column_double(records, 1), Int(sqlite3_column_int64(records, 2))))
+            buckets.append(RecordBucket(key: sqlite3_column_int64(records, 0), time: sqlite3_column_double(records, 1),
+                                        records: Int(sqlite3_column_int64(records, 2))))
         }
         let samples = try Self.prepare("""
             SELECT CAST(time / ?1 AS INTEGER), COUNT(*), SUM(cpu), MAX(cpu), MAX(memory), SUM(disk_read), SUM(disk_write),
@@ -209,6 +210,13 @@ extension FlightRecorder {
     }
 
     // MARK: - Helpers
+
+    /// A chart bucket's records: its key, its last record's time and how many records it holds.
+    private struct RecordBucket {
+        let key: Int64
+        let time: Double
+        let records: Int
+    }
 
     private struct StoredBucket {
         let count: Int

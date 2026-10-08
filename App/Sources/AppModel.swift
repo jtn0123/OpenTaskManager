@@ -203,6 +203,12 @@ final class AppModel {
     /// Restarts of launchd's jobs, counted from the Startup page's reads.
     let launchJobs = LaunchJobStore()
     private var recording = HistoryAccumulator(span: FlightRecorder.span)
+    /// Each process's figures over each record, from the counters the sampler
+    /// already read, for History's process history.
+    @ObservationIgnored private var processTracker = ProcessHistoryTracker()
+    /// launchd's label for each process it runs, gathered once per read of its
+    /// list on the Startup page (`launchJobs`), and that read's time.
+    @ObservationIgnored private var jobLabels: (read: Date?, labels: [ProcessIdentity: String]) = (nil, [:])
     /// Saves what happened beside the history: apps launched and quit, busy
     /// processes, network changes, sleep and wake.
     @ObservationIgnored private lazy var historyEvents = recorder.map { HistoryEventMonitor(recorder: $0) }
@@ -459,7 +465,7 @@ final class AppModel {
             networkOutHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.sentBytesPerSecond)
         }
 
-        appendProcessHistories(snapshot.processes)
+        let changes = appendProcessHistories(snapshot.processes)
         var totalGPU = 0.0
         var totalPower = 0.0
         var totalMemory = 0.0
@@ -481,7 +487,7 @@ final class AppModel {
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
         appendGroupHistories()
-        record(snapshot, sensorsRead: fixture(or: sensors)?.isEmpty == false)
+        record(snapshot, sensorsRead: fixture(or: sensors)?.isEmpty == false, appeared: changes.appeared, gone: changes.gone)
     }
 
     /// Adds each app group's totals to its history and running total, as
@@ -514,8 +520,9 @@ final class AppModel {
     /// Adds each process's sample to its history and running total. A process
     /// that has quit leaves both. The histories are taken out of the model
     /// while they grow, so each is appended to in place, not copied whole
-    /// every tick.
-    private func appendProcessHistories(_ samples: [ProcessSample]) {
+    /// every tick. Returns the processes new since the last tick, and the
+    /// last tick's samples of those gone since.
+    private func appendProcessHistories(_ samples: [ProcessSample]) -> (appeared: [ProcessSample], gone: [ProcessSample]) {
         var previous = processHistory
         processHistory = [:]
         var previousTotals = processTotals
@@ -526,10 +533,18 @@ final class AppModel {
         totals.reserveCapacity(samples.count)
         var identities: [Int32: ProcessIdentity] = [:]
         identities.reserveCapacity(samples.count)
+        var appeared: [ProcessSample] = []
         for process in samples {
             let identity = process.identity
             identities[process.pid] = identity
-            var history = previous.removeValue(forKey: identity) ?? History(capacity: Self.processHistoryCapacity)
+            // Bound only within the `if`, so `history` holds the only reference when it's appended to.
+            var history: History<ProcessPoint>
+            if let kept = previous.removeValue(forKey: identity) {
+                history = kept
+            } else {
+                history = History(capacity: Self.processHistoryCapacity)
+                appeared.append(process)
+            }
             var total = previousTotals.removeValue(forKey: identity) ?? ProcessTotal()
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
                                      gpuFraction: process.gpuFraction ?? 0, powerWatts: process.powerWatts ?? 0)
@@ -541,6 +556,12 @@ final class AppModel {
         processHistory = histories
         processTotals = totals
         processIdentityByPID = identities
+        // What's left of the last tick's histories is the processes gone since; `snapshot` is still that tick's.
+        var gone: [ProcessSample] = []
+        if !previous.isEmpty, let last = snapshot?.processes {
+            for process in last where previous[process.identity] != nil { gone.append(process) }
+        }
+        return (appeared, gone)
     }
 
     /// Whether this Mac measures energy, GPU time and Neural Engine memory per
@@ -612,8 +633,12 @@ final class AppModel {
     /// Feeds the flight recorder, which writes a record every few seconds.
     /// `sensorsRead` is false when this tick didn't read the temperature
     /// sensors and fans, so their last readings aren't recorded again.
-    private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool) {
+    /// `appeared` and `gone` are the processes started and ended since the
+    /// last tick, which alone cost the process history work between records.
+    private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool, appeared: [ProcessSample], gone: [ProcessSample]) {
         guard let recorder, !showsSensorFixture else { return }
+        processTracker.watchesRestricted = includeSystemProcesses
+        processTracker.add(snapshot.processes, appeared: appeared, disappeared: gone, interval: snapshot.interval, at: snapshot.timestamp)
         // The apps NSWorkspace reports launching and quitting; background agents are left to the tracker.
         historyEvents?.update(snapshot.processes, apps: Set(regularApps.keys), at: snapshot.timestamp)
         let apps = appGroups.compactMap { group in
@@ -626,9 +651,25 @@ final class AppModel {
         let hardware = HistoryHardwareSample(readings: sensorReadings, cpu: snapshot.cpu, topology: topology, sensorsRead: sensorsRead)
         guard let record = recording.add(values, hardware: hardware, apps: apps, interval: snapshot.interval,
                                          at: snapshot.timestamp) else { return }
+        let processes = processTracker.close(at: record.time, samples: snapshot.processes, labels: launchdLabels())
         Task.detached(priority: .utility) {
             try? await recorder.append(record)
+            try? await recorder.append(processes)
         }
+    }
+
+    /// launchd's label for each process it was running at the Startup page's
+    /// latest read of its list, gathered again only after another read.
+    private func launchdLabels() -> [ProcessIdentity: String] {
+        let watch = launchJobs.watch
+        guard watch.lastRead != jobLabels.read else { return jobLabels.labels }
+        var labels: [ProcessIdentity: String] = [:]
+        for (key, record) in watch.records {
+            guard let instance = record.instance else { continue }
+            labels[ProcessIdentity(pid: instance.pid, startTime: instance.started)] = key.label
+        }
+        jobLabels = (watch.lastRead, labels)
+        return labels
     }
 
     // MARK: - Queries

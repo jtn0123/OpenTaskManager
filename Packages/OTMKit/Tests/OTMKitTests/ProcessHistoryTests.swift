@@ -100,7 +100,7 @@ struct ProcessHistoryTrackerTests {
         for tick in 1...10 {
             let now = processes(at: Double(tick))
             let appeared = now.filter { process in !previous.contains { $0.identity == process.identity } }
-            tracker.add(now, appeared: appeared, disappeared: [], watchesRestricted: true, interval: 1, at: date(1_000 + Double(tick)))
+            tracker.add(now, appeared: appeared, disappeared: [], interval: 1, at: date(1_000 + Double(tick)))
             previous = now
         }
         let batch = tracker.close(at: date(1_010), samples: previous)
@@ -128,7 +128,7 @@ struct ProcessHistoryTrackerTests {
             let now = processes(at: value, extra: extra)
             let appeared = now.filter { process in !previous.contains { $0.identity == process.identity } }
             let gone = previous.filter { process in !now.contains { $0.identity == process.identity } }
-            tracker.add(now, appeared: appeared, disappeared: gone, watchesRestricted: true, interval: 1, at: date(1_000 + value))
+            tracker.add(now, appeared: appeared, disappeared: gone, interval: 1, at: date(1_000 + value))
             previous = now
         }
         let batch = tracker.close(at: date(1_010), samples: previous)
@@ -145,25 +145,30 @@ struct ProcessHistoryTrackerTests {
         var tracker = ProcessHistoryTracker(span: 10)
         func cpu(_ time: Double) -> ProcessSample { process(10, cpuTime: 0.5 * (time - 1_000), cpuPercent: 50) }
         for tick in 1...10 {
-            tracker.add([cpu(1_000 + Double(tick))], appeared: tick == 1 ? [cpu(1_001)] : [], disappeared: [], watchesRestricted: true,
+            tracker.add([cpu(1_000 + Double(tick))], appeared: tick == 1 ? [cpu(1_001)] : [], disappeared: [],
                         interval: 1, at: date(1_000 + Double(tick)))
         }
         _ = tracker.close(at: date(1_010), samples: [cpu(1_010)])
         // The app slept for 90 s; the process kept running.
         for tick in 0..<10 {
             let time = 1_100 + Double(tick)
-            tracker.add([cpu(time)], appeared: [], disappeared: [], watchesRestricted: true, interval: 1, at: date(time))
+            tracker.add([cpu(time)], appeared: [], disappeared: [], interval: 1, at: date(time))
         }
         let batch = tracker.close(at: date(1_109), samples: [cpu(1_109)])
         #expect(abs((batch.samples.first?.cpuPercent ?? 0) - 50) < 1e-9)
+        // Paused for a minute, during which it ended: it was last seen before the pause, not after.
+        tracker.add([], appeared: [], disappeared: [cpu(1_109)], interval: 61, at: date(1_170))
+        #expect(tracker.close(at: date(1_180), samples: []).ended.map(\.time) == [date(1_109)])
     }
 
     @Test func aRestrictedProcessNoLongerSampledIsntCalledEnded() {
         var tracker = ProcessHistoryTracker(span: 10)
         let root = process(1, start: 100, name: "launchd", restricted: true)
         let mine = process(20)
-        tracker.add([root, mine], appeared: [root, mine], disappeared: [], watchesRestricted: true, interval: 1, at: date(1_001))
-        tracker.add([], appeared: [], disappeared: [root, mine], watchesRestricted: false, interval: 1, at: date(1_002))
+        tracker.add([root, mine], appeared: [root, mine], disappeared: [], interval: 1, at: date(1_001))
+        // Other users' and system processes are no longer sampled.
+        tracker.watchesRestricted = false
+        tracker.add([], appeared: [], disappeared: [root, mine], interval: 1, at: date(1_002))
         let batch = tracker.close(at: date(1_002), samples: [])
         #expect(batch.ended.map(\.isEnded) == [false, true])
         #expect(batch.samples.first { $0.identity.pid == 1 }?.diskRead == nil, "macOS gives no disk figures for it")
@@ -172,10 +177,10 @@ struct ProcessHistoryTrackerTests {
     @Test func handsOnEachLaunchdLabelOnce() {
         var tracker = ProcessHistoryTracker(span: 10)
         let job = process(40)
-        tracker.add([job], appeared: [job], disappeared: [], watchesRestricted: true, interval: 1, at: date(1_001))
+        tracker.add([job], appeared: [job], disappeared: [], interval: 1, at: date(1_001))
         let labels = [job.identity: "com.example.agent"]
         #expect(tracker.close(at: date(1_001), samples: [job], labels: labels).labels == labels)
-        tracker.add([job], appeared: [], disappeared: [], watchesRestricted: true, interval: 1, at: date(1_002))
+        tracker.add([job], appeared: [], disappeared: [], interval: 1, at: date(1_002))
         #expect(tracker.close(at: date(1_002), samples: [job], labels: labels).labels.isEmpty)
     }
 }
@@ -209,6 +214,25 @@ struct FlightRecorderProcessTests {
         #expect(later.summary.records == 2)
         #expect(later.summary.averageCPU == 30)
         #expect(later.summary.peakCPU == 40)
+    }
+
+    @Test func aLifetimeReadBackIsTheSameProcessAsTheLiveOne() async throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let recorder = try FlightRecorder(url: url)
+        // Start times as the sampler makes them, from the kernel's microseconds,
+        // so History can tell whether a lifetime is the process running now.
+        let identities = (0..<200).map { index in
+            ProcessIdentity(pid: Int32(100 + index),
+                            startTime: ProcessIdentity.startTime(microseconds: 1_759_812_345_678_901 + Int64(index) * 7_919))
+        }
+        let starts = identities.map {
+            ProcessHistoryBatch.Start(identity: $0, name: "p", path: nil, user: "me", isRestricted: false, firstSeen: date(1_001))
+        }
+        try await recorder.append(ProcessHistoryBatch(time: date(1_010), started: starts))
+        for identity in identities {
+            #expect(try await recorder.processLifetime(identity)?.identity == identity)
+        }
     }
 
     @Test func searchesNamesPathsBundlesLabelsAndPIDs() async throws {

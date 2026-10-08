@@ -442,8 +442,9 @@ public actor FlightRecorder {
 
     // MARK: - SQLite
 
-    private static func open(_ path: String,
-                             flags: Int32 = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX) throws(FlightRecorderError) -> Connection {
+    private static let writing = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+
+    private static func open(_ path: String, flags: Int32 = writing) throws(FlightRecorderError) -> Connection {
         var handle: OpaquePointer?
         guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK,
               let handle else {
