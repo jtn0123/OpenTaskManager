@@ -159,7 +159,12 @@ Manager OG or any other proprietary task manager.
   `system_profiler` run a session, `HardwareInventoryStore`, and `otm hardware`),
   Views/Drivers (system extensions and kexts in a SwiftUI `Table`, scanned off
   the main actor when the page opens and on Refresh, never per tick; parsing is
-  in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList),
+  in OTMKit's System/Extensions, SystemExtensionList and KernelExtensionList;
+  System/ExtensionBundles reads the `.kext`, `.systemextension` and `.dext`
+  copies one level into /Library/Extensions and the Applications folders, never
+  /System, and Model/ExtensionMatching ties each to what's registered or loaded
+  by identifier and version, the rest being rows "Installed, not in use" or,
+  when that can't be told, "Unknown"; tests use fake bundles in a temp dir),
   Views/Storage (disk space: `StorageStore` keeps the session's last scan and
   scans only on Scan or a scope pick, never on launch or per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
