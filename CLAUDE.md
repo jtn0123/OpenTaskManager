@@ -227,8 +227,8 @@ Manager OG or any other proprietary task manager.
   their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump;
   the idle line under the rows is a footer shorter than a row
   (`TopListRoom.height`), so a sparse list alone in its row stays compact.
-  Performance's Fit collected data toggle (`GraphFit`, in the main graph's
-  time axis until the window is nearly full) narrows that one window, through
+  Performance's Fit collected data toggle (`GraphFit`, on by default, in the
+  main graph's time axis until the window is nearly full) narrows that one window, through
   the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
   never per tick, so the graphs keep scrolling. A reading a Mac never gives
   (a VM GPU's load) takes `Unavailable.symbol` and a short label, never the
@@ -462,6 +462,21 @@ the thermal state turns fair), so `-openResource benchmarks
   segmented pickers on a live page out of `ViewThatFits`: it measured them
   again every tick (about half a percent of a core for the CPU graph's two),
   so that caption row is a small `Layout` instead.
+- Each Performance device page opens the same way (`PerformanceHero.swift`):
+  `DeviceHeader`, its title over a segmented `LevelBar` (Core Animation layers,
+  the lit width eased in the render server; a nil fraction leaves it dim) and the
+  current figure, then one `DeviceCard` whose main graph (`heroPlot`, over a
+  still `FineGrid`) is `Hero.height` tall: the pane's measured height
+  (`detailPaneHeight`, which changes with the window, never per tick) less
+  `Hero.reserved`, clamped by `HeroHeight` in OTMKit, with the device's figures
+  under it in `DeviceFigures` (columns from `FigureColumns`). Everything else
+  follows that card. The CPU page's default is a graph per logical CPU
+  (`CoreGrid`: one AppKit view hosting a `StreamGraphView` a tile, busy time
+  filled and kernel time, `CPUSample.coreSystem`, as a line; tiles laid out by
+  `CoreGridLayout` in OTMKit, 18 CPUs 6 by 3, core types on rows of their own
+  where that costs nothing). A GPU that doesn't report utilization graphs its
+  memory in use there (`GPUHero`), its bar dim. The resource list's rows give a
+  live graph in the device's colour and two lines of figures (`ResourceText`).
 - History's chart legends draw a sample of each line as it's stroked
   (`HistoryLine.Stroke`, solid, dashed or dotted, over its fill when it has
   one), so two lines on a chart never differ by colour alone, and give what

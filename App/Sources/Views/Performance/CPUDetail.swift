@@ -3,10 +3,11 @@ import SwiftUI
 
 struct CPUDetail: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("cpuGraphMode") private var mode = "overall"
+    @AppStorage(CPUGraphMode.key) private var mode = CPUGraphMode.standard
     @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
     /// The page's window, which every graph here covers (`GraphFit`).
     @Environment(\.graphWindow) private var window
+    @Environment(\.detailPaneHeight) private var pane
     /// The auto-scaled graphs' bounds, held between samples.
     @State private var bounds = AutoScaleBounds()
     var snapshot: SystemSnapshot
@@ -17,9 +18,11 @@ struct CPUDetail: View {
         let topology = model.topology
         ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
-                DetailHeader(title: "CPU", subtitle: topology.brand)
-                stats(topology)
-                graph(topology)
+                DeviceHeader(title: "CPU", subtitle: topology.brand, level: LevelRow(
+                    fraction: snapshot.cpu.usage, color: Theme.cpu, value: snapshot.cpu.usage,
+                    caption: "busy · \(topology.logicalCores) CPUs", label: "CPU busy"
+                ))
+                hero(topology)
                     .id(Self.graphID)
                 byApp()
                 if let clusters = snapshot.power.components?.clusters, clusters.contains(where: { $0.activeFraction != nil }) {
@@ -58,50 +61,71 @@ struct CPUDetail: View {
 
     /// The CPU graph by core type, or each core's with one kind, scrolled into view.
     private func showGraphs(_ layout: ChipLayout, proxy: ScrollViewProxy) {
-        mode = layout.coreTypes.count > 1 ? "tiers" : "cores"
+        mode = layout.coreTypes.count > 1 ? CPUGraphMode.tiers : CPUGraphMode.cores
         proxy.scrollTo(Self.graphID, anchor: .top)
     }
 
-    private func stats(_ topology: CPUTopology) -> some View {
-        MetricStrip(tint: Theme.cpu) {
-            Stat(label: "Utilization", number: snapshot.cpu.usage, color: Theme.cpu) { Format.percent($0) }
-            Stat(label: "User", number: snapshot.cpu.user) { Format.percent($0) }
-            Stat(label: "System", number: snapshot.cpu.system) { Format.percent($0) }
-            // With one kind of core, its load is the overall figure.
-            if topology.tiers.count > 1 {
-                ForEach(topology.tiers, id: \.level) { tier in
-                    Stat(label: "\(tier.name) cores (\(tier.logicalCPUs))", number: tierUsage(tier.level),
-                         color: Theme.tier(tier.level)) { Format.percent($0) }
-                }
+    /// The figures under the main graph. Each core type's load is in the
+    /// legend over them where the graph draws the types apart.
+    @ViewBuilder
+    private func figures(_ topology: CPUTopology) -> some View {
+        Stat(label: "Utilization", number: snapshot.cpu.usage, color: Theme.cpu) { Format.percent($0) }
+        Stat(label: "User", number: snapshot.cpu.user) { Format.percent($0) }
+        Stat(label: "System (kernel)", number: snapshot.cpu.system) { Format.percent($0) }
+        // With one kind of core, its load is the overall figure.
+        if topology.tiers.count > 1, mode == CPUGraphMode.overall {
+            ForEach(topology.tiers, id: \.level) { tier in
+                Stat(label: "\(tier.name) cores (\(tier.logicalCPUs))", number: tierUsage(tier.level),
+                     color: Theme.tier(tier.level)) { Format.percent($0) }
             }
-            Stat(label: "Load average (1, 5, 15 min)",
-                 value: snapshot.cpu.loadAverage.map { Format.fixed($0, 2) }.joined(separator: "  "))
-            Stat(label: "Processes", value: String(snapshot.processes.count))
-            Stat(label: "Threads", value: String(snapshot.threadCount))
-            Stat(label: "Up time", value: Format.duration(snapshot.uptime))
+        }
+        Stat(label: "Load (1, 5, 15 min)", value: snapshot.cpu.loadAverage.map { Format.fixed($0, 2) }.joined(separator: " "))
+        Stat(label: "Processes", value: String(snapshot.processes.count))
+        Stat(label: "Threads", value: String(snapshot.threadCount))
+        Stat(label: "Up time", value: Format.duration(snapshot.uptime))
+    }
+
+    /// The utilization graph in the chosen form, filling the pane, with the
+    /// choice of form and scale on its caption row and the figures under it.
+    /// A card like CPU by app's below it, so both plots run edge to edge over
+    /// the same minutes.
+    private func hero(_ topology: CPUTopology) -> some View {
+        // Every core's graph shares one scale, so they compare at a glance.
+        let cores = mode == CPUGraphMode.cores ? model.coreHistory.map(\.values) : []
+        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0)
+        let title = mode == CPUGraphMode.cores ? "Utilization of each core"
+            : mode == CPUGraphMode.tiers ? "Utilization by core type" : "Utilization"
+        let height = Hero.height(pane: pane, extra: Hero.legendLine + 4)
+        return DeviceCard(tint: Theme.cpu, legend: legend(topology)) {
+            CPUGraphHeader(title: title, note: mode == CPUGraphMode.cores ? coreScaleNote(coreTop) : "")
+        } plot: {
+            switch mode {
+            case CPUGraphMode.cores: coreGrid(topology, histories: cores, top: coreTop, height: height)
+            case CPUGraphMode.tiers: tierGraphs(topology, height: height)
+            default:
+                let values = model.cpuHistory.values
+                GraphView(series: [GraphSeries(values: values, color: Theme.cpu),
+                                   GraphSeries(values: model.cpuSystemHistory.values, color: Theme.wired, fill: false)],
+                          maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: window)), showsGrid: false,
+                          glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8)
+                    .heroPlot(height: height, tint: Theme.cpu)
+            }
+        } figures: {
+            figures(topology)
         }
     }
 
-    /// The utilization graph in the chosen form, with the choice of form and
-    /// scale on its caption row. In a card like CPU by app's below it, so
-    /// both plots run edge to edge over the same minutes.
-    private func graph(_ topology: CPUTopology) -> some View {
-        // Every core's graph shares one scale, so they compare at a glance.
-        let cores = mode == "cores" ? model.coreHistory.map(\.values) : []
-        let coreTop = cores.isEmpty ? 1 : top("cores", peak: cores.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0)
-        let title = mode == "cores" ? "Utilization of each core" : mode == "tiers" ? "Utilization by core type" : "Utilization"
-        return Card(tint: Theme.cpu) {
-            CPUGraphHeader(title: title, note: mode == "cores" ? coreScaleNote(coreTop) : "")
-            switch mode {
-            case "cores": coreGrid(topology, histories: cores, top: coreTop)
-            case "tiers": tierGraphs(topology)
-            default:
-                let values = model.cpuHistory.values
-                GraphPanel(title: "", trailing: "", series: [GraphSeries(values: values, color: Theme.cpu)],
-                           maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: window)),
-                           height: DetailGraph.primary, axis: CPUGraphScale.axisLabel, axisNote: axisNote, offersFit: true)
-            }
+    /// What the main graph's colours stand for: each core type's, where the
+    /// graph draws them apart, and the kernel's line.
+    private func legend(_ topology: CPUTopology) -> [LegendItem] {
+        let kernel = LegendItem(name: "Kernel (system) time", color: Theme.wired, value: Format.percent(snapshot.cpu.system))
+        guard mode != CPUGraphMode.overall, topology.tiers.count > 1 else {
+            return [LegendItem(name: "Busy", color: Theme.cpu, value: Format.percent(snapshot.cpu.usage)), kernel]
         }
+        return topology.tiers.map { tier in
+            LegendItem(name: "\(tier.name) cores (\(tier.logicalCPUs))", color: Theme.tier(tier.level),
+                       value: Format.percent(tierUsage(tier.level)))
+        } + [kernel]
     }
 
     /// The top of a CPU graph: its auto bound, held in `bounds` under
@@ -174,62 +198,60 @@ struct CPUDetail: View {
         return usages.isEmpty ? 0 : usages.reduce(0, +) / Double(usages.count)
     }
 
-    /// One graph per core type, on a shared scale.
-    private func tierGraphs(_ topology: CPUTopology) -> some View {
+    /// One graph per core type, on a shared scale, sharing the main graph's
+    /// height, each with its kernel time as a line.
+    private func tierGraphs(_ topology: CPUTopology, height: CGFloat) -> some View {
         let histories = topology.tiers.map { model.tierHistory(level: $0.level) }
         let top = top("tiers", peak: histories.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0)
+        let count = CGFloat(max(topology.tiers.count, 1))
+        // Each graph's caption line and the gaps between them come out of the height.
+        let each = max((height - (count - 1) * 10 - count * 19) / count, DetailGraph.compact)
         return VStack(spacing: 10) {
             ForEach(topology.tiers.indices, id: \.self) { index in
                 let tier = topology.tiers[index]
-                // The last graph's axis holds the fit toggle, at the foot of the card as in the other forms.
-                GraphPanel(title: "\(tier.name) cores (\(tier.logicalCPUs))", trailing: Format.percent(tierUsage(tier.level)),
-                           series: [GraphSeries(values: histories[index], color: Theme.tier(tier.level))],
-                           maxValue: top, height: DetailGraph.compact, axis: CPUGraphScale.axisLabel, axisNote: axisNote,
-                           offersFit: index == topology.tiers.count - 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    HeroGraphTitle(title: "\(tier.name) cores (\(tier.logicalCPUs))", trailing: Format.percent(tierUsage(tier.level)))
+                    GraphView(series: [GraphSeries(values: histories[index], color: Theme.tier(tier.level)),
+                                       GraphSeries(values: model.tierHistory(level: tier.level, kernel: true), color: Theme.wired,
+                                                   fill: false)],
+                              maxValue: top, showsGrid: false, glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote,
+                              cornerRadius: 8)
+                        .heroPlot(height: each, tint: Theme.tier(tier.level), rows: 4)
+                }
             }
         }
     }
 
-    /// Each core's graph covers the same window as the graphs around it, so a
-    /// spike sits over the app that caused it in CPU by app.
-    private func coreGrid(_ topology: CPUTopology, histories: [[Double]], top: Double) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(topology.tiers, id: \.level) { tier in
-                let cpus = topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level && histories.indices.contains($0) }
-                Text("\(tier.name) cores").font(.callout).foregroundStyle(.secondaryText)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: min(max(cpus.count, 1), 6)), spacing: 6) {
-                    ForEach(cpus, id: \.self) { cpu in
-                        coreGraph(cpu, values: histories[cpu], top: top, color: Theme.tier(tier.level))
-                    }
-                }
-            }
-            TimeAxis(offersFit: true)
-                .padding(.top, -6)
+    /// A graph for every logical CPU, filling the main graph's area, over the
+    /// same window as the graphs around it, so a spike sits over the app that
+    /// caused it in CPU by app. Performance cores come first.
+    private func coreGrid(_ topology: CPUTopology, histories: [[Double]], top: Double, height: CGFloat) -> some View {
+        let kernels = model.coreSystemHistory.map(\.values)
+        let several = topology.tiers.count > 1
+        let tiers = topology.tiers.sorted { $0.level < $1.level }
+        let runs = tiers.map { tier in
+            (tier: tier, cpus: topology.tierForCPU.indices.filter { topology.tierForCPU[$0] == tier.level && histories.indices.contains($0) })
         }
-    }
-
-    /// One logical CPU's recent load, with its number and current reading.
-    private func coreGraph(_ cpu: Int, values: [Double], top: Double, color: Color) -> some View {
-        let usage = snapshot.cpu.coreUsage.indices.contains(cpu) ? snapshot.cpu.coreUsage[cpu] : 0
-        return GraphView(series: [GraphSeries(values: values, color: color)],
-                         maxValue: top, lineWidth: 1.2, glows: true, cornerRadius: 5)
-            .frame(height: 64)
-            .background(LinearGradient(colors: [color.opacity(0.06 + 0.22 * usage), color.opacity(0.02)],
-                                       startPoint: .top, endPoint: .bottom),
-                        in: RoundedRectangle(cornerRadius: 5))
-            .overlay(alignment: .top) {
-                HStack {
-                    Text("\(cpu)").foregroundStyle(.secondaryText)
-                    Spacer()
-                    Text(Format.percent(usage)).foregroundStyle(usage > 0.5 ? AnyShapeStyle(color) : AnyShapeStyle(.secondaryText))
-                }
-                // The metadata size, 12 pt: in a small multiple, a bigger label would hide the graph's top.
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .padding(.horizontal, 5)
-                .padding(.top, 3)
+        let tiles = runs.flatMap { run in
+            run.cpus.map { cpu in
+                CoreTile(cpu: cpu, kind: several ? String(run.tier.name.prefix(1)) : "",
+                         kindName: several ? "\(run.tier.name) core" : "", color: Theme.tier(run.tier.level),
+                         busy: histories[cpu], kernel: kernels.indices.contains(cpu) ? kernels[cpu] : [])
             }
-            .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(color.opacity(0.18 + 0.5 * usage)))
+        }
+        return CoreGrid(tiles: tiles, groups: runs.map(\.cpus.count).filter { $0 > 0 }, top: top, height: height,
+                        kernelColor: Theme.wired)
     }
+}
+
+/// The CPU graph's forms, as kept under `key`.
+enum CPUGraphMode {
+    static let key = "cpuGraphMode"
+    static let overall = "overall"
+    static let tiers = "tiers"
+    static let cores = "cores"
+    /// A graph for every core, so each one's load shows at first look.
+    static let standard = cores
 }
 
 /// The CPU graph's title with the graph and scale pickers. A view of its
@@ -238,7 +260,7 @@ private struct CPUGraphHeader: View {
     let title: String
     /// Said after the title in secondary text, such as the core grid's scale.
     let note: String
-    @AppStorage("cpuGraphMode") private var mode = "overall"
+    @AppStorage(CPUGraphMode.key) private var mode = CPUGraphMode.standard
 
     var body: some View {
         // Not a `ViewThatFits`: it measured both segmented controls again on
@@ -258,9 +280,9 @@ private struct CPUGraphHeader: View {
 
     private var graphPicker: some View {
         Picker("Graph", selection: $mode) {
-            Text("Overall").tag("overall")
-            Text("By core type").tag("tiers")
-            Text("Every core").tag("cores")
+            Text("Every core").tag(CPUGraphMode.cores)
+            Text("By core type").tag(CPUGraphMode.tiers)
+            Text("Overall").tag(CPUGraphMode.overall)
         }
         .pickerStyle(.segmented)
         .labelsHidden()

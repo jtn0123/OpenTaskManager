@@ -5,9 +5,11 @@ import SwiftUI
 /// Whether Performance's graphs, while their window is still filling, fit
 /// what's been collected across their width or keep the full window with
 /// the samples at its right. One setting, `GraphFit.key`, for every graph
-/// on the page, so they still share one window; off by default, keeping the
-/// labelled 5-minute window. It has no effect once every sample would fit
-/// only the full window, and then its toggle goes.
+/// on the page, so they still share one window. On by default, so what's
+/// been collected fills the graphs rather than a sliver at the right of an
+/// empty, hatched window; off keeps the labelled 5-minute window from the
+/// start. It has no effect once every sample would fit only the full
+/// window, and then its toggle goes.
 ///
 /// A fitted window steps (`GraphCoverage.fittedCapacity`) rather than
 /// growing with every sample: the graphs keep scrolling between samples,
@@ -15,6 +17,8 @@ import SwiftUI
 /// 30 s at most.
 enum GraphFit {
     static let key = "fitsCollectedGraphData"
+    /// Fitted, until the user picks the full window.
+    static let standard = true
 
     /// The page's window for `samples` collected out of `span`.
     static func window(samples: Int, span: Int = AppModel.graphSpan, fits: Bool) -> Int {
@@ -39,7 +43,7 @@ struct GraphFitToggle: View {
     }()
 
     @Environment(AppModel.self) private var model
-    @AppStorage(GraphFit.key) private var fits = false
+    @AppStorage(GraphFit.key) private var fits = GraphFit.standard
 
     var body: some View {
         let window = Format.timeSpan(Double(AppModel.graphSpan) * model.updateSpeed.rawValue)

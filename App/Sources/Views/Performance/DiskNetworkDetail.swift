@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DiskDetail: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.detailPaneHeight) private var pane
     /// Bumped by the shortcut beside the title, for the speed test's card.
     @State private var revealTest = 0
     var disk: DiskSample
@@ -15,11 +16,15 @@ struct DiskDetail: View {
         let choices = volumes.map { DiskSpeedVolumeChoice(name: $0.name, mountPoint: $0.mountPoint, isRoot: $0.isRoot) }
         ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
-                SpeedTestHeader(title: DiskText.title(disk), subtitle: DiskText.device(disk), action: "Test disk speed…",
-                                help: "Go to the disk speed test below. It starts only when you click Run Test.",
-                                last: lastTest(choices)) {
-                    SpeedTestHeader.scrollToCard(proxy)
-                    revealTest += 1
+                VStack(alignment: .leading, spacing: 8) {
+                    SpeedTestHeader(title: DiskText.title(disk), subtitle: DiskText.device(disk), action: "Test disk speed…",
+                                    help: "Go to the disk speed test below. It starts only when you click Run Test.",
+                                    last: lastTest(choices)) {
+                        SpeedTestHeader.scrollToCard(proxy)
+                        revealTest += 1
+                    }
+                    LevelRow(fraction: disk.activeFraction, color: Theme.disk, value: disk.activeFraction, caption: "active",
+                             label: "Disk active time")
                 }
                 readings()
                 if !volumes.isEmpty {
@@ -45,25 +50,42 @@ struct DiskDetail: View {
         }
     }
 
+    /// Active time over transfer rate in one card filling the pane, the
+    /// figures under them, then the apps doing the I/O.
     @ViewBuilder
     private func readings() -> some View {
-        MetricStrip(tint: Theme.disk) {
+        // The two graphs' caption lines and the gap between them come out of the height.
+        let height = Hero.height(pane: pane, extra: Hero.legendLine + 2 * 19 + 8)
+        DeviceCard(tint: Theme.disk, legend: [
+            LegendItem(name: "Active time", color: Theme.disk, value: Format.percent(disk.activeFraction)),
+            LegendItem(name: "Read", color: Theme.disk, value: Format.bytesPerSecond(disk.readBytesPerSecond)),
+            LegendItem(name: "Write (dashed)", color: Theme.diskSecondary, value: Format.bytesPerSecond(disk.writeBytesPerSecond)),
+        ]) {
+            DeviceCaption(title: "Activity", trailing: "read solid, write dashed")
+        } plot: {
+            VStack(alignment: .leading, spacing: 8) {
+                HeroGraphTitle(title: "Active time", trailing: Format.percent(disk.activeFraction))
+                GraphView(series: [GraphSeries(values: model.diskActiveHistory[disk.id]?.values ?? [], color: Theme.disk)],
+                          maxValue: 1, showsGrid: false, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
+                    .heroPlot(height: (height * 0.38).rounded(), tint: Theme.disk, rows: 4)
+                HeroGraphTitle(title: "Transfer rate",
+                               trailing: Format.bytesPerSecond(disk.readBytesPerSecond + disk.writeBytesPerSecond))
+                GraphView(series: [
+                              GraphSeries(values: model.diskReadHistory[disk.id]?.values ?? [], color: Theme.disk),
+                              GraphSeries(values: model.diskWriteHistory[disk.id]?.values ?? [], color: Theme.diskSecondary,
+                                          fill: false, dashed: true),
+                          ],
+                          showsGrid: false, glows: true, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond,
+                          axisUnits: .binaryBytes, cornerRadius: 8)
+                    .heroPlot(height: (height * 0.62).rounded(), tint: Theme.disk)
+            }
+        } figures: {
             Stat(label: "Read", number: disk.readBytesPerSecond, color: Theme.disk, format: Format.bytesPerSecond)
             Stat(label: "Write", number: disk.writeBytesPerSecond, color: Theme.diskSecondary, format: Format.bytesPerSecond)
             Stat(label: "Active time", number: disk.activeFraction) { Format.percent($0) }
             Stat(label: "IOPS", number: disk.readOperationsPerSecond + disk.writeOperationsPerSecond) { Format.fixed($0, 0) }
             Stat(label: "Read since boot", value: Format.bytes(disk.totalRead))
             Stat(label: "Written since boot", value: Format.bytes(disk.totalWritten))
-        }
-        // A card, like the network detail's throughput graph.
-        ChartCard(title: "Transfer rate", trailing: "read solid, write dashed", tint: Theme.disk, offersFit: true) {
-            GraphView(series: [
-                          GraphSeries(values: model.diskReadHistory[disk.id]?.values ?? [], color: Theme.disk),
-                          GraphSeries(values: model.diskWriteHistory[disk.id]?.values ?? [], color: Theme.diskSecondary,
-                                      fill: false, dashed: true),
-                      ],
-                      glows: true, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond, axisUnits: .binaryBytes, cornerRadius: 8)
-                .chartFrame(height: DetailGraph.primary, tint: Theme.disk)
         }
         TopAppsCard(title: "Disk I/O", symbol: "internaldrive", color: Theme.disk, groups: model.appGroups,
                     metric: \.diskRate, format: { Format.bytesPerSecond($0.diskRate) }, column: .disk)
@@ -146,6 +168,7 @@ enum DiskText {
 
 struct NetworkDetail: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.detailPaneHeight) private var pane
     /// Bumped by the shortcut beside the title, for the Internet quality card.
     @State private var revealTest = 0
     var link: NetworkInterfaceSample
@@ -156,28 +179,37 @@ struct NetworkDetail: View {
         let sent = model.networkOutHistory[link.id]?.values ?? []
         ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 16) {
-                SpeedTestHeader(title: link.displayName, subtitle: link.name, action: "Test Internet quality…",
-                                help: "Go to the Internet quality test below. It starts only when you click Run Test, "
-                                    + "as it loads the connection for about \(Int(NetworkQuality.typicalSeconds)) s.",
-                                last: lastTest()) {
-                    SpeedTestHeader.scrollToCard(proxy)
-                    revealTest += 1
-                }
-                MetricStrip(tint: Theme.network) {
-                    Stat(label: "Receive", number: link.receivedBytesPerSecond, color: Theme.network, format: Format.bitsPerSecond)
-                    Stat(label: "Send", number: link.sentBytesPerSecond, color: Theme.networkSecondary, format: Format.bitsPerSecond)
-                    Stat(label: "Received", value: Format.bytes(link.totalReceived))
-                    Stat(label: "Sent", value: Format.bytes(link.totalSent))
+                VStack(alignment: .leading, spacing: 8) {
+                    SpeedTestHeader(title: link.displayName, subtitle: link.name, action: "Test Internet quality…",
+                                    help: "Go to the Internet quality test below. It starts only when you click Run Test, "
+                                        + "as it loads the connection for about \(Int(NetworkQuality.typicalSeconds)) s.",
+                                    last: lastTest()) {
+                        SpeedTestHeader.scrollToCard(proxy)
+                        revealTest += 1
+                    }
+                    level()
                 }
                 // A card like Apps using the network below it, so the two
                 // plots run edge to edge over the same minutes.
-                ChartCard(title: "Throughput", trailing: "receive solid, send dashed", tint: Theme.network, offersFit: true) {
+                DeviceCard(tint: Theme.network, legend: [
+                    LegendItem(name: "Receive", color: Theme.network, value: Format.bitsPerSecond(link.receivedBytesPerSecond)),
+                    LegendItem(name: "Send (dashed)", color: Theme.networkSecondary, value: Format.bitsPerSecond(link.sentBytesPerSecond)),
+                ]) {
+                    DeviceCaption(title: "Throughput", trailing: "receive solid, send dashed")
+                } plot: {
                     GraphView(series: [
                                   GraphSeries(values: received, color: Theme.network),
                                   GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),
                               ],
-                              glows: true, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits, cornerRadius: 8)
-                        .chartFrame(height: DetailGraph.primary, tint: Theme.network)
+                              showsGrid: false, glows: true, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits,
+                              cornerRadius: 8)
+                        .heroPlot(height: Hero.height(pane: pane, extra: Hero.legendLine), tint: Theme.network)
+                } figures: {
+                    Stat(label: "Receive", number: link.receivedBytesPerSecond, color: Theme.network, format: Format.bitsPerSecond)
+                    Stat(label: "Send", number: link.sentBytesPerSecond, color: Theme.networkSecondary, format: Format.bitsPerSecond)
+                    Stat(label: "Received", value: Format.bytes(link.totalReceived))
+                    Stat(label: "Sent", value: Format.bytes(link.totalSent))
+                    if let speed = link.linkSpeed { Stat(label: "Link speed", value: Format.bitsPerSecond(Double(speed) / 8)) }
                 }
                 NetworkAppsSection()
                 InternetQualityCard(interface: link.name, name: link.displayName, reveal: revealTest)
@@ -185,13 +217,24 @@ struct NetworkDetail: View {
                     .id(SpeedTestHeader.card)
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                     FactRow(label: "Connection", value: link.kind.rawValue.capitalized)
-                    if let speed = link.linkSpeed { FactRow(label: "Link speed", value: Format.bitsPerSecond(Double(speed) / 8)) }
                     ForEach(link.addresses, id: \.self) { address in
                         FactRow(label: address.contains(":") ? "IPv6" : "IPv4", value: address)
                     }
                 }
             }
         }
+    }
+
+    /// Traffic both ways, lit as a share of the link's speed where the
+    /// interface reports one (each way can use all of it, so the busier way's
+    /// share); where it doesn't, the bar stays dim rather than guess.
+    private func level() -> some View {
+        let busier = max(link.receivedBytesPerSecond, link.sentBytesPerSecond)
+        let share = link.linkSpeed.flatMap { $0 > 0 ? busier * 8 / Double($0) : nil }
+        let caption = link.linkSpeed.map { "of a \(Format.bitsPerSecond(Double($0) / 8)) link" } ?? "link speed not reported"
+        return LevelRow(fraction: share.map { min($0, 1) }, color: Theme.network,
+                        value: link.receivedBytesPerSecond + link.sentBytesPerSecond, format: Format.bitsPerSecond,
+                        caption: caption, label: "Network traffic", figureWidth: 96)
     }
 
     /// This link's last Internet quality result, or that a test is running on it.
