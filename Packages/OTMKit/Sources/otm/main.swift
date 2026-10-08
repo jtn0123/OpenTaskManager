@@ -27,6 +27,7 @@ USAGE:
                                  Sample that long and show each reading's
                                  lowest and highest, and the worst thermal
                                  pressure, as the Thermals page's table does
+  otm owner <path|port> [--json] Processes holding a file, folder or local port
   otm ports [--json]             Listening TCP/UDP ports of your processes
   otm net [-n COUNT] [--interval SECONDS] [--json]
                                  Processes moving the most network traffic
@@ -149,6 +150,9 @@ case "hardware":
 
 case "devices":
     devicesCommand(options)
+
+case "owner":
+    ownerCommand(options)
 
 case "ports":
     portsCommand(options)

@@ -51,24 +51,22 @@ public enum ConnectionSampler {
         var users: [UInt32: String] = [:]
 
         // PID 0 is the kernel, which has no descriptor table to read.
-        for pid in allPIDs() where pid > 0 {
+        for pid in ProcessDescriptorReader.allPIDs() ?? [] where pid > 0 {
             errno = 0
-            guard let count = listDescriptors(of: pid, into: &descriptors) else {
+            guard let count = ProcessDescriptorReader.listDescriptors(of: pid, into: &descriptors) else {
                 unreadable.insert(pid)
                 if errno == EPERM || errno == EACCES { hidden += 1 }
                 continue
             }
             scanned += 1
-            var process: Description?
+            var process: ProcessDescriptorReader.Description?
             for descriptor in descriptors.prefix(count) where Int32(descriptor.proc_fdtype) == PROX_FDTYPE_SOCKET {
-                var info = socket_fdinfo()
-                let size = Int32(MemoryLayout<socket_fdinfo>.size)
                 errno = 0
-                guard unsafe proc_pidfdinfo(pid, descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else {
+                guard let info = ProcessDescriptorReader.socket(pid: pid, fd: descriptor.proc_fd) else {
                     if unreadable.insert(pid).inserted, errno == EPERM || errno == EACCES { hidden += 1 }
                     continue
                 }
-                let described = process ?? describe(pid)
+                let described = process ?? ProcessDescriptorReader.describe(pid)
                 process = described
                 if let connection = decode(info.psi, pid: pid, fd: descriptor.proc_fd, processName: described.name,
                                            processStart: described.start) {
@@ -119,75 +117,6 @@ public enum ConnectionSampler {
             processName: processName, transport: transport, family: endpoints.family,
             local: endpoints.local, remote: endpoints.remote, tcpState: state, processStart: processStart
         )
-    }
-
-    // MARK: - Kernel reads
-
-    private static func allPIDs() -> [Int32] {
-        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
-        // reads stay within their buffers.
-        let estimate = proc_listallpids(nil, 0)
-        guard estimate > 0 else { return [] }
-        // Processes can start between the two calls; leave headroom.
-        var pids = [Int32](repeating: 0, count: Int(estimate) + 64)
-        let written = pids.withUnsafeMutableBytes { unsafe proc_listallpids($0.baseAddress, Int32($0.count)) }
-        guard written > 0 else { return [] }
-        return Array(pids.prefix(Int(written)))
-    }
-
-    /// Fills `buffer` with the process's descriptors and returns how many
-    /// there are, growing the buffer when it's too small. Nil with `errno`
-    /// set when the process can't be read.
-    private static func listDescriptors(of pid: Int32, into buffer: inout [proc_fdinfo]) -> Int? {
-        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
-        // reads stay within their buffers.
-        let stride = MemoryLayout<proc_fdinfo>.stride
-        for _ in 0..<3 {
-            let written = buffer.withUnsafeMutableBytes {
-                unsafe proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
-            }
-            if written == 0, errno == 0 { return 0 }
-            guard written > 0 else { return nil }
-            // A full buffer may have cut the list short; ask for the real size.
-            guard Int(written) >= buffer.count * stride else { return Int(written) / stride }
-            let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-            guard needed > 0 else { return nil }
-            buffer = [proc_fdinfo](repeating: proc_fdinfo(), count: max(Int(needed) / stride + 32, buffer.count * 2))
-        }
-        return buffer.count
-    }
-
-    /// The process's name and when it started, from the one record
-    /// `proc_name` reads the name from, so the start time takes no extra call.
-    private struct Description {
-        let name: String
-        let start: Date?
-        let path: String?
-        let uid: UInt32?
-    }
-
-    private static func describe(_ pid: Int32) -> Description {
-        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
-        // reads stay within their buffers.
-        var info = proc_bsdinfo()
-        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard unsafe proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else {
-            return Description(name: "PID \(pid)", start: nil, path: nil, uid: nil)
-        }
-        let name = text(info.pbi_name)
-        let shown = name.isEmpty ? text(info.pbi_comm) : name
-        let start = ProcessIdentity.startTime(microseconds: Int64(info.pbi_start_tvsec) * 1_000_000 + Int64(info.pbi_start_tvusec))
-        var path = [CChar](repeating: 0, count: 4096)
-        let length = path.withUnsafeMutableBytes { unsafe proc_pidpath(pid, $0.baseAddress, UInt32($0.count)) }
-        let executable = length > 0 ? String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) : nil
-        return Description(name: shown.isEmpty ? "PID \(pid)" : shown, start: start, path: executable, uid: info.pbi_uid)
-    }
-
-    /// A kernel record's fixed-size C string, up to its first NUL.
-    private static func text<Characters>(_ characters: Characters) -> String {
-        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
-        // reads stay within their buffers.
-        withUnsafeBytes(of: characters) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
     }
 }
 

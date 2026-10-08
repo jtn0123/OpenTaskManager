@@ -100,29 +100,16 @@ public enum ProcessInspector {
     }
 
     public static func currentDirectory(of pid: Int32) -> String? {
-        // The kernel receives the local record's exact size; socket kind selects the union member, and strings stop within their tuples.
-        var info = proc_vnodepathinfo()
-        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
-        guard unsafe proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
-        return withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
-            let path = unsafe String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
-            return path.isEmpty ? nil : path
-        }
+        guard let info = ProcessDescriptorReader.currentDirectory(of: pid) else { return nil }
+        let path = ProcessDescriptorReader.text(info.pvi_cdir.vip_path)
+        return path.isEmpty ? nil : path
     }
 
     /// Open file descriptors with paths and socket endpoints. Returns nil when
     /// macOS denies access (another user's process).
     public static func openFiles(of pid: Int32) -> [OpenFile]? {
-        // The kernel receives the local record's exact size; socket kind selects the union member, and strings stop within their tuples.
-        let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard needed > 0 else { return nil }
-        let capacity = Int(needed) / MemoryLayout<proc_fdinfo>.stride + 16
-        var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: capacity)
-        let written = descriptors.withUnsafeMutableBytes {
-            unsafe proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
-        }
-        guard written > 0 else { return nil }
-        let count = Int(written) / MemoryLayout<proc_fdinfo>.stride
+        var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: 256)
+        guard let count = ProcessDescriptorReader.listDescriptors(of: pid, into: &descriptors) else { return nil }
 
         return descriptors.prefix(count).compactMap { descriptor in
             switch Int32(descriptor.proc_fdtype) {
@@ -139,21 +126,15 @@ public enum ProcessInspector {
     }
 
     private static func vnode(pid: Int32, fd: Int32) -> OpenFile? {
-        // The kernel receives the local record's exact size; socket kind selects the union member, and strings stop within their tuples.
-        var info = vnode_fdinfowithpath()
-        let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
-        guard unsafe proc_pidfdinfo(pid, fd, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { return nil }
-        let path = withUnsafeBytes(of: info.pvip.vip_path) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        guard let info = ProcessDescriptorReader.vnode(pid: pid, fd: fd) else { return nil }
+        let path = ProcessDescriptorReader.text(info.pvip.vip_path)
         let mode = info.pvip.vip_vi.vi_stat.vst_mode
         let kind: OpenFile.Kind = (mode & S_IFMT) == S_IFDIR ? .directory : .file
         return OpenFile(descriptor: fd, kind: kind, detail: path, socket: nil)
     }
 
-    private static func socket(pid: Int32, fd: Int32) -> OpenFile? {
-        // The kernel receives the local record's exact size; socket kind selects the union member, and strings stop within their tuples.
-        var info = socket_fdinfo()
-        let size = Int32(MemoryLayout<socket_fdinfo>.size)
-        guard unsafe proc_pidfdinfo(pid, fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { return nil }
+    static func socket(pid: Int32, fd: Int32) -> OpenFile? {
+        guard let info = ProcessDescriptorReader.socket(pid: pid, fd: fd) else { return nil }
         let psi = info.psi
 
         let socketInfo: SocketInfo
