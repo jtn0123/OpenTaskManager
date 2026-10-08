@@ -57,9 +57,10 @@ USAGE:
                                  Each thread's CPU over the interval, CPU time,
                                  state and priority (your own processes, or
                                  any with sudo)
-  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--reconcile] [--json]
+  otm du [PATH] [--depth N] [-n COUNT] [--changes] [--reconcile] [--schedule] [--json]
                                  What's using the space under PATH (default: the
                                  current folder): biggest folders and files,
+                                 --schedule lists app schedules without scanning;
                                  space by category; --changes saves the scan
                                  (as the Storage page does) and shows what grew
                                  and shrank since the last saved one;

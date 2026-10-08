@@ -22,6 +22,15 @@ struct PageSelectionTests {
         }
     }
 
+    @Test func scheduleArgumentOpensStorageWithoutSavingThePage() throws {
+        try withIsolatedDefaults { defaults, suite in
+            defaults.set("Processes", forKey: "page")
+            let selection = PageSelection(defaults: defaults, arguments: ["openStorageSchedule": "/Library"])
+            #expect(selection.page == .storage)
+            #expect(defaults.persistentDomain(forName: suite)?["page"] as? String == "Processes")
+        }
+    }
+
     @Test func pageArgumentOnlySetsTheStartingPageAndChangesStillSave() throws {
         try withIsolatedDefaults { defaults, suite in
             defaults.set("Processes", forKey: "page")

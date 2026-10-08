@@ -304,7 +304,8 @@ Manager OG or any other proprietary task manager.
   with an accent outline while selected (`DriversStatusFilter` and
   `DriverSummaryFilter` in OTMKit); tests use fake bundles in a temp dir),
   Views/Storage (disk space: `StorageStore` keeps the session's last scan and
-  scans only on Scan or a scope pick, never on launch or per tick; the treemap
+  scans on Scan, a scope pick, or an opt-in schedule while the app is running,
+  never per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
   layer and the fixed-height strip below it read the pointer; the strip names
   the hovered item, else the selection, with its path below the scan root,
@@ -335,6 +336,19 @@ Manager OG or any other proprietary task manager.
   Components/Graphs (graphs, bars, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
+
+- `StorageScheduler` has one one-shot timer for the earliest due scope, none
+  without schedules. Due but ineligible work retries every 15 min and on wake;
+  power/thermal change notifications also move this same timer forward.
+  No scheduler work runs on sampler ticks. HID idle time, IOPowerSources, Low
+  Power Mode and thermal state are read only at a timer firing. Run Now
+  queues work on that same timer and still respects every safety condition.
+  A scan starts only after 2 min without input, with battery at least 30%,
+  Low Power Mode off and thermal state below serious. Automatic walks use
+  utility QoS, share the manual scanner and archive, and keep the scan slot
+  through cancellation and summary saving. Power and thermal notifications
+  stop an active automatic walk if its conditions become unsafe. No launch
+  agent or helper exists.
 
 - Slow sources follow visible demand, counted across windows by
   `SamplingDemandStore` and `SamplingDemand` in OTMKit. `SamplingDemandLease`
@@ -573,6 +587,34 @@ what changed since the last saved scan of that folder, and
 scan paths picked (use it with `-openStorageScope`; it never starts a move).
 Pick a scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
 Documents, Downloads and other apps' containers raise a privacy prompt.
+`-openStorageSchedule <path>` selects Storage and opens its schedule sheet.
+In debug builds `-scheduleFixture YES` shows two made-up schedules (one due,
+one with Permission needed), never persisted or run. Their actions are disabled.
+
+Storage's Scan This Automatically… offers Daily or Weekly and a local time
+preference. Settings' Storage section lists schedules with Remove and Run Now.
+`Settings.storageSchedules` holds a Codable JSON list (40 scopes at most), empty
+by default, with path, cadence, preferred hour/minute, fixed due time, last attempt
+and result. Sleep never advances a missed deadline. An unreadable or unmounted
+scope records its reason and advances to the next cadence, while private folders
+inside a readable one are counted in its result ("Scanned 4.2 GB · 3 folders
+unreadable"), and growth notices compare only scans with the same count; transient eligibility
+refusals keep Due since visible. Scheduling refuses Desktop, Documents, Downloads,
+Library/Containers and Library/Group Containers, their descendants and their
+parents (including Home and the startup disk), checking resolved paths too.
+A scheduled scan must never trigger a privacy prompt, even with Full Disk Access.
+
+Summaries carry optional `scheduled` provenance (version 1, cadence); absent is
+manual, and reading old summaries never rewrites them. The scan picker marks
+Scheduled · Daily/Weekly with a clock. Show Saved Scans reopens the bounded tree
+without walking it, with unnamed remainders and no cleanup identities. Pick the
+later scan, then Compare With an earlier one to compare any saved pair.
+`otm du --schedule [--json]` reads only the app's persisted defaults domain and
+lists due dates and last results; it never scans. Growth notifications default
+off (`storageScheduleNotifications`); only turning on Settings' switch requests
+notification permission. A readable scan growing by more than both 5 GB and 10%
+against the previous saved scan may notify; otherwise nothing appears outside
+Storage.
 `-page <name>` works too. Each running copy keeps its own page
 (`PageSelection`): it reads the saved page, or the one these arguments name,
 once at launch, and saves each change for the next launch. It never follows
