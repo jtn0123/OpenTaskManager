@@ -31,6 +31,29 @@ struct IncidentRecorderTests {
         #expect(!exported.contains("other"))
     }
 
+    @Test func listenerChangesKeepToTheCapAndSayTheyAreChanges() async throws {
+        let url = url()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let recorder = try FlightRecorder(url: url)
+        func listener(_ port: Int) -> ListenerObservation {
+            let executable = ListenerExecutable(path: "/example/server", teamIdentifier: "TEAM", signingIdentifier: "example.server")
+            let connection = Connection(id: .init(pid: 7, fd: Int32(port % 1_000), socket: UInt64(port)), processName: "server",
+                                        transport: .tcp, family: .ipv4, local: Endpoint(address: "127.0.0.1", port: port),
+                                        remote: nil, tcpState: .listen)
+            return ListenerObservation(identity: ListenerIdentity(executable: executable, transport: .tcp, port: port, scope: .loopback),
+                                       connection: connection)
+        }
+        _ = try await recorder.observeListeners([listener(1)], confirmed: [], at: date(900))
+        let added = [listener(52_344), listener(8_080), listener(8_081)]
+        _ = try await recorder.observeListeners(added, confirmed: added, at: date(1_000))
+        let timeline = try await recorder.incident(.init(from: date(990), to: date(1_010)), limit: 2, reportFolders: [])
+        let sockets = try #require(timeline.lanes.first { $0.kind == .sockets })
+        #expect(sockets.rows.count == 2)
+        #expect(sockets.cut, "a third change was left out")
+        #expect(sockets.rows.map(\.title) == ["server · listener change on system-assigned port (52344 when seen)",
+                                               "server · listener change on port 8080"])
+    }
+
     @Test func resourceBaselineGapsAndCPUSequenceUseRecordedFigures() async throws {
         let url = url()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

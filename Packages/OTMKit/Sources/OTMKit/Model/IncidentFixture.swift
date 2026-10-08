@@ -34,7 +34,7 @@ public enum IncidentFixture {
                 .init(id: "old", time: time.addingTimeInterval(-20), title: "Example Agent · socket opened",
                       detail: "127.0.0.1:8080 → 192.0.2.147:443", process: identity, lifetime: 1, socket: "fixture-old",
                       port: 8080, transport: "tcp", remoteAddress: "192.0.2.147", kind: "opened"),
-                .init(id: "new", time: time.addingTimeInterval(4), title: "Example Agent · new listener on port 8080",
+                .init(id: "new", time: time.addingTimeInterval(4), title: "Example Agent · listener change on port 8080",
                       process: replacement, lifetime: 2, socket: "fixture-new", port: 8080, transport: "tcp", kind: "listener"),
             ], coverage: coverage, cut: true, note: "Made-up cut lane; further evidence may exist."),
             IncidentLane(kind: .events, rows: [

@@ -184,11 +184,12 @@ extension FlightRecorder {
             if row.ending == .closed, let end = row.closedBy, window.contains(end) { rows.append(entry(end, kind: "closed")) }
         }
         let changes = try incidentListenerChanges(window, limit: limit + 1)
-        for (index, change) in changes.prefix(limit + 1).enumerated() {
+        for (index, change) in changes.prefix(limit).enumerated() {
             let connection = change.listener.connection
             let lifetime = IncidentTimeline.lifetime(for: connection.process, in: lifetimes)
+            // A widened bind or a port changing hands is a change, not always a new listener; the reasons follow.
             rows.append(IncidentRow(id: "listener/\(index)", time: change.detectedAt,
-                title: "\(connection.processName) · new listener on port \(connection.local.port ?? 0)",
+                title: "\(connection.processName) · listener change on \(change.id.portLabel(seen: connection.local.port))",
                 detail: change.reasons.map(\.label).joined(separator: " · ") + " · \(change.listener.identity.executable.path)",
                 process: connection.process, lifetime: lifetime?.id, port: connection.local.port,
                 transport: connection.transport.rawValue, kind: "listener"))
@@ -198,7 +199,7 @@ extension FlightRecorder {
             LaunchHistoryInterval(start: $0.start, end: $0.end)
         }, cut: socketCoverage.intervals.count > limit)
         return IncidentLane(kind: .sockets, rows: rows, coverage: coverage,
-            limit: limit, cut: sockets.count > limit,
+            limit: limit, cut: sockets.count > limit || changes.count > limit,
             note: "Socket walks may miss short-lived sockets. Hidden processes: \(socketCoverage.intervals.map(\.hiddenProcesses).max() ?? 0). "
                 + "Retention dropped \(socketCoverage.droppedRows) rows. Listener changes are pending reviews only.")
     }

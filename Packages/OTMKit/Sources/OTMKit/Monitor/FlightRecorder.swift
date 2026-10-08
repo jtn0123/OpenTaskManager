@@ -336,7 +336,6 @@ public actor FlightRecorder {
         defer { unsafe sqlite3_finalize(statement) }
         unsafe sqlite3_bind_double(statement, 1, start.timeIntervalSince1970)
         unsafe sqlite3_bind_double(statement, 2, end.timeIntervalSince1970)
-        unsafe sqlite3_bind_int64(statement, 3, Int64(max(count, 0)))
         var totals: [String: Double] = [:]
         while unsafe sqlite3_step(statement) == SQLITE_ROW {
             guard let name = unsafe Self.text(statement, 0) else { continue }
