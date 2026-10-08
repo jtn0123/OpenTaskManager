@@ -40,4 +40,16 @@ public struct PathParts: Sendable, Hashable {
         // "/bin" is in "/", not in an empty folder.
         folder = slash == trimmed.startIndex ? "/" : String(trimmed[..<slash])
     }
+
+    /// A bounded folder preview keeps its beginning and its end. Count
+    /// characters, not bytes, so a cut never splits a composed filename.
+    /// The view also limits this preview to two lines at its actual width.
+    public func compactFolder(maxCharacters: Int = 64) -> String? {
+        guard let folder else { return nil }
+        let limit = max(1, maxCharacters)
+        guard folder.count > limit else { return folder }
+        let kept = limit - 1
+        let beginning = (kept + 1) / 2
+        return String(folder.prefix(beginning)) + "…" + String(folder.suffix(kept - beginning))
+    }
 }

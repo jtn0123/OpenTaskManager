@@ -35,6 +35,26 @@ struct LaunchHistoryBaselineTests {
                              LaunchHistoryInterval(start: date(1_070), end: date(1_130))])
     }
 
+    @Test func thePageGetsTheOriginalFailureTimeAfterRelaunchAndRetention() async throws {
+        let url = url()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        do {
+            let recorder = try FlightRecorder(url: url)
+            try await recorder.observeLaunchJobs(reading(1_000, pid: nil, exit: 1))
+            try await recorder.prune(before: date(2_000))
+        }
+        let recorder = try FlightRecorder(url: url)
+        try await recorder.observeLaunchJobs(reading(3_000, pid: nil, exit: 1))
+        let key = LaunchHistoryKey(label: "job", domain: "system")
+        let state = await recorder.launchJobObservedStates()[key]
+        let status = LaunchItemStatus(execution: .failed(code: 1), registration: .init(isLoaded: true, isDisabled: false),
+                                      needsAttention: true)
+        #expect(status.failureFirstSeen(in: state, key: key) == date(1_000))
+        try await recorder.observeLaunchJobs(reading(3_060, pid: nil, exit: 2))
+        let changed = await recorder.launchJobObservedStates()[key]
+        #expect(status.failureFirstSeen(in: changed, key: key) == nil)
+    }
+
     @Test func changedRelaunchHasOneObservedChangeBoundedByTheLastRead() async throws {
         let url = url()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }

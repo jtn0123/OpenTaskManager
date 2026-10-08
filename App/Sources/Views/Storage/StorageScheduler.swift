@@ -35,8 +35,11 @@ final class StorageScheduler {
             let now = Date()
             var due = DiskScanSchedule(path: "/Library", cadence: .weekly, now: now)
             due.dueAt = now.addingTimeInterval(-3 * 86_400)
+            due.lastRefusal = DiskScanScheduleRefusal(reason: "Waiting for two minutes without input",
+                                                     checkedAt: now.addingTimeInterval(-5 * 60))
             var denied = DiskScanSchedule(path: "/usr", cadence: .daily, now: now)
             denied.finish(at: now, result: DiskScanScheduleSafety.permissionNeeded)
+            denied.lastRefusal = DiskScanScheduleRefusal(reason: DiskScanScheduleSafety.permissionNeeded, checkedAt: now)
             schedules = DiskScanSchedules([due, denied])
             return
         }
@@ -140,7 +143,7 @@ final class StorageScheduler {
             // Input gates starting a walk; a power or thermal change can stop one already running.
             conditions.idleSeconds = 120
             if let reason = conditions.refusal(now: now, schedule: active, runNow: true) {
-                waiting[active.path] = reason
+                recordRefusal([active], reason: reason, at: now)
                 StorageStore.shared.stop()
             }
             return
@@ -152,7 +155,7 @@ final class StorageScheduler {
         let conditions = DiskScanScheduleReader.conditions(idleSeconds: idle, anotherScanRunning: StorageStore.shared.isScanning)
         if let reason = conditions.refusal(now: now, schedule: schedule, runNow: runNowPaths.contains(schedule.path)) {
             prepared = nil
-            for item in due { waiting[item.path] = reason }
+            recordRefusal(due, reason: reason, at: now)
             arm(afterRefusal: true)
             return
         }
@@ -170,7 +173,7 @@ final class StorageScheduler {
             checking = false
             guard schedules.entries.contains(schedule) else { arm(); return }
             if let failure {
-                finished(schedule, result: failure)
+                finished(schedule, result: failure, refused: true)
                 return
             }
             // A fresh timer firing checks input and power again after asynchronous filesystem work.
@@ -182,7 +185,9 @@ final class StorageScheduler {
     func completed(_ schedule: DiskScanSchedule, saved: StorageArchive.Saved?, cancelled: Bool) {
         active = nil
         if cancelled {
-            waiting[schedule.path] = waiting[schedule.path] ?? "Scan stopped; waiting to retry"
+            if waiting[schedule.path] == nil {
+                recordRefusal([schedule], reason: "Scan stopped; waiting to retry", at: .now)
+            }
             arm(afterRefusal: true)
             return
         }
@@ -201,9 +206,20 @@ final class StorageScheduler {
         Task { try? await UNUserNotificationCenter.current().add(request) }
     }
 
-    private func finished(_ schedule: DiskScanSchedule, result: String) {
-        if let index = schedules.entries.firstIndex(where: { $0 == schedule }) {
-            schedules.entries[index].finish(at: Date(), result: result)
+    private func recordRefusal(_ entries: [DiskScanSchedule], reason: String, at now: Date) {
+        for schedule in entries {
+            guard let index = schedules.entries.firstIndex(where: { $0.hasSameDeadline(as: schedule) }) else { continue }
+            waiting[schedule.path] = reason
+            schedules.entries[index].lastRefusal = DiskScanScheduleRefusal(reason: reason, checkedAt: now)
+        }
+        persist()
+    }
+
+    private func finished(_ schedule: DiskScanSchedule, result: String, refused: Bool = false) {
+        if let index = schedules.entries.firstIndex(where: { $0.hasSameDeadline(as: schedule) }) {
+            let now = Date()
+            schedules.entries[index].finish(at: now, result: result)
+            if refused { schedules.entries[index].lastRefusal = DiskScanScheduleRefusal(reason: result, checkedAt: now) }
             persist()
         }
         runNowPaths.remove(schedule.path)

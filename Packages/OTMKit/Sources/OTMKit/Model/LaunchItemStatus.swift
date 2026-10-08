@@ -1,14 +1,8 @@
 import Foundation
 
-/// A startup item's status in two parts that never mix: what its job is
-/// doing (`execution`), the one label both the Startup table's Status column
-/// and the details' header show, and whether launchd holds the job at all
-/// (`registration`), which the header gives on a line of its own.
-///
-/// "Loaded" is registration, not something a job does, so it never stands in
-/// for the job's state: a loaded job whose last run exited with an error is
-/// "Failed · exit code 1" in the row and the header alike, with "Loaded"
-/// beside it in the header.
+/// A startup item's execution and registration stay separate. The table keeps
+/// a short failure label; the details name it as the last exit, with the time
+/// it was first observed, so an old failure never reads as a new diagnosis.
 public struct LaunchItemStatus: Hashable, Sendable, Comparable {
     /// What the job is doing, or why nothing runs.
     public enum Execution: Hashable, Sendable {
@@ -129,6 +123,34 @@ public struct LaunchItemStatus: Hashable, Sendable, Comparable {
     /// Title and detail in one line: "Failed · exit code 1".
     public var summary: String {
         [title, detail].compactMap(\.self).joined(separator: " · ")
+    }
+
+    /// The retained state time is the first sighting of this unchanged exit,
+    /// not an exact exit time. A different job, exit or running state can't date it.
+    public func failureFirstSeen(in state: LaunchHistoryState?, key: LaunchHistoryKey) -> Date? {
+        guard case let .failed(code) = execution, let state, state.key == key,
+              state.loaded, state.pid == nil, state.lastExit == .code(code) else { return nil }
+        return state.time
+    }
+
+    /// The header keeps the present state separate from the historical exit.
+    public func headerSummary(firstSeen: Date?, at now: Date = .now, calendar: Calendar = .current,
+                              time: (Date, Bool) -> String = Self.observationTime) -> String {
+        guard case let .failed(code) = execution else { return summary }
+        let when = firstSeen.map { "at " + time($0, !calendar.isDate($0, inSameDayAs: now)) } ?? "· time not known"
+        return "Not running · last exit code \(code) \(when)"
+    }
+
+    /// The table stays short, but its tooltip always gives the observation time or its absence.
+    public func observationExplanation(firstSeen: Date?, at now: Date = .now, calendar: Calendar = .current,
+                                       time: (Date, Bool) -> String = Self.observationTime) -> String {
+        guard case .failed = execution else { return explanation }
+        let when = firstSeen.map { time($0, !calendar.isDate($0, inSameDayAs: now)) } ?? "time not known"
+        return explanation + " First seen: \(when). This is an observation time, not the exact exit time."
+    }
+
+    public static func observationTime(_ date: Date, includesDate: Bool) -> String {
+        date.formatted(date: includesDate ? .abbreviated : .omitted, time: .shortened)
     }
 
     /// What the state means, for a tooltip.

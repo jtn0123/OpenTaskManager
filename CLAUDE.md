@@ -346,10 +346,15 @@ Manager OG or any other proprietary task manager.
   scope, PID and start time and names failed, crashed and restarting jobs for
   the Problems filter; `LaunchItemStatus` in OTMKit is the one label for what
   a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
-  running, Disabled, Not loaded) that the Status column, the details' header
-  and the Apps page share, with launchd's Loaded or Not loaded on a line of
-  its own, never in its place ("exit 1" where the column is narrow, the rest
-  in its tooltip); the details put Program right under it, and a notice
+  running, Disabled, Not loaded). The Status column stays short ("exit 1"
+  where narrow); its failure tooltip names when that exit was first seen,
+  or "time not known". The details say "Not running · last exit code 1 at …",
+  naming the date too before today, from the retained matching job baseline,
+  never an exact exit time or the latest unchanged read. Problems still
+  includes it. LaunchJobStore publishes the recorder's already-held baselines
+  after page writes, without another per-job query. View history beside Last
+  exit scrolls to the existing History section. Apps shares the short status;
+  launchd's Loaded or Not loaded stays on a line of its own; the details put Program right under it, and a notice
   (`LaunchJobHealth.notice`) only where it adds something: what a known code
   or a crash signal means, a failure before the run now, restarts seen; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
@@ -402,6 +407,13 @@ Manager OG or any other proprietary task manager.
   what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
   Reveal in Finder); "Where the space is" (`StorageReconcilePanel`), folded at
   first, reads the volume's figures once per finished scan, off the main actor.
+  Unfolded, its existing scroll view is capped at 180 points and at the space
+  left after the top cards and treemap. StorageResultsLayout reserves at least
+  180 points for the map itself, plus its breadcrumb, selection and caption,
+  so reconciliation scrolls inside the panel and the status strips stay visible.
+  Very tall top cards or a shorter window scroll the results as well, keeping
+  the schedule strip inside the window. Measurements change with content or
+  window size, never sampler ticks.
   Largest Files supports Cmd/Shift selection by path; a treemap item's Add to
   Cleanup joins it. Clean Up opens `StorageCleanupSheet` only after
   `StorageCleanupReader` has refreshed the picks off the main actor. The scan
@@ -430,6 +442,10 @@ Manager OG or any other proprietary task manager.
   No scheduler work runs on sampler ticks. HID idle time, IOPowerSources, Low
   Power Mode and thermal state are read only at a timer firing. Run Now
   queues work on that same timer and still respects every safety condition.
+  Each refusal stores its reason and check time in the schedule's optional
+  lastRefusal, including scope access failures; older schedules still decode.
+  Due schedules show these in the page's popover with Run Now, or the default
+  two-minute idle rule and "Last checked: not recorded" before a refusal exists.
   A scan starts only after 2 min without input, with battery at least 30%,
   Low Power Mode off and thermal state below serious. Automatic walks use
   utility QoS, share the manual scanner and archive, and keep the scan slot
@@ -694,7 +710,8 @@ Documents, Downloads and other apps' containers raise a privacy prompt.
 `-openStorageSchedules YES` opens the popover listing the schedules from the
 line under the page.
 In debug builds `-scheduleFixture YES` shows two made-up schedules (one due,
-one with Permission needed), never persisted or run. Their actions are disabled.
+one with Permission needed), with refusal reasons and check times, never
+persisted or run. Their actions, including the popover's Run Now, are disabled.
 
 Storage's Scan This Automatically… offers Daily or Weekly and a local time
 preference. Settings' Storage section lists schedules with Remove and Run Now.
@@ -832,6 +849,9 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   `GridMath.stripRows`) when they don't fit one row or the details are open,
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.
+  History rows keep "PID 62194 · fd 4 · IPv4" under the process name, even
+  as Protocol and First / last seen give way to fit; descriptors remain
+  separate sockets, and the details header keeps the descriptor and family.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
   `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
   `StartupColumn`'s order (OTMKit's Layout/): Source first, then Launches and Publisher,
@@ -893,10 +913,12 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
 - A details pane has one scroll view, edge to edge between a pinned header and
   a pinned footer of actions, with dividers at both ends. Long technical values
   fold away in a `DetailDisclosure` (Startup's arguments, an app's certificate
-  chain). A path shows its name over its folder, which wraps and can be
-  selected (`CopyableText(splitsPath: true)`, `PathParts` in OTMKit), the whole
-  path in its tooltip and copied whole, with Copy Path beside Reveal in Finder:
-  one control, never a scroll view of its own. Identifiers too long for their
+  chain). A path shows its name over its folder, on at most two lines with
+  the middle cut (`CopyableText(splitsPath: true)`, PathParts.compactFolder in
+  OTMKit). Show full path expands selectable whole text; the tooltip and Copy
+  always keep the whole path, with Copy Path beside Reveal in Finder: one
+  control, never a scroll view of its own. This shared control serves Startup,
+  Apps, Drivers and the process inspector. Identifiers too long for their
   line (a UUID) keep to one, cut in the middle (`truncatesMiddle`).
 - A row picked outside its table (a launch argument, another page, Show in
   List) or moved by the user's filter, search or sort is brought into view

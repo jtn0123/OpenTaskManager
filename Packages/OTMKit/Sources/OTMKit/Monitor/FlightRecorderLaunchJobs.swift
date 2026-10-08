@@ -131,6 +131,10 @@ struct LaunchHistoryWriter: Sendable {
 }
 
 extension FlightRecorder {
+    /// Reuses the baselines already loaded and updated by the bulk observation.
+    /// The page needs their original times, without another query for every job.
+    public func launchJobObservedStates() -> [LaunchHistoryKey: LaunchHistoryState] { launchWriter.states }
+
     /// Configuration reads have their own clock, so they don't invent a job-state read.
     public func observeLaunchConfiguration(_ item: LaunchItem, at time: Date) throws(FlightRecorderError) {
         guard item.hasFile, !item.isUnreadable, !item.isMissingLabel else { return }

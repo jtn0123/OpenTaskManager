@@ -47,19 +47,31 @@ struct StartupItemDetail: View {
     var body: some View {
         let restriction = LaunchControl.restriction(for: item)
         let pinsTop = height.map { $0 >= topHeight + 24 + Self.detailsMinimum + footerHeight + 2 } ?? true
+        ScrollViewReader { proxy in
+            pane(restriction: restriction, pinsTop: pinsTop, viewHistory: { proxy.scrollTo("history", anchor: .top) })
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID,
+                              pid: item.pid, lastExit: item.job?.lastExit)) {
+            let (label, scope) = (item.label, item.scope)
+            service = await Task.detached(priority: .userInitiated) { Launchctl.service(label, scope: scope) }.value
+        }
+    }
+
+    private func pane(restriction: String?, pinsTop: Bool, viewHistory: @escaping () -> Void) -> some View {
         VStack(spacing: 0) {
             if pinsTop {
                 top(restriction: restriction)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
-                ScrollView { details.padding(12) }
+                ScrollView { details(viewHistory: viewHistory).padding(12) }
                     .defaultScrollAnchor(Self.scrollAnchor)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         top(restriction: restriction)
-                        details
+                        details(viewHistory: viewHistory)
                     }
                     .padding(12)
                 }
@@ -68,12 +80,6 @@ struct StartupItemDetail: View {
             Divider()
             footer(restriction: restriction)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
-        }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-        .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID,
-                              pid: item.pid, lastExit: item.job?.lastExit)) {
-            let (label, scope) = (item.label, item.scope)
-            service = await Task.detached(priority: .userInitiated) { Launchctl.service(label, scope: scope) }.value
         }
     }
 
@@ -125,19 +131,29 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// What the job is doing, the label its row's Status shows ("Failed ·
-    /// exit code 1"), over whether launchd has it loaded, which is a separate
-    /// thing; then the action that fits: Start Now while nothing runs,
+    /// What runs now, with the last failing exit dated by its first observation,
+    /// over whether launchd has it loaded; then the action that fits: Start Now while nothing runs,
     /// Restart and Stop while it does.
     private func state(restriction: String?) -> some View {
         let status = LaunchItemStatus(item: item, health: health)
+        let firstSeen = status.failureFirstSeen(in: model.launchJobs.observedStates[LaunchHistoryKey(item)],
+                                               key: LaunchHistoryKey(item))
         return VStack(alignment: .leading, spacing: 8) {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 4) {
                 GridRow {
                     Text("Status").foregroundStyle(.secondaryText)
-                    LaunchStateLabel(status: status)
-                        .fontWeight(.medium)
-                        .help(status.explanation)
+                    Group {
+                        if case .failed = status.execution {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LaunchJobHealth.tint)
+                                Text(status.headerSummary(firstSeen: firstSeen))
+                            }
+                        } else {
+                            LaunchStateLabel(status: status)
+                        }
+                    }
+                    .fontWeight(.medium)
+                    .help(status.observationExplanation(firstSeen: firstSeen))
                 }
                 GridRow {
                     Text("launchd").foregroundStyle(.secondaryText)
@@ -161,17 +177,18 @@ struct StartupItemDetail: View {
     /// say enough, launchd's figures for the job and what the property list
     /// says. The arguments fold away and paths are a name over a folder, so
     /// nothing here needs a scroll view of its own.
-    private var details: some View {
+    private func details(viewHistory: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             program
             if let notice = health.notice(for: item, record: record, time: Self.clock) {
                 noticeView(notice)
             }
-            facts
+            facts(viewHistory: viewHistory)
             if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
             launches
             StartupHistorySection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item,
                                   refreshID: refreshID, jobs: model.launchJobs)
+                .id("history")
             if item.hasPlist {
                 StartupFilesSection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item, refreshID: refreshID)
             }
@@ -209,7 +226,7 @@ struct StartupItemDetail: View {
 
     /// What launchd has done with the job, then what the property list says
     /// about it, which doesn't change as it runs.
-    private var facts: some View {
+    private func facts(viewHistory: @escaping () -> Void) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             if let disabledBy {
                 FactRow(label: "Disabled by", value: disabledBy)
@@ -236,7 +253,14 @@ struct StartupItemDetail: View {
                 .font(.callout)
             }
             if let lastExit {
-                FactRow(label: "Last exit", value: lastExit)
+                GridRow {
+                    Text("Last exit").foregroundStyle(.secondaryText)
+                    FlowRow(spacing: 8, lineSpacing: 3, spreads: false) {
+                        Text(lastExit).textSelection(.enabled)
+                        Button("View history", action: viewHistory).buttonStyle(.link)
+                    }
+                }
+                .font(.callout)
             }
             // A gap rather than a rule, which would read as another region.
             Color.clear.frame(height: 2).gridCellUnsizedAxes(.horizontal)
@@ -402,12 +426,10 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// launchd's last exit and its reason. Where the status line or the
-    /// notice already gives the exit ("Failed · exit code 1"), only a reason
-    /// launchd adds, or nothing.
+    /// The last exit stays beside View history even when the header names
+    /// it, with any reason launchd adds.
     private var lastExit: String? {
         let reason = service?.lastExitReason.map(LaunchServiceInfo.describe(exitReason:))
-        if health.tellsLastExit { return reason }
         if let exit = item.job?.lastExit { return [exit.description, reason].compactMap(\.self).joined(separator: " · ") }
         return item.job == nil ? "—" : "Hasn't exited"
     }

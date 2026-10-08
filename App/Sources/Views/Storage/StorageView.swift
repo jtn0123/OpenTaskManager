@@ -339,6 +339,8 @@ private struct StorageResultsView: View {
     let result: StorageResult
     let hover: StorageHover
     var focus: FocusState<StorageStage?>.Binding
+    @State private var summaryHeight: CGFloat = 160
+    @State private var footerHeight: CGFloat = 40
 
     var body: some View {
         let usage = result.usage
@@ -346,6 +348,27 @@ private struct StorageResultsView: View {
         // This scan's comparison, once saved; the treemap shows it in Changes mode.
         let comparison = store.comparison.flatMap { $0.later.scannedAt == usage.finishedAt ? $0 : nil }
         let changes = store.list == .changes ? comparison.map(TreemapChanges.init) : nil
+        GeometryReader { geometry in
+            results(usage: usage, folder: folder, comparison: comparison, changes: changes, height: geometry.size.height)
+        }
+        // A new scan's items are numbered afresh.
+        .onChange(of: usage.finishedAt, initial: true) { hover.useScan(usage) }
+        .onChange(of: ChangesFocus(showsChanges: store.list == .changes, since: comparison?.earlier.scannedAt, folder: folder.id),
+                  initial: true) {
+            focusChanges(comparison, in: folder)
+        }
+    }
+
+    private func results(usage: DiskUsage, folder: DiskItem, comparison: DiskScanComparison?,
+                         changes: TreemapChanges?, height: CGFloat) -> some View {
+        ScrollView {
+            resultCards(usage: usage, folder: folder, comparison: comparison, changes: changes, height: height)
+                .padding(16)
+        }
+    }
+
+    private func resultCards(usage: DiskUsage, folder: DiskItem, comparison: DiskScanComparison?,
+                             changes: TreemapChanges?, height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 SummaryCard(store: store, result: result, comparison: comparison)
@@ -354,6 +377,7 @@ private struct StorageResultsView: View {
                     .frame(maxWidth: .infinity)
             }
             .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { summaryHeight = $0 }
             GeometryReader { proxy in
                 HStack(spacing: 12) {
                     TreemapCard(store: store, result: result, folder: folder, hover: hover, changes: changes, open: open)
@@ -362,18 +386,11 @@ private struct StorageResultsView: View {
                         .frame(width: min(max(proxy.size.width * 0.36, 250), 340))
                 }
             }
-            .frame(minHeight: 200)
-            // Asked first, after the treemap's minimum: unfolded, the
-            // reconciliation takes what it needs and scrolls only past that.
-            StorageFooter(store: store, usage: usage)
-                .layoutPriority(1)
-        }
-        .padding(16)
-        // A new scan's items are numbered afresh.
-        .onChange(of: usage.finishedAt, initial: true) { hover.useScan(usage) }
-        .onChange(of: ChangesFocus(showsChanges: store.list == .changes, since: comparison?.earlier.scannedAt, folder: folder.id),
-                  initial: true) {
-            focusChanges(comparison, in: folder)
+            .frame(height: StorageResultsLayout.cardHeight(available: Double(height), summary: Double(summaryHeight),
+                                                          footer: Double(footerHeight)))
+            StorageFooter(store: store, usage: usage,
+                          maximumHeight: StorageResultsLayout.footerHeight(available: Double(height), summary: Double(summaryHeight)))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
     }
 
@@ -595,7 +612,8 @@ private struct TreemapCard: View {
                     EmptyFolder(store: store, usage: usage, folder: folder)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minHeight: StorageResultsLayout.mapMinimum, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
             Divider()
             TreemapSelectionStrip(usage: usage, folder: folder, hover: hover)
             HStack(spacing: 8) {
@@ -658,6 +676,8 @@ private struct EmptyFolder: View {
 private struct StorageFooter: View {
     let store: StorageStore
     let usage: DiskUsage
+    let maximumHeight: Double
+    @State private var warningHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -675,9 +695,11 @@ private struct StorageFooter: View {
                         .buttonStyle(.link)
                         .fixedSize()
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { warningHeight = $0 }
                 .help(usage.unreadablePaths.prefix(5).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
             }
-            StorageReconcilePanel(store: store)
+            StorageReconcilePanel(store: store,
+                                  maximumHeight: max(0, maximumHeight - (usage.unreadableFolders > 0 ? Double(warningHeight) + 6 : 0)))
         }
         .font(.explanation)
     }
