@@ -512,8 +512,10 @@ the thermal state turns fair), so `-openResource benchmarks
 - Each Performance device page opens the same way (`PerformanceHero.swift`):
   `DeviceHeader`, its title over a segmented `LevelBar` (Core Animation layers,
   the lit width eased in the render server; a nil fraction leaves it dim) and the
-  current figure, then one `DeviceCard` whose main graph (`heroPlot`, over a
-  still `FineGrid`) is `Hero.height` tall: the pane's measured height
+  current figure, then one `DeviceCard` whose main graph (`heroPlot`, which
+  sets `fineGridRows`, so the graph draws `FineGridLines`: still rows, columns
+  that scroll with the data as every live graph's do, `FineGridSpacing` in
+  OTMKit) is `Hero.height` tall: the pane's measured height
   (`detailPaneHeight`, which changes with the window, never per tick) less
   `Hero.reserved`, clamped by `HeroHeight` in OTMKit, with the device's figures
   under it in `DeviceFigures` (columns from `FigureColumns`). Everything else

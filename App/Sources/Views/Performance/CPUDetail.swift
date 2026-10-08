@@ -106,7 +106,7 @@ struct CPUDetail: View {
                 let values = model.cpuHistory.values
                 GraphView(series: [GraphSeries(values: values, color: Theme.cpu),
                                    GraphSeries(values: model.cpuSystemHistory.values, color: Theme.wired, fill: false)],
-                          maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: window)), showsGrid: false,
+                          maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: window)),
                           glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8)
                     .heroPlot(height: height, tint: Theme.cpu)
             }
@@ -214,7 +214,7 @@ struct CPUDetail: View {
                     GraphView(series: [GraphSeries(values: histories[index], color: Theme.tier(tier.level)),
                                        GraphSeries(values: model.tierHistory(level: tier.level, kernel: true), color: Theme.wired,
                                                    fill: false)],
-                              maxValue: top, showsGrid: false, glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote,
+                              maxValue: top, glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote,
                               cornerRadius: 8)
                         .heroPlot(height: each, tint: Theme.tier(tier.level), rows: 4)
                 }

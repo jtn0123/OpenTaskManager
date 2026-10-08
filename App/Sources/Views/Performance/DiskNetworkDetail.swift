@@ -66,7 +66,7 @@ struct DiskDetail: View {
             VStack(alignment: .leading, spacing: 8) {
                 HeroGraphTitle(title: "Active time", trailing: Format.percent(disk.activeFraction))
                 GraphView(series: [GraphSeries(values: model.diskActiveHistory[disk.id]?.values ?? [], color: Theme.disk)],
-                          maxValue: 1, showsGrid: false, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
+                          maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
                     .heroPlot(height: (height * 0.38).rounded(), tint: Theme.disk, rows: 4)
                 HeroGraphTitle(title: "Transfer rate",
                                trailing: Format.bytesPerSecond(disk.readBytesPerSecond + disk.writeBytesPerSecond))
@@ -75,7 +75,7 @@ struct DiskDetail: View {
                               GraphSeries(values: model.diskWriteHistory[disk.id]?.values ?? [], color: Theme.diskSecondary,
                                           fill: false, dashed: true),
                           ],
-                          showsGrid: false, glows: true, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond,
+                          glows: true, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond,
                           axisUnits: .binaryBytes, cornerRadius: 8)
                     .heroPlot(height: (height * 0.62).rounded(), tint: Theme.disk)
             }
@@ -201,7 +201,7 @@ struct NetworkDetail: View {
                                   GraphSeries(values: received, color: Theme.network),
                                   GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),
                               ],
-                              showsGrid: false, glows: true, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits,
+                              glows: true, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits,
                               cornerRadius: 8)
                         .heroPlot(height: Hero.height(pane: pane, extra: Hero.legendLine), tint: Theme.network)
                 } figures: {

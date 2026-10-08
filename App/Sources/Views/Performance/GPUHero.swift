@@ -62,7 +62,7 @@ struct GPUHero: View {
                     GraphSeries(values: detail.renderer.values, color: Self.renderer, fill: false),
                     GraphSeries(values: detail.tiler.values, color: Self.tiler, fill: false, dashed: true),
                 ],
-                maxValue: 1, showsGrid: false, glows: true, axis: { Format.percent($0) }, cornerRadius: 8
+                maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8
             )
             .heroPlot(height: Hero.height(pane: pane, extra: Hero.legendLine), tint: Theme.gpu)
         } figures: {
@@ -87,7 +87,7 @@ struct GPUHero: View {
                     .lineLimit(1)
             }
         } plot: {
-            GraphView(series: [GraphSeries(values: history, color: Theme.gpu)], showsGrid: false, glows: true,
+            GraphView(series: [GraphSeries(values: history, color: Theme.gpu)], glows: true,
                       minimumCeiling: Self.memoryCeiling, axis: MemoryDetail.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
                 .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.gpu)
         } figures: {

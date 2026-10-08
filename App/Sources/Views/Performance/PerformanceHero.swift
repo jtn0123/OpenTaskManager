@@ -155,13 +155,12 @@ struct HeroGraphTitle: View {
 }
 
 extension View {
-    /// A main graph's plot: `height` tall, over a fine grid, in a wash of
-    /// the device's colour with a border in it. The graph's own grid is off
-    /// (`showsGrid: false`); `inset` is its vertical padding, 4 with glows,
-    /// so the grid's floor and top lines meet its 0 and its scale's top.
-    func heroPlot(height: CGFloat, tint: Color, inset: CGFloat = 4, rows: Int = 8) -> some View {
-        frame(height: height)
-            .background(FineGrid(inset: inset, rows: rows).clipShape(RoundedRectangle(cornerRadius: 8)))
+    /// A main graph's plot: `height` tall, in a wash of the device's colour
+    /// with a border in it. Its graph draws a fine grid of `rows` rows
+    /// (`fineGridRows`), whose columns scroll with the data.
+    func heroPlot(height: CGFloat, tint: Color, rows: Int = 8) -> some View {
+        environment(\.fineGridRows, rows)
+            .frame(height: height)
             .plotFrame(tint: tint, wash: (0.13, 0.02), border: 0.5, lineWidth: 1.25)
     }
 }
@@ -212,127 +211,5 @@ struct DeviceFigures: Layout {
             }
             y += height + lineSpacing
         }
-    }
-}
-
-// MARK: - Fine grid
-
-/// The lines of a fine grid over a plot of `size`: rows `rows` to its
-/// height between `inset`s, and columns as far apart, counted from the right
-/// edge, where the newest sample is. Every fourth row line is a major one.
-enum GridLines {
-    static func paths(size: CGSize, inset: CGFloat, rows: Int) -> (minor: CGPath, major: CGPath) {
-        let minor = CGMutablePath()
-        let major = CGMutablePath()
-        let usable = size.height - 2 * inset
-        guard rows > 0, usable > 4, size.width > 4 else { return (minor, major) }
-        let step = usable / CGFloat(rows)
-        for row in 1..<rows {
-            let y = (inset + CGFloat(row) * step).rounded() + 0.25
-            let path = rows % 4 == 0 && row % (rows / 4) == 0 ? major : minor
-            path.move(to: CGPoint(x: 0, y: y))
-            path.addLine(to: CGPoint(x: size.width, y: y))
-        }
-        // Columns about as far apart as the rows, never closer than 12 points.
-        let columnStep = max(step, 12)
-        var x = size.width - columnStep
-        while x > 1 {
-            minor.move(to: CGPoint(x: x.rounded() + 0.25, y: 0))
-            minor.addLine(to: CGPoint(x: x.rounded() + 0.25, y: size.height))
-            x -= columnStep
-        }
-        return (minor, major)
-    }
-
-    /// The lines' colours: faint enough that a trace near the floor isn't
-    /// lost among them, firmer in light mode to hold up on a pale plot, and
-    /// fainter by the palette's `GraphEmphasis`, as the live graphs' own grid is.
-    static func colors(dark: Bool, emphasis: GraphEmphasis) -> (minor: CGColor, major: CGColor) {
-        let weight = CGFloat(emphasis.grid)
-        return (NSColor.labelColor.withAlphaComponent((dark ? 0.05 : 0.07) * weight).cgColor,
-                NSColor.labelColor.withAlphaComponent((dark ? 0.09 : 0.12) * weight).cgColor)
-    }
-}
-
-/// A still fine grid behind a main graph, built once per size.
-struct FineGrid: NSViewRepresentable {
-    var inset: CGFloat
-    var rows: Int
-
-    func makeNSView(context: Context) -> FineGridView {
-        FineGridView()
-    }
-
-    func updateNSView(_ view: FineGridView, context: Context) {
-        view.configure(inset: inset, rows: rows, emphasis: GraphColors.shared.emphasis)
-    }
-}
-
-final class FineGridView: NSView {
-    private let minor = CAShapeLayer()
-    private let major = CAShapeLayer()
-    private var inset: CGFloat = 4
-    private var rows = 8
-    private var builtSize: CGSize = .zero
-    private var emphasis = GraphEmphasis.standard
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        for shape in [minor, major] {
-            shape.fillColor = nil
-            shape.lineWidth = 0.5
-            layer?.addSublayer(shape)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    func configure(inset: CGFloat, rows: Int, emphasis: GraphEmphasis) {
-        if emphasis != self.emphasis {
-            self.emphasis = emphasis
-            applyColors()
-        }
-        guard inset != self.inset || rows != self.rows else { return }
-        self.inset = inset
-        self.rows = rows
-        builtSize = .zero
-        needsLayout = true
-    }
-
-    override func layout() {
-        super.layout()
-        guard bounds.size != builtSize else { return }
-        builtSize = bounds.size
-        let paths = GridLines.paths(size: bounds.size, inset: inset, rows: rows)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        minor.frame = bounds
-        major.frame = bounds
-        minor.path = paths.minor
-        major.path = paths.major
-        CATransaction.commit()
-        applyColors()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyColors()
-    }
-
-    private func applyColors() {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let colors = GridLines.colors(dark: effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua, emphasis: emphasis)
-            minor.strokeColor = colors.minor
-            major.strokeColor = colors.major
-        }
-        CATransaction.commit()
     }
 }

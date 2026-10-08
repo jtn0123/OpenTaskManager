@@ -77,3 +77,34 @@ struct FigureColumnsTests {
         #expect(FigureColumns.fit(width: .infinity, count: 0, minimum: 128, spacing: 16).count == 1)
     }
 }
+
+struct FineGridSpacingTests {
+    @Test func rowsSplitThePlotBetweenItsInsets() {
+        #expect(FineGridSpacing.row(height: 400, inset: 4, rows: 8) == 49)
+        #expect(FineGridSpacing.row(height: 6, inset: 4, rows: 8) == 0)
+        #expect(FineGridSpacing.row(height: 400, inset: 4, rows: 0) == 0)
+        #expect(FineGridSpacing.row(height: .nan, inset: 4, rows: 8) == 0)
+    }
+
+    @Test func columnsAreAboutAsFarApartAsTheRows() {
+        // Rows 48 points apart over samples 8 apart: a column every 6 samples.
+        #expect(FineGridSpacing.columnSamples(rowStep: 48, sampleStep: 8) == 6)
+        // A long window's samples half a point apart: every 96.
+        #expect(FineGridSpacing.columnSamples(rowStep: 48, sampleStep: 0.5) == 96)
+        // Samples wider than a row: every one.
+        #expect(FineGridSpacing.columnSamples(rowStep: 48, sampleStep: 100) == 1)
+    }
+
+    @Test func columnsNeverCloserThanTheMinimum() {
+        // Rows 5 apart would crowd the columns: 12 points is 6 samples of 2.
+        #expect(FineGridSpacing.columnSamples(rowStep: 5, sampleStep: 2) == 6)
+        // No rows at all: still 12 points, rounded up to whole samples.
+        #expect(FineGridSpacing.columnSamples(rowStep: 0, sampleStep: 5) == 3)
+    }
+
+    @Test func anUnusableStepGivesEverySample() {
+        #expect(FineGridSpacing.columnSamples(rowStep: 48, sampleStep: 0) == 1)
+        #expect(FineGridSpacing.columnSamples(rowStep: 48, sampleStep: .nan) == 1)
+        #expect(FineGridSpacing.columnSamples(rowStep: .infinity, sampleStep: 4) == 3)
+    }
+}

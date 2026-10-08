@@ -369,16 +369,16 @@ private struct ResourceRow: View {
 }
 
 /// A rail row's live graph of its last minute: the device's colour over a
-/// fine grid, framed in it, as the detail's main graph is.
+/// fine grid that scrolls with it, framed in it, as the detail's main graph is.
 private struct RailGraph: View {
     var values: [Double]
     var color: Color
     var maxValue: Double?
 
     var body: some View {
-        GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue, capacity: 60, showsGrid: false,
+        GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue, capacity: 60,
                   lineWidth: 1.4, glows: true, cornerRadius: 5)
-            .background(FineGrid(inset: 4, rows: 4).clipShape(RoundedRectangle(cornerRadius: 5)))
+            .environment(\.fineGridRows, 4)
             .plotFrame(tint: color, wash: (0.18, 0.04), border: 0.6, lineWidth: 1, cornerRadius: 5)
     }
 }

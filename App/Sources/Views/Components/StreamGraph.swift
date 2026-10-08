@@ -12,6 +12,9 @@ extension EnvironmentValues {
     /// `AppModel.graphSpan`, or fewer while Performance fits its graphs to
     /// what's been collected (`GraphFit`).
     @Entry var graphWindow = AppModel.graphSpan
+    /// Rows of the fine grid the graphs under it draw in place of the usual
+    /// quarters: a device page's main graph (`heroPlot`). 0 keeps the usual grid.
+    @Entry var fineGridRows = 0
 }
 
 struct GraphSeries {
@@ -64,11 +67,13 @@ struct GraphView: NSViewRepresentable {
 
     func updateNSView(_ view: StreamGraphView, context: Context) {
         let capacity = capacity ?? context.environment.graphWindow
+        let fineRows = context.environment.fineGridRows
         let configuration = StreamGraphView.Configuration(
             lines: series.map {
                 StreamGraphView.Line(values: Array($0.values.suffix(capacity + 1)), color: NSColor($0.color), fill: $0.fill, dashed: $0.dashed)
             },
-            maxValue: maxValue, capacity: max(capacity, 2), showsGrid: showsGrid, lineWidth: lineWidth, glows: glows,
+            maxValue: maxValue, capacity: max(capacity, 2), showsGrid: showsGrid, fineRows: fineRows > 0 ? fineRows : nil,
+            lineWidth: lineWidth, glows: glows,
             stacked: stacked, minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling,
             axis: axis, axisUnits: axisUnits, axisNote: axisNote, cornerRadius: cornerRadius
         )
@@ -89,6 +94,9 @@ final class StreamGraphView: NSView {
         var maxValue: Double?
         var capacity: Int
         var showsGrid: Bool
+        /// Rows of a fine grid in place of the usual quarters (`FineGridLines`),
+        /// its columns about as far apart; nil for the usual grid.
+        var fineRows: Int?
         var lineWidth: CGFloat
         var glows: Bool
         var stacked: Bool
@@ -104,7 +112,7 @@ final class StreamGraphView: NSView {
         func drawsLike(_ other: Configuration) -> Bool {
             lines.count == other.lines.count
                 && zip(lines, other.lines).allSatisfy { $0.color == $1.color && $0.fill == $1.fill && $0.dashed == $1.dashed }
-                && maxValue == other.maxValue && capacity == other.capacity && showsGrid == other.showsGrid
+                && maxValue == other.maxValue && capacity == other.capacity && showsGrid == other.showsGrid && fineRows == other.fineRows
                 && lineWidth == other.lineWidth && glows == other.glows && stacked == other.stacked
                 && minimumCeiling == other.minimumCeiling && maximumCeiling == other.maximumCeiling
                 && (axis == nil) == (other.axis == nil) && axisUnits == other.axisUnits && axisNote == other.axisNote
@@ -169,6 +177,8 @@ final class StreamGraphView: NSView {
 
     private let plot = CALayer()
     private let grid = CAShapeLayer()
+    /// A fine grid's firmer rows, at its quarters.
+    private let majorGrid = CAShapeLayer()
     private let scroller = CALayer()
     private let columns = CAShapeLayer()
     /// The stretch before the first sample, washed and faintly hatched. It lives in
@@ -214,7 +224,7 @@ final class StreamGraphView: NSView {
         // The scroller only ever moves sideways between samples, so a cached
         // bitmap of it (glow included) slides for free in the render server.
         scroller.shouldRasterize = true
-        for shape in [grid, columns] {
+        for shape in [grid, majorGrid, columns] {
             shape.fillColor = nil
             shape.lineWidth = 0.5
         }
@@ -244,6 +254,7 @@ final class StreamGraphView: NSView {
         scroller.addSublayer(unrecorded)
         scroller.addSublayer(boundary)
         plot.addSublayer(grid)
+        plot.addSublayer(majorGrid)
         plot.addSublayer(scroller)
         layer?.addSublayer(plot)
         layer?.addSublayer(captionBadge)
@@ -559,6 +570,7 @@ final class StreamGraphView: NSView {
     /// Runs inside `render`'s appearance block, so the colours resolve for this view.
     private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration, emphasis: GraphEmphasis) {
         grid.isHidden = !configuration.showsGrid
+        majorGrid.isHidden = !configuration.showsGrid || configuration.fineRows == nil
         columns.isHidden = !configuration.showsGrid
         // Light mode needs a firmer grid to hold up on a pale plot. Both stay
         // faint enough that a trace near the floor isn't lost among them,
@@ -568,7 +580,9 @@ final class StreamGraphView: NSView {
         let labelColor = NSColor.secondaryText.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
-        if configuration.showsGrid {
+        if configuration.showsGrid, let fineRows = configuration.fineRows {
+            drawFineGrid(rows: fineRows, in: plotRect, step: step, colors: FineGridLines.colors(dark: isDark, emphasis: emphasis))
+        } else if configuration.showsGrid {
             let rows = CGMutablePath()
             for fraction in [0.25, 0.5, 0.75] as [CGFloat] {
                 let y = padding + usable * fraction
@@ -578,20 +592,8 @@ final class StreamGraphView: NSView {
             grid.frame = plot.bounds
             grid.path = rows
             grid.strokeColor = lineColor
-
-            // Vertical lines belong to sample times, so they scroll with the data.
-            let spacing = max(configuration.capacity / 10, 1)
-            let newestX = plotRect.width + step
-            let verticals = CGMutablePath()
-            var age = sampleIndex % spacing
-            while newestX - CGFloat(age) * step >= -step {
-                let x = newestX - CGFloat(age) * step
-                verticals.move(to: CGPoint(x: x, y: 0))
-                verticals.addLine(to: CGPoint(x: x, y: plotRect.height))
-                age += spacing
-            }
             columns.frame = scroller.bounds
-            columns.path = verticals
+            columns.path = verticals(every: max(configuration.capacity / 10, 1), in: plotRect, step: step)
             columns.strokeColor = lineColor
         }
 
@@ -618,6 +620,38 @@ final class StreamGraphView: NSView {
             label.shadowColor = NSColor.windowBackgroundColor.cgColor
             label.frame = CGRect(x: 5, y: y - Self.labelHeight, width: max(plotRect.width - 10, 0), height: Self.labelHeight)
         }
+    }
+
+    /// A main graph's fine grid (`FineGridLines`): still rows, firmer at the
+    /// quarters, and columns about as far apart that scroll with the data.
+    private func drawFineGrid(rows: Int, in plotRect: CGRect, step: CGFloat, colors: (minor: CGColor, major: CGColor)) {
+        let lines = FineGridLines.rows(size: plotRect.size, inset: verticalPadding, rows: rows)
+        grid.frame = plot.bounds
+        grid.path = lines.minor
+        grid.strokeColor = colors.minor
+        majorGrid.frame = plot.bounds
+        majorGrid.path = lines.major
+        majorGrid.strokeColor = colors.major
+        let rowStep = FineGridSpacing.row(height: Double(plotRect.height), inset: Double(verticalPadding), rows: rows)
+        let spacing = FineGridSpacing.columnSamples(rowStep: rowStep, sampleStep: Double(step))
+        columns.frame = scroller.bounds
+        columns.path = verticals(every: spacing, in: plotRect, step: step)
+        columns.strokeColor = colors.minor
+    }
+
+    /// Vertical lines every `spacing` samples, counted from the newest. They
+    /// belong to sample times, so they scroll with the data.
+    private func verticals(every spacing: Int, in plotRect: CGRect, step: CGFloat) -> CGPath {
+        let newestX = plotRect.width + step
+        let path = CGMutablePath()
+        var age = sampleIndex % spacing
+        while newestX - CGFloat(age) * step >= -step {
+            let x = newestX - CGFloat(age) * step
+            path.move(to: CGPoint(x: x, y: 0))
+            path.addLine(to: CGPoint(x: x, y: plotRect.height))
+            age += spacing
+        }
+        return path
     }
 }
 

@@ -85,7 +85,7 @@ struct SensorsDetail: View {
             DeviceCaption(title: "Thermal pressure", trailing: thermalState.title)
         } plot: {
             GraphView(series: [GraphSeries(values: model.thermalPressureHistory.values, color: Theme.thermal)], maxValue: 1,
-                      showsGrid: false, glows: true, cornerRadius: 8)
+                      glows: true, cornerRadius: 8)
                 .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.thermal, rows: 3)
         } figures: {
             figures(thermalState)
@@ -111,7 +111,7 @@ struct SensorsDetail: View {
         return DeviceCard(tint: Theme.thermal, legend: legend) {
             DeviceCaption(title: "Temperatures", trailing: sensors.hottest(.chip).map { "chip \(Format.celsius($0))" } ?? "")
         } plot: {
-            GraphView(series: series, showsGrid: false, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8)
+            GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8)
                 .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.thermal)
         } figures: {
             figures(thermalState)

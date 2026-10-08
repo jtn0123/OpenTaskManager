@@ -11,9 +11,10 @@ import SwiftUI
 /// border that firm up with the load.
 ///
 /// One AppKit view hosting a `StreamGraphView` per CPU, so every tile
-/// scrolls as the page's other graphs do while SwiftUI updates one view a
-/// tick; the tiles' washes, grids, borders and labels are layers, built when
-/// the size or the CPUs change, and a tick sets only the figures that changed.
+/// scrolls, its fine grid too, as the page's other graphs do, while SwiftUI
+/// updates one view a tick; the tiles' washes, borders and labels are
+/// layers, built when the size or the CPUs change, and a tick sets only the
+/// figures that changed.
 struct CoreGraphGrid: NSViewRepresentable {
     /// One logical CPU's tile.
     struct Tile {
@@ -98,8 +99,6 @@ final class CoreGraphGridView: NSView {
     @MainActor
     private final class Chrome {
         let wash = CAGradientLayer()
-        let minor = CAShapeLayer()
-        let major = CAShapeLayer()
         let border = CALayer()
         let name = CATextLayer()
         let value = CATextLayer()
@@ -113,11 +112,6 @@ final class CoreGraphGridView: NSView {
             wash.masksToBounds = true
             wash.startPoint = CGPoint(x: 0.5, y: 1)
             wash.endPoint = CGPoint(x: 0.5, y: 0)
-            for shape in [minor, major] {
-                shape.fillColor = nil
-                shape.lineWidth = 0.5
-                wash.addSublayer(shape)
-            }
             border.cornerRadius = CoreGraphGridView.radius
             border.borderWidth = 1
             for label in [name, value] {
@@ -132,7 +126,7 @@ final class CoreGraphGridView: NSView {
         }
     }
 
-    /// Hosts the washes and grids, under the graphs.
+    /// Hosts the washes, under the graphs.
     private let backdrop = LayerHostView()
     /// Hosts the borders and labels, over the graphs.
     private let overlay = LayerHostView()
@@ -181,7 +175,8 @@ final class CoreGraphGridView: NSView {
                     StreamGraphView.Line(values: tile.busy, color: tile.color, fill: true, dashed: false),
                     StreamGraphView.Line(values: tile.kernel, color: kernelColor, fill: false, dashed: false),
                 ],
-                maxValue: readings.top, capacity: readings.capacity, showsGrid: false, lineWidth: Self.lineWidth, glows: true,
+                maxValue: readings.top, capacity: readings.capacity, showsGrid: true, fineRows: 4,
+                lineWidth: Self.lineWidth, glows: true,
                 stacked: false, minimumCeiling: 0, maximumCeiling: .infinity, axis: nil, axisUnits: .plain, axisNote: nil,
                 cornerRadius: Self.radius - 1
             )
@@ -262,7 +257,7 @@ final class CoreGraphGridView: NSView {
     }
 
     /// Lays one tile out: its wash and border over the whole tile, its
-    /// labels on the line at its top and its graph and grid in the rest.
+    /// labels on the line at its top and its graph in the rest.
     private func place(_ item: Chrome, in rect: CGRect, scale: CGFloat) {
         item.wash.frame = rect
         item.border.frame = rect
@@ -270,12 +265,6 @@ final class CoreGraphGridView: NSView {
         let plot = CGRect(x: rect.minX + 1, y: rect.minY + 1, width: rect.width - 2,
                           height: max(rect.height - Self.header - 1, 8))
         item.graph.frame = plot
-        let plotInWash = CGRect(x: 1, y: 1, width: plot.width, height: plot.height)
-        let paths = GridLines.paths(size: plotInWash.size, inset: 4, rows: 4)
-        for (shape, path) in [(item.minor, paths.minor), (item.major, paths.major)] {
-            shape.frame = plotInWash
-            shape.path = path
-        }
         // The text layers' line box, centred on the labels' line.
         let lineBox = ceil(CoreTileLook.labelNSFont.ascender - CoreTileLook.labelNSFont.descender + 1)
         let labelY = (rect.maxY - Self.header + (Self.header - lineBox) / 2).rounded()
@@ -287,18 +276,13 @@ final class CoreGraphGridView: NSView {
         item.value.contentsScale = scale
     }
 
-    /// The grid's colours and the labels that change only with the CPUs, the
-    /// palette or the appearance.
+    /// The labels that change only with the CPUs, the palette or the appearance.
     private func applyStyle() {
-        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let lines = GridLines.colors(dark: dark, emphasis: GraphColors.shared.emphasis)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let secondary = NSColor(cgColor: NSColor.secondaryText.cgColor) ?? .secondaryText
             for (item, tile) in zip(chrome, tiles) {
-                item.minor.strokeColor = lines.minor
-                item.major.strokeColor = lines.major
                 let name = NSMutableAttributedString(string: "CPU \(tile.cpu)",
                                                      attributes: [.font: CoreTileLook.labelNSFont, .foregroundColor: secondary])
                 if !tile.kind.isEmpty {

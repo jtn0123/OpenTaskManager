@@ -58,3 +58,24 @@ public enum FigureColumns {
         return (min(fit, max(count, 1)), max((usable - Double(fit - 1) * spacing) / Double(fit), 0))
     }
 }
+
+/// A main graph's fine grid: how far apart its rows are, and how many
+/// samples apart its columns, about as far apart as the rows and never
+/// closer than `minimum` points. Columns belong to sample times, so they
+/// scroll with the data, as every live graph's do.
+public enum FineGridSpacing {
+    /// Points between the rows that split a plot `height` tall, less `inset`
+    /// at each end, into `rows`; 0 where there's no room for them.
+    public static func row(height: Double, inset: Double, rows: Int) -> Double {
+        let usable = height - 2 * inset
+        guard rows > 0, usable.isFinite, usable > 4 else { return 0 }
+        return usable / Double(rows)
+    }
+
+    /// Samples between columns, for samples `sampleStep` points apart.
+    public static func columnSamples(rowStep: Double, sampleStep: Double, minimum: Double = 12) -> Int {
+        guard sampleStep.isFinite, sampleStep > 0 else { return 1 }
+        let target = rowStep.isFinite ? max(rowStep, minimum) : minimum
+        return max(Int((target / sampleStep).rounded()), Int((minimum / sampleStep).rounded(.up)), 1)
+    }
+}

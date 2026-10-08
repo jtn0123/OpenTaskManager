@@ -19,7 +19,7 @@ struct PowerDetail: View {
                 DeviceCard(tint: Theme.power) {
                     DeviceCaption(title: "Whole-system power draw", trailing: Format.watts(watts))
                 } plot: {
-                    GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)], showsGrid: false,
+                    GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)],
                               glows: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
                         .heroPlot(height: Hero.height(pane: pane), tint: Theme.power)
                 } figures: {
@@ -100,7 +100,7 @@ struct PowerDetail: View {
         return DeviceCard(tint: Theme.power, legend: legend, footnote: Self.restNote(components)) {
             DeviceCaption(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "")
         } plot: {
-            GraphView(series: series, showsGrid: false, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts,
+            GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts,
                       cornerRadius: 8)
                 .heroPlot(height: height, tint: Theme.power)
         } figures: {
