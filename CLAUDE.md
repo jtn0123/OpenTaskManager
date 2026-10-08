@@ -199,7 +199,11 @@ Manager OG or any other proprietary task manager.
   `RunningSum`, never re-summed; a graph reads one ring per app), `AppModel.shortGraphSpan` on Overview. Top lists (`TopAppsCard`) skip figures that read as zero and hold
   their room for 30 s (`TopListRoom` in OTMKit), so the page doesn't jump;
   the idle line under the rows is a footer shorter than a row
-  (`TopListRoom.height`), so a sparse list alone in its row stays compact.
+  (`TopListRoom.height`), so a sparse list alone in its row stays compact,
+  and the room grows only for rows two samples in a row list, so an app busy
+  for one sample gets neither a row nor 30 s of empty room. The card tells
+  samples apart by `AppModel.appGroupsUptime`, which isn't observed: reading
+  `snapshot` there too drew the Overview's cards about twice a tick.
   Performance's Fit collected data toggle (`GraphFit`, in the main graph's
   time axis until the window is nearly full) narrows that one window, through
   the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
