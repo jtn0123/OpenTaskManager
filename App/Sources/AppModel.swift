@@ -726,20 +726,6 @@ final class AppModel {
         }
     }
 
-    /// Average load of one core tier over time, aligned on the newest sample;
-    /// with `kernel`, the part of it spent in the kernel.
-    func tierHistory(level: Int, kernel: Bool = false) -> [Double] {
-        let source = kernel ? coreSystemHistory : coreHistory
-        let histories = topology.tierForCPU.indices
-            .filter { topology.tierForCPU[$0] == level && source.indices.contains($0) }
-            .map { source[$0].values }
-        guard !histories.isEmpty else { return [] }
-        let length = histories.map(\.count).min() ?? 0
-        return (0..<length).map { index in
-            histories.reduce(0) { $0 + $1[$1.count - length + index] } / Double(histories.count)
-        }
-    }
-
     // MARK: - Actions
 
     /// Quits apps politely (like ⌘Q) and sends SIGTERM to everything else.
@@ -872,5 +858,21 @@ extension AppModel {
         }
         jobLabels = (watch.lastRead, labels)
         return labels
+    }
+}
+
+extension AppModel {
+    /// Average load of one core tier over time, aligned on the newest sample;
+    /// with `kernel`, the part of it spent in the kernel.
+    func tierHistory(level: Int, kernel: Bool = false) -> [Double] {
+        let source = kernel ? coreSystemHistory : coreHistory
+        let histories = topology.tierForCPU.indices
+            .filter { topology.tierForCPU[$0] == level && source.indices.contains($0) }
+            .map { source[$0].values }
+        guard !histories.isEmpty else { return [] }
+        let length = histories.map(\.count).min() ?? 0
+        return (0..<length).map { index in
+            histories.reduce(0) { $0 + $1[$1.count - length + index] } / Double(histories.count)
+        }
     }
 }
