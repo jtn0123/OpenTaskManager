@@ -28,7 +28,11 @@ struct OpenTaskManagerApp: App {
             SidebarCommands()
             PageCommands()
             CommandGroup(after: .toolbar) {
-                Button(model.isPaused ? "Resume Updates" : "Pause Updates") { model.isPaused.toggle() }
+                Button(UpdateControlLabels.liveMenuTitle(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil)) {
+                    model.isPaused.toggle()
+                }
+                    .help(UpdateControlLabels.liveHelp(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil))
+                    .accessibilityLabel(UpdateControlLabels.liveAccessibility(paused: model.isPaused))
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                 Button("Refresh Now") { model.refreshNow() }
                     .keyboardShortcut("r")
@@ -184,14 +188,17 @@ struct ContentView: View {
                 Button {
                     model.isPaused.toggle()
                 } label: {
-                    Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
+                    Label(UpdateControlLabels.liveTitle(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil,
+                                                        compact: sidebar.isNarrow == true),
+                          systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
                 // Just the icon in a narrow window, whether the page menu or
                 // the sidebar shares it: the word pushed Startup's, Apps' and
                 // Drivers' Refresh, System's Copy Summary and, with the
                 // sidebar shown, Processes' End Task into the overflow menu.
                 .labelStyle(showsTitle: sidebar.isNarrow != true)
-                .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
+                .help(UpdateControlLabels.liveHelp(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil))
+                .accessibilityLabel(UpdateControlLabels.liveAccessibility(paused: model.isPaused))
             }
             ToolbarItem(placement: .navigation) {
                 LiveBadge()
@@ -318,7 +325,7 @@ private struct LiveBadge: View {
             ? "Collecting this Mac's own figures is paused, so its history gains nothing; the recording replays on its own. "
                 + "Press ⇧⌘P to resume."
             : "This Mac's own figures are still collected every \(every), and its history kept, while the recording replays. "
-                + "Click to change the speed. Pause stops collecting, not the replay."
+                + "Click to change the speed. Pause Live stops collecting; Pause Replay stops the replay."
     }
 
     /// "every second", "every 2 s".

@@ -166,9 +166,7 @@ struct HistoryRailTrack: View {
                 .onEnded { _ in ended() })
         }
         .frame(height: height)
-        .help("Click or drag along the timeline to move playback, or to pin a moment when there's none. "
-            + (recorder == nil ? "" : "Shift-drag along the timeline to mark a session. ")
-            + "While comparing, drag along it to pick A or B. Hover a hatched gap to see when nothing was recorded.")
+        .modifier(HistoryRailHelp(scrubber: scrubber, canMark: recorder != nil))
     }
 
     /// After a drag that picked A, the next one picks B.
@@ -592,6 +590,19 @@ private struct HistoryRailHandle: View {
             .overlay(Capsule().strokeBorder(border, style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 2] : [])))
             .fixedSize()
             .alignmentGuide(.leading) { size in -min(max(x - size.width / 2, 0), width - size.width) }
+    }
+}
+
+/// Only the tooltip reads the hovered gap, so the track's drawing stays still.
+private struct HistoryRailHelp: ViewModifier {
+    let scrubber: HistoryScrubber
+    let canMark: Bool
+
+    func body(content: Content) -> some View {
+        content.help(scrubber.hoveredGap.map(HistoryGapStyle.help)
+            ?? ("Click or drag along the timeline to move playback, or to pin a moment when there's none. "
+                + (canMark ? "Shift-drag along the timeline to mark a session. " : "")
+                + "While comparing, drag along it to pick A or B. Hover a hatched gap to see when nothing was recorded."))
     }
 }
 

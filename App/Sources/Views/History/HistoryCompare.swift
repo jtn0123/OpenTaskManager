@@ -111,6 +111,7 @@ struct HistoryComparisonSlot: View {
 /// of every figure, and it says so.
 private struct HistoryComparisonCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.compactToolbar) private var compact
     /// Where the overlap's narrowing and the way back go; the body reads it not.
     let scrubber: HistoryScrubber
     let draft: HistoryCompareDraft
@@ -150,11 +151,16 @@ private struct HistoryComparisonCard: View {
                 if let comparison {
                     // Peaks beside the averages while there's room, else the
                     // averages alone, so both A and B keep their columns.
-                    ViewThatFits(in: .horizontal) {
-                        headlines(comparison, statistics: [.average, .peak])
+                    if compact {
                         headlines(comparison, statistics: [.average])
+                    } else {
+                        ViewThatFits(in: .horizontal) {
+                            headlines(comparison, statistics: [.average, .peak])
+                            headlines(comparison, statistics: [.average])
+                        }
                     }
-                    Text("Disk and network add both directions. Gaps are left out of every figure.")
+                    Text(compact ? HistoryCompareLabels.compactFigures : HistoryCompareLabels.figuresHelp)
+                        .help(HistoryCompareLabels.figuresHelp)
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -172,8 +178,8 @@ private struct HistoryComparisonCard: View {
                     ProgressView().controlSize(.small)
                 }
             } else {
-                Text("Drag along the timeline to pick A, the stretch to look at. It's compared with the same length "
-                    + "just before it, or drag again to pick B.")
+                Text(compact ? HistoryCompareLabels.compactSelection : HistoryCompareLabels.selectionHelp)
+                    .help(HistoryCompareLabels.selectionHelp)
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +194,8 @@ private struct HistoryComparisonCard: View {
         Button {
             showsDetails.toggle()
         } label: {
-            Label(showsDetails ? "Fewer Figures" : "All Figures", systemImage: showsDetails ? "chevron.up" : "chevron.down")
+            Label(HistoryCompareLabels.detailsTitle(expanded: showsDetails, compact: compact),
+                  systemImage: showsDetails ? "chevron.up" : "chevron.down")
         }
         .controlSize(.small)
         .fixedSize()
@@ -210,11 +217,13 @@ private struct HistoryComparisonCard: View {
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             HistoryCompareBadge(side: side)
             (Text(HistorySessionStyle.span(range.lowerBound, range.upperBound)).fontWeight(.medium)
-                + Text(note.map { " (\($0))" } ?? "") + Text(" · " + joined).foregroundStyle(.secondaryText))
+                + Text(note.map { " (\($0))" } ?? "") + Text(compact ? "" : " · " + joined).foregroundStyle(.secondaryText))
                 .font(.callout)
                 .monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .help("\(HistoryCompareDraft.letter(side)) \(HistorySessionStyle.span(range.lowerBound, range.upperBound))"
+            + (note.map { " (\($0))" } ?? "") + " · " + parts.joined(separator: " · "))
     }
 
     /// CPU, memory, disk and network: each `statistics` (average, and peak
@@ -237,7 +246,10 @@ private struct HistoryComparisonCard: View {
                         .gridCellAnchor(.leading)
                         .padding(.leading, side == .a ? 0 : 10)
                 }
-                Text("Change").font(.explanation.weight(.semibold)).foregroundStyle(.secondaryText)
+                Text(HistoryCompareLabels.changeHeading)
+                    .help(HistoryCompareLabels.changeHelp)
+                    .accessibilityLabel(HistoryCompareLabels.changeAccessibility)
+                    .font(.explanation.weight(.semibold)).foregroundStyle(.secondaryText)
                     .gridCellColumns(span).gridCellAnchor(.leading).padding(.leading, 10)
             }
             if span > 1 {
@@ -268,6 +280,8 @@ private struct HistoryComparisonCard: View {
                     }
                     ForEach(statistics, id: \.self) { statistic in
                         Text(row.changeText(statistic))
+                            .accessibilityLabel(row.change(statistic)?.spokenLabel(isFraction: row.headline.isFraction)
+                                ?? "Not recorded in both")
                             .foregroundStyle(.secondaryText)
                             .padding(.leading, statistic == statistics.first ? 10 : 0)
                     }
@@ -291,7 +305,7 @@ private struct HistoryComparisonCard: View {
     /// recorded", spelled out in the tooltip.
     private func coverageHeading(_ side: HistoryComparison.Side, _ comparison: HistoryComparison, thin: Bool) -> some View {
         let stats = comparison.stats(side)
-        let recorded = HistoryInterval.recorded(stats.coverage)
+        let recorded = HistoryCompareLabels.coverage(stats.coverage, compact: compact)
         let share = HistoryInterval.share(sampled: stats.sampledSeconds, span: stats.duration)
         return HStack(spacing: 5) {
             HistoryCompareBadge(side: HistoryCompareDraft.Side(side))
@@ -304,7 +318,7 @@ private struct HistoryComparisonCard: View {
         .help("\(side.rawValue) holds \(share). Its figures cover that recorded time alone; gaps are left out."
             + (thin ? " Too little to read them at face value." : ""))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(side.rawValue), \(recorded)")
+        .accessibilityLabel("\(side.rawValue), \(HistoryInterval.recorded(stats.coverage))")
     }
 
     /// Why the figures can't be taken at face value, over them, as calm as
@@ -313,22 +327,26 @@ private struct HistoryComparisonCard: View {
     /// both to that stretch.
     private func notice(_ limitation: HistoryComparison.Limitation, overlap: HistoryComparison.Overlap?) -> some View {
         HistoryCompareNote {
-            (Text(limitation.title + ": ").fontWeight(.semibold) + Text(limitation.message))
+            (Text(compact ? "" : limitation.title + ": ").fontWeight(.semibold)
+                + Text(compact ? HistoryCompareLabels.notice(limitation) : limitation.message))
+                .help(limitation.title + ": " + limitation.message + " " + HistoryCompareLabels.limitationHelp)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Each side's figures cover its recorded time alone, so a change may come from what wasn't recorded.")
-                .font(.explanation)
-                .foregroundStyle(.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            if !compact {
+                Text(HistoryCompareLabels.limitationHelp)
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let overlap {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Button("Compare Recorded Overlap") { scrubber.compare?.narrow(to: overlap) }
+                    Button(compact ? "Use Recorded Overlap" : "Compare Recorded Overlap") { scrubber.compare?.narrow(to: overlap) }
                         .controlSize(.small)
                         .fixedSize()
                         .help("Narrow A and B to the \(Format.roughDuration(overlap.duration)) where both hold records at the same "
                             + "point in their stretch: \(HistorySessionStyle.span(overlap.a.lowerBound, overlap.a.upperBound)) "
                             + "against \(HistorySessionStyle.span(overlap.b.lowerBound, overlap.b.upperBound))")
-                    Text("\(Format.roughDuration(overlap.duration)) both recorded at the same offsets")
+                    Text(Format.roughDuration(overlap.duration) + (compact ? " overlap" : " both recorded at the same offsets"))
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -342,11 +360,12 @@ private struct HistoryComparisonCard: View {
     /// means, and the way back to the stretches as picked.
     private var overlapNote: some View {
         HistoryCompareNote {
-            (Text("Recorded overlap: ").fontWeight(.semibold)
-                + Text("A and B are narrowed to the stretch both recorded at the same offsets from their starts."))
+            (Text(compact ? "Recorded overlap" : "Recorded overlap: ").fontWeight(.semibold)
+                + Text(compact ? "" : HistoryCompareLabels.overlapHelp))
+                .help(HistoryCompareLabels.overlapHelp)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Back to Full Stretches") { scrubber.compare?.widen() }
+            Button(compact ? "Full Stretches" : "Back to Full Stretches") { scrubber.compare?.widen() }
                 .controlSize(.small)
                 .fixedSize()
                 .help("Compare A and B as they were picked again")
@@ -362,7 +381,10 @@ private struct HistoryComparisonCard: View {
                 ForEach(HistoryComparison.Side.allCases, id: \.self) { side in
                     coverageHeading(side, comparison, thin: thin.contains(side)).gridColumnAlignment(.trailing)
                 }
-                Text("Change").gridColumnAlignment(.trailing)
+                Text(HistoryCompareLabels.changeHeading)
+                    .help(HistoryCompareLabels.changeHelp)
+                    .accessibilityLabel(HistoryCompareLabels.changeAccessibility)
+                    .gridColumnAlignment(.trailing)
             }
             .font(.explanation.weight(.semibold))
             .foregroundStyle(.secondaryText)
@@ -371,7 +393,9 @@ private struct HistoryComparisonCard: View {
                     Text(row.metric.title(row.statistic)).foregroundStyle(.secondaryText).lineLimit(1)
                     figure(row.a.map { row.metric.format($0, row.statistic) } ?? "—", side: .a, thin: thin.contains(.a))
                     figure(row.b.map { row.metric.format($0, row.statistic) } ?? "—", side: .b, thin: thin.contains(.b))
-                    Text(row.change?.label(isFraction: row.metric.isFraction) ?? "—").foregroundStyle(.secondaryText)
+                    Text(row.change?.label(isFraction: row.metric.isFraction) ?? "—")
+                        .foregroundStyle(.secondaryText)
+                        .accessibilityLabel(row.change?.spokenLabel(isFraction: row.metric.isFraction) ?? "Not recorded in both")
                 }
                 .monospacedDigit()
             }

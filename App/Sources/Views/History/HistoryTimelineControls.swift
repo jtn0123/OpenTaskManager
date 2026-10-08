@@ -242,7 +242,7 @@ struct HistoryTransport: View {
     }
 }
 
-/// Play, Pause, or Resume where playback paused. For a recording file,
+/// Play Replay, Pause Replay, or Resume Replay where playback paused. For a recording file,
 /// replay is what the page is for, so it's the prominent button, in the
 /// replay's tint. A view of its own, as it reads the playhead: each step
 /// redraws it and not the speed picker.
@@ -268,12 +268,12 @@ private struct HistoryPlayButton: View {
                 player.play(scrubber, within: scrubber.session)
             }
         } label: {
-            Label(player.isPlaying ? "Pause" : scrubber.playhead != nil ? "Resume" : "Play",
+            Label(UpdateControlLabels.replayTitle(playing: player.isPlaying, hasPlayhead: scrubber.playhead != nil),
                   systemImage: player.isPlaying ? "pause.fill" : "play.fill")
                 .frame(minWidth: 52)
         }
         .fixedSize()
-        .help(player.isPlaying ? "Pause playback where it is (the toolbar's Pause stops live updates instead)"
-            : "Play the timeline back from the pinned moment, else where it paused (or the picked session), skipping what wasn't recorded")
+        .help(UpdateControlLabels.replayHelp(playing: player.isPlaying))
+        .accessibilityLabel(UpdateControlLabels.replayTitle(playing: player.isPlaying, hasPlayhead: scrubber.playhead != nil))
     }
 }
