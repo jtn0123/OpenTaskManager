@@ -175,7 +175,8 @@ public struct BenchmarkTrend: Sendable, Equatable {
             guard let measurement = run.measurement(id) else { continue }
             let isBaseline = run.id == baseline?.id
             let change = reference.flatMap { reference in
-                isBaseline || comparable.contains(run.id) ? BenchmarkChange(baseline: reference, compared: measurement) : nil
+                isBaseline || comparable.contains(run.id) ? BenchmarkChange(baseline: reference, compared: measurement,
+                    conditionSummary: isBaseline ? nil : baseline.flatMap { BenchmarkComparison.conditionSummary($0, run) }) : nil
             }
             points.append(Point(runID: run.id, line: lineOf[run.id] ?? 0, sequence: sequence, date: run.date, value: measurement.value,
                                 low: measurement.low, high: measurement.high, repeats: measurement.repeats, caveat: measurement.caveat,

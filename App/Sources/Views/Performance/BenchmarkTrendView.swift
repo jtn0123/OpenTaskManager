@@ -34,6 +34,12 @@ struct BenchmarkTrendView: View, Equatable {
                     TrendChart(figure: figure, trend: trend, runs: byID, tint: tint)
                 }
             }
+            if let summary = trend.figures.lazy.compactMap({ $0.latestCompared?.fromBaseline?.conditionSummary }).first {
+                Text(summary)
+                    .font(.explanation)
+                    .foregroundStyle(BenchmarkLook.caution)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(Self.caption(trend))
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
@@ -94,7 +100,7 @@ struct BenchmarkTrendView: View, Equatable {
         parts.append(trend.baseline == nil
             ? "Hover over a run for its figures; click one, or pick it under Baseline, to measure the others against it."
             : "Runs are coloured by their verdict against the baseline, and those it can't be compared with are faded. "
-                + "Click the baseline to clear it.")
+                + "Amber means the conditions differed. Click the baseline to clear it.")
         return parts.joined(separator: " ")
     }
 }
@@ -187,17 +193,17 @@ private struct TrendChart: View {
     @ViewBuilder private var baselineChange: some View {
         if let compared = figure.latestCompared, let change = compared.fromBaseline {
             VStack(alignment: .trailing, spacing: 0) {
-                Label(BenchmarkChange.formatChange(change.change ?? .nan), systemImage: BenchmarkLook.symbol(change.verdict))
+                Label(BenchmarkChange.formatChange(change.change ?? .nan), systemImage: BenchmarkLook.symbol(change))
                     .font(.callout)
                     .monospacedDigit()
                 Text(change.verdictWord).font(.metadata)
             }
-            .foregroundStyle(change.caveat == nil ? BenchmarkLook.color(change.verdict) : AnyShapeStyle(.secondaryText))
-            .lineLimit(1)
-            .fixedSize()
+            .foregroundStyle(BenchmarkLook.color(change))
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .combine)
             .help("The newest run compared with the baseline, \(BenchmarkLook.when(compared.date)): "
-                + "\(change.verdictWord). \(change.verdict.explanation)" + (change.caveatNote.map { " \($0)" } ?? ""))
+                + "\(change.verdictWord). \(change.verdictExplanation)" + (change.caveatNote.map { " \($0)" } ?? ""))
         } else {
             VStack(alignment: .trailing, spacing: 0) {
                 Label("+0.0%", systemImage: "equal.circle").font(.callout).monospacedDigit()
@@ -304,6 +310,7 @@ private struct TrendChart: View {
 
     /// Better or worse than the baseline in their colours; otherwise the line's.
     private func color(_ point: Point) -> Color {
+        if !point.isBaseline, point.fromBaseline?.isQualified == true { return BenchmarkLook.caution }
         if !point.isBaseline, let verdict = point.fromBaseline?.verdict {
             if verdict == .better { return BenchmarkLook.better }
             if verdict == .worse { return BenchmarkLook.worse }
@@ -358,7 +365,7 @@ private struct TrendChart: View {
             lines.append("This run is the baseline.")
         } else if let change = point.fromBaseline {
             lines.append("\(BenchmarkChange.formatChange(change.change ?? .nan)) from the baseline: \(change.verdictWord). "
-                + change.verdict.explanation)
+                + change.verdictExplanation)
         } else if let id = trend.baseline, let base = runs[id], let run, let refusal = BenchmarkComparison.refusal(base, run) {
             lines.append("Not compared with the baseline: \(refusal.summary).")
         }

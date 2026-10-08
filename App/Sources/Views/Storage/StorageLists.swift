@@ -70,25 +70,29 @@ private struct FolderContentsList: View {
                         }
                     }
                 }
-                .background(ListFollower(hover: hover, proxy: proxy))
+                .background(ListFollower(usage: usage, folder: folder, hover: hover, proxy: proxy))
             }
             .id(folder.id)
         }
     }
 }
 
-/// Scrolls the row for the tile under the pointer into view, so its
-/// highlight shows. Its own view, so only it reads the hover here.
+/// Scrolls a selected tile's row into view once. Hovering keeps the list still.
+/// Its own view, so only it reads the selection here.
 private struct ListFollower: View {
+    let usage: DiskUsage
+    let folder: DiskItem
     let hover: StorageHover
     let proxy: ScrollViewProxy
 
     var body: some View {
         Color.clear
-            .onChange(of: hover.item) {
-                // Hovers in the list itself are already in view.
-                guard hover.source == .treemap, let id = hover.item else { return }
-                proxy.scrollTo(id)
+            .onChange(of: hover.selected, initial: true) {
+                guard let selected = hover.selected else { return }
+                // An inner tile is represented by its enclosing folder's row here.
+                let chain = usage.ancestry(of: selected)
+                guard let row = chain.first(where: { folder.children.contains($0.id) }) else { return }
+                proxy.scrollTo(row.id)
             }
     }
 }
@@ -99,6 +103,7 @@ private struct ContentRow: View {
     let item: DiskItem
     let total: UInt64
     let hover: StorageHover
+    @FocusState private var focused: Bool
     var open: (Int) -> Void
 
     var body: some View {
@@ -130,15 +135,27 @@ private struct ContentRow: View {
         .onHover { inside in
             if inside { hover.enter(item.id) } else { hover.leave(item.id) }
         }
-        .onTapGesture {
+        .onTapGesture(count: 2) {
             if item.isFolder { open(item.id) }
+        }
+        .onTapGesture {
+            hover.select(item, in: usage)
+            focused = true
+        }
+        .focusable()
+        .focused($focused)
+        .onKeyPress(.return) {
+            guard item.isFolder else { return .ignored }
+            open(item.id)
+            return .handled
         }
         .contextMenu {
             StorageItemMenu(path: path, isFolder: item.isFolder, store: store)
         }
-        .help(item.isFolder ? "Open \(item.name)" : (path as NSString).abbreviatingWithTildeInPath)
+        .help(item.isFolder ? "Select \(item.name). Double-click or press Return to open it." : path)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(item.isFolder ? .isButton : [])
+        .accessibilityAddTraits(hover.selected == item.id ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { hover.select(item, in: usage) }
     }
 
     private func detail(share: Double) -> String {

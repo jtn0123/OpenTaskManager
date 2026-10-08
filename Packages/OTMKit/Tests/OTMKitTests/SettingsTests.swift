@@ -15,6 +15,7 @@ struct SettingsTests {
         "fitsCollectedGraphData": .bool(true),
         "networkByProcess": .bool(false),
         "cpuGraphMode": .string("cores"),
+        "cpuLargerGraphs": .bool(false),
         "showMenuBarExtra": .bool(true),
         "streamGraphs": .bool(true),
         "sidebarHidden": .bool(false),
@@ -130,6 +131,7 @@ struct SettingsTests {
             checkNative(Settings.peakSystemWatts, sample: 123.5, in: defaults)
             checkNative(Settings.appsInspectorWidth, sample: 411.25, in: defaults)
             checkNative(Settings.sustainedMinutes, sample: 5, in: defaults)
+            checkNative(Settings.cpuLargerGraphs, sample: true, in: defaults)
             checkNative(Settings.cpuGraphMode, sample: "overall", in: defaults)
             checkNative(Settings.spikesSeen, sample: Date(timeIntervalSince1970: 1_700_000_000), in: defaults)
             checkNative(Settings.benchmarkComparePicks, sample: ["cpu": ["cpu-1", "cpu-2"]], in: defaults)

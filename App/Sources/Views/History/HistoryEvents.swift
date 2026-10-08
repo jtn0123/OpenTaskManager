@@ -18,17 +18,7 @@ enum HistoryEventStyle {
 
     /// "Xcode launched", "5 × clang started", "Network: Wi-Fi (en0)", "CPU spike captured".
     static func title(_ event: HistoryEvent) -> String {
-        let name = event.count > 1 ? "\(event.count) × \(event.name)" : event.name
-        return switch event.kind {
-        case .appLaunched: "\(name) launched"
-        case .appQuit: "\(name) quit"
-        case .processStarted: "\(name) started"
-        case .processExited: "\(name) exited"
-        case .networkChanged: event.name.isEmpty ? "Network disconnected" : "Network: \(event.name)"
-        case .sleep: "Mac went to sleep"
-        case .wake: "Mac woke"
-        case .spike: "\(name) spike captured"
-        }
+        HistoryReplayLabels.eventTitle(event)
     }
 
     /// What there is to say beyond the title: a network's new address, for
@@ -242,43 +232,36 @@ struct HistoryMomentEvents: View {
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
-            ForEach(closest) { event in
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: HistoryEventStyle.symbol(event.kind))
-                        .foregroundStyle(event == selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondaryText))
-                        .frame(width: 16)
-                    Text(HistoryEventStyle.title(event))
-                        .fontWeight(event == selected ? .semibold : .regular)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Text(offset(event))
-                        .foregroundStyle(.secondaryText)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .fixedSize()
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 5) {
+                ForEach(closest) { event in
+                    GridRow(alignment: .firstTextBaseline) {
+                        Image(systemName: HistoryEventStyle.symbol(event.kind))
+                            .foregroundStyle(event == selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondaryText))
+                            .frame(width: 16)
+                        Text(HistoryEventStyle.title(event))
+                            .fontWeight(event == selected ? .semibold : .regular)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .gridCellUnsizedAxes(.horizontal)
+                        Text(HistoryReplayLabels.eventOffset(event, at: time, bucket: bucket))
+                            .font(.metadata)
+                            .foregroundStyle(.secondaryText)
+                            .monospacedDigit()
+                            .fixedSize()
+                            .gridColumnAlignment(.trailing)
+                    }
+                    .help(tooltip(event))
                 }
-                .font(.tableText)
-                .help(tooltip(event))
             }
+            .font(.tableText)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if near.count > closest.count {
                 Text("\(near.count - closest.count) more within \(Format.roughDuration(reach))")
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
         }
-    }
-
-    /// "12 s before", "during these 10 s", "about 5 s after".
-    private func offset(_ event: HistoryEvent) -> String {
-        let seconds = event.time.timeIntervalSince(time)
-        let text: String
-        if seconds <= 0, seconds > -bucket {
-            text = "during these \(Format.timeSpan(bucket))"
-        } else {
-            text = "\(Format.timeSpan(abs(seconds).rounded())) \(seconds < 0 ? "before" : "after")"
-        }
-        return event.isApproximate ? "about " + text : text
     }
 
     private func tooltip(_ event: HistoryEvent) -> String {

@@ -32,6 +32,8 @@ struct DriversView: View {
     @State private var scannedAt: Date?
     @State private var isScanning = false
     @State private var search = ""
+    @State private var status: DriversStatusFilter = .all
+    @State private var summaryFilter: DriverSummaryFilter?
     @State private var selection: ExtensionItem.ID?
     @State private var openedRequest = false
     /// A row to bring into view once, for `-openDriver`.
@@ -73,7 +75,7 @@ struct DriversView: View {
         .task {
             if scan == nil { await rescan() }
         }
-        .onChange(of: filter) {
+        .onChange(of: DriverFilterChoice(vendor: filter, status: status, summary: summaryFilter)) {
             // Drop a selection the filter hides, so its details go with it.
             guard let scan else { return }
             if !visibleRows(scan.items).contains(where: { $0.id == selection }) { selection = nil }
@@ -84,12 +86,19 @@ struct DriversView: View {
         let rows = visibleRows(scan.items)
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                DriverSummaryCards(scan: scan)
-                Picker("Show", selection: $filter) {
-                    ForEach(DriversFilter.allCases) { Text($0.rawValue).tag($0) }
+                DriverSummaryCards(scan: scan, selected: summaryFilter, apply: applySummary)
+                HStack(spacing: 16) {
+                    Picker("Vendor", selection: $filter) {
+                        ForEach(DriversFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Picker("Status", selection: Binding(get: { status }, set: {
+                        summaryFilter = nil
+                        status = $0
+                    })) {
+                        ForEach(DriversStatusFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }
                 }
                 .pickerStyle(.segmented)
-                .labelsHidden()
                 .fixedSize()
             }
             .padding(.horizontal, 16)
@@ -154,6 +163,14 @@ struct DriversView: View {
     private func emptyState(_ scan: ExtensionScan) -> some View {
         if !search.trimmingCharacters(in: .whitespaces).isEmpty {
             ContentUnavailableView.search(text: search)
+        } else if status != .all || summaryFilter != nil {
+            EmptyNote(symbol: "line.3.horizontal.decrease.circle", tint: Theme.other, title: "No matching extensions",
+                      detail: "No extensions match the selected vendor and status.") {
+                Button("Show All Statuses") {
+                    status = .all
+                    summaryFilter = nil
+                }
+            }
         } else if filter == .thirdParty {
             let apple = scan.items.filter { $0.publisher == .apple }.count
             EmptyNote(symbol: "checkmark.seal.fill", tint: Theme.disk,
@@ -172,7 +189,19 @@ struct DriversView: View {
     }
 
     private func visibleRows(_ items: [ExtensionItem]) -> [ExtensionItem] {
-        items.filter { filter.includes($0) && $0.matches(search) }.sorted(using: sortOrder)
+        items.filter {
+            filter.includes($0) && status.includes($0.status) && (summaryFilter?.includes($0) ?? true) && $0.matches(search)
+        }.sorted(using: sortOrder)
+    }
+
+    private func applySummary(_ summary: DriverSummaryFilter) {
+        if summaryFilter == summary {
+            summaryFilter = nil
+            status = .all
+        } else {
+            summaryFilter = summary
+            status = summary.status
+        }
     }
 
     private func rescan() async {
@@ -191,6 +220,10 @@ struct DriversView: View {
         }) {
             // The filter first, since it can swap tables.
             if !filter.includes(requested) { filter = requested.publisher == .apple ? .apple : .thirdParty }
+            if !status.includes(requested.status) || !(summaryFilter?.includes(requested) ?? true) {
+                status = .all
+                summaryFilter = nil
+            }
             await LaunchArgument.afterTableLayout()
             selection = requested.id
             scrollTarget = requested.id
@@ -206,6 +239,8 @@ struct DriversView: View {
 
 private struct DriverSummaryCards: View {
     var scan: ExtensionScan
+    var selected: DriverSummaryFilter?
+    var apply: (DriverSummaryFilter) -> Void
 
     /// Five fit one row of the narrowest window (820 points, sidebar hidden).
     var body: some View {
@@ -214,27 +249,32 @@ private struct DriverSummaryCards: View {
             DriverSummaryCard(title: "System extensions", value: summary.systemExtensions, symbol: "puzzlepiece.extension",
                               tint: Theme.gpu, detail: systemDetail,
                               explanation: "Network filters and VPNs, DriverKit drivers and security tools that apps installed "
-                                  + "and macOS allowed. They run outside the kernel.")
+                                  + "and macOS allowed. They run outside the kernel.",
+                              isSelected: selected == .system, action: { apply(.system) })
             DriverSummaryCard(title: "Third-party kexts", value: summary.thirdPartyKernelExtensions, symbol: "shippingbox",
                               tint: Theme.memory,
                               detail: summary.thirdPartyKernelExtensions == 0 ? "None loaded" : "In the kernel now",
                               explanation: "Kernel extensions from developers other than Apple, loaded now. They run inside the "
-                                  + "kernel with full access to the Mac.")
+                                  + "kernel with full access to the Mac.",
+                              isSelected: selected == .thirdPartyKernel, action: { apply(.thirdPartyKernel) })
             DriverSummaryCard(title: "Loaded kexts", value: summary.loadedKernelExtensions, symbol: "cpu",
                               tint: Theme.cpu, detail: wiredDetail,
-                              explanation: "Every kernel extension loaded now, Apple's included, and the memory their code keeps wired.")
+                              explanation: "Every kernel extension loaded now, Apple's included, and the memory their code keeps wired.",
+                              isSelected: selected == .kernel, action: { apply(.kernel) })
             // Neutral and never glowing: a copy that doesn't run isn't a problem.
             DriverSummaryCard(title: "Not in use", value: summary.notInUse, symbol: "archivebox", tint: Theme.other,
                               detail: notInUseDetail,
                               explanation: "Extensions on disk that macOS hasn't registered or loaded, so they don't run: kexts "
                                   + "in /Library/Extensions or an app, and system extensions an app carries. Often they're left "
                                   + "from an old install or wait for hardware; that alone isn't a problem. Copies whose use "
-                                  + "couldn't be told are listed as Unknown and not counted.")
+                                  + "couldn't be told are listed as Unknown and not counted.",
+                              isSelected: selected == .notInUse, action: { apply(.notInUse) })
             DriverSummaryCard(title: "Needs attention", value: summary.needsAttention, symbol: "exclamationmark.triangle",
                               tint: summary.needsAttention > 0 ? .orange : Theme.disk,
                               glow: summary.needsAttention > 0 ? 0.35 : 0,
                               detail: summary.needsAttention > 0 ? "Waiting for your approval" : "Nothing waiting",
-                              explanation: "System extensions macOS won't run until someone allows them in System Settings.")
+                              explanation: "System extensions macOS won't run until someone allows them in System Settings.",
+                              isSelected: selected == .attention, action: { apply(.attention) })
         }
     }
 
@@ -284,8 +324,19 @@ private struct DriverSummaryCard: View {
     var glow = 0.0
     var detail: String
     var explanation: String
+    var isSelected: Bool
+    var action: () -> Void
 
     var body: some View {
+        Button(action: action) {
+            card
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help(explanation)
+    }
+
+    private var card: some View {
         Card(tint: tint, glow: glow) {
             Label {
                 Text(title).lineLimit(2)
@@ -303,8 +354,17 @@ private struct DriverSummaryCard: View {
                     .lineLimit(1)
             }
         }
-        .help(explanation)
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+        }
     }
+}
+
+private struct DriverFilterChoice: Equatable {
+    let vendor: DriversFilter
+    let status: DriversStatusFilter
+    let summary: DriverSummaryFilter?
 }
 
 /// What the page says when the filter leaves nothing to list. Smaller than

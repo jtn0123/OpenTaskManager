@@ -6,6 +6,33 @@ import Foundation
 /// that has just come up (the one a jump lands on) rather than the tail of a
 /// long card beside it.
 public enum ScrollSpy {
+    /// A section's heading in page coordinates, y down.
+    public struct Header<ID>: Sendable where ID: Sendable {
+        public let id: ID
+        public let top: Double
+
+        public init(_ id: ID, top: Double) {
+            self.id = id
+            self.top = top
+        }
+    }
+
+    /// The heading nearest the visible top. Equal distances keep page order,
+    /// including side-by-side headings, so the highlight doesn't flicker.
+    public static func nearestHeader<ID>(_ headers: [Header<ID>], line: Double) -> ID? {
+        guard line.isFinite else { return nil }
+        var nearest: ID?
+        var distance = Double.infinity
+        for header in headers where header.top.isFinite {
+            let next = abs(header.top - line)
+            if next < distance {
+                nearest = header.id
+                distance = next
+            }
+        }
+        return nearest
+    }
+
     /// A card's top and bottom in page coordinates, y down.
     public struct Card<ID>: Sendable where ID: Sendable {
         public let id: ID

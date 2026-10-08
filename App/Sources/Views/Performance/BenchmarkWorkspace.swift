@@ -48,6 +48,9 @@ final class BenchmarkWorkspace {
         var interface: String?
     }
 
+    /// The family on show; comparisons opened elsewhere select it before scrolling.
+    var selectedKind: BenchmarkKind = .cpu
+
     /// The newest saved result of any test; nil until the files are read, or with none.
     private(set) var newest: Date?
     /// Run all's steps: the last suite's, or the running one's.
@@ -127,6 +130,7 @@ final class BenchmarkWorkspace {
     }
 
     private func requestReveal(_ kind: BenchmarkKind, aligned: Bool, section: Bool = false) {
+        selectedKind = kind
         reveal = Reveal(kind: kind, aligned: aligned, section: section, serial: (reveal?.serial ?? 0) + 1)
     }
 
@@ -274,12 +278,15 @@ final class BenchmarkWorkspace {
     func handleLaunchArguments(runs: [BenchmarkKind: [BenchmarkRun]], targets: SuiteTargets) {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
-        if let (kind, ids) = Self.requestedRuns("openBenchmarkCompare", among: runs) {
+        let comparisonRequest = Self.requestedRuns("openBenchmarkCompare", among: runs)
+        if let (kind, ids) = comparisonRequest {
+            selectedKind = kind
             picks[kind] = Array(ids.prefix(2))
             if ids.count >= 2 { requestReveal(kind, aligned: true) }
         }
         if let (kind, ids) = Self.requestedRuns("openBenchmarkBaseline", among: runs), let id = ids.first {
             baselines[kind] = id
+            if comparisonRequest == nil { selectedKind = kind }
         }
         if LaunchArgument.startsTest(on: "benchmarks") { runAll(targets: targets) }
     }

@@ -159,6 +159,12 @@ private struct HistoryComparisonCard: View {
                             headlines(comparison, statistics: [.average])
                         }
                     }
+                    if let scope = HistoryCompareLabels.recordedScope(a: comparison.a.coverage, b: comparison.b.coverage) {
+                        Text(scope)
+                            .font(.explanation)
+                            .foregroundStyle(.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(compact ? HistoryCompareLabels.compactFigures : HistoryCompareLabels.figuresHelp)
                         .help(HistoryCompareLabels.figuresHelp)
                         .font(.explanation)

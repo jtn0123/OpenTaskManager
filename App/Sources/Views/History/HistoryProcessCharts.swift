@@ -361,15 +361,15 @@ struct HistoryIdleSample: View {
 /// The picked process's lifetime as a lane over the rail's track: a bar
 /// from its start to its end (to the right edge while it runs), named
 /// where there's room, its idle stretches paler. Takes no room while
-/// nothing is picked. Reads only the process store, so the pointer and
-/// playback never redraw it.
+/// nothing is picked or a file is open. Reads no scrubber state, so the
+/// pointer and playback never redraw it.
 struct HistoryProcessLane: View {
     let domain: ClosedRange<Date>
     private let store = HistoryProcessStore.shared
 
     var body: some View {
-        if store.picked != nil, let track = store.track, let span = track.lifetime.span(within: domain, isRunning: track.isRunning,
-                                                                                        now: domain.upperBound) {
+        if HistoryRecordingStore.shared.opened == nil, store.picked != nil, let track = store.track,
+           let span = track.lifetime.span(within: domain, isRunning: track.isRunning, now: domain.upperBound) {
             GeometryReader { geometry in
                 let width = geometry.size.width
                 let lower = HistoryMoment.x(of: span.lowerBound, width: width, domain: domain)
@@ -417,7 +417,7 @@ struct HistoryProcessStripBand: View {
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            if store.picked != nil, let track = store.track,
+            if HistoryRecordingStore.shared.opened == nil, store.picked != nil, let track = store.track,
                let span = track.lifetime.span(within: domain, isRunning: track.isRunning, now: domain.upperBound) {
                 let lower = HistoryMoment.x(of: span.lowerBound, width: width, domain: domain)
                 let upper = HistoryMoment.x(of: span.upperBound, width: width, domain: domain)
@@ -438,24 +438,14 @@ struct HistoryMomentProcess: View {
     let time: Date
     private let store = HistoryProcessStore.shared
 
-    /// What the process was doing at the moment.
-    enum Moment {
-        case figures(ProcessHistoryPoint)
-        case idle
-        case notRunning
-        case notRecorded
-    }
+    typealias Moment = ProcessHistoryLabels.Moment
 
     static func moment(of track: HistoryProcessStore.Track, at time: Date) -> Moment {
-        let lifetime = track.lifetime
-        if time < lifetime.started.addingTimeInterval(-track.bucket) { return .notRunning }
-        if let ended = lifetime.ended, time > ended.addingTimeInterval(track.bucket) { return .notRunning }
-        guard let point = ProcessHistoryPoint.at(time, in: track.figures, bucket: track.bucket) else { return .notRecorded }
-        return point.state == .idle ? .idle : .figures(point)
+        ProcessHistoryLabels.moment(of: track.lifetime, at: time, points: track.figures, bucket: track.bucket)
     }
 
     var body: some View {
-        if store.picked != nil, let track = store.track {
+        if HistoryRecordingStore.shared.opened == nil, store.picked != nil, let track = store.track {
             Divider()
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
@@ -467,12 +457,12 @@ struct HistoryMomentProcess: View {
                 case .figures(let point):
                     figures(point, restricted: track.lifetime.isRestricted)
                 case .idle:
-                    note("Idle, not stored: running, but under every keep threshold then")
+                    note(ProcessHistoryLabels.idleMoment)
                         .help(HistoryProcessStyle.idleHelp)
                 case .notRunning:
                     note("Not running then")
                 case .notRecorded:
-                    note("Not recorded then")
+                    note(ProcessHistoryLabels.notRecorded)
                 }
             }
         }
@@ -529,7 +519,7 @@ struct HistoryMomentProcessLine: View {
     private let store = HistoryProcessStore.shared
 
     var body: some View {
-        if store.picked != nil, let track = store.track, let time {
+        if HistoryRecordingStore.shared.opened == nil, store.picked != nil, let track = store.track, let time {
             HStack(spacing: 6) {
                 Circle().fill(HistoryProcessStyle.tint).frame(width: 6, height: 6)
                 Text(track.lifetime.name).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
@@ -550,9 +540,9 @@ struct HistoryMomentProcessLine: View {
                 parts.append("disk \(Format.bytesPerSecond(read + write))")
             }
             return parts.compactMap { $0 }.joined(separator: " · ")
-        case .idle: return "idle, not stored"
+        case .idle: return ProcessHistoryLabels.idleMoment
         case .notRunning: return "not running"
-        case .notRecorded: return "not recorded"
+        case .notRecorded: return ProcessHistoryLabels.notRecorded
         }
     }
 }

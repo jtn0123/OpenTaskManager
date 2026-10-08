@@ -203,7 +203,7 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
             lines.append(Self.row([
                 change.title, change.unit.format(change.baseline) + Self.qualifier(change.baselineCaveat),
                 change.unit.format(change.compared) + Self.qualifier(change.comparedCaveat),
-                change.change.map(BenchmarkChange.formatChange) ?? "—", change.spreadText, change.verdict.title.lowercased(),
+                change.change.map(BenchmarkChange.formatChange) ?? "—", change.spreadText, change.verdictTitle.lowercased(),
             ]))
         }
         if let caveats = entry.caveats, !caveats.isEmpty {

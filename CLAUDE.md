@@ -68,8 +68,9 @@ Manager OG or any other proprietary task manager.
   pane, `SplitMath`, the process table's columns, `ColumnFit`, and the
   Overview's per-core graphs, `CoreGrid` (core types side by side when they
   fit one line, otherwise rows of shared columns, a short last row balanced),
-  the CPU page's, `CoreAreaGrid` (near-square tiles filling its main graph's
-  area), and Performance's main graphs' heights and figures, `HeroLayout`;
+  the CPU page's, `CoreAreaGrid` (near-square tiles), with `CoreGraphLayout`
+  capping their height by default to leave room for the summary figures, and
+  Performance's main graphs' heights and figures, `HeroLayout`;
   System/NetworkQuality (parses `networkQuality -c`) and System/DiskSpeedTest (one
   unlinked temp file, F_NOCACHE reads, verified, cancellable) back the user-started
   speed tests on Performance's network and disk details (`SpeedTestStores`; nothing
@@ -101,9 +102,13 @@ Manager OG or any other proprietary task manager.
   Model/BenchmarkRun adapts those histories on read to one envelope (never
   rewritten), Model/BenchmarkComparison holds the compatibility rules and change
   against both runs' spread, with context differences as warnings that never
-  refuse, and Format/BenchmarkExport the versioned JSON (v2) and
+  refuse; `BenchmarkConditions` qualifies verdicts as Higher/Lower · conditions
+  differ in amber with a short account beside them, keeping the full warnings
+  below (equal heat or load alone is still comparable), and Format/BenchmarkExport
+  the versioned JSON (v2) and
   Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`, `BenchmarkSections`,
-  `BenchmarkWorkspace`: Run all through the tests' own stores, picks and ticks in
+  `BenchmarkWorkspace`: a selected family's compact saved-run picker before
+  its results and trends, Run all through the tests' own stores, picks and ticks in
   UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
   Model/BenchmarkTrend splits a test's runs into lines only comparable runs
   share and gives each figure's points their spread and verdict against a
@@ -162,7 +167,12 @@ Manager OG or any other proprietary task manager.
   that follow on, no PIDs, nothing to chart),
   the process inspector's Show History opens it, `-openProcessHistory <query>`
   searches it and picks the latest match, and `otm history processes <query>`
-  prints it; recording files carry no process history yet; Compare's figures, `HistoryIntervalStats` and
+  prints it; recording files carry no process history yet, so their Processes
+  section is a compact notice with Search Live History, which closes the file
+  and focuses the live search. Idle-only results show their lifetime and
+  "Idle throughout: no busy figures kept" without empty charts; the moment
+  panel says "Idle (not kept)" only for a watched idle point, and "Not recorded"
+  for real gaps (`ProcessHistoryLabels` in OTMKit). Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; each interval's column heading gives how much
   of it was recorded, and `HistoryComparison.limitation` (a side under
@@ -178,7 +188,10 @@ Manager OG or any other proprietary task manager.
   wording in `HistoryCompareLabels`). Under
   900 window points its interval and coverage headings shorten, the headline
   grid shows averages, and notices keep their full explanations in help;
-  the wide layout keeps its wording and figures. The pinned rail folds to a strip (the
+  the wide layout keeps its wording and figures. A side under 90% recorded,
+  or shares differing by more than 15 points, also puts both recorded shares
+  and the changes' recorded-time scope under the headline figures
+  (`HistoryCompareLabels.recordedScope`). The pinned rail folds to a strip (the
   section at the top, the span, the moment, Play and speed, a slim track that
   marks spike events) once the charts' top has scrolled under it; hovering a
   gap in either rail shows its span and possible causes (`HistoryGapLabels`).
@@ -201,7 +214,12 @@ Manager OG or any other proprietary task manager.
   at most 100 MB); a replay's `FlightRecorder.recordSpan` is the file's record
   length, so it buckets by the second; spike replays open at the first trigger's
   time (`SpikeReplay` in OTMKit), including `-openRecording` and playback started
-  with `-openPlayback`. The banner's Jump to Spike pauses there from anywhere,
+  with `-openPlayback`. Below 900 window points the recording banner keeps its
+  title, trigger time and actions, and moves the machine, record count and
+  unreported figures to Details. Both widths show a Read-only badge
+  (`HistoryReplayLabels` in OTMKit). The moment panel's event descriptions
+  wrap to two lines in their own column, beside a trailing column of complete
+  relative times. The banner's Jump to Spike pauses there from anywhere,
   with every trigger's time in its help. Every time chart marks the triggers
   with the rail's bolt and a thin rule, laid out once without reading the
   scrubber (`HistorySpikeChartMarks`); ordinary recordings still open at the end.
@@ -268,11 +286,19 @@ Manager OG or any other proprietary task manager.
   copies one level into /Library/Extensions and the Applications folders, never
   /System, and Model/ExtensionMatching ties each to what's registered or loaded
   by identifier and version, the rest being rows "Installed, not in use" or,
-  when that can't be told, "Unknown"; tests use fake bundles in a temp dir),
+  when that can't be told, "Unknown"; vendor and Status (All, Loaded, Not in
+  use) filters combine, and summary cards toggle the rows behind their count
+  with an accent outline while selected (`DriversStatusFilter` and
+  `DriverSummaryFilter` in OTMKit); tests use fake bundles in a temp dir),
   Views/Storage (disk space: `StorageStore` keeps the session's last scan and
   scans only on Scan or a scope pick, never on launch or per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
-  layer alone reads the pointer; each finished scan's summary is saved once, off
+  layer and the fixed-height strip below it read the pointer; the strip names
+  the hovered item, else the selection, with its path below the scan root,
+  size and share. A click selects and brings its folder-list row into view;
+  double-click or Return opens a folder. Arrow keys follow tile geometry
+  (`TreemapNavigation` in OTMKit), including tiny tiles and drawn children;
+  each region has a spoken name and size. Each finished scan's summary is saved once, off
   the main actor, to Application Support/OpenTaskManager/Scans, and the Changes
   list colours the treemap by what changed since an earlier scan; the change
   picked there is named above the map, not in a tag over it (`PickedChangeBar`:
@@ -433,6 +459,9 @@ Manager OG or any other proprietary task manager.
   The System page's jump bar and search (`SystemNavigator`; the matching is
   `SystemReportSearch` in OTMKit) scroll to stable ids (`SystemTarget`) through
   a `ScrollViewReader`, and follow the scrolling from the clip view's bounds.
+  `ScrollSpy.nearestHeader` chooses the group whose first header is nearest
+  the visible top, including after a jump stops short at the page's end;
+  no timed hold pins the last click. Only the jump bar reads that group.
   The bar is in-page links, not tabs: "Jump to" and a link per group, the one
   at the top underlined (a menu when narrow). A search marks its finds in the
   cards' titles, labels and values (`SearchMarks`, ranges from
@@ -503,7 +532,7 @@ selects the first matching socket on the Connections page so its details show
 `-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
 (add `-openAppRemoval YES` to open its Move to Trash review),
 `-openDriver <text>` selects the first extension on the Drivers page whose name
-or bundle ID contains it (switching the Third party/Apple filter if it hides it),
+or bundle ID contains it (switching the vendor and status filters if they hide it),
 `-openUser <name>` opens that user's top processes on the Users page (and
 the system accounts, for root or a service account), `-openSystemSearch <text>`
 searches the System page and `-openSystemCategory network` (or another group
@@ -697,7 +726,12 @@ the thermal state turns fair), so `-openResource benchmarks
   (`CoreGraphGrid`: one AppKit view hosting a `StreamGraphView` a tile, busy time
   filled and kernel time, `CPUSample.coreSystem`, as a line; tiles laid out by
   `CoreAreaGrid` in OTMKit, 18 CPUs 6 by 3, core types on rows of their own
-  where that costs nothing; the Overview's Cores tiles grown, both drawn in
+  where that costs nothing; `CoreGraphLayout` caps the whole tiles at 130 points
+  by default, up to 180 when there is spare height, reserving another 100 points
+  for the remaining summary rows and the toggle. Larger Graphs
+  (`cpuLargerGraphs` in Settings, off by default) fills the original area
+  with the same graph views and no new per-frame work; the CPU and Overview's
+  tiles are both drawn in
   `CoreTileLook`, so they read as one family). A GPU that doesn't report utilization graphs its
   memory in use there (`GPUHero`), its bar dim. The resource list's rows give a
   live graph in the device's colour and two lines of figures (`ResourceText`).

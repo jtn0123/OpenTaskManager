@@ -2,9 +2,9 @@ import OTMKit
 import SwiftUI
 
 /// The Benchmarks workspace, at the foot of the Performance list: the CPU
-/// benchmark and sustained run, GPU, disk and Internet tests side by side,
-/// each with its latest figures, how the Mac stood as it started, its saved
-/// runs and a comparison of any two, and Run all. The tests' sections are in
+/// benchmark and sustained run, GPU, disk and Internet tests, one family
+/// on show at a time, with its saved-run picker before the comparison and
+/// latest figures, how the Mac stood as it started, trends and Run all. The tests' sections are in
 /// `BenchmarkSections.swift`. The tests run
 /// through their own stores, so a run started here is the one the resource's
 /// card shows, and the other way round. Its inputs don't change from tick to
@@ -12,9 +12,8 @@ import SwiftUI
 /// with a run's progress, never per tick. There's no overall score: the
 /// tests measure different things, and the Internet's figures aren't this Mac's.
 ///
-/// A strip pins to the top as the page scrolls: a link to each test with its
-/// count of runs, and what's ticked for comparison. How the tests and the
-/// comparison work folds away under Methodology, so the figures come first.
+/// A family selector pins as the page scrolls, with its saved run picker
+/// directly below. Results, trends, Run all and methodology follow it.
 struct BenchmarksDetail: View, Equatable {
     /// The startup volume's name ("Macintosh HD"), where the disk test writes.
     let homeVolume: String
@@ -37,28 +36,19 @@ struct BenchmarksDetail: View, Equatable {
         ScrollViewReader { proxy in
             LazyVStack(alignment: .leading, spacing: 16, pinnedViews: .sectionHeaders) {
                 BenchmarksHeader()
-                Text("Every saved run of each test, newest first. Tick two runs of a test to compare them.")
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                WorkspaceMethodology()
                 Section {
+                    let kind = BenchmarkWorkspace.shared.selectedKind
                     VStack(alignment: .leading, spacing: 16) {
+                        SavedRuns(kind: kind, runs: BenchmarkHistories.runs(kind))
+                            .equatable()
+                            .modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.section(kind)))
+                        selectedSection(kind, places: places)
                         SuiteCard(places: places)
-                        GroupHeading(title: "This Mac", symbol: "laptopcomputer",
-                                     note: "The CPU, GPU and disk tests measure this Mac's hardware.")
-                        CPUSection().modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.section(.cpu)))
-                        SustainedSection().modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.section(.sustained)))
-                        GPUSection().modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.section(.gpu)))
-                        DiskSection(places: places).modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.section(.disk)))
-                        GroupHeading(title: "Your Internet connection", symbol: "globe",
-                                     note: "Measures the connection and the server it reached at the time, not this Mac.")
-                            .padding(.top, 6)
-                        NetworkSection(places: places).modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.section(.network)))
+                        WorkspaceMethodology()
                     }
                     .environment(\.benchmarkScrollClearance, stripHeight + 8)
                 } header: {
-                    BenchmarkContextStrip(proxy: proxy)
+                    BenchmarkContextStrip()
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
                 }
             }
@@ -81,6 +71,17 @@ struct BenchmarksDetail: View, Equatable {
             BenchmarkWorkspace.shared.handleLaunchArguments(runs: runs, targets: places.suiteTargets)
             // A card's Compare in Benchmarks opened the workspace.
             BenchmarkWorkspace.shared.revealPending()
+        }
+    }
+
+    @ViewBuilder
+    private func selectedSection(_ kind: BenchmarkKind, places: BenchmarkPlaces) -> some View {
+        switch kind {
+        case .cpu: CPUSection()
+        case .sustained: SustainedSection()
+        case .gpu: GPUSection()
+        case .disk: DiskSection(places: places)
+        case .network: NetworkSection(places: places)
         }
     }
 }
@@ -191,6 +192,15 @@ enum BenchmarkLook {
         }
     }
 
+    static func color(_ change: BenchmarkChange) -> AnyShapeStyle {
+        if change.isQualified { return AnyShapeStyle(caution) }
+        return change.caveat == nil ? color(change.verdict) : AnyShapeStyle(.secondaryText)
+    }
+
+    static func symbol(_ change: BenchmarkChange) -> String {
+        change.isQualified ? "exclamationmark.triangle" : symbol(change.verdict)
+    }
+
     /// "Oct 6, 14:02".
     static func when(_ date: Date) -> String {
         date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
@@ -246,52 +256,20 @@ private struct WorkspaceMethodology: View {
     }
 }
 
-/// Pinned over the workspace as it scrolls: a link to each test's section
-/// with its count of saved runs, then what's ticked for comparison in each,
-/// with Show and Clear. It reads only the histories and the picks, never a
-/// test's progress, so it redraws when a run is saved or a box ticked.
+/// The family selector stays visible while results scroll. It reads saved
+/// histories and the selection, never a sample or a test's progress.
 private struct BenchmarkContextStrip: View {
-    let proxy: ScrollViewProxy
-
-    private struct Selection: Identifiable {
-        let kind: BenchmarkKind
-        /// The earlier first.
-        let picked: [BenchmarkRun]
-        var id: BenchmarkKind { kind }
-    }
-
     var body: some View {
         let workspace = BenchmarkWorkspace.shared
-        let runs = Dictionary(uniqueKeysWithValues: BenchmarkKind.allCases.map { ($0, BenchmarkHistories.runs($0)) })
-        let selections = BenchmarkKind.allCases.compactMap { kind -> Selection? in
-            let picked = workspace.picked(kind, among: runs[kind] ?? [])
-            return picked.isEmpty ? nil : Selection(kind: kind, picked: picked)
-        }
-        VStack(alignment: .leading, spacing: 6) {
-            // Packed to the left, wrapping in the narrowest window's detail.
-            FlowRow(spacing: 6, lineSpacing: 6, spreads: false) {
-                ForEach(BenchmarkKind.allCases, id: \.self) { kind in
-                    SectionLink(kind: kind, count: runs[kind]?.count ?? 0) {
-                        jump(to: BenchmarkAnchor.section(kind))
-                    }
-                }
-            }
-            if selections.isEmpty {
-                Label("Nothing ticked: tick two runs of a test to compare them.", systemImage: "arrow.left.arrow.right")
-                    .font(.explanation)
-                    .foregroundStyle(.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                ForEach(selections) { selection in
-                    SelectionLine(kind: selection.kind, picked: selection.picked) {
-                        jump(to: BenchmarkAnchor.comparison(selection.kind))
-                    }
+        FlowRow(spacing: 6, lineSpacing: 6, spreads: false) {
+            ForEach(BenchmarkKind.allCases, id: \.self) { kind in
+                SectionLink(kind: kind, count: BenchmarkHistories.runs(kind).count, selected: workspace.selectedKind == kind) {
+                    workspace.selectedKind = kind
                 }
             }
         }
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Opaque, out to the page's edges, so the cards scroll out of sight under it.
         .background {
             Rectangle().fill(.background).padding(.horizontal, -20)
         }
@@ -299,18 +277,13 @@ private struct BenchmarkContextStrip: View {
             Divider().padding(.horizontal, -20)
         }
     }
-
-    private func jump(to id: String) {
-        withAnimation(.easeInOut(duration: 0.3)) {
-            proxy.scrollTo(id, anchor: .top)
-        }
-    }
 }
 
-/// A test's name and count of runs, as a link to its section.
+/// A family choice with its run count; the selected one has a firmer outline.
 private struct SectionLink: View {
     let kind: BenchmarkKind
     let count: Int
+    let selected: Bool
     let action: () -> Void
 
     var body: some View {
@@ -326,81 +299,14 @@ private struct SectionLink: View {
             .fixedSize()
             .padding(.horizontal, 9)
             .padding(.vertical, 3)
-            .background(tint.fillShade.opacity(0.10), in: Capsule())
-            .overlay(Capsule().strokeBorder(tint.opacity(0.30)))
+            .background(tint.fillShade.opacity(selected ? 0.24 : 0.06), in: Capsule())
+            .overlay(Capsule().strokeBorder(tint.opacity(selected ? 0.8 : 0.3)))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help("Go to \(kind.title): \(count == 1 ? "1 saved run" : "\(count) saved runs")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .help("Show \(kind.title): \(count == 1 ? "1 saved run" : "\(count) saved runs")")
         .accessibilityLabel("\(kind.title), \(count == 1 ? "1 saved run" : "\(count) saved runs")")
-    }
-}
-
-/// What's ticked in one test: the pair compared and how it came out, a pair
-/// that can't be, or one run waiting for a second.
-private struct SelectionLine: View {
-    let kind: BenchmarkKind
-    /// The earlier first.
-    let picked: [BenchmarkRun]
-    let show: () -> Void
-
-    var body: some View {
-        let state = Self.state(kind: kind, picked: picked)
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: state.symbol).foregroundStyle(state.color)
-            Text(state.text)
-                .font(.explanation)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 4)
-            if picked.count == 2 {
-                Button("Show", action: show)
-                    .help("Go to the comparison")
-            }
-            Button("Clear") { BenchmarkWorkspace.shared.clearPicks(kind) }
-                .help(picked.count == 2 ? "Untick both runs" : "Untick the run")
-        }
-    }
-
-    private struct State {
-        let symbol: String
-        let color: AnyShapeStyle
-        let text: String
-    }
-
-    private static func state(kind: BenchmarkKind, picked: [BenchmarkRun]) -> State {
-        let name = BenchmarkLook.shortTitle(kind)
-        guard picked.count == 2 else {
-            let when = picked.first.map { BenchmarkLook.when($0.date) } ?? ""
-            return State(symbol: "checkmark.square", color: AnyShapeStyle(.secondaryText),
-                         text: "\(name) run of \(when) ticked: tick another to compare.")
-        }
-        let span = BenchmarkLook.span(picked[0].date, picked[1].date)
-        switch BenchmarkComparison.compare(picked[0], picked[1]) {
-        case let .refused(refusal):
-            return State(symbol: "nosign", color: AnyShapeStyle(BenchmarkLook.debug),
-                         text: "\(name) runs \(span) can't be compared: \(refusal.summary).")
-        case let .compared(comparison):
-            let doubt = comparison.changes.contains { $0.caveat != nil } ? " · a figure's timing unverified" : ""
-            let starts = comparison.contextWarnings.isEmpty ? "" : " · the runs started differently"
-            return State(symbol: "arrow.left.arrow.right", color: AnyShapeStyle(BenchmarkLook.tint(kind)),
-                         text: "Comparing \(name) runs \(span) · \(comparison.verdictSummary)\(doubt)\(starts)")
-        }
-    }
-}
-
-private struct GroupHeading: View {
-    var title: String
-    var symbol: String
-    var note: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Label(title, systemImage: symbol).font(.title3.weight(.semibold))
-            Text(note)
-                .font(.explanation)
-                .foregroundStyle(.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 }
 

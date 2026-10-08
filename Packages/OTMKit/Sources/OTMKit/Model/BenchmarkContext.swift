@@ -238,10 +238,15 @@ public extension BenchmarkContext {
     }
 
     private static func powerWarning(_ one: Self, _ other: Self) -> BenchmarkContextWarning? {
-        guard let first = one.power, let second = other.power, first != second else { return nil }
-        let battery = one.hasBattery ?? other.hasBattery
-        return BenchmarkContextWarning(topic: .power, text: "The earlier run was \(first.phrase(hasBattery: battery)), "
-            + "the later \(second.phrase(hasBattery: battery)).")
+        var parts: [String] = []
+        if let first = one.power, let second = other.power, first != second {
+            let battery = one.hasBattery ?? other.hasBattery
+            parts.append("The earlier run was \(first.phrase(hasBattery: battery)), the later \(second.phrase(hasBattery: battery)).")
+        }
+        if let first = one.lowPowerMode, let second = other.lowPowerMode, first != second {
+            parts.append("Low Power Mode was \(first ? "on" : "off") in the earlier run, \(second ? "on" : "off") in the later.")
+        }
+        return parts.isEmpty ? nil : BenchmarkContextWarning(topic: .power, text: parts.joined(separator: " "))
     }
 
     private static func thermalWarning(_ one: Self, _ other: Self) -> BenchmarkContextWarning? {

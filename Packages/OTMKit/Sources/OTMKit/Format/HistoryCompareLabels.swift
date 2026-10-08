@@ -27,6 +27,16 @@ public enum HistoryCompareLabels {
         return coverage < 0.005 ? "<1%" : Format.percent(min(coverage, 1))
     }
 
+    /// A modest gap can matter even when neither side needs the detailed
+    /// low-coverage notice. Keep that scope beside the headline changes.
+    public static func recordedScope(a: Double, b: Double) -> String? {
+        func share(_ value: Double) -> Double { value.isFinite ? min(max(value, 0), 1) : 0 }
+        let a = share(a)
+        let b = share(b)
+        guard min(a, b) < 0.9 || abs(a - b) > 0.15 else { return nil }
+        return "Recorded: A \(Format.fixed(a * 100, 0))%, B \(Format.fixed(b * 100, 0))% — changes describe recorded time only."
+    }
+
     public static func notice(_ limitation: HistoryComparison.Limitation) -> String {
         let sides = limitation.sides.map(\.rawValue).joined(separator: " and ")
         let reason = limitation.kind == .low ? "Little recorded in \(sides)" : "Less recorded in \(sides)"
