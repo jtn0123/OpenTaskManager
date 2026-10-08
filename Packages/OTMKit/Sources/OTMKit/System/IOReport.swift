@@ -29,7 +29,8 @@ struct IOReportChannel: Equatable {
 /// libIOReport's C entry points. It's a private system library with no
 /// headers or module map, so it's opened at run time and `init` fails where
 /// it's missing (Intel Macs before it shipped, stripped-down VMs).
-final class IOReportLibrary {
+/// The owned library handle outlives its symbols and every subscription that uses them.
+@safe final class IOReportLibrary {
     typealias CopyChannelsInGroup = @convention(c) (CFString?, CFString?, UInt64, UInt64, UInt64) -> Unmanaged<CFMutableDictionary>?
     typealias MergeChannels = @convention(c) (CFMutableDictionary, CFMutableDictionary, CFTypeRef?) -> Void
     typealias CreateSubscription = @convention(c) (
@@ -66,51 +67,54 @@ final class IOReportLibrary {
     private let handle: UnsafeMutableRawPointer
 
     init?(path: String = "/usr/lib/libIOReport.dylib") {
-        guard let handle = dlopen(path, RTLD_NOW | RTLD_LOCAL) else { return nil }
+        // Each symbol uses its C signature; the owned handle keeps the library loaded until its last user is gone.
+        guard let handle = unsafe dlopen(path, RTLD_NOW | RTLD_LOCAL) else { return nil }
         func load<T>(_ name: String, as _: T.Type) -> T? {
-            dlsym(handle, name).map { unsafeBitCast($0, to: T.self) }
+            unsafe dlsym(handle, name).map { unsafe unsafeBitCast($0, to: T.self) }
         }
-        guard let copyChannelsInGroup = load("IOReportCopyChannelsInGroup", as: CopyChannelsInGroup.self),
+        guard let copyChannelsInGroup = unsafe load("IOReportCopyChannelsInGroup", as: CopyChannelsInGroup.self),
               let mergeChannels = load("IOReportMergeChannels", as: MergeChannels.self),
-              let createSubscription = load("IOReportCreateSubscription", as: CreateSubscription.self),
-              let createSamples = load("IOReportCreateSamples", as: CreateSamples.self),
-              let createSamplesDelta = load("IOReportCreateSamplesDelta", as: CreateSamplesDelta.self),
-              let group = load("IOReportChannelGetGroup", as: ChannelString.self),
-              let subgroup = load("IOReportChannelGetSubGroup", as: ChannelString.self),
-              let channelName = load("IOReportChannelGetChannelName", as: ChannelString.self),
-              let unitLabel = load("IOReportChannelGetUnitLabel", as: ChannelString.self),
+              let createSubscription = unsafe load("IOReportCreateSubscription", as: CreateSubscription.self),
+              let createSamples = unsafe load("IOReportCreateSamples", as: CreateSamples.self),
+              let createSamplesDelta = unsafe load("IOReportCreateSamplesDelta", as: CreateSamplesDelta.self),
+              let group = unsafe load("IOReportChannelGetGroup", as: ChannelString.self),
+              let subgroup = unsafe load("IOReportChannelGetSubGroup", as: ChannelString.self),
+              let channelName = unsafe load("IOReportChannelGetChannelName", as: ChannelString.self),
+              let unitLabel = unsafe load("IOReportChannelGetUnitLabel", as: ChannelString.self),
               let format = load("IOReportChannelGetFormat", as: ChannelInteger.self),
               let simpleIntegerValue = load("IOReportSimpleGetIntegerValue", as: IndexedInteger.self),
               let stateCount = load("IOReportStateGetCount", as: ChannelInteger.self),
-              let stateName = load("IOReportStateGetNameForIndex", as: IndexedString.self),
+              let stateName = unsafe load("IOReportStateGetNameForIndex", as: IndexedString.self),
               let stateResidency = load("IOReportStateGetResidency", as: IndexedInteger.self) else {
-            dlclose(handle)
+            unsafe dlclose(handle)
             return nil
         }
-        self.handle = handle
-        self.copyChannelsInGroup = copyChannelsInGroup
+        unsafe self.handle = handle
+        unsafe self.copyChannelsInGroup = copyChannelsInGroup
         self.mergeChannels = mergeChannels
-        self.createSubscription = createSubscription
-        self.createSamples = createSamples
-        self.createSamplesDelta = createSamplesDelta
-        self.group = group
-        self.subgroup = subgroup
-        self.channelName = channelName
-        self.unitLabel = unitLabel
+        unsafe self.createSubscription = createSubscription
+        unsafe self.createSamples = createSamples
+        unsafe self.createSamplesDelta = createSamplesDelta
+        unsafe self.group = group
+        unsafe self.subgroup = subgroup
+        unsafe self.channelName = channelName
+        unsafe self.unitLabel = unitLabel
         self.format = format
         self.simpleIntegerValue = simpleIntegerValue
         self.stateCount = stateCount
-        self.stateName = stateName
+        unsafe self.stateName = stateName
         self.stateResidency = stateResidency
     }
 
     deinit {
-        dlclose(handle)
+        // The library stays loaded while these function pointers are used; CF results follow their Copy or Get ownership rule.
+        unsafe dlclose(handle)
     }
 
     /// The "Get" accessors follow the CF get rule: the string isn't ours to release.
     func string(_ accessor: ChannelString, _ channel: CFDictionary) -> String {
-        accessor(channel)?.takeUnretainedValue() as String? ?? ""
+        // The library stays loaded while these function pointers are used; CF results follow their Copy or Get ownership rule.
+        unsafe accessor(channel)?.takeUnretainedValue() as String? ?? ""
     }
 }
 
@@ -130,10 +134,11 @@ final class IOReportSubscription {
     /// `keep(group, channelName)` is true; a nil subgroup means the whole group.
     /// Fails when no channel survives, so callers can treat IOReport as missing.
     init?(library: IOReportLibrary, groups: [(group: String, subgroup: String?)], keep: (String, String) -> Bool) {
+        // The library stays loaded while these function pointers are used; CF results follow their Copy or Get ownership rule.
         self.library = library
         var merged: CFMutableDictionary?
         for (group, subgroup) in groups {
-            guard let channels = library.copyChannelsInGroup(group as CFString, subgroup as CFString?, 0, 0, 0)?
+            guard let channels = unsafe library.copyChannelsInGroup(group as CFString, subgroup as CFString?, 0, 0, 0)?
                 .takeRetainedValue() else { continue }
             if let merged {
                 library.mergeChannels(merged, channels, nil)
@@ -149,14 +154,14 @@ final class IOReportSubscription {
         guard let all = dictionary[Self.channelsKey] as? [NSDictionary] else { return nil }
         let kept = all.filter { channel in
             let channel = channel as CFDictionary
-            return keep(library.string(library.group, channel), library.string(library.channelName, channel))
+            return unsafe keep(library.string(library.group, channel), library.string(library.channelName, channel))
         }
         guard !kept.isEmpty else { return nil }
         dictionary[Self.channelsKey] = kept
 
         var subscribed: Unmanaged<CFMutableDictionary>?
-        guard let subscription = library.createSubscription(nil, merged, &subscribed, 0, nil)?.takeRetainedValue(),
-              let subscribed = subscribed?.takeRetainedValue() else { return nil }
+        guard let subscription = unsafe library.createSubscription(nil, merged, &subscribed, 0, nil)?.takeRetainedValue(),
+              let subscribed = unsafe subscribed?.takeRetainedValue() else { return nil }
         self.subscription = subscription
         subscribedChannels = subscribed
     }
@@ -171,8 +176,9 @@ final class IOReportSubscription {
     /// Each channel's change since the previous call, and the seconds between
     /// the two readings. nil on the first call, which only sets the baseline.
     func sample() -> (interval: Double, channels: [IOReportChannel])? {
+        // The library stays loaded while these function pointers are used; CF results follow their Copy or Get ownership rule.
         guard let subscription, let subscribedChannels,
-              let current = library.createSamples(subscription, subscribedChannels, nil)?.takeRetainedValue() else {
+              let current = unsafe library.createSamples(subscription, subscribedChannels, nil)?.takeRetainedValue() else {
             return nil
         }
         let now = ContinuousClock.now
@@ -181,7 +187,7 @@ final class IOReportSubscription {
             previousTime = now
         }
         guard let previous, let previousTime,
-              let delta = library.createSamplesDelta(previous, current, nil)?.takeRetainedValue() else {
+              let delta = unsafe library.createSamplesDelta(previous, current, nil)?.takeRetainedValue() else {
             return nil
         }
         let elapsed = now - previousTime
@@ -190,6 +196,7 @@ final class IOReportSubscription {
     }
 
     private func channels(in sample: CFDictionary) -> [IOReportChannel] {
+        // The library stays loaded while these function pointers are used; CF results follow their Copy or Get ownership rule.
         guard let entries = (sample as NSDictionary)[Self.channelsKey] as? [NSDictionary] else { return [] }
         return entries.compactMap { entry in
             let channel = entry as CFDictionary
@@ -200,7 +207,7 @@ final class IOReportSubscription {
             case .state:
                 let count = max(library.stateCount(channel), 0)
                 value = .states((0..<count).map { index in
-                    IOReportChannel.State(
+                    unsafe IOReportChannel.State(
                         name: library.stateName(channel, index)?.takeUnretainedValue() as String? ?? "",
                         residency: library.stateResidency(channel, index)
                     )
@@ -208,7 +215,7 @@ final class IOReportSubscription {
             case nil:
                 return nil
             }
-            return IOReportChannel(
+            return unsafe IOReportChannel(
                 group: library.string(library.group, channel),
                 subgroup: library.string(library.subgroup, channel),
                 name: library.string(library.channelName, channel),

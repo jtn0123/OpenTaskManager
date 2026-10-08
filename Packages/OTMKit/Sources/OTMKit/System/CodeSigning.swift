@@ -102,11 +102,12 @@ public enum CodeSigning {
     /// The signature of the bundle or executable at `path`. Reads the
     /// signature and certificates only, so it takes a millisecond or so.
     public static func signature(atPath path: String) -> CodeSignature {
+        // Security borrows the local output variables; successful Create and Copy results transfer their retains to Swift.
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess,
+        guard unsafe SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess,
               let code else { return .unknown }
         var information: CFDictionary?
-        let status = SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
+        let status = unsafe SecCodeCopySigningInformation(code, SecCSFlags(rawValue: kSecCSSigningInformation), &information)
         if status == errSecCSUnsigned { return CodeSignature(signer: .unsigned) }
         guard status == errSecSuccess, let dictionary = information as? [String: Any] else { return .unknown }
         let certificates = dictionary[kSecCodeInfoCertificates as String] as? [SecCertificate] ?? []

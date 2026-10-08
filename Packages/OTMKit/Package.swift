@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -11,11 +11,13 @@ let package = Package(
     targets: [
         .target(
             name: "OTMKit",
+            swiftSettings: [.strictMemorySafety()],
             linkerSettings: [.linkedFramework("IOKit"), .linkedFramework("SystemConfiguration"), .linkedFramework("CoreWLAN")]
         ),
         .executableTarget(
             name: "otm",
-            dependencies: ["OTMKit"]
+            dependencies: ["OTMKit"],
+            swiftSettings: [.strictMemorySafety()]
         ),
         .testTarget(
             name: "OTMKitTests",

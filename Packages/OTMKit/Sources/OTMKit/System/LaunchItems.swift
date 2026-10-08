@@ -174,8 +174,9 @@ public enum LaunchItems {
 
     /// Classifies one property list. `data` is nil when the file couldn't be read.
     public static func item(plist data: Data?, path: String, scope: LaunchItemScope, modified: Date? = nil) -> LaunchItem {
+        // The optional format output is nil; Foundation owns the decoded plist values.
         let fileLabel = (URL(fileURLWithPath: path).lastPathComponent as NSString).deletingPathExtension
-        guard let data, let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+        guard let data, let plist = unsafe try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
             return LaunchItem(label: fileLabel, name: displayName(forLabel: fileLabel), plistPath: path, modified: modified,
                               scope: scope, publisher: publisher(plistPath: path, label: fileLabel), program: nil,
                               arguments: [], triggers: LaunchTriggers(), disabledInPlist: false,

@@ -30,6 +30,8 @@ public struct ConnectionSnapshot: Sendable {
 /// refresh (the Connections page every few seconds), not the main sampler's tick.
 public enum ConnectionSampler {
     public static func sample() -> ConnectionSnapshot {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         let time = Date()
         let started = DispatchTime.now()
         var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: 256)
@@ -49,7 +51,7 @@ public enum ConnectionSampler {
             for descriptor in descriptors.prefix(count) where Int32(descriptor.proc_fdtype) == PROX_FDTYPE_SOCKET {
                 var info = socket_fdinfo()
                 let size = Int32(MemoryLayout<socket_fdinfo>.size)
-                guard proc_pidfdinfo(pid, descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { continue }
+                guard unsafe proc_pidfdinfo(pid, descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { continue }
                 let described = process ?? describe(pid)
                 process = described
                 if let connection = decode(info.psi, pid: pid, fd: descriptor.proc_fd, processName: described.name,
@@ -68,17 +70,19 @@ public enum ConnectionSampler {
     /// to a port nor connected (just created) aren't worth a row, so they're nil.
     static func decode(_ info: socket_info, pid: Int32, fd: Int32, processName: String,
                        processStart: Date? = nil) -> Connection? {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         let transport: Connection.Transport
         let inet: in_sockinfo
         var state: TCPState?
         switch Int32(info.soi_kind) {
         case Int32(SOCKINFO_TCP):
             transport = .tcp
-            inet = info.soi_proto.pri_tcp.tcpsi_ini
-            state = TCPState(kernelValue: info.soi_proto.pri_tcp.tcpsi_state)
+            inet = unsafe info.soi_proto.pri_tcp.tcpsi_ini
+            state = unsafe TCPState(kernelValue: info.soi_proto.pri_tcp.tcpsi_state)
         case Int32(SOCKINFO_IN) where info.soi_protocol == IPPROTO_UDP:
             transport = .udp
-            inet = info.soi_proto.pri_in
+            inet = unsafe info.soi_proto.pri_in
         default:
             return nil
         }
@@ -94,11 +98,13 @@ public enum ConnectionSampler {
     // MARK: - Kernel reads
 
     private static func allPIDs() -> [Int32] {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         let estimate = proc_listallpids(nil, 0)
         guard estimate > 0 else { return [] }
         // Processes can start between the two calls; leave headroom.
         var pids = [Int32](repeating: 0, count: Int(estimate) + 64)
-        let written = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        let written = pids.withUnsafeMutableBytes { unsafe proc_listallpids($0.baseAddress, Int32($0.count)) }
         guard written > 0 else { return [] }
         return Array(pids.prefix(Int(written)))
     }
@@ -107,10 +113,12 @@ public enum ConnectionSampler {
     /// there are, growing the buffer when it's too small. Nil with `errno`
     /// set when the process can't be read.
     private static func listDescriptors(of pid: Int32, into buffer: inout [proc_fdinfo]) -> Int? {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         let stride = MemoryLayout<proc_fdinfo>.stride
         for _ in 0..<3 {
             let written = buffer.withUnsafeMutableBytes {
-                proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
+                unsafe proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
             }
             guard written > 0 else { return nil }
             // A full buffer may have cut the list short; ask for the real size.
@@ -125,9 +133,11 @@ public enum ConnectionSampler {
     /// The process's name and when it started, from the one record
     /// `proc_name` reads the name from, so the start time takes no extra call.
     private static func describe(_ pid: Int32) -> (name: String, start: Date?) {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return ("PID \(pid)", nil) }
+        guard unsafe proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return ("PID \(pid)", nil) }
         let name = text(info.pbi_name)
         let shown = name.isEmpty ? text(info.pbi_comm) : name
         let start = ProcessIdentity.startTime(microseconds: Int64(info.pbi_start_tvsec) * 1_000_000 + Int64(info.pbi_start_tvusec))
@@ -136,7 +146,9 @@ public enum ConnectionSampler {
 
     /// A kernel record's fixed-size C string, up to its first NUL.
     private static func text<Characters>(_ characters: Characters) -> String {
-        withUnsafeBytes(of: characters) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
+        withUnsafeBytes(of: characters) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
     }
 }
 
@@ -151,11 +163,13 @@ enum SocketDecoder {
     }
 
     static func endpoints(_ info: in_sockinfo) -> Endpoints {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         let hasIPv4 = info.insi_vflag & UInt8(INI_IPV4) != 0
         let isIPv6 = info.insi_vflag & UInt8(INI_IPV6) != 0
         let family: Connection.Family = isIPv6 ? (hasIPv4 ? .dual : .ipv6) : .ipv4
-        let local = isIPv6 ? address(info.insi_laddr.ina_6) : address(info.insi_laddr.ina_46.i46a_addr4)
-        let remote = isIPv6 ? address(info.insi_faddr.ina_6) : address(info.insi_faddr.ina_46.i46a_addr4)
+        let local = unsafe isIPv6 ? address(info.insi_laddr.ina_6) : address(info.insi_laddr.ina_46.i46a_addr4)
+        let remote = unsafe isIPv6 ? address(info.insi_faddr.ina_6) : address(info.insi_faddr.ina_46.i46a_addr4)
         let localPort = port(info.insi_lport)
         let remotePort = port(info.insi_fport)
         return Endpoints(
@@ -171,9 +185,11 @@ enum SocketDecoder {
     }
 
     static func address(_ address: in_addr) -> String {
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
         var address = address
         var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-        guard inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count)) != nil else { return "" }
+        guard unsafe inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count)) != nil else { return "" }
         return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
@@ -181,7 +197,9 @@ enum SocketDecoder {
     /// address (bytes 2 and 3). It's moved out into a `%en0` zone, the way
     /// `netstat` prints it, so the address itself reads normally.
     static func address(_ address: in6_addr) -> String {
-        var bytes = withUnsafeBytes(of: address) { Array($0) }
+        // Kernel calls receive the allocated byte capacity; kind and family select the union layouts, and text
+        // reads stay within their buffers.
+        var bytes = withUnsafeBytes(of: address) { unsafe Array($0) }
         var zone = ""
         if bytes[0] == 0xFE, bytes[1] & 0xC0 == 0x80 {
             let index = UInt32(bytes[2]) << 8 | UInt32(bytes[3])
@@ -189,16 +207,16 @@ enum SocketDecoder {
                 bytes[2] = 0
                 bytes[3] = 0
                 var name = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
-                zone = if_indextoname(index, &name) != nil
+                zone = unsafe if_indextoname(index, &name) != nil
                     ? "%" + String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
                     : "%\(index)"
             }
         }
         var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
         let text = bytes.withUnsafeBytes { raw in
-            inet_ntop(AF_INET6, raw.baseAddress, &buffer, socklen_t(buffer.count))
+            unsafe inet_ntop(AF_INET6, raw.baseAddress, &buffer, socklen_t(buffer.count))
         }
-        guard text != nil else { return "" }
+        guard unsafe text != nil else { return "" }
         return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self) + zone
     }
 }

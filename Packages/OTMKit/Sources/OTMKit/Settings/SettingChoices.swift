@@ -79,22 +79,6 @@ public enum UpdateSpeed: Double, CaseIterable, Sendable, Identifiable {
     public var id: Double { rawValue }
 }
 
-public enum Page: String, CaseIterable, Sendable, Identifiable {
-    case overview = "Overview"
-    case processes = "Processes"
-    case performance = "Performance"
-    case history = "History"
-    case connections = "Connections"
-    case startup = "Startup"
-    case apps = "Apps"
-    case users = "Users"
-    case system = "System"
-    case drivers = "Drivers"
-    case storage = "Storage"
-
-    public var id: String { rawValue }
-}
-
 public enum SystemReportFormat: String, CaseIterable, Sendable {
     case markdown, json
 }

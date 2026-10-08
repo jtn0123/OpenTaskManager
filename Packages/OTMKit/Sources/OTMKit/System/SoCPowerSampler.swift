@@ -53,17 +53,18 @@ final class SoCPowerSampler {
     /// Each GPU's clock per performance state, from the `perf-states` table
     /// of the device-tree node the accelerator hangs off.
     private static func gpuTables() -> [UInt64: [Double]] {
+        // IOKit consumes the matching dictionary and services remain live for each property read.
         var tables: [UInt64: [Double]] = [:]
         IORegistry.forEachService(matching: "IOAccelerator") { accelerator in
             var registryID: UInt64 = 0
-            IORegistryEntryGetRegistryEntryID(accelerator, &registryID)
+            unsafe IORegistryEntryGetRegistryEntryID(accelerator, &registryID)
             guard let parent = IORegistry.parent(of: accelerator) else { return }
             defer { IOObjectRelease(parent) }
             guard let data = IORegistry.property("perf-states", of: parent) as? Data else { return }
             // The property can hold several tables back to back; the count says
             // how long the first one is.
             let count = (IORegistry.property("perf-state-count", of: parent) as? Data).flatMap { data -> Int? in
-                data.count >= 4 ? Int(data.withUnsafeBytes { UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self)) }) : nil
+                data.count >= 4 ? Int(UInt32(littleEndian: data.bytes.load(fromByteOffset: 0, as: UInt32.self))) : nil
             }
             if let table = FrequencyTable.megahertz(from: data, limit: count) { tables[registryID] = table }
         }

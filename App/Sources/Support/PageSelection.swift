@@ -12,18 +12,20 @@ import SwiftUI
 final class PageSelection {
     static let shared = PageSelection()
 
+    @ObservationIgnored private let defaults: UserDefaults
+
     var page: Page {
         didSet {
-            if page != oldValue { Settings.page.set(page) }
+            if page != oldValue { Settings.page.set(page, in: defaults) }
         }
     }
 
-    private init() {
-        if let named = UserDefaults.standard.string(forKey: "openPage") {
-            page = Page(rawValue: named) ?? Settings.page.defaultValue
-        } else {
-            page = Settings.page.get()
-        }
+    /// `arguments` is the launch argument domain, which only names the
+    /// starting page; `defaults` holds the saved one.
+    init(defaults: UserDefaults = .standard, arguments: [String: Any] = LaunchArgument.domain) {
+        self.defaults = defaults
+        let named = LaunchOptions.string("openPage", in: arguments) ?? LaunchOptions.string(Settings.page.key, in: arguments)
+        page = Page.starting(openPage: named, savedPage: defaults.string(forKey: Settings.page.key))
     }
 }
 

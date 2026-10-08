@@ -52,30 +52,6 @@ struct OpenTaskManagerApp: App {
     }
 }
 
-extension Page {
-    var symbol: String {
-        switch self {
-        case .overview: "gauge.with.dots.needle.67percent"
-        case .processes: "list.bullet.rectangle"
-        case .performance: "waveform.path.ecg"
-        case .history: "clock.arrow.circlepath"
-        case .connections: "point.3.connected.trianglepath.dotted"
-        case .startup: "sunrise"
-        case .apps: "square.grid.3x3"
-        case .users: "person.2"
-        case .system: "info.circle"
-        case .drivers: "puzzlepiece.extension"
-        case .storage: "internaldrive"
-        }
-    }
-
-    /// ⌘1 to ⌘9 for the first nine pages, in the View menu and the page menu.
-    var shortcut: KeyboardShortcut? {
-        guard let index = Self.allCases.firstIndex(of: self), index < 9 else { return nil }
-        return KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
-    }
-}
-
 /// The pages in the View menu, the current one ticked, with ⌘1 to ⌘9 for the
 /// first nine: a way between pages that doesn't need the sidebar, which a
 /// window under 900 points hides.
@@ -143,16 +119,13 @@ struct ContentView: View {
     /// window that opens narrow never shows it. Hidden only once the window
     /// was measured, it flashed by, and its list, focused by then, passed
     /// the focus on to the toolbar's sidebar button.
-    @State private var sidebar = SidebarVisibility(
-        hiddenByUser: Settings.sidebarHidden.get(),
-        windowWidth: SidebarVisibility.openingWidth(savedFrame: UserDefaults.standard.string(forKey: "NSWindow Frame main"))
-    )
+    @State private var sidebar = SidebarVisibilityStore()
 
     var body: some View {
         NavigationSplitView(columnVisibility: Binding(
-            get: { sidebar.isShown ? .all : .detailOnly },
+            get: { sidebar.columnVisibility },
             // The toolbar's sidebar button and View > Hide Sidebar.
-            set: { sidebar.userSets(shown: $0 != .detailOnly) }
+            set: { sidebar.columnVisibility = $0 }
         )) {
             List(Page.allCases, selection: Binding(get: { page }, set: { if let new = $0 { page = new } })) { page in
                 Label(page.rawValue, systemImage: page.symbol).tag(page)
@@ -199,7 +172,6 @@ struct ContentView: View {
         // With the sidebar hidden, the focus goes to the page's main table
         // or nowhere, not to the toolbar's sidebar button.
         .background(PageFocus(page: page, sidebarShown: sidebar.isShown))
-        .onChange(of: sidebar.hiddenByUser) { Settings.sidebarHidden.set(sidebar.hiddenByUser) }
         // With the sidebar hidden, the title still names the page, and the
         // page menu just before it (`PageSwitcher`) and the View menu (⌘1
         // to ⌘9, `PageCommands`) change it.

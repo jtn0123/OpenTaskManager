@@ -191,7 +191,8 @@ You need Xcode 16 or later (the full app, not just the Command Line Tools) and
 
 ```sh
 make run          # generate the Xcode project, build, and launch
-make test         # run the OTMKit test suite
+make test         # run OTMKit and hostless app logic tests
+make test-app     # run just the hostless app logic tests
 make cli          # build the otm tool; `make install-cli` copies it to /usr/local/bin
 make release      # optimized build in .build/xcode/Build/Products/Release
 ```

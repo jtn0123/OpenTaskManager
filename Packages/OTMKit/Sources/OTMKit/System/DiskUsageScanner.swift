@@ -268,9 +268,10 @@ private final class DiskScan {
     }
 
     static func realPath(_ url: URL) -> String {
-        guard let resolved = realpath(url.path, nil) else { return url.standardizedFileURL.path }
-        defer { free(resolved) }
-        return String(cString: resolved)
+        // realpath returns an owned NUL-terminated allocation; copy its text before the deferred free.
+        guard let resolved = unsafe realpath(url.path, nil) else { return url.standardizedFileURL.path }
+        defer { unsafe free(resolved) }
+        return unsafe String(cString: resolved)
     }
 
     func run(isCancelled: () -> Bool, progress: (DiskScanProgress) -> Void) -> DiskUsage? {
@@ -403,8 +404,9 @@ private final class DiskScan {
 
     /// A file's device and inode, which together name it however many paths it has.
     private static func identity(of url: URL) -> HardLinkLedger.Key? {
+        // lstat borrows the aligned local record for this call only.
         var info = stat()
-        guard url.withUnsafeFileSystemRepresentation({ $0.map { lstat($0, &info) } }) == 0 else { return nil }
+        guard unsafe url.withUnsafeFileSystemRepresentation({ unsafe $0.map { unsafe lstat($0, &info) } }) == 0 else { return nil }
         return HardLinkLedger.Key(device: Int64(info.st_dev), inode: UInt64(info.st_ino))
     }
 
