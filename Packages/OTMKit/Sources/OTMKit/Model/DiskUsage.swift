@@ -169,17 +169,26 @@ public struct DiskUsage: Sendable, Codable {
     public let unreadablePaths: [String]
     /// Extra names for files already counted (hard links), counted once.
     public let hardLinkDuplicates: Int
-    /// Other volumes mounted inside the scanned folder, which the scan doesn't enter.
+    /// The space those extra names would have added had they been counted again.
+    public let hardLinkDuplicateSize: UInt64
+    /// Other volumes mounted inside the scanned folder, which the scan
+    /// doesn't enter: the first `MountBoundary.listLimit` of them.
     public let skippedVolumes: [String]
+    /// How many it passed by, listed or not.
+    public let skippedVolumeCount: Int
     /// Folders smaller than this keep their totals but not their contents.
     public let detailThreshold: UInt64
     public let duration: TimeInterval
     public let finishedAt: Date
+    /// The scanned folder's volume's used space as the scan started, so a
+    /// reconciliation can tell how far it moved while the scan ran.
+    public let volumeUsedAtStart: UInt64?
 
     public init(rootPath: String, items: [DiskItem], largestFiles: [DiskFile], largestFilesCutoff: UInt64 = 0,
                 categories: [DiskCategoryTotal], fileCount: Int, folderCount: Int, unreadableFolders: Int,
-                unreadablePaths: [String], hardLinkDuplicates: Int, skippedVolumes: [String], detailThreshold: UInt64,
-                duration: TimeInterval, finishedAt: Date) {
+                unreadablePaths: [String], hardLinkDuplicates: Int, hardLinkDuplicateSize: UInt64 = 0, skippedVolumes: [String],
+                skippedVolumeCount: Int? = nil, detailThreshold: UInt64, duration: TimeInterval, finishedAt: Date,
+                volumeUsedAtStart: UInt64? = nil) {
         self.rootPath = rootPath
         self.items = items
         self.largestFiles = largestFiles
@@ -190,10 +199,13 @@ public struct DiskUsage: Sendable, Codable {
         self.unreadableFolders = unreadableFolders
         self.unreadablePaths = unreadablePaths
         self.hardLinkDuplicates = hardLinkDuplicates
+        self.hardLinkDuplicateSize = hardLinkDuplicateSize
         self.skippedVolumes = skippedVolumes
+        self.skippedVolumeCount = skippedVolumeCount ?? skippedVolumes.count
         self.detailThreshold = detailThreshold
         self.duration = duration
         self.finishedAt = finishedAt
+        self.volumeUsedAtStart = volumeUsedAtStart
     }
 
     public var root: DiskItem { items[0] }
