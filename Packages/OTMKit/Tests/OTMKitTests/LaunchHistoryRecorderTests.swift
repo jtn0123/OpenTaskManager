@@ -26,7 +26,8 @@ struct LaunchHistoryRecorderTests {
         var handle: OpaquePointer?
         #expect(sqlite3_open(url.path, &handle) == SQLITE_OK)
         defer { sqlite3_close(handle) }
-        #expect(sqlite3_exec(handle, "DROP TABLE launch_job_events; PRAGMA user_version = 4;", nil, nil, nil) == SQLITE_OK)
+        let downgrade = "DROP TABLE launch_job_events; DROP TABLE launch_job_state; DROP TABLE launch_job_reads; PRAGMA user_version = 4;"
+        #expect(sqlite3_exec(handle, downgrade, nil, nil, nil) == SQLITE_OK)
         let olderReader = try FlightRecorder(reading: url)
         #expect(try await !olderReader.keepsLaunchJobHistory())
         #expect(try await olderReader.launchJobEvents(label: "job", from: date(0), to: date(2_000)).isEmpty)
@@ -36,6 +37,13 @@ struct LaunchHistoryRecorderTests {
         #expect(try await recorder.processLifetimes(matching: "kept", from: date(0), to: date(2_000)).first?.lifetime.name == "kept")
         #expect(try await recorder.records(from: date(0), to: date(2_000)).first?.values.cpu == 42)
         #expect(try await recorder.keepsLaunchJobHistory())
+        var tables: OpaquePointer?
+        let tableSQL = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' "
+            + "AND name IN ('launch_job_events', 'launch_job_state', 'launch_job_reads')"
+        #expect(sqlite3_prepare_v2(handle, tableSQL, -1, &tables, nil) == SQLITE_OK)
+        #expect(sqlite3_step(tables) == SQLITE_ROW)
+        #expect(sqlite3_column_int(tables, 0) == 3)
+        sqlite3_finalize(tables)
         let event = LaunchHistoryEvent(key: LaunchHistoryKey(label: "job", domain: "system"), time: date(1_010), kind: .started, pid: 3)
         try await recorder.appendLaunchJobEvents([event])
         let reopened = try FlightRecorder(url: url)
@@ -74,7 +82,10 @@ struct LaunchHistoryRecorderTests {
             try await recorder.observeLaunchJobs(reading(1_020, pid: 1))
             let events = try await recorder.launchJobEvents(label: "job", from: date(0), to: date(2_000))
             #expect(!events.contains { $0.kind == .unloaded || $0.kind == .restarted })
-            #expect(events.last { $0.kind == .gap }?.since == date(1_000), "the failed read breaks observation coverage")
+            #expect(events.count == 1, "unchanged jobs get no events after a failed read")
+            let coverage = try await recorder.launchJobCoverage(domain: domain, from: date(0), to: date(2_000))
+            #expect(coverage == [LaunchHistoryInterval(start: date(1_000), end: date(1_000)),
+                                 LaunchHistoryInterval(start: date(1_020), end: date(1_020))])
             // A bulk read can see a job unload even if no plist was scanned.
             try await recorder.observeLaunchJobs(LaunchJobReading(time: date(1_030), domains: [domain: [:]]))
             #expect(try await recorder.launchJobEvents(label: "job", from: date(0), to: date(2_000)).last?.kind == .unloaded)
@@ -83,7 +94,9 @@ struct LaunchHistoryRecorderTests {
         try await reopened.observeLaunchJobs(reading(1_040, pid: 2))
         let events = try await reopened.launchJobEvents(label: "job", from: date(0), to: date(2_000))
         #expect(!events.contains { $0.kind == .restarted })
-        #expect(events.filter { $0.kind == .gap }.count == 3)
+        #expect(events.filter { $0.kind == .observed }.count == 2)
+        #expect(events.last?.since == date(1_030))
+        #expect(events.last?.words.hasPrefix("Changed while not watched") == true)
     }
 
     @Test func remembersConfigurationAcrossLaunches() async throws {

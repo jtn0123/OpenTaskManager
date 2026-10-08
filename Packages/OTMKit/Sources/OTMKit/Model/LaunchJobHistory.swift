@@ -33,7 +33,7 @@ public struct LaunchJobConfiguration: Sendable, Codable, Hashable {
 /// Times are observation times. `since` bounds a change, not its actual time.
 public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
     public enum Kind: String, Sendable, Codable {
-        case observed, started, exited, restarted, failed, crashed, restarting, loaded, unloaded, configuration, gap
+        case observed, started, exited, restarted, failed, crashed, restarting, loaded, unloaded, configuration
     }
 
     public let key: LaunchHistoryKey
@@ -61,7 +61,7 @@ public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
 
     public var words: String {
         switch kind {
-        case .observed: detail + (exit?.isFailure == true ? " · Last reported: \(exit?.description ?? "unknown")" : "")
+        case .observed: detail
         case .started: "Started · PID \(pid.map(String.init) ?? "unknown")"
         case .exited: exit?.description ?? "Run ended · exit unknown"
         case .restarted: "Restarted · PID \(pid.map(String.init) ?? "unknown")"
@@ -71,7 +71,6 @@ public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
         case .loaded: "Loaded"
         case .unloaded: "Unloaded · last exit unknown"
         case .configuration: detail.isEmpty ? "Configuration changed" : detail
-        case .gap: "Unknown gap · " + detail
         }
     }
 
@@ -110,19 +109,26 @@ public enum LaunchHistoryDerivation {
         guard let before else {
             let state = after.job?.pid.map { "First observed running · PID \($0)" }
                 ?? (after.job == nil ? "First observed not loaded" : "First observed not running")
-            var result = [event(.observed, exit: after.job?.lastExit, detail: state),
-                          event(.gap, detail: "Earlier activity was not observed")]
+            let reported = after.job?.lastExit?.isFailure == true ? " · Last reported: \(after.job?.lastExit?.description ?? "unknown")" : ""
+            var result = [event(.observed, exit: after.job?.lastExit, detail: state + reported)]
             if after.configuration != nil { result.append(event(.configuration, detail: "Configuration first read")) }
             return result
         }
         guard before.key == after.key, after.time > before.time else { return [] }
         var result: [LaunchHistoryEvent] = []
-        if !continuous || after.time.timeIntervalSince(before.time) > 90 {
-            // Sleep, a failed read or a stopped app cannot confirm a transition.
-            result.append(event(.gap, detail: "No successful reads in this interval; changes are unknown"))
-            let state = after.job?.pid.map { "Observed running · PID \($0)" }
-                ?? (after.job == nil ? "Observed not loaded" : "Observed not running")
-            result.append(event(.observed, exit: after.job?.lastExit, detail: state))
+        if !continuous || after.time.timeIntervalSince(before.time) > LaunchHistoryCoverage.maximumReadGap {
+            // Coverage carries the hole once per domain. A job gets an event
+            // only if the state on either side differs; no run is invented.
+            if !LaunchHistoryState(before).matches(after) {
+                var detail = "Changed while not watched: was \(stateWords(before)), now \(stateWords(after))"
+                if before.instance?.started != after.instance?.started, before.job?.pid == after.job?.pid, after.instance != nil {
+                    detail += " · process start time changed"
+                }
+                result.append(event(.observed, exit: after.job?.lastExit, detail: detail))
+                if after.job?.lastExit != before.job?.lastExit, after.job?.lastExit?.isFailure == true {
+                    result.append(event(after.job?.lastExit?.crashSignal == nil ? .failed : .crashed, exit: after.job?.lastExit))
+                }
+            }
         } else {
             if (before.job == nil) != (after.job == nil) { result.append(event(after.job == nil ? .unloaded : .loaded)) }
             let replaced = before.instance.map { old in after.instance.map { !$0.isSame(as: old) } ?? false } ?? false
@@ -145,6 +151,18 @@ public enum LaunchHistoryDerivation {
             result.append(event(.configuration, detail: "Configuration first read"))
         }
         return result
+    }
+
+    private static func stateWords(_ snapshot: LaunchHistorySnapshot) -> String {
+        var words = snapshot.job?.pid.map { "running · PID \($0)" } ?? (snapshot.job == nil ? "not loaded" : "not running")
+        if let exit = snapshot.job?.lastExit {
+            if snapshot.job?.pid == nil {
+                words += " · \(exit.description)"
+            } else if exit.isFailure {
+                words += " · Last reported: \(exit.description)"
+            }
+        }
+        return words
     }
 }
 
@@ -170,14 +188,36 @@ public struct LaunchHistoryTracker: Sendable {
         interrupted.formUnion(snapshots.keys.filter { $0.domain == domain })
     }
 
-    public mutating func seedConfigurations(_ saved: [LaunchHistoryKey: LaunchJobConfiguration]) { configurations = saved }
+    /// A state row is rewritten at every watched change, so each job still
+    /// held its saved state at its domain's last read: that read, not the
+    /// older change, bounds anything that changed while the app was away.
+    public mutating func seedStates(_ saved: [LaunchHistoryKey: LaunchHistoryState], lastReads: [String: Date] = [:]) {
+        snapshots = saved.mapValues { state in
+            let snapshot = state.snapshot
+            guard let read = lastReads[state.key.domain], read > snapshot.time else { return snapshot }
+            return LaunchHistorySnapshot(key: snapshot.key, time: read, job: snapshot.job, started: snapshot.instance?.started)
+        }
+        interrupted.formUnion(saved.keys)
+    }
 
-    public mutating func observe(_ snapshot: LaunchHistorySnapshot) -> [LaunchHistoryEvent] {
+    public mutating func seedConfigurations(_ saved: [LaunchHistoryKey: LaunchJobConfiguration]) {
+        configurations = saved
+        for (key, configuration) in saved { noteConfiguration(configuration, for: key) }
+    }
+
+    public mutating func observe(_ reading: LaunchHistorySnapshot, continuous watched: Bool? = nil) -> [LaunchHistoryEvent] {
+        // Keep a start time learned earlier if this cheaper read can't supply it.
+        let previous = snapshots[reading.key]
+        let started = reading.instance?.started ?? (previous?.job?.pid == reading.job?.pid ? previous?.instance?.started : nil)
+        let snapshot = LaunchHistorySnapshot(key: reading.key, time: reading.time, job: reading.job, started: started,
+                                             configuration: reading.configuration ?? previous?.configuration, keepsAlive: reading.keepsAlive)
         let key = snapshot.key
         let before = snapshots[key]
         if let before, snapshot.time <= before.time { return [] }
         let wasInterrupted = interrupted.remove(key) != nil
-        let continuous = !wasInterrupted && (before.map { snapshot.time.timeIntervalSince($0.time) <= 90 } ?? false)
+        let continuous = watched ?? (!wasInterrupted && (before.map {
+            snapshot.time.timeIntervalSince($0.time) <= LaunchHistoryCoverage.maximumReadGap
+        } ?? false))
         var events = LaunchHistoryDerivation.events(from: before, to: snapshot, continuous: continuous)
         if !continuous { instances[key] = nil; restarts[key] = nil }
         if snapshot.job == nil { instances[key] = nil; restarts[key] = nil }

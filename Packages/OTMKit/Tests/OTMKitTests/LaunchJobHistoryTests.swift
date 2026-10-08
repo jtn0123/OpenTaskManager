@@ -15,9 +15,9 @@ struct LaunchJobHistoryTests {
 
     @Test func firstReadIsABaselineNotAStartOrAFailure() {
         let events = LaunchHistoryDerivation.events(from: nil, to: snapshot(1_000, pid: 1, exit: 78))
-        #expect(events.map(\.kind) == [.observed, .gap])
+        #expect(events.map(\.kind) == [.observed])
         #expect(events.first?.words == "First observed running · PID 1 · Last reported: Exited with code 78")
-        #expect(LaunchHistoryPattern.verdict(events, at: date(1_000)) == nil)
+        #expect(LaunchHistoryPattern.verdict(events, coverage: [], at: date(1_000)) == nil)
     }
 
     @Test func unchangedFailureIsNeverCountedAgain() {
@@ -54,7 +54,7 @@ struct LaunchJobHistoryTests {
 
     @Test func gapsAndOutOfOrderReadsNeverInventTransitions() {
         let events = LaunchHistoryDerivation.events(from: snapshot(1_000, pid: 1), to: snapshot(1_200, pid: 2, exit: 78))
-        #expect(events.map(\.kind) == [.gap, .observed])
+        #expect(events.map(\.kind) == [.observed, .failed])
         #expect(events.first?.since == date(1_000))
         #expect(LaunchHistoryDerivation.events(from: snapshot(1_010), to: snapshot(1_000, pid: 1)).isEmpty)
         var tracker = LaunchHistoryTracker()
@@ -108,14 +108,17 @@ struct LaunchJobHistoryTests {
         let events = (0..<14).map { index in
             LaunchHistoryEvent(key: key, time: date(3_600 + Double(index * 300)), kind: .exited, exit: .code(78))
         }
-        let verdict = LaunchHistoryPattern.verdict(events, at: date(10_000), calendar: calendar)
+        let coverage = [LaunchHistoryInterval(start: date(3_000), end: date(10_000))]
+        let verdict = LaunchHistoryPattern.verdict(events, coverage: coverage, at: date(10_000), calendar: calendar)
         #expect(verdict?.contains("Observed 14 failures today, every ~5 min, always exited with code 78") == true)
         #expect(verdict?.contains("a setup problem") == true)
         let unknown = events.map { LaunchHistoryEvent(key: key, time: $0.time, kind: .exited, exit: .code(1)) }
-        #expect(LaunchHistoryPattern.verdict(unknown, at: date(10_000), calendar: calendar)?.contains(":") == false)
-        let gap = LaunchHistoryEvent(key: key, time: date(4_000), kind: .gap)
-        #expect(LaunchHistoryPattern.verdict(events + [gap], at: date(10_000), calendar: calendar)?.contains("every") == false)
-        #expect(LaunchHistoryPattern.verdict(events, at: date(100_000), calendar: calendar) == nil)
+        #expect(LaunchHistoryPattern.verdict(unknown, coverage: coverage, at: date(10_000), calendar: calendar)?.contains(":") == false)
+        let hole = [LaunchHistoryInterval(start: date(3_000), end: date(4_000)),
+                    LaunchHistoryInterval(start: date(4_001), end: date(10_000))]
+        #expect(LaunchHistoryPattern.verdict(events, coverage: hole, at: date(10_000), calendar: calendar)?.contains("every") == false)
+        #expect(LaunchHistoryPattern.verdict(events, coverage: [], at: date(10_000), calendar: calendar)?.contains("every") == false)
+        #expect(LaunchHistoryPattern.verdict(events, coverage: coverage, at: date(100_000), calendar: calendar) == nil)
     }
 
     @Test func confirmedIdleExitsWithTheSameCodeCountOncePerRun() {

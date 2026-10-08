@@ -16,14 +16,17 @@ func startupCommand(_ options: Options) async {
     do {
         guard try await recorder.keepsLaunchJobHistory() else { fail("this database has no launch job history yet") }
         let end = Date.now
-        let events = try await recorder.launchJobEvents(label: label, from: end.addingTimeInterval(-FlightRecorder.retention), to: end)
+        let report = try await recorder.launchJobHistory(label: label, from: end.addingTimeInterval(-FlightRecorder.retention), to: end)
         if options.json {
-            printJSON(events)
-        } else if events.isEmpty {
-            print("No stored observations for \(label) in the last 7 days.")
+            printJSON(report)
         } else {
+            let spans = report.coverage.map {
+                "\($0.start.formatted(date: .abbreviated, time: .shortened))–\($0.end.formatted(date: .abbreviated, time: .shortened))"
+            }
+            print("Watched: " + (spans.isEmpty ? "none in the last 7 days" : spans.joined(separator: ", ")))
+            if report.events.isEmpty { print("No stored changes for \(label) in the last 7 days."); return }
             print("\(label) · observed changes; exact times and runs between reads are unknown")
-            for event in events.reversed() {
+            for event in report.events.reversed() {
                 print("\(event.time.formatted(date: .abbreviated, time: .standard)) · \(event.key.domain) · \(event.words)")
                 if let configuration = event.configuration {
                     print("  \(configuration.path) · modified \(configuration.modified?.formatted() ?? "unknown")")

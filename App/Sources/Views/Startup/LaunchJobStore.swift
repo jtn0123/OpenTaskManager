@@ -57,6 +57,8 @@ final class LaunchJobStore {
         }, uniquingKeysWith: { first, _ in first })
     }
 
+    func waitForHistoryWrite() async { await pendingWrite?.value }
+
     private func save(_ reading: LaunchJobReading, recorder: FlightRecorder, items: [LaunchItem]? = nil,
                       starts: [Int32: Date] = [:], publish: Bool = false) {
         let previous = pendingWrite

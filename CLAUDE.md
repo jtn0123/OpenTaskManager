@@ -227,23 +227,36 @@ Manager OG or any other proprietary task manager.
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
-  launch job history (schema 5, `FlightRecorderLaunchJobs`): `launch_job_events`
-  keeps observed transitions by label and launchd domain for 7 days, pruned with
-  the recorder, outside `.otmrecording` files. `LaunchHistoryDerivation` and
-  `LaunchHistoryTracker` keep first sightings separate from starts, a stale exit
-  separate from a new PID, and gaps separate from confirmed transitions;
-  configuration reads retain path, modification date, program and arguments.
-  `LaunchHistoryPattern` counts reported failure exits once, gives a cadence only
-  for consistent observed intervals without a gap, and explains only known exits.
-  The Startup inspector's `StartupHistorySection` shows a static 24-hour lane and
-  the latest events, at read times, with all time between reads labelled unknown;
+  launch job history (schema 5, `FlightRecorderLaunchJobs` and
+  `FlightRecorderLaunchState`): `launch_job_events` keeps observed transitions
+  by label and launchd domain; `launch_job_state` keeps the last changed state,
+  seeded once on the first read at each launch, and is upserted only on a state
+  change. An unchanged job writes no event at relaunch or after sleep.
+  `launch_job_reads` keeps coverage once per domain: consecutive successful reads
+  within 90 s extend one interval's end; a new app run, a longer interval, or a
+  failed or missing domain starts a new interval. No job carries gap events.
+  Events and coverage are pruned after 7 days, outside `.otmrecording` files;
+  coverage crossing the cutoff is clipped. A loaded job's one baseline survives
+  however old its last change is, while old unloaded baselines can age out.
+  `LaunchHistoryDerivation` and `LaunchHistoryTracker` distinguish watched
+  transitions from changed states while unwatched, bounded by `since`, never
+  inventing starts, exits or restarts across a hole. Configuration reads retain
+  path, modification date, program and arguments. `LaunchHistoryPattern` gives
+  a cadence only when domain coverage spans the first counted failure through
+  the verdict's read time, and explains only known exits. `StartupHistorySection`
+  loads events and coverage together on opening or Refresh, after the page write;
+  its static 24-hour lane strengthens watched stretches over the faint unwatched
+  line, keeps event marks, and captions how much of the day was watched.
   `StartupFilesSection` checks the current plist and executable on opening or
   Refresh, including `CodeSigning.validity` (contents validated on demand, not
   notarization) and at most 20 log lines from a bounded tail. `LaunchJobFiles`
   refuses protected paths and links into them before touching their targets,
   reads only local regular files, and reports unavailable files as Not readable.
   `otm startup history LABEL [--json]` reads stored events in both domains without
-  sampling or modifying the database;
+  sampling or modifying the database, printing coverage before events; its JSON
+  is an object with `coverage` and `events`. `LaunchExitStatus` encodes only a
+  flat `{code: integer}` or `{reason: string}` object, including the `lastExit`
+  fields under `otm apps --json`, and refuses synthesized enum payloads;
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick; while it's on screen
   launchd's list alone, no plists, is read again every 10 s and noted in

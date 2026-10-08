@@ -2,7 +2,8 @@ import Foundation
 
 /// A verdict counts reported exits, never a failure left unchanged at many reads.
 public enum LaunchHistoryPattern {
-    public static func verdict(_ events: [LaunchHistoryEvent], at date: Date, calendar: Calendar = .current) -> String? {
+    public static func verdict(_ events: [LaunchHistoryEvent], coverage: [LaunchHistoryInterval],
+                               at date: Date, calendar: Calendar = .current) -> String? {
         let start = calendar.startOfDay(for: date)
         let failures = events.filter { $0.kind == .exited && $0.exit?.isFailure == true && $0.time >= start && $0.time <= date }
             .sorted { $0.time < $1.time }
@@ -11,8 +12,8 @@ public enum LaunchHistoryPattern {
         let intervals = zip(failures, failures.dropFirst()).map { $1.time.timeIntervalSince($0.time) }.sorted()
         let median = intervals[intervals.count / 2]
         // Sparse or uneven observation times don't establish a repeating cadence.
-        let hasGap = events.contains { $0.kind == .gap && $0.time > failures[0].time && $0.time <= date }
-        if !hasGap, median >= 60, intervals.allSatisfy({ abs($0 - median) <= median * 0.25 }) {
+        let watched = LaunchHistoryCoverage.watches(coverage, from: failures[0].time, to: date)
+        if watched, median >= 60, intervals.allSatisfy({ abs($0 - median) <= median * 0.25 }) {
             text += ", every ~\(Int((median / 60).rounded())) min"
         }
         if let exit = failures.first?.exit, failures.allSatisfy({ $0.exit == exit }) {
