@@ -140,7 +140,8 @@ Manager OG or any other proprietary task manager.
   `SensorTable`'s rows, null where unread) go in each record's `hardware` blob
   (schema 2, series named once in `hardware_series`) and a file's optional,
   separately versioned `hardware` block, charted under History's folded Hardware
-  section; process history (schemas 3 and 4, OTMKit's FlightRecorderProcesses):
+  section; process history (schemas 3, 4 and 7, OTMKit's FlightRecorderProcesses
+  and FlightRecorderProcessMemory):
   every process seen at two record ends or kept with figures gets a
   `process_lifetimes` row by `ProcessIdentity` (name, path,
   user, bundle ID, launchd label once Startup has read launchd's list, first and
@@ -160,19 +161,42 @@ Manager OG or any other proprietary task manager.
   rates between `ps` reads, so record boundaries never invent idle time, and
   `ProcessHistoryKeep` keeps figures only for the 5 largest footprints, busy disk
   and CPU users, 40 at most, so a missing row while it ran is "idle, not stored",
-  never zero, and a stretch without records a gap; History's Processes section
+  never zero, and a stretch without records a gap. Schema 7 also keeps
+  coarse memory for every stored lifetime, including idle ones, in
+  `process_memory` (WITHOUT ROWID, lifetime and time as its key): first and
+  final readings, changes of at least max(10%, 16 MB) from the last step,
+  or any change after 30 min. `ProcessMemoryKeep` and `ProcessMemoryState`
+  are pure rules in Model/ProcessMemoryHistory. Native footprint and ps RSS
+  carry their measures; a changed measure or stopped watch closes one line
+  and starts another, never joining the two. A lifetime's peak, time and
+  measure are updated only when a larger reading is observed (a changed
+  measure starts its own peak). Threshold steps include spikes between
+  record ends, while peaks are written once per record. The state lives
+  inside the tracker's existing counter entries; all changed steps share
+  one buffer, with no per-process arrays or added process reads. Pruning
+  clips one held anchor at the seven-day boundary and deletes older steps
+  and orphaned tracks. A watch marks that it keeps memory, so records from
+  older builds never extend a held memory figure. History's Processes section
   (`HistoryProcessStore`, `HistoryProcessSection`) searches lifetimes by name,
-  path, label or PID and charts one, marked on the rail and in the moment panel,
+  path, label or PID, sorts by Latest or Grew (last minus first retained
+  memory, computed in SQL before limiting results), and charts one, marked on the rail and in the moment panel,
   and lists short runs by name or path ("83 short runs between …", over records
   that follow on, no PIDs, nothing to chart),
   the process inspector's Show History opens it, `-openProcessHistory <query>`
   searches it and picks the latest match, and `otm history processes <query>`
-  prints it; recording files carry no process history yet, so their Processes
+  prints each lifetime's first, peak and last memory reading, with steps in
+  `--json`; recording files carry no process history yet, so their Processes
   section is a compact notice with Search Live History, which closes the file
-  and focuses the live search. Idle-only results show their lifetime and
-  "Idle throughout: no busy figures kept" without empty charts; the moment
-  panel says "Idle (not kept)" only for a watched idle point, and "Not recorded"
-  for real gaps (`ProcessHistoryLabels` in OTMKit). Compare's figures, `HistoryIntervalStats` and
+  and focuses the live search. Idle-only results with a memory track show a
+  static step chart and "Memory only: changes of 10% or 16 MB, CPU and disk
+  stayed under the history's floors"; older lifetimes without memory still
+  show "Idle throughout: no busy figures kept" without empty charts.
+  A busy lifetime overlays the step track between its kept memory figures.
+  Memory is loaded with the selected lifetime, never per tick. Exact
+  recorded stretches and step edges bound the track and the moment panel:
+  "Footprint about 412 MB (from the memory track)" (Resident for ps RSS),
+  "Idle (not kept)" only for a watched idle point without memory, and
+  "Not recorded" for real gaps (`ProcessHistoryLabels` in OTMKit). Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; each interval's column heading gives how much
   of it was recorded, and `HistoryComparison.limitation` (a side under
@@ -398,7 +422,10 @@ Manager OG or any other proprietary task manager.
   10 s. Its top-app memory lists keep the highest sampled footprint, so native
   rusage figures and the kernel process list keep the same step. The latter keeps observed lifetimes and short
   runs correct; `ProcessHistoryTracker` takes native CPU and disk from cumulative
-  counters and integrates restricted CPU between ps reads. Hidden sampling
+  counters and integrates restricted CPU between ps reads. Its coarse memory
+  steps reuse those same native footprints and held ps RSS readings; the
+  sampler adds no per-process calls, and History publishes nothing new per
+  tick. Memory peaks stay in value state between records. Hidden sampling
   skips `PROC_PIDTASKINFO`, `ps -M` and the per-process GPU walk. With spike
   capture off, ps stays at 5 s after priming; with it on, ps reads each second
   for the capture's top processes. Spikes cap a slower visible update speed at

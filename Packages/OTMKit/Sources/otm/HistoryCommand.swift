@@ -37,7 +37,13 @@ func historyCommand(_ options: Options) async {
     let running = Set(matches.filter { match in
         match.lifetime.ended == nil && ProcessDetailReader.identity(of: match.lifetime.identity.pid) == match.lifetime.identity
     }.map(\.id))
-    let found = ProcessHistoryFound(matches: matches, shortRuns: shortRuns, running: running)
+    var memory: [Int64: [ProcessMemoryStep]] = [:]
+    do {
+        for match in matches { memory[match.id] = try await recorder.processMemory(match.lifetime) }
+    } catch {
+        fail("couldn't read memory history at \(url.path): \(error)")
+    }
+    let found = ProcessHistoryFound(matches: matches, shortRuns: shortRuns, running: running, memory: memory)
     if options.json {
         printJSON(ProcessHistoryReport(query: query, from: start, to: end, found: found))
     } else {
@@ -67,6 +73,7 @@ struct ProcessHistoryFound {
     let shortRuns: [ProcessHistoryShortRuns]
     /// Lifetimes still running, by row.
     let running: Set<Int64>
+    let memory: [Int64: [ProcessMemoryStep]]
 }
 
 /// `otm history processes --json`. CPU is percent of one core; a figure
@@ -97,6 +104,10 @@ struct ProcessHistoryReport: Encodable {
         let peakMemory: UInt64?
         let averageDiskRead: Double?
         let averageDiskWrite: Double?
+        let memorySteps: [ProcessMemoryStep]
+        let firstMemory: ProcessMemoryStep?
+        let lastMemory: ProcessMemoryStep?
+        let lifetimePeakMemory: ProcessMemoryStep?
     }
 
     let query: String
@@ -121,7 +132,9 @@ struct ProcessHistoryReport: Encodable {
                 running: found.running.contains(match.id),
                 records: summary.records, storedRecords: summary.stored, recordedSeconds: summary.recordedSeconds,
                 averageCPU: summary.averageCPU, peakCPU: summary.peakCPU, peakMemory: summary.peakMemory,
-                averageDiskRead: summary.averageDiskRead, averageDiskWrite: summary.averageDiskWrite
+                averageDiskRead: summary.averageDiskRead, averageDiskWrite: summary.averageDiskWrite,
+                memorySteps: found.memory[match.id] ?? [], firstMemory: found.memory[match.id]?.first,
+                lastMemory: found.memory[match.id]?.last, lifetimePeakMemory: memoryPeak(lifetime)
             )
         }
     }
@@ -137,7 +150,8 @@ func processHistoryList(_ found: ProcessHistoryFound, query: String, range: Hist
     // Latest first, lifetimes and short runs together.
     var blocks: [(time: Date, lines: [String])] = found.matches.map { match in
         let isRunning = found.running.contains(match.id)
-        return (isRunning ? end : match.lifetime.ended ?? match.lifetime.lastSeen, list.lines(match, isRunning: isRunning))
+        let lines = list.lines(match, isRunning: isRunning, memory: found.memory[match.id] ?? [])
+        return (isRunning ? end : match.lifetime.ended ?? match.lifetime.lastSeen, lines)
     }
     blocks += found.shortRuns.map { ($0.to, list.lines($0)) }
     blocks.sort { $0.time > $1.time }
@@ -160,7 +174,7 @@ private struct HistoryProcessList {
 
     func clock(_ date: Date) -> String { date.formatted(Calendar.current.isDateInToday(date) ? time : dated) }
 
-    func lines(_ match: ProcessHistoryMatch, isRunning: Bool) -> [String] {
+    func lines(_ match: ProcessHistoryMatch, isRunning: Bool, memory: [ProcessMemoryStep]) -> [String] {
         let lifetime = match.lifetime
         let summary = match.summary
         let state = isRunning ? "running" : lifetime.ended.map { "ended \(clock($0))" } ?? "last seen \(clock(lifetime.lastSeen))"
@@ -189,6 +203,14 @@ private struct HistoryProcessList {
             figures.append("idle throughout, not stored")
         }
         lines.append("  " + figures.joined(separator: " · "))
+        if let first = memory.first, let last = memory.last {
+            var readings = ["first \(first.measure.title.lowercased()) \(Format.bytes(first.footprint)) at \(clock(first.time))"]
+            if let peak = memoryPeak(lifetime) {
+                readings.append("peak \(peak.measure.title.lowercased()) \(Format.bytes(peak.footprint)) at \(clock(peak.time))")
+            }
+            readings.append("last \(last.measure.title.lowercased()) \(Format.bytes(last.footprint)) at \(clock(last.time))")
+            lines.append("  Memory track: " + readings.joined(separator: " · "))
+        }
         let about = [lifetime.path, lifetime.label, lifetime.user.isEmpty ? nil : "user \(lifetime.user)"].compactMap { $0 }
         if !about.isEmpty { lines.append("  " + about.joined(separator: " · ")) }
         return lines
@@ -203,4 +225,10 @@ private struct HistoryProcessList {
         if !about.isEmpty { lines.append("  " + about.joined(separator: " · ")) }
         return lines
     }
+}
+
+private func memoryPeak(_ lifetime: ProcessLifetime) -> ProcessMemoryStep? {
+    guard let footprint = lifetime.peakFootprint, let time = lifetime.peakFootprintTime,
+          let measure = lifetime.peakFootprintMeasure else { return nil }
+    return ProcessMemoryStep(time: time, footprint: footprint, measure: measure)
 }

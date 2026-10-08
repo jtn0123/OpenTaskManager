@@ -39,7 +39,8 @@ final class HistoryProcessStore {
         /// its last sighting (now while it runs), short runs by their last record.
         let entries: [Entry]
 
-        init(query: String, matches: [ProcessHistoryMatch], running: Set<Int64>, shortRuns: [ProcessHistoryShortRuns]) {
+        init(query: String, matches: [ProcessHistoryMatch], running: Set<Int64>, shortRuns: [ProcessHistoryShortRuns],
+             sort: ProcessHistorySort = .latest) {
             self.query = query
             self.matches = matches
             self.running = running
@@ -49,6 +50,10 @@ final class HistoryProcessStore {
                  entry: Entry.lifetime(match))
             }
             // Stable: equal times keep lifetimes first, each list in its own order.
+            if sort == .grew {
+                entries = matches.map(Entry.lifetime) + shortRuns.map(Entry.shortRuns)
+                return
+            }
             entries = (lifetimes + shortRuns.map { (time: $0.to, entry: Entry.shortRuns($0)) })
                 .enumerated()
                 .sorted { $0.element.time == $1.element.time ? $0.offset < $1.offset : $0.element.time > $1.element.time }
@@ -66,6 +71,9 @@ final class HistoryProcessStore {
         let points: [HistoryPoint]
         /// The same points as read, for the moment panel.
         let figures: [ProcessHistoryPoint]
+        let memory: [ProcessMemoryStep]
+        let memoryCoverage: [ClosedRange<Date>]
+        let memoryPoints: [ProcessMemoryPoint]
         /// Where every record left it out as idle.
         let idle: [ClosedRange<Date>]
         /// Where it ran but an older build, keeping no process history, recorded.
@@ -85,6 +93,7 @@ final class HistoryProcessStore {
 
     /// The search field's text.
     var query = ""
+    var sort = ProcessHistorySort.latest
     /// A file's Search Live History hands focus to the live field once it appears.
     var wantsSearchFocus = false
     /// Counts requests from elsewhere, so one for the query already shown
@@ -151,17 +160,18 @@ final class HistoryProcessStore {
     /// lifetime still running in this app (never for a recording file).
     func search(in recorder: FlightRecorder, domain: ClosedRange<Date>, isRunning: (ProcessIdentity) -> Bool) async {
         let text = query
+        let order = sort
         guard ProcessHistorySearch.normalized(text) != nil else {
             if results != nil { results = nil }
             return
         }
         let found = (try? await recorder.processLifetimes(matching: text, from: domain.lowerBound, to: domain.upperBound,
-                                                          limit: Self.limit)) ?? []
+                                                          limit: Self.limit, sort: order)) ?? []
         let short = (try? await recorder.processShortRuns(matching: text, from: domain.lowerBound, to: domain.upperBound,
                                                           limit: Self.limit)) ?? []
-        guard !Task.isCancelled, text == query else { return }
+        guard !Task.isCancelled, text == query, order == sort else { return }
         let running = Set(found.filter { isRunning($0.lifetime.identity) }.map(\.id))
-        let next = Results(query: text, matches: found, running: running, shortRuns: short)
+        let next = Results(query: text, matches: found, running: running, shortRuns: short, sort: order)
         if results != next { results = next }
         switch pending {
         case .identity(let identity):
@@ -186,9 +196,13 @@ final class HistoryProcessStore {
         let figures = (try? await recorder.processPoints(lifetime, from: domain.lowerBound, to: domain.upperBound, bucket: bucket)) ?? []
         let unwatched = (try? await recorder.processUnwatched(lifetime, from: domain.lowerBound, to: domain.upperBound,
                                                               bucket: bucket)) ?? []
+        let memory = (try? await recorder.processMemory(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? []
+        let coverage = (try? await recorder.processMemoryCoverage(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? []
         guard !Task.isCancelled, picked == identity else { return }
         let next = Track(match: ProcessHistoryMatch(lifetime: lifetime, summary: summary), points: figures.map(HistoryProcessKey.point),
-                         figures: figures, idle: ProcessHistoryPoint.idleStretches(figures, bucket: bucket), unwatched: unwatched,
+                         figures: figures, memory: memory, memoryCoverage: coverage,
+                         memoryPoints: ProcessMemoryTrack.points(steps: memory, coverage: coverage),
+                         idle: ProcessHistoryPoint.idleStretches(figures, bucket: bucket), unwatched: unwatched,
                          isRunning: isRunning(identity), bucket: bucket, domain: domain)
         if track != next { track = next }
     }
@@ -299,5 +313,5 @@ enum HistoryProcessStyle {
     static let idleHelp = "Idle, not stored: it ran, but under every keep threshold (CPU under "
         + "\(Format.fixed(ProcessHistoryKeep.cpuFloor, 1))% of one core, disk under \(Int(ProcessHistoryKeep.diskFloor / 1_024)) KB/s, "
         + "and not among the \(ProcessHistoryKeep.memoryTop) largest in memory), so its figures weren't kept. "
-        + "It's never drawn as zero; averages count it as nothing."
+        + "Coarse memory steps are still kept; CPU and disk are never drawn as zero, and averages count idle records as nothing."
 }

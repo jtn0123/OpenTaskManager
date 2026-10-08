@@ -45,13 +45,13 @@ struct ConnectionHistoryRecorderTests {
         #expect(try await !oldReader.keepsConnectionHistory())
         #expect(try await oldReader.connectionHistory(from: date(0), to: date(200)).isEmpty)
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 6)
+        #expect(try await recorder.schemaVersionOnDisk() == 7)
         #expect(try await recorder.keepsConnectionHistory())
         #expect(try await recorder.launchJobEvents(label: "job", from: date(0), to: date(200)).contains(event))
         #expect(try await recorder.launchJobStates()[key]?.pid == 7)
         #expect(try await recorder.launchJobCoverage(domain: "system", from: date(0), to: date(200)).count == 1)
         let reopened = try FlightRecorder(url: url)
-        #expect(try await reopened.schemaVersionOnDisk() == 6)
+        #expect(try await reopened.schemaVersionOnDisk() == 7)
     }
 
     @Test func persistsEndsTimelineCoverageAndPrunesWithRecorder() async throws {

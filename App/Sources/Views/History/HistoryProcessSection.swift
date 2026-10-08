@@ -36,6 +36,7 @@ struct HistoryProcessSection: View {
 
     private struct SearchKey: Equatable {
         let query: String
+        let sort: ProcessHistorySort
         let requests: Int
         let recording: URL?
         let domain: ClosedRange<Date>
@@ -81,13 +82,13 @@ struct HistoryProcessSection: View {
                             + "and chart its CPU, memory and disk.")
                     }
                 }
-                if store.picked != nil, let track = store.track, !track.match.summary.isIdle {
+                if store.picked != nil, let track = store.track, !track.match.summary.isIdle || !track.memoryPoints.isEmpty {
                     HistoryProcessCharts(track: track, points: points, bucket: bucket, domain: domain, gaps: gaps, ticks: ticks,
                                          timeLabels: timeLabels, scrubber: scrubber)
                 }
             }
         }
-        .task(id: SearchKey(query: store.query, requests: store.requests, recording: recorder?.url, domain: domain,
+        .task(id: SearchKey(query: store.query, sort: store.sort, requests: store.requests, recording: recorder?.url, domain: domain,
                             revision: points.last?.time)) {
             guard let recorder, !isFile else { return }
             // Waits for typing to pause; a key pressed meanwhile starts again.
@@ -132,6 +133,12 @@ struct HistoryProcessSection: View {
                 .foregroundStyle(.secondaryText)
                 .help("Clear the search")
             }
+            Picker("Sort", selection: Binding(get: { store.sort }, set: { store.sort = $0 })) {
+                Text("Latest").tag(ProcessHistorySort.latest)
+                Text("Grew").tag(ProcessHistorySort.grew)
+            }
+            .labelsHidden()
+            .fixedSize()
             Spacer(minLength: 0)
             if store.picked == nil, let results = store.results, !results.entries.isEmpty {
                 Text(count(results))
@@ -146,7 +153,7 @@ struct HistoryProcessSection: View {
     private func count(_ results: HistoryProcessStore.Results) -> String {
         var parts: [String] = []
         let found = results.matches.count
-        if found > 0 { parts.append(found >= HistoryProcessStore.limit ? "latest \(found) shown" : "\(found) found") }
+        if found > 0 { parts.append(found >= HistoryProcessStore.limit ? "\(found) shown" : "\(found) found") }
         let runs = results.shortRunCount
         if runs > 0 { parts.append("\(runs) short \(runs == 1 ? "run" : "runs")") }
         return parts.joined(separator: " · ")
@@ -241,7 +248,11 @@ private struct HistoryProcessRow: View {
 
     /// "10:02 – 10:42 AM · 40 min · CPU avg 3.2%, peak 45% · Memory peak 1.2 GB".
     private func details(_ lifetime: ProcessLifetime) -> String {
-        let figures = HistoryProcessStyle.figures(match.summary, scale: model.cpuScale)
+        var figures = HistoryProcessStyle.figures(match.summary, scale: model.cpuScale)
+        if match.summary.isIdle, let peak = lifetime.peakFootprint {
+            figures = "Memory track · peak " + Format.bytes(peak)
+        }
+        if let growth = match.memoryGrowth { figures = ProcessHistoryLabels.growth(growth) + " · " + figures }
         if match.summary.isIdle {
             return ProcessHistoryLabels.lifetime(lifetime, isRunning: isRunning) + " · " + figures
         }
@@ -390,7 +401,9 @@ private struct HistoryProcessSummary: View {
     /// Its figures over the part of the range it ran, and how many records kept them.
     private var figures: String {
         let summary = track.match.summary
-        if summary.isIdle { return ProcessHistoryLabels.idleSummary }
+        if summary.isIdle {
+            return track.memoryPoints.isEmpty ? ProcessHistoryLabels.idleSummary : ProcessHistoryLabels.memoryOnly
+        }
         var line = HistoryProcessStyle.figures(summary, scale: model.cpuScale)
         if let read = summary.averageDiskRead, let write = summary.averageDiskWrite {
             line += " · Disk avg read \(HistoryProcessStyle.unbroken(Format.bytesPerSecond(read))), "
