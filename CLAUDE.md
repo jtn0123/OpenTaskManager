@@ -68,8 +68,9 @@ Manager OG or any other proprietary task manager.
   pane, `SplitMath`, the process table's columns, `ColumnFit`, and the
   Overview's per-core graphs, `CoreGrid` (core types side by side when they
   fit one line, otherwise rows of shared columns, a short last row balanced),
-  the CPU page's, `CoreAreaGrid` (near-square tiles filling its main graph's
-  area), and Performance's main graphs' heights and figures, `HeroLayout`;
+  the CPU page's, `CoreAreaGrid` (near-square tiles), with `CoreGraphLayout`
+  capping their height by default to leave room for the summary figures, and
+  Performance's main graphs' heights and figures, `HeroLayout`;
   System/NetworkQuality (parses `networkQuality -c`) and System/DiskSpeedTest (one
   unlinked temp file, F_NOCACHE reads, verified, cancellable) back the user-started
   speed tests on Performance's network and disk details (`SpeedTestStores`; nothing
@@ -101,9 +102,13 @@ Manager OG or any other proprietary task manager.
   Model/BenchmarkRun adapts those histories on read to one envelope (never
   rewritten), Model/BenchmarkComparison holds the compatibility rules and change
   against both runs' spread, with context differences as warnings that never
-  refuse, and Format/BenchmarkExport the versioned JSON (v2) and
+  refuse; `BenchmarkConditions` qualifies verdicts as Higher/Lower · conditions
+  differ in amber with a short account beside them, keeping the full warnings
+  below (equal heat or load alone is still comparable), and Format/BenchmarkExport
+  the versioned JSON (v2) and
   Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`, `BenchmarkSections`,
-  `BenchmarkWorkspace`: Run all through the tests' own stores, picks and ticks in
+  `BenchmarkWorkspace`: a selected family's compact saved-run picker before
+  its results and trends, Run all through the tests' own stores, picks and ticks in
   UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
   Model/BenchmarkTrend splits a test's runs into lines only comparable runs
   share and gives each figure's points their spread and verdict against a
@@ -684,7 +689,12 @@ the thermal state turns fair), so `-openResource benchmarks
   (`CoreGraphGrid`: one AppKit view hosting a `StreamGraphView` a tile, busy time
   filled and kernel time, `CPUSample.coreSystem`, as a line; tiles laid out by
   `CoreAreaGrid` in OTMKit, 18 CPUs 6 by 3, core types on rows of their own
-  where that costs nothing; the Overview's Cores tiles grown, both drawn in
+  where that costs nothing; `CoreGraphLayout` caps the whole tiles at 130 points
+  by default, up to 180 when there is spare height, reserving another 100 points
+  for the remaining summary rows and the toggle. Larger Graphs
+  (`cpuLargerGraphs` in Settings, off by default) fills the original area
+  with the same graph views and no new per-frame work; the CPU and Overview's
+  tiles are both drawn in
   `CoreTileLook`, so they read as one family). A GPU that doesn't report utilization graphs its
   memory in use there (`GPUHero`), its bar dim. The resource list's rows give a
   live graph in the device's colour and two lines of figures (`ResourceText`).

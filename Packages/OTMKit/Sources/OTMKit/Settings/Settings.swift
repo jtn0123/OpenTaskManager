@@ -29,6 +29,9 @@ public enum Settings {
     public static let networkByProcess = SettingKey<Bool, Bool>(
         "networkByProcess", default: false, meaning: "Whether network usage is grouped by process instead of app."
     )
+    public static let cpuLargerGraphs = SettingKey<Bool, Bool>(
+        "cpuLargerGraphs", default: false, meaning: "Whether the CPU per-core tiles fill the main graph area."
+    )
     public static let cpuGraphMode = SettingKey<String, String>(
         "cpuGraphMode", default: "cores", meaning: "Form of the main CPU graph."
     )
@@ -226,6 +229,7 @@ public enum Settings {
         fitsCollectedGraphData.descriptor,
         networkByProcess.descriptor,
         cpuGraphMode.descriptor,
+        cpuLargerGraphs.descriptor,
         showMenuBarExtra.descriptor,
         streamGraphs.descriptor,
         sidebarHidden.descriptor,

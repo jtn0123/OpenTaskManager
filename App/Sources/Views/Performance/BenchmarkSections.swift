@@ -133,7 +133,7 @@ struct NetworkSection: View {
 }
 
 /// One test: its name and Run or Cancel; its progress while it runs; the
-/// latest run's figures, then its saved runs and comparison; and last, under
+/// latest run's figures and trends; and last, under
 /// Methodology, where it runs and how its figures are taken.
 private struct BenchmarkSection: View {
     let kind: BenchmarkKind
@@ -201,8 +201,6 @@ private struct BenchmarkSection: View {
                     BenchmarkTrendView(kind: kind, runs: runs)
                         .equatable()
                 }
-                SavedRuns(kind: kind, runs: runs)
-                    .equatable()
             } else if run == nil {
                 Text("No saved runs yet. Run the test, here or on its resource's page, and its figures are kept here.")
                     .font(.explanation)
