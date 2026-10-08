@@ -54,7 +54,12 @@ struct ConnectionHistoryView: View {
                     }
                     .help(coverage?.watchedWords ?? "Not watched in this range")
                 } else {
-                    historyTable
+                    // Only as tall as its rows, and under the pickers beside
+                    // the details too, not in the middle of the pane.
+                    VStack(spacing: 0) {
+                        historyTable.layoutPriority(1)
+                        Spacer(minLength: 0)
+                    }
                 }
             } detail: {
                 if let selected {
