@@ -14,6 +14,7 @@ struct Options {
     var source: LaunchItemSource?
     var schedule = false
     var changes = false
+    var listeners = false
     var reconcile = false
     var extremes: Double?
     var range: String?
@@ -46,6 +47,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--sizes": options.sizes = true
         case "--schedule": options.schedule = true
         case "--changes": options.changes = true
+        case "--listeners": options.listeners = true
         case "--since": options.since = iterator.next()
         case "--range": options.range = iterator.next()
         case "--reconcile": options.reconcile = true

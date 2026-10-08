@@ -274,6 +274,21 @@ Manager OG or any other proprietary task manager.
   coverage counts and walk time. Unreadable processes stay counted even when a
   process has a partial match; an empty result names what was checked. Volumes
   mention that Spotlight or the kernel may also prevent ejecting,
+  listener reviews (schema 8, `FlightRecorderListeners`): `listener_review`
+  keeps the reviewed baseline and pending changes independently of history retention,
+  even with recording off. `ListenerIdentityReader` reads signing team and identifier
+  once per executable path, without validation. Identity is path and signature,
+  TCP/UDP, port and bind scope (loopback, all interfaces or a specific address),
+  never PID or descriptor; a port in the system-assigned range (49152–65535) counts
+  as one per executable, so a random port at each launch isn't a new listener. `ListenerChangeRules` and `ListenerDebounce` in OTMKit
+  compare only identities seen on two consecutive walks; gaps restart the pair.
+  New executables, new ports, widened loopback binds, changed addresses and ports
+  held by another reviewed executable stay pending until Accept or Accept All adds
+  them to the baseline. The first walk seeds it without changes; unreadable
+  processes and paths are counted as unknown, never absent listeners.
+  The Connections summary's Listeners entry opens the review and each retained
+  observation's socket details. `otm ports --listeners --changes [--json]` reads
+  the saved review and compares two walks without creating or changing a baseline;
   socket history (schema 6, `FlightRecorderConnections`): `connection_lifetimes`
   keeps one row per observed segment from `ConnectionWatch`, with process identity,
   executable path and user, endpoints, the TCP states seen and its bounded timeline.
@@ -499,7 +514,12 @@ Manager OG or any other proprietary task manager.
   History switch, Keep watching connections in the background (`backgroundConnections`,
   off by default), schedules sockets at most once a minute while recording and the
   page isn't visible, on the same `ConnectionStore.shared` watch, off the main actor.
-  No new timer or per-tick descriptor work is added. Background walks publish no
+  No new timer or per-tick descriptor work is added. Listener review uses these
+  same walks, off the main actor, publishing only changed review state and counts.
+  Settings' `listenerChangeNotifications` switch defaults off and requests permission
+  only when turned on; with background watching enabled it posts one notification
+  for a walk's new batch, never again for unchanged pending changes.
+  Background walks publish no
   table rows, and page reads move the shared deadline on. The ConnectionHistory debug
   category logs wall and thread CPU seconds for each walk; a headless `otm ports`
   with `OTM_CONNECTION_WALK_TIMING=1` prints that measurement to stderr.
@@ -686,6 +706,9 @@ starts on Processes and opens Find Owner with that query searched, `-openProcess
 match, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show
 (`-openConnectionList closed|history` starts it on Closed recently or History;
+`-openListenerChanges YES` selects Connections and opens listener review;
+with debug `-listenerFixture YES` it shows made-up changes, never persisted,
+with Accept and notifications disabled;
 `-openConnectionSearch <text>` opens History with a search),
 `-openStartupSource <name>` picks the Source filter (the CLI source names or visible titles),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
@@ -845,7 +868,7 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
   Protocol first, then PID, then Seen for, then Scope; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
-  Its six summary cards fold into a strip of chips (rows from
+  Its seven summary cards fold into a strip of chips (rows from
   `GridMath.stripRows`) when they don't fit one row or the details are open,
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.

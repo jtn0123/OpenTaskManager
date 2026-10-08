@@ -28,7 +28,11 @@ USAGE:
                                  lowest and highest, and the worst thermal
                                  pressure, as the Thermals page's table does
   otm owner <path|port> [--json] Processes holding a file, folder or local port
-  otm ports [--json]             Listening TCP/UDP ports of your processes
+  otm ports [--listeners] [--json]
+                                 Listening TCP/UDP ports of your processes
+  otm ports --listeners --changes [--json]
+                                 Listener changes against the saved baseline;
+                                 two walks, read-only, never accepts changes
   otm net [-n COUNT] [--interval SECONDS] [--json]
                                  Processes moving the most network traffic
   otm drivers [--all] [--json]   System extensions and third-party kernel
@@ -155,7 +159,7 @@ case "owner":
     ownerCommand(options)
 
 case "ports":
-    portsCommand(options)
+    await portsCommand(options)
 
 case "net":
     try await netCommand(options)
