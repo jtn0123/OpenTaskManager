@@ -77,10 +77,13 @@ private struct PageCommands: Commands {
     }
 }
 
-/// The toolbar's page menu uses the current title so the hidden sidebar's replacement is easy to find.
-/// Its native chevron opens every page, with the current one ticked and its keyboard shortcut.
-/// Keep the separate navigation title: removing it once sent the sidebar toggle to overflow permanently
-/// after showing the sidebar in a narrow window on macOS 26. A title menu also did nothing there.
+/// The toolbar's page menu, there only while the sidebar is hidden: the word
+/// "Pages" with a chevron, so the hidden sidebar's replacement reads as one,
+/// opening every page with the current one ticked and its keyboard shortcut.
+/// Not the page's name: the title beside it already says that, and the two
+/// read "Processes ⌄ Processes". Keep the separate navigation title: removing
+/// it once sent the sidebar toggle to overflow permanently after showing the
+/// sidebar in a narrow window on macOS 26. A title menu also did nothing there.
 private struct PageSwitcher: View {
     @Binding var page: Page
 
@@ -93,12 +96,11 @@ private struct PageSwitcher: View {
                 .keyboardShortcut(item.shortcut)
             }
         } label: {
-            Text(page.rawValue)
-                .fontWeight(.semibold)
+            Text("Pages")
         }
         .fixedSize()
         .help("Switch pages")
-        .accessibilityLabel("\(page.rawValue), switch pages")
+        .accessibilityLabel("Pages")
         .accessibilityValue(page.rawValue)
         .accessibilityHint("Shows the list of pages, which ⌘1 to ⌘9 also switch between")
     }
