@@ -58,10 +58,23 @@ Manager OG or any other proprietary task manager.
   the GPU, every result checked, cancellable) backs the GPU detail's Benchmark card
   (`GPUBenchmarkStore`; debug `-gpuBenchmarkFixture nodevice|unsupported|notiming`)
   and `otm gpubench`, the last 10 per Mac in SpeedTests/gpu-benchmark.json;
-  Model/BenchmarkRun adapts those four histories on read to one envelope (never
+  System/CPUSustained (the floating-point workload on every worker for 2 or 5
+  min, timed in 10 s windows; Model/CPUSustainedSummary: first window, the last
+  third's median, "held 97% of its starting speed", the thermal states seen,
+  never a claim of throttling) backs the CPU card's sustained run
+  (`CPUSustainedStore`, `CPUSustainedViews`; one CPU run at a time) and `otm
+  cpubench --sustained [2|5]`, in SpeedTests/cpu-sustained.json, its own cohort;
+  each new result carries an optional, versioned `context` (Model/BenchmarkContext,
+  read by System/BenchmarkContextReader as the test starts: OS, app and build,
+  Mac and chip, IOPowerSources, Low Power Mode, thermal state at start and end,
+  the CPU's load over the few seconds before, from the app's sampler through
+  `BenchmarkContextFeed` or a 1 s tick probe, and memory available); older runs
+  read as "Context not recorded" and are never rewritten;
+  Model/BenchmarkRun adapts those histories on read to one envelope (never
   rewritten), Model/BenchmarkComparison holds the compatibility rules and change
-  against both runs' spread, and Format/BenchmarkExport the versioned JSON and
-  Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`,
+  against both runs' spread, with context differences as warnings that never
+  refuse, and Format/BenchmarkExport the versioned JSON (v2) and
+  Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`, `BenchmarkSections`,
   `BenchmarkWorkspace`: Run all through the tests' own stores, picks and ticks in
   UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
   Model/BenchmarkTrend splits a test's runs into lines only comparable runs
@@ -314,6 +327,13 @@ A Mac or VM with no sensors can still show a full Thermals page: in a debug
 build, `-sensorFixture <file>` loads a recording from
 `otm sensors --extremes 20 --json` in place of the sensors (`SensorFixture`).
 Such a run records nothing to History, since the readings aren't that Mac's.
+
+`-openResource cpu -openSpeedTest sustained` starts a sustained CPU run when the
+CPU card first shows (2 min, or the length last picked). In a debug build,
+`-sustainedFixture YES` shows three made-up sustained runs on this Mac, never
+saved, with differing contexts (one on battery with the CPU busy, slowing as
+the thermal state turns fair), so `-openResource benchmarks
+-openBenchmarkCompare sustained:1,2` shows a comparison's context warnings.
 
 ## Conventions
 

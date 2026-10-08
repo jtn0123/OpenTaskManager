@@ -14,8 +14,10 @@ func netQualityCommand(_ options: Options) async {
         let notice = "Testing\(link) for about \(Int(NetworkQuality.typicalSeconds)) s. This deliberately fills the connection…\n"
         FileHandle.standardError.write(Data(notice.utf8))
     }
+    let context = benchmarkContext()
     do throws(NetworkQualityError) {
-        let result = try await NetworkQuality.run(interface: interface)
+        var result = try await NetworkQuality.run(interface: interface)
+        result.context = context.ended()
         _ = try? SpeedTestHistory.networkQuality.append(result)
         if options.json {
             printJSON(result)
@@ -42,6 +44,7 @@ func networkQualitySummary(_ result: NetworkQualityResult) -> String {
     if let endpoint = result.endpoint { lines.append("Server          \(endpoint)") }
     if let bytes = result.bytesTransferred { lines.append("Data used       \(Format.bytes(bytes))") }
     if let rating = result.rating { lines += ["", rating.summary] }
+    lines += ["", contextLine(result.context)]
     return lines.joined(separator: "\n")
 }
 
@@ -69,7 +72,8 @@ func diskSpeedCommand(_ options: Options) {
     defer { interrupt.cancel() }
 
     let showsProgress = isatty(STDERR_FILENO) == 1 && !options.json
-    let result: DiskSpeedResult
+    let context = benchmarkContext()
+    var result: DiskSpeedResult
     do throws(DiskSpeedError) {
         result = try DiskSpeedTest.run(in: folder, configuration: configuration, cancellation: cancellation) { progress in
             guard showsProgress else { return }
@@ -81,6 +85,7 @@ func diskSpeedCommand(_ options: Options) {
         fail(error.message)
     }
     if showsProgress { FileHandle.standardError.write(Data("\u{1B}[2K\r".utf8)) }
+    result.context = context.ended()
     _ = try? SpeedTestHistory.diskSpeed.append(result)
     if options.json {
         printJSON(result)
@@ -108,5 +113,6 @@ func diskSpeedSummary(_ result: DiskSpeedResult, requested: UInt64) -> String {
         lines.append("Used \(Format.wholeBytes(result.configuration.fileSize)): the test file never takes more than a tenth of the free space.")
     }
     lines.append(DiskSpeedTest.methodNote(result))
+    lines.append(contextLine(result.context))
     return lines.joined(separator: "\n")
 }
