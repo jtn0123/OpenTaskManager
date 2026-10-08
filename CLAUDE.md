@@ -93,8 +93,13 @@ Manager OG or any other proprietary task manager.
   `-openBenchmarkBaseline cpu:3`); the resource cards fold their runs into
   `SavedRunsDisclosure`, whose Compare in Benchmarks ticks the latest pair;
   System/CommandRunner runs every system tool with a timeout),
-  the `otm` CLI, and Swift Testing tests. Keep pure logic here so it can be
-  tested.
+  the `otm` CLI, and Swift Testing tests. The CLI's `main.swift` keeps the
+  entry point, command dispatch and usage text; `CLIOptions` parses arguments
+  and `CLIOutput` holds shared output helpers. Command handlers and their
+  reports live in files by family (processes, system, power, sensors, network,
+  disk, apps and drivers), beside the benchmark, history and capture handlers.
+  Async handlers moved from the entry point stay on the main actor. Keep pure
+  logic here so it can be tested.
 - `App/Sources`: `AppModel` (observable state and history), Views/Overview,
   Views/Processes (NSOutlineView table in `ProcessOutlineView`), Views/Performance,
   Views/History (the flight recorder's graphs; `FlightRecorder` in OTMKit writes
