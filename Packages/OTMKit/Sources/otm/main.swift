@@ -97,10 +97,7 @@ USAGE:
   otm captures [--json]          The spike captures the app kept: what crossed,
                                  when, for how long, and the busiest processes
   otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
-                                 Processes the app's History saw (default: the
-                                 last 24 hours) by name, path, bundle ID,
-                                 launchd label or PID, latest first: when each
-                                 ran, average and peak CPU, peak memory, disk
+                                 History's processes by name, path, label or PID
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
