@@ -340,7 +340,9 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   switches, QoS; per field "Needs admin rights" for others' processes) and its
   ancestry (`ProcessAncestry`), each step selecting that process; its Threads
   tab reads the threads off the main actor once per tick, only while shown
-  (`ThreadActivityTracker`), as does `otm threads`. `-openProcessTab
+  (`ThreadActivityTracker`), as does `otm threads`; rows stay one line, and
+  a clicked thread's whole name, selectable, with Copy Thread Name, is pinned
+  under the list (`ThreadDetailLine`). `-openProcessTab
   threads|files` opens a tab with `-openProcess`.
 - The inspector's Group tab (`-openProcessTab group`) is offered only for a
   row with others nested under it, and the note's "See all N together" link
