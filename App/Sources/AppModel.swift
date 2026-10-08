@@ -226,7 +226,11 @@ final class AppModel {
     @ObservationIgnored private let sensorFixture = SensorFixture.load()
     #endif
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
+    /// The whole CPU's kernel (system) share, drawn as a line in its busy time.
+    private(set) var cpuSystemHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
+    /// Each logical CPU's kernel share, indexed as `coreHistory`.
+    private(set) var coreSystemHistory: [History<Double>]
     private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
     private(set) var memoryDetail = MemoryHistory()
     private(set) var gpuDetail: [String: GPUHistory] = [:]
@@ -238,9 +242,14 @@ final class AppModel {
     private(set) var appGroups: [ProcessNode] = []
     private(set) var gpuHistory: [String: History<Double>] = [:]
     private(set) var powerHistory = History<Double>(capacity: historyCapacity)
+    /// macOS's thermal pressure as `ThermalState.level`, for a Mac with no
+    /// temperatures to graph.
+    private(set) var thermalPressureHistory = History<Double>(capacity: historyCapacity)
     private(set) var powerDetail = PowerHistory()
     private(set) var diskReadHistory: [String: History<Double>] = [:]
     private(set) var diskWriteHistory: [String: History<Double>] = [:]
+    /// Each disk's share of the time it was busy, 0 to 1.
+    private(set) var diskActiveHistory: [String: History<Double>] = [:]
     private(set) var networkInHistory: [String: History<Double>] = [:]
     private(set) var networkOutHistory: [String: History<Double>] = [:]
     /// By PID and start time, so a PID macOS gives to a later process starts
@@ -336,7 +345,9 @@ final class AppModel {
 
     init() {
         topology = monitor.topology
-        coreHistory = (0..<monitor.topology.logicalCores).map { _ in History(capacity: Self.historyCapacity) }
+        let cores = (0..<monitor.topology.logicalCores).map { _ in History<Double>(capacity: Self.historyCapacity) }
+        coreHistory = cores
+        coreSystemHistory = cores
         let defaults = UserDefaults.standard
         updateSpeed = UpdateSpeed(rawValue: defaults.double(forKey: "updateSpeed")) ?? .normal
         includeSystemProcesses = defaults.object(forKey: "includeSystemProcesses") as? Bool ?? true
@@ -433,12 +444,17 @@ final class AppModel {
         userHistory = histories
 
         cpuHistory.append(snapshot.cpu.usage)
+        cpuSystemHistory.append(snapshot.cpu.system)
         for (index, usage) in snapshot.cpu.coreUsage.enumerated() where index < coreHistory.count {
             coreHistory[index].append(usage)
+        }
+        for (index, system) in snapshot.cpu.coreSystem.enumerated() where index < coreSystemHistory.count {
+            coreSystemHistory[index].append(system)
         }
         memoryHistory.append(snapshot.memory.usedFraction)
         memoryDetail.append(snapshot.memory)
         powerHistory.append(snapshot.power.systemWatts ?? 0)
+        thermalPressureHistory.append(snapshot.power.thermalState.level)
         powerDetail.append(snapshot.power, interval: snapshot.interval)
         if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
             peakSystemWatts = watts
@@ -454,6 +470,7 @@ final class AppModel {
         for disk in snapshot.disks {
             diskReadHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.readBytesPerSecond)
             diskWriteHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.writeBytesPerSecond)
+            diskActiveHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.activeFraction)
         }
         for link in snapshot.network {
             networkInHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.receivedBytesPerSecond)
@@ -681,11 +698,13 @@ final class AppModel {
         }
     }
 
-    /// Average load of one core tier over time, aligned on the newest sample.
-    func tierHistory(level: Int) -> [Double] {
+    /// Average load of one core tier over time, aligned on the newest sample;
+    /// with `kernel`, the part of it spent in the kernel.
+    func tierHistory(level: Int, kernel: Bool = false) -> [Double] {
+        let source = kernel ? coreSystemHistory : coreHistory
         let histories = topology.tierForCPU.indices
-            .filter { topology.tierForCPU[$0] == level && coreHistory.indices.contains($0) }
-            .map { coreHistory[$0].values }
+            .filter { topology.tierForCPU[$0] == level && source.indices.contains($0) }
+            .map { source[$0].values }
         guard !histories.isEmpty else { return [] }
         let length = histories.map(\.count).min() ?? 0
         return (0..<length).map { index in
