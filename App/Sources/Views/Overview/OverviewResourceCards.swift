@@ -10,7 +10,7 @@ import SwiftUI
 struct CPUGraphCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.graphWindow) private var window
-    @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
+    @Setting(Settings.cpuGraphScale) private var scale: CPUGraphScale
     /// The auto-scaled graph's bound, held between samples.
     @State private var bounds = AutoScaleBounds()
     var chartHeight: CGFloat

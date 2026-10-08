@@ -108,7 +108,7 @@ final class AppModel {
     /// (launchd's, on Startup).
     var processIdentityByPID: [Int32: ProcessIdentity] = [:]
     /// Each user's processes summed, for the Users page.
-    let userUsage = UserUsageStore()
+    let userUsage = UserUsageStore(historyCapacity: AppModel.userHistoryCapacity)
     var users: [UserUsage] { userUsage.users }
     var userHistory: [UInt32: UserHistory] { userUsage.histories }
     /// Directory lookups by uid, including misses, so each runs once.
@@ -137,23 +137,23 @@ final class AppModel {
     /// exposed sockets" on the System page's Firewall card). Cleared once applied.
     var requestedConnectionFilter: ConnectionFilter?
     /// Highest whole-system draw seen on this Mac, kept across launches.
-    var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
+    var peakSystemWatts = Settings.peakSystemWatts.get()
     /// `SystemSnapshot.measuresProcessEnergy`, read off the tick's walk over
     /// the processes and written only when it changes. Kept across launches,
     /// so a Mac without power sensors (a VM) hides its power figures from the
     /// first frame rather than a second later. nil until a sample has told.
-    var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
+    var measuresProcessEnergy = Settings.measuresProcessEnergy.get()
     /// Whether this Mac attributes GPU time to processes (`ProcessFigureReporting`),
     /// kept across launches and written only when it changes, like
     /// `measuresProcessEnergy`. nil until the samples have told.
-    var reportsProcessGPU = UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+    var reportsProcessGPU = Settings.reportsProcessGPU.get()
     @ObservationIgnored var gpuReporting = ProcessFigureReporting(
-        isReported: UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+        isReported: Settings.reportsProcessGPU.get()
     )
     /// Whether any process has held Neural Engine memory, kept like `reportsProcessGPU`.
-    var reportsProcessNeuralMemory = UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
+    var reportsProcessNeuralMemory = Settings.reportsProcessNeuralMemory.get()
     @ObservationIgnored var neuralMemoryReporting = ProcessFigureReporting(
-        isReported: UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
+        isReported: Settings.reportsProcessNeuralMemory.get()
     )
 
     var isPaused = false {
@@ -162,20 +162,20 @@ final class AppModel {
 
     var updateSpeed: UpdateSpeed {
         didSet {
-            UserDefaults.standard.set(updateSpeed.rawValue, forKey: "updateSpeed")
+            Settings.updateSpeed.set(updateSpeed)
             restart()
         }
     }
 
     var includeSystemProcesses: Bool {
         didSet {
-            UserDefaults.standard.set(includeSystemProcesses, forKey: "includeSystemProcesses")
+            Settings.includeSystemProcesses.set(includeSystemProcesses)
             applyMonitorOptions()
         }
     }
 
     var cpuRelativeToSystem: Bool {
-        didSet { UserDefaults.standard.set(cpuRelativeToSystem, forKey: "cpuRelativeToSystem") }
+        didSet { Settings.cpuRelativeToSystem.set(cpuRelativeToSystem) }
     }
 
     var cpuScale: CPUScale {
@@ -191,10 +191,9 @@ final class AppModel {
         let cores = (0..<monitor.topology.logicalCores).map { _ in History<Double>(capacity: Self.historyCapacity) }
         coreHistory = cores
         coreSystemHistory = cores
-        let defaults = UserDefaults.standard
-        updateSpeed = UpdateSpeed(rawValue: defaults.double(forKey: "updateSpeed")) ?? .normal
-        includeSystemProcesses = defaults.object(forKey: "includeSystemProcesses") as? Bool ?? true
-        cpuRelativeToSystem = defaults.object(forKey: "cpuRelativeToSystem") as? Bool ?? true
+        updateSpeed = Settings.updateSpeed.get()
+        includeSystemProcesses = Settings.includeSystemProcesses.get()
+        cpuRelativeToSystem = Settings.cpuRelativeToSystem.get()
         applyMonitorOptions()
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
             Task { @MainActor in self?.runningAppsChanged = true }

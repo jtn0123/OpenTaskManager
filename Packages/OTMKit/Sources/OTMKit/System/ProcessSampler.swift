@@ -173,9 +173,10 @@ final class ProcessSampler {
     /// A path that can't be read is tried again next tick, as before, and the
     /// name then comes from `proc_name`, which can change on exec.
     private func lastingFacts(for key: Key) -> Lasting {
+        // The path buffer is borrowed for proc_pidpath, which receives its full byte capacity.
         if let cached = lasting[key], cached.path != nil { return cached }
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        let path = proc_pidpath(key.pid, &buffer, UInt32(buffer.count)) > 0
+        let path = unsafe proc_pidpath(key.pid, &buffer, UInt32(buffer.count)) > 0
             ? String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             : nil
         let facts = Lasting(path: path, name: path.map { ($0 as NSString).lastPathComponent },
@@ -185,8 +186,9 @@ final class ProcessSampler {
     }
 
     private func userName(for uid: UInt32) -> String {
+        // getpwuid's string is copied before another directory lookup can replace its storage.
         if let cached = userNames[uid] { return cached }
-        let name = getpwuid(uid).map { String(cString: $0.pointee.pw_name) } ?? String(uid)
+        let name = unsafe getpwuid(uid).map { unsafe String(cString: $0.pointee.pw_name) } ?? String(uid)
         userNames[uid] = name
         return name
     }
@@ -244,12 +246,13 @@ final class ProcessSampler {
     }
 
     private func readNative(_ pid: Int32, details: Bool) -> Native? {
+        // Each local C record has the flavor's exact size and stays live until the synchronous kernel call returns.
         var task = proc_taskinfo()
         let size = Int32(MemoryLayout<proc_taskinfo>.size)
         guard pid > 0 else { return nil }
         // History and spikes need the rusage figures, not a second kernel
         // call for resident memory, running threads and thread counts.
-        if details, proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) != size { return nil }
+        if details, unsafe proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) != size { return nil }
 
         if supportsV6 {
             var usage = rusage_info_v6()
@@ -290,16 +293,18 @@ final class ProcessSampler {
     }
 
     private static func rusage<T>(_ pid: Int32, _ usage: inout T, flavor: Int32) -> Bool {
+        // The caller supplies the flavor's aligned rusage record; rebinding covers only the call, which writes the record, not a pointer.
         withUnsafeMutablePointer(to: &usage) { pointer in
-            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
-                proc_pid_rusage(pid, flavor, $0) == 0
+            unsafe pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                unsafe proc_pid_rusage(pid, flavor, $0) == 0
             }
         }
     }
 
     private static func shortName(_ pid: Int32) -> String? {
+        // proc_name receives the byte capacity of the local buffer and finishes before it is decoded.
         var buffer = [CChar](repeating: 0, count: 256)
-        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        guard unsafe proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
         let name = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         return name.isEmpty ? nil : name
     }
@@ -319,29 +324,30 @@ final class ProcessSampler {
 
     /// One sysctl that returns every process, including ones we cannot inspect.
     static func listProcesses() -> [KernelProcess] {
+        // The kernel receives the allocated byte capacity; only complete returned C records and their bounded command tuples are read.
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var processes: [kinfo_proc] = []
+        var processes: [kinfo_proc] = unsafe []
         for _ in 0..<4 {
             var size = 0
-            guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [] }
+            guard unsafe sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [] }
             // Processes can spawn between the two calls; leave headroom.
             size += size / 8
-            processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
-            let result = processes.withUnsafeMutableBytes { sysctl(&mib, 4, $0.baseAddress, &size, nil, 0) }
+            unsafe processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+            let result = processes.withUnsafeMutableBytes { unsafe sysctl(&mib, 4, $0.baseAddress, &size, nil, 0) }
             if result == 0 {
-                processes.removeLast(processes.count - size / MemoryLayout<kinfo_proc>.stride)
+                unsafe processes.removeLast(processes.count - size / MemoryLayout<kinfo_proc>.stride)
                 break
             }
             guard errno == ENOMEM else { return [] }
         }
 
-        return processes.map { process in
-            let proc = process.kp_proc
-            let start = proc.p_un.__p_starttime
-            let command = withUnsafeBytes(of: proc.p_comm) { raw in
-                String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        return unsafe processes.map { process in
+            let proc = unsafe process.kp_proc
+            let start = unsafe proc.p_un.__p_starttime
+            let command = unsafe withUnsafeBytes(of: proc.p_comm) { raw in
+                unsafe String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
             }
-            return KernelProcess(
+            return unsafe KernelProcess(
                 pid: proc.p_pid,
                 parentPID: process.kp_eproc.e_ppid,
                 uid: process.kp_eproc.e_ucred.cr_uid,
@@ -374,9 +380,10 @@ enum Responsibility {
     private typealias Lookup = @convention(c) (pid_t) -> pid_t
 
     private static let lookup: Lookup? = {
-        let defaultHandle = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
-        guard let symbol = dlsym(defaultHandle, "responsibility_get_pid_responsible_for_pid") else { return nil }
-        return unsafeBitCast(symbol, to: Lookup.self)
+        // RTLD_DEFAULT keeps the system symbol loaded, and Lookup matches its C signature.
+        let defaultHandle = unsafe UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
+        guard let symbol = unsafe dlsym(defaultHandle, "responsibility_get_pid_responsible_for_pid") else { return nil }
+        return unsafe unsafeBitCast(symbol, to: Lookup.self)
     }()
 
     static func responsiblePID(for pid: Int32) -> Int32 {

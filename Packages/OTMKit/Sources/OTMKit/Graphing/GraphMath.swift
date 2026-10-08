@@ -53,6 +53,7 @@ public enum GraphMath {
     /// point but never overshoots its neighbours, so a smoothed line can't
     /// poke above 100% or dip below zero.
     public static func monotoneTangents(_ values: [Double]) -> [Double] {
+        // Both arrays have count elements and stay borrowed here; the loops keep each neighbour inside those bounds.
         let count = values.count
         guard count > 1 else { return Array(repeating: 0, count: count) }
         var tangents = [Double](repeating: 0, count: count)
@@ -63,29 +64,29 @@ public enum GraphMath {
         values.withUnsafeBufferPointer { valueBuffer in
             tangents.withUnsafeMutableBufferPointer { tangentBuffer in
                 guard let value = valueBuffer.baseAddress, let tangent = tangentBuffer.baseAddress else { return }
-                tangent[0] = value[1] - value[0]
-                tangent[count - 1] = value[count - 1] - value[count - 2]
+                unsafe tangent[0] = value[1] - value[0]
+                unsafe tangent[count - 1] = value[count - 1] - value[count - 2]
                 var index = 1
                 while index < count - 1 {
-                    let before = value[index] - value[index - 1]
-                    let after = value[index + 1] - value[index]
-                    if before * after > 0 { tangent[index] = (before + after) / 2 }
+                    let before = unsafe value[index] - value[index - 1]
+                    let after = unsafe value[index + 1] - value[index]
+                    if before * after > 0 { unsafe tangent[index] = (before + after) / 2 }
                     index += 1
                 }
                 index = 0
                 while index < count - 1 {
-                    let delta = value[index + 1] - value[index]
+                    let delta = unsafe value[index + 1] - value[index]
                     if delta == 0 {
-                        tangent[index] = 0
-                        tangent[index + 1] = 0
+                        unsafe tangent[index] = 0
+                        unsafe tangent[index + 1] = 0
                     } else {
-                        let alpha = tangent[index] / delta
-                        let beta = tangent[index + 1] / delta
+                        let alpha = unsafe tangent[index] / delta
+                        let beta = unsafe tangent[index + 1] / delta
                         let length = alpha * alpha + beta * beta
                         if length > 9 {
                             let scale = 3 / length.squareRoot()
-                            tangent[index] = scale * alpha * delta
-                            tangent[index + 1] = scale * beta * delta
+                            unsafe tangent[index] = scale * alpha * delta
+                            unsafe tangent[index + 1] = scale * beta * delta
                         }
                     }
                     index += 1
@@ -134,6 +135,7 @@ public enum GraphMath {
     /// `total` minus the sum of `parts`, aligned on the newest value and
     /// never negative: what a stacked graph's top band, the rest, shows.
     public static func remainder(of total: [Double], minus parts: [[Double]]) -> [Double] {
+        // The result matches total; the offset aligns used at the end, and a part is read only when its index is nonnegative.
         let used = tailSum(parts)
         let count = total.count
         // Where `total`'s first value falls in `used`, which may be shorter.
@@ -146,8 +148,8 @@ public enum GraphMath {
                     let part = usedBuffer.baseAddress
                     var index = 0
                     while index < count {
-                        let rest = value[index] - (index + offset >= 0 ? part?[index + offset] ?? 0 : 0)
-                        out[index] = 0 >= rest ? 0 : rest
+                        let rest = unsafe value[index] - (index + offset >= 0 ? part?[index + offset] ?? 0 : 0)
+                        unsafe out[index] = 0 >= rest ? 0 : rest
                         index += 1
                     }
                 }
@@ -159,6 +161,8 @@ public enum GraphMath {
     /// The largest finite value among the last `count` of `values` (all of
     /// them by default), or 0 when there's none.
     public static func finitePeak(_ values: [Double], last count: Int = .max) -> Double {
+        // The positive tail count keeps start in 0...end, and the array stays borrowed until the scan finishes.
+        guard count > 0 else { return 0 }
         let end = values.count
         let start = count >= end ? 0 : end - count
         var peak = 0.0
@@ -167,7 +171,7 @@ public enum GraphMath {
             guard let value = buffer.baseAddress else { return }
             var index = start
             while index < end {
-                let candidate = value[index]
+                let candidate = unsafe value[index]
                 if candidate.isFinite, !found || candidate > peak {
                     peak = candidate
                     found = true
@@ -207,6 +211,7 @@ public enum GraphMath {
     /// while loop over pointers (see `monotoneTangents`); with `floorsAtZero`,
     /// a negative value adds nothing.
     private static func addAligned(_ values: [Double], into sums: inout [Double], floorsAtZero: Bool) {
+        // Sums is at least as long as values; offset plus each index stays in sums while both arrays are borrowed.
         let count = values.count
         let offset = sums.count - count
         values.withUnsafeBufferPointer { valueBuffer in
@@ -214,8 +219,8 @@ public enum GraphMath {
                 guard let value = valueBuffer.baseAddress, let sum = sumBuffer.baseAddress else { return }
                 var index = 0
                 while index < count {
-                    let added = value[index]
-                    sum[offset + index] += floorsAtZero && 0 >= added ? 0 : added
+                    let added = unsafe value[index]
+                    unsafe sum[offset + index] += floorsAtZero && 0 >= added ? 0 : added
                     index += 1
                 }
             }

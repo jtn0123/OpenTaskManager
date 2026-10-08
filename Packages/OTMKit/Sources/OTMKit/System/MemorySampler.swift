@@ -45,11 +45,12 @@ final class MemorySampler {
     private var previousCounters: PagingCounters?
 
     func sample(interval: Double) -> MemorySample {
+        // The aligned VM record has count integer words; the temporary rebind and the kernel write finish before its borrow ends.
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
         let result = withUnsafeMutablePointer(to: &stats) { pointer in
-            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(host, HOST_VM_INFO64, $0, &count)
+            unsafe pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                unsafe host_statistics64(host, HOST_VM_INFO64, $0, &count)
             }
         }
 

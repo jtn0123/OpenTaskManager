@@ -156,8 +156,9 @@ public enum ExtensionBundles {
     }
 
     private static func propertyList(_ path: String) -> [String: Any]? {
+        // The optional format output is nil; Foundation owns the decoded plist values.
         guard let data = FileManager.default.contents(atPath: path) else { return nil }
-        return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        return unsafe try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
     }
 
     private static func text(_ value: Any?) -> String? {

@@ -48,11 +48,6 @@ final class BenchmarkWorkspace {
         var interface: String?
     }
 
-    private static let picksKey = "benchmarkComparePicks"
-    private static let baselinesKey = "benchmarkTrendBaselines"
-    private static let includesDiskKey = "benchmarkSuiteIncludesDisk"
-    private static let includesNetworkKey = "benchmarkSuiteIncludesNetwork"
-
     /// The newest saved result of any test; nil until the files are read, or with none.
     private(set) var newest: Date?
     /// Run all's steps: the last suite's, or the running one's.
@@ -69,12 +64,12 @@ final class BenchmarkWorkspace {
     private(set) var openRequest = 0
     /// Whether Run all adds the disk test, which writes a temporary file.
     var includesDisk: Bool {
-        didSet { UserDefaults.standard.set(includesDisk, forKey: Self.includesDiskKey) }
+        didSet { Settings.benchmarkSuiteIncludesDisk.set(includesDisk) }
     }
 
     /// Whether Run all adds the Internet test, which loads the connection.
     var includesNetwork: Bool {
-        didSet { UserDefaults.standard.set(includesNetwork, forKey: Self.includesNetworkKey) }
+        didSet { Settings.benchmarkSuiteIncludesNetwork.set(includesNetwork) }
     }
 
     @ObservationIgnored private var summaryLoaded = false
@@ -85,13 +80,12 @@ final class BenchmarkWorkspace {
     @ObservationIgnored private var pendingReveal: (kind: BenchmarkKind, section: Bool)?
 
     private init() {
-        let defaults = UserDefaults.standard
-        let saved = defaults.dictionary(forKey: Self.picksKey) as? [String: [String]] ?? [:]
+        let saved = Settings.benchmarkComparePicks.get()
         picks = Dictionary(uniqueKeysWithValues: saved.compactMap { key, ids in BenchmarkKind(rawValue: key).map { ($0, ids) } })
-        let bases = defaults.dictionary(forKey: Self.baselinesKey) as? [String: String] ?? [:]
+        let bases = Settings.benchmarkTrendBaselines.get()
         baselines = Dictionary(uniqueKeysWithValues: bases.compactMap { key, id in BenchmarkKind(rawValue: key).map { ($0, id) } })
-        includesDisk = defaults.bool(forKey: Self.includesDiskKey)
-        includesNetwork = defaults.bool(forKey: Self.includesNetworkKey)
+        includesDisk = Settings.benchmarkSuiteIncludesDisk.get()
+        includesNetwork = Settings.benchmarkSuiteIncludesNetwork.get()
     }
 
     // MARK: - The newest result
@@ -142,7 +136,7 @@ final class BenchmarkWorkspace {
     }
 
     private func savePicks() {
-        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: picks.map { ($0.key.rawValue, $0.value) }), forKey: Self.picksKey)
+        Settings.benchmarkComparePicks.set(Dictionary(uniqueKeysWithValues: picks.map { ($0.key.rawValue, $0.value) }))
     }
 
     // MARK: - From a resource's card
@@ -174,7 +168,7 @@ final class BenchmarkWorkspace {
     /// The run `kind`'s trends are measured against, or none.
     func setBaseline(_ kind: BenchmarkKind, to id: String?) {
         baselines[kind] = id
-        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: baselines.map { ($0.key.rawValue, $0.value) }), forKey: Self.baselinesKey)
+        Settings.benchmarkTrendBaselines.set(Dictionary(uniqueKeysWithValues: baselines.map { ($0.key.rawValue, $0.value) }))
     }
 
     // MARK: - Run all

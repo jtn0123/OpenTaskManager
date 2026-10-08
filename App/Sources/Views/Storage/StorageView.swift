@@ -520,7 +520,7 @@ private struct TreemapCard: View {
     var open: (Int) -> Void
     @State private var copied = false
     /// In Changes, fade what didn't change.
-    @AppStorage("storageChangesOnly") private var changesOnly = true
+    @Setting(Settings.storageChangesOnly) private var changesOnly: Bool
 
     var body: some View {
         let usage = result.usage

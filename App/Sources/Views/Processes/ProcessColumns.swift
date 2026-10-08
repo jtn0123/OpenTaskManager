@@ -4,9 +4,7 @@ import SwiftUI
 
 /// Columns of the process table. The raw value doubles as the column
 /// identifier and, where sortable, the `ProcessSortKey`.
-enum ProcessColumn: String, CaseIterable {
-    case name, pid, cpu, memory, power, gpu, neuralMemory, disk, threads, topTier, wakeups, user, kind
-
+extension ProcessColumn {
     var title: String {
         switch self {
         case .name: "Name"
@@ -181,50 +179,4 @@ enum MemoryMeasure {
     static let neural = "Neural Engine memory: what this process holds for the Neural Engine now, such as models it has "
         + "loaded, and the most it has held. macOS keeps it apart from the footprint. It's memory, not how busy the Neural "
         + "Engine is."
-}
-
-/// The columns switched off in the Columns menu, and the ones this Mac can't
-/// fill that were switched on anyway, saved as "kind,threads,+power".
-struct HiddenProcessColumns: RawRepresentable, Equatable {
-    var columns: Set<ProcessColumn>
-    /// Unreported columns (see `ProcessColumn.unreported`) the user turned
-    /// on, to see the dashes. The others stay hidden.
-    var shownAnyway: Set<ProcessColumn> = []
-
-    static let defaults = HiddenProcessColumns(columns: Set(ProcessColumn.allCases.filter(\.hiddenByDefault)))
-
-    init(columns: Set<ProcessColumn>) {
-        self.columns = columns
-    }
-
-    init?(rawValue: String) {
-        let entries = rawValue.split(separator: ",")
-        columns = Set(entries.compactMap { ProcessColumn(rawValue: String($0)) })
-        shownAnyway = Set(entries.compactMap { $0.first == "+" ? ProcessColumn(rawValue: String($0.dropFirst())) : nil })
-    }
-
-    var rawValue: String {
-        (columns.map(\.rawValue) + shownAnyway.map { "+" + $0.rawValue }).sorted().joined(separator: ",")
-    }
-
-    /// Hidden by choice, or because this Mac doesn't report it.
-    func hidden(unreported: Set<ProcessColumn>) -> Set<ProcessColumn> {
-        columns.union(unreported.subtracting(shownAnyway))
-    }
-
-    func isOn(_ column: ProcessColumn, unreported: Set<ProcessColumn>) -> Bool {
-        !hidden(unreported: unreported).contains(column)
-    }
-
-    /// Switches a column on or off. An unreported column switched off goes
-    /// back to hiding by itself, so it shows again on a Mac that reports it.
-    mutating func toggle(_ column: ProcessColumn, unreported: Set<ProcessColumn>) {
-        guard column != .name else { return }
-        if isOn(column, unreported: unreported) {
-            if unreported.contains(column) { shownAnyway.remove(column) } else { columns.insert(column) }
-        } else {
-            columns.remove(column)
-            if unreported.contains(column) { shownAnyway.insert(column) }
-        }
-    }
 }

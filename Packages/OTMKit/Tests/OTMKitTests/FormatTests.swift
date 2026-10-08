@@ -2,6 +2,16 @@
 import Testing
 
 struct FormatTests {
+    @Test func hexadecimalKeepsDeviceAndColorWidths() {
+        #expect(Format.hexadecimal(0, width: 4) == "0000")
+        #expect(Format.hexadecimal(0x0781, width: 4) == "0781")
+        #expect(Format.hexadecimal(0x55FD, width: 4) == "55fd")
+        #expect(Format.hexadecimal(0xAB, width: 2, uppercase: true) == "AB")
+        #expect(Format.hexadecimal(0x12345, width: 4) == "12345")
+        #expect(Format.hexadecimal(-1, width: 4) == "ffffffff")
+        #expect(Format.hexadecimal(0x1_0000_0001, width: 4) == "0001")
+    }
+
     @Test(arguments: [
         (UInt64(0), "0 B"),
         (UInt64(1023), "1023 B"),

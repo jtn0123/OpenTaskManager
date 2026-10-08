@@ -27,26 +27,29 @@ public struct MountedVolume: Sendable, Codable, Equatable {
 public enum MountTable {
     /// Every mount point.
     public static func mountPoints() -> [String] {
+        // getfsstat receives the array's byte capacity; text decoding stays inside the returned records' fixed C tuples.
         let count = Int(getfsstat(nil, 0, MNT_NOWAIT))
         guard count > 0 else { return [] }
         // Room for a mount or two arriving between the calls.
         var mounts = Array(repeating: statfs(), count: count + 4)
         let stride = MemoryLayout.stride(ofValue: mounts[0])
         let filled = mounts.withUnsafeMutableBufferPointer { buffer in
-            Int(getfsstat(buffer.baseAddress, Int32(buffer.count * stride), MNT_NOWAIT))
+            unsafe Int(getfsstat(buffer.baseAddress, Int32(buffer.count * stride), MNT_NOWAIT))
         }
         return mounts.prefix(max(filled, 0)).map { text($0.f_mntonname) }
     }
 
     /// The volume holding `path`.
     public static func volume(at path: String) -> MountedVolume? {
+        // statfs borrows an aligned local record for the call; its strings are decoded within their fixed C tuples.
         var stats = statfs()
-        guard statfs(path, &stats) == 0 else { return nil }
+        guard unsafe statfs(path, &stats) == 0 else { return nil }
         return MountedVolume(mountPoint: text(stats.f_mntonname), device: VolumeReader.bsdName(mountSource: text(stats.f_mntfromname)),
                              fileSystem: text(stats.f_fstypename), isReadOnly: stats.f_flags & UInt32(MNT_RDONLY) != 0)
     }
 
     private static func text<T>(_ field: T) -> String {
-        withUnsafeBytes(of: field) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        // The C tuple stays borrowed while decoding, which stops at its byte count or the first NUL.
+        withUnsafeBytes(of: field) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
     }
 }

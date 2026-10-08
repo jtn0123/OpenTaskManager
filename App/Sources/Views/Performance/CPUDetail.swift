@@ -3,8 +3,8 @@ import SwiftUI
 
 struct CPUDetail: View {
     @Environment(AppModel.self) private var model
-    @AppStorage(CPUGraphMode.key) private var mode = CPUGraphMode.standard
-    @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
+    @Setting(Settings.cpuGraphMode) private var mode: String
+    @Setting(Settings.cpuGraphScale) private var scale: CPUGraphScale
     /// The page's window, which every graph here covers (`GraphFit`).
     @Environment(\.graphWindow) private var window
     @Environment(\.detailPaneHeight) private var pane
@@ -244,14 +244,11 @@ struct CPUDetail: View {
     }
 }
 
-/// The CPU graph's forms, as kept under `key`.
+/// The CPU graph's forms, as kept by Settings.cpuGraphMode.
 enum CPUGraphMode {
-    static let key = "cpuGraphMode"
     static let overall = "overall"
     static let tiers = "tiers"
     static let cores = "cores"
-    /// A graph for every core, so each one's load shows at first look.
-    static let standard = cores
 }
 
 /// The CPU graph's title with the graph and scale pickers. A view of its
@@ -260,7 +257,7 @@ private struct CPUGraphHeader: View {
     let title: String
     /// Said after the title in secondary text, such as the core grid's scale.
     let note: String
-    @AppStorage(CPUGraphMode.key) private var mode = CPUGraphMode.standard
+    @Setting(Settings.cpuGraphMode) private var mode: String
 
     var body: some View {
         // Not a `ViewThatFits`: it measured both segmented controls again on

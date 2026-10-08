@@ -225,7 +225,7 @@ struct HistoryChartCard: View {
     let timeLabels: Date.FormatStyle
     let scrubber: HistoryScrubber
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(CPUGraphScale.key) private var cpuScale = CPUGraphScale.auto
+    @Setting(Settings.cpuGraphScale) private var cpuScale: CPUGraphScale
 
     private var title: some View {
         Label(spec.title, systemImage: spec.symbol)

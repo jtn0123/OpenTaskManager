@@ -4,14 +4,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// How far back the History page looks.
-enum HistoryRange: Int, CaseIterable, Identifiable {
-    case hour = 3_600
-    case sixHours = 21_600
-    case day = 86_400
-    case week = 604_800
-
-    var id: Int { rawValue }
-
+extension HistoryRange {
     var seconds: TimeInterval { TimeInterval(rawValue) }
 
     var label: String {
@@ -187,9 +180,9 @@ struct HistoryView: View {
     private static let axisFont = NSFont.systemFont(ofSize: 11)
 
     @Environment(AppModel.self) private var model
-    @AppStorage("historyRange") private var range: HistoryRange = .hour
+    @Setting(Settings.historyRange) private var range: HistoryRange
     /// Spread the graphs from the first record in the range to the last.
-    @AppStorage("historyFitsRecording") private var fitsRecording = false
+    @Setting(Settings.historyFitsRecording) private var fitsRecording: Bool
     @State private var scrubber = HistoryScrubber()
     @State private var player = HistoryPlayer()
     /// Folds the pinned rail to a strip among the charts; only the rail reads it.

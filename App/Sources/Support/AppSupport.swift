@@ -170,7 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// ⌃⇧⎋, the shortcut Windows users already have in their fingers.
     private func updateHotKey() {
-        let enabled = UserDefaults.standard.object(forKey: "globalHotKeyEnabled") as? Bool ?? true
+        let enabled = Settings.globalHotKeyEnabled.get()
         if enabled, hotKey == nil {
             hotKey = GlobalHotKey(keyCode: kVK_Escape, modifiers: controlKey | shiftKey) {
                 WindowOpener.showMainWindow()

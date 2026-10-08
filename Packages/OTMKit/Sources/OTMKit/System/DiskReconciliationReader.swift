@@ -61,8 +61,9 @@ public enum DiskReconciliationReader {
     }
 
     private static func realPath(_ path: String) -> String {
-        guard let resolved = realpath(path, nil) else { return path }
-        defer { free(resolved) }
-        return String(cString: resolved)
+        // realpath returns an owned NUL-terminated allocation; copy its text before the deferred free.
+        guard let resolved = unsafe realpath(path, nil) else { return path }
+        defer { unsafe free(resolved) }
+        return unsafe String(cString: resolved)
     }
 }

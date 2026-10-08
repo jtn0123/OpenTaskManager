@@ -105,25 +105,7 @@ struct PowerHistory {
     }
 }
 
-/// One user's CPU (100 = one core) and summed process memory over time.
-struct UserHistory {
-    var cpu = History<Double>(capacity: AppModel.userHistoryCapacity)
-    var memory = History<Double>(capacity: AppModel.userHistoryCapacity)
-
-    mutating func append(_ totals: UsageTotals) {
-        cpu.append(totals.cpuPercent)
-        memory.append(Double(totals.memory))
-    }
-}
-
-enum UpdateSpeed: Double, CaseIterable, Identifiable {
-    case fast = 0.5
-    case normal = 1
-    case slow = 2
-    case verySlow = 5
-
-    var id: Double { rawValue }
-
+extension UpdateSpeed {
     var label: String {
         switch self {
         case .fast: "Fast (2× per second)"
@@ -131,23 +113,6 @@ enum UpdateSpeed: Double, CaseIterable, Identifiable {
         case .slow: "Slow (every 2 seconds)"
         case .verySlow: "Very slow (every 5 seconds)"
         }
-    }
-}
-
-/// How per-process CPU is shown. macOS tools count 100% per core, so a busy
-/// app on an 18-core Mac can read 1,200%; the default is share of the whole CPU.
-struct CPUScale: Equatable {
-    var relativeToSystem: Bool
-    var logicalCores: Int
-
-    /// Converts a per-process figure (100 = one core) to the chosen scale.
-    func value(_ percentOfCore: Double) -> Double {
-        guard relativeToSystem else { return percentOfCore }
-        return min(percentOfCore / Double(max(logicalCores, 1)), 100)
-    }
-
-    func format(_ percentOfCore: Double) -> String {
-        Format.fixed(value(percentOfCore), 1) + "%"
     }
 }
 

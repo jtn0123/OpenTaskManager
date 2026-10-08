@@ -28,7 +28,7 @@ struct ProcessGroupView: View {
     let mode: ProcessViewMode
     /// Selects a member in the table.
     var onSelect: (ProcessIdentity) -> Void
-    @AppStorage("groupMemberSort") private var sort: GroupMemberSort = .cpu
+    @Setting(Settings.groupMemberSort) private var sort: GroupMemberSort
 
     var body: some View {
         if let group = model.processGroup(root, mode: mode) {
@@ -229,9 +229,7 @@ struct ProcessGroupView: View {
 }
 
 /// How the Group tab orders its processes.
-enum GroupMemberSort: String, CaseIterable {
-    case cpu, memory, name, pid
-
+extension GroupMemberSort {
     var title: String {
         switch self {
         case .cpu: "CPU"

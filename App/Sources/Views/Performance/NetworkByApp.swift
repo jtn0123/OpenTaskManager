@@ -9,7 +9,7 @@ struct NetworkAppsSection: View {
     @Environment(AppModel.self) private var model
     /// The page's window, in the main sampler's samples (`GraphFit`).
     @Environment(\.graphWindow) private var window
-    @AppStorage("networkByProcess") private var byProcess = false
+    @Setting(Settings.networkByProcess) private var byProcess: Bool
 
     private static let bands = 5
     private static let rows = 8

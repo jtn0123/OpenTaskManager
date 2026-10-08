@@ -291,8 +291,8 @@ struct SystemReportJSON: Encodable {
         init(_ device: USBDevice, devices: [USBNode], keep: Bool) {
             name = device.name
             vendor = device.vendor
-            vendorID = device.vendorID.map { String(format: "0x%04x", $0) }
-            productID = device.productID.map { String(format: "0x%04x", $0) }
+            vendorID = device.vendorID.map { "0x" + Format.hexadecimal($0, width: 4) }
+            productID = device.productID.map { "0x" + Format.hexadecimal($0, width: 4) }
             speed = device.speed
             power = device.power
             serialNumber = keep ? device.serialNumber : nil

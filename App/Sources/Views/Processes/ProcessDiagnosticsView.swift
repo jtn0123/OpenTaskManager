@@ -16,14 +16,6 @@ extension AppModel {
     }
 }
 
-extension CPUScale {
-    /// One shown step (0.1%) in per-core percent, so sorts compare CPU as it
-    /// reads and rows that read the same don't trade places every tick.
-    var shownStep: Double {
-        relativeToSystem ? 0.1 * Double(max(logicalCores, 1)) : 0.1
-    }
-}
-
 /// Why the inspector has no figure for a field.
 enum ProcessAccess {
     static let denied = "Needs admin rights"

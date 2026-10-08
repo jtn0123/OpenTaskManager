@@ -29,6 +29,8 @@ public struct NetworkInUse: Sendable, Equatable {
                 ?? (dictionary("Setup:/Network/Service/\(id)/Interface")?["UserDefinedName"] as? String)
         }
         let addresses = serviceID.map { id in
+            // The store retains this exact context type; callbacks borrow it while retained, and the weak
+            // monitor is read on the main queue.
             ["IPv4", "IPv6"].flatMap { (dictionary("State:/Network/Service/\(id)/\($0)")?["Addresses"] as? [String]) ?? [] }
         } ?? []
         address = interface == nil ? nil : addresses.first { !$0.isEmpty }
@@ -82,14 +84,14 @@ public final class NetworkChangeMonitor {
         let owner = NetworkChangeContext(monitor: self)
         let watched = Self.watched
         store.withLock { stored in
-            var context = SCDynamicStoreContext(version: 0, info: Unmanaged.passUnretained(owner).toOpaque(), retain: { info in
-                return UnsafeRawPointer(Unmanaged<NetworkChangeContext>.fromOpaque(info).retain().toOpaque())
+            var context = unsafe SCDynamicStoreContext(version: 0, info: Unmanaged.passUnretained(owner).toOpaque(), retain: { info in
+                return unsafe UnsafeRawPointer(Unmanaged<NetworkChangeContext>.fromOpaque(info).retain().toOpaque())
             }, release: { info in
-                Unmanaged<NetworkChangeContext>.fromOpaque(info).release()
+                unsafe Unmanaged<NetworkChangeContext>.fromOpaque(info).release()
             }, copyDescription: nil)
-            stored = SCDynamicStoreCreate(nil, "OpenTaskManager" as CFString, { _, _, info in
-                guard let info else { return }
-                let owner = Unmanaged<NetworkChangeContext>.fromOpaque(info).takeUnretainedValue()
+            stored = unsafe SCDynamicStoreCreate(nil, "OpenTaskManager" as CFString, { _, _, info in
+                guard let info = unsafe info else { return }
+                let owner = unsafe Unmanaged<NetworkChangeContext>.fromOpaque(info).takeUnretainedValue()
                 MainActor.assumeIsolated { owner.monitor?.storeChanged() }
             }, &context)
             if let stored {

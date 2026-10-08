@@ -49,7 +49,7 @@ extension AppModel {
             powerDetail.integral = backgroundSampling.power
             if backgroundSampling.peakWatts > peakSystemWatts {
                 peakSystemWatts = backgroundSampling.peakWatts
-                UserDefaults.standard.set(peakSystemWatts, forKey: "peakSystemWatts")
+                Settings.peakSystemWatts.set(peakSystemWatts)
             }
         } else {
             backgroundSampling.keep(snapshot, sensors: held)
@@ -83,7 +83,7 @@ extension AppModel {
         powerDetail.append(snapshot.power, interval: snapshot.interval, keepingEnergy: false)
         if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
             peakSystemWatts = watts
-            UserDefaults.standard.set(watts, forKey: "peakSystemWatts")
+            Settings.peakSystemWatts.set(watts)
         }
         for gpu in snapshot.gpus {
             // An unreported load stays out of the history, so no graph draws it as 0%.
@@ -214,17 +214,17 @@ extension AppModel {
         // The rule in `ProcessSample.measuresEnergy`, without a second walk.
         if snapshot.interval > 0, anyPower != measuresProcessEnergy {
             measuresProcessEnergy = anyPower
-            UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
+            Settings.measuresProcessEnergy.set(anyPower)
         }
         gpuReporting.record(anyProcess: anyGPU)
         if let reported = gpuReporting.isReported, reported != reportsProcessGPU {
             reportsProcessGPU = reported
-            UserDefaults.standard.set(reported, forKey: "reportsProcessGPU")
+            Settings.reportsProcessGPU.set(reported)
         }
         neuralMemoryReporting.record(anyProcess: anyNeural)
         if let reported = neuralMemoryReporting.isReported, reported != reportsProcessNeuralMemory {
             reportsProcessNeuralMemory = reported
-            UserDefaults.standard.set(reported, forKey: "reportsProcessNeuralMemory")
+            Settings.reportsProcessNeuralMemory.set(reported)
         }
     }
 
