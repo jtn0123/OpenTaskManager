@@ -80,13 +80,13 @@ Manager OG or any other proprietary task manager.
   in Application Support/OpenTaskManager/SpeedTests (System/SpeedTestHistory);
   System/CPUBenchmark (versioned workloads in CPUBenchmarkKernels, every unit
   checked, on threads of its own, cancellable) backs the CPU detail's Benchmark
-  card (`CPUBenchmarkStore`) and `otm cpubench`, the last 10 per Mac kept beside
+  card (`CPUBenchmarkStore`) and `otm cpubench`, the last 10 runs or sessions per Mac kept beside
   the speed tests; System/ChipLayoutReader (hw.perflevelN, device-tree clusters,
   I/O Registry core counts) backs its Chip layout card and `otm cpubench layout`;
   System/GPUBenchmark (Metal shaders from source in GPUBenchmarkKernels, timed by
   the GPU, every result checked, cancellable) backs the GPU detail's Benchmark card
   (`GPUBenchmarkStore`; debug `-gpuBenchmarkFixture nodevice|unsupported|notiming`)
-  and `otm gpubench`, the last 10 per Mac in SpeedTests/gpu-benchmark.json;
+  and `otm gpubench`, the last 10 runs or sessions per Mac in SpeedTests/gpu-benchmark.json;
   System/CPUSustained (the floating-point workload on every worker for 2 or 5
   min, timed in 10 s windows; Model/CPUSustainedSummary: first window, the last
   third's median, "held 97% of its starting speed", the thermal states seen,
@@ -594,6 +594,47 @@ saved, with differing contexts (one on battery with the CPU busy, slowing as
 the thermal state turns fair), so `-openResource benchmarks
 -openBenchmarkCompare sustained:1,2` shows a comparison's context warnings.
 
+Guided benchmark sessions (`BenchmarkGuidedSheet`, `BenchmarkWorkspace.runGuided`)
+watch a 30 s quiet window, keeping current readings visible for at most 2 min.
+Wait keeps watching; Proceed or Cancel ends the preflight sooner. The sheet uses only published CPU, memory pressure, thermal and
+power readings from `BenchmarkContextFeed`; no extra sampler or work is added
+to a closed sheet's ticks. Power comes from the published battery's plugged-in
+state (AC for a Mac with no reported battery); UPS distinctions are not available
+in this feed. A paused or stale sampler is unavailable, never quiet. Battery and
+Low Power Mode are advisories; CPU above 10%, memory pressure, thermal pressure,
+a sampling gap or changing power readings prevent settling. Proceed anyway and
+Cancel are always available when the tests are idle.
+
+A session discards one full warm-up pass, then measures N full passes (3 by
+default, 1–10 offered) in
+fixed CPU, GPU, optional disk, optional Internet order, through the existing
+stores. A failed or cancelled pass stops the protocol; cancellation keeps the
+store occupied until its runner has stopped. Kernels and their timing loops are
+unchanged. Each saved repeat has an optional `session` block (schema 1, protocol
+1, session ID, preflight samples and verdicts, repeat index and count). Older
+results have no session; reading never rewrites them. History retention counts a
+session as one entry and keeps its measured repeats together. Workspace picks,
+comparisons and trends group repeats into one median with a spread enclosing
+both the passes' figures and their internal timing ranges. Partial sessions say
+so; unsupported protocols and ordinary runs cannot compare with sessions; the
+measured repeat counts must also match.
+Preflight differences are warnings, never claims about what caused a result.
+
+`otm bench guided [cpu|gpu|all] [--repeats N] [--json]` uses the same protocol and history files.
+The CLI has no app sampler, so its bounded preflight uses the existing CPU and
+memory samplers. A quiet window starts the protocol; otherwise an interactive
+terminal offers Wait, Proceed anyway or Cancel. Without a terminal, an unsettled
+preflight exits without running tests. Ctrl-C cancels preflight or the active
+runner. Progress and preflight notices go to stderr; JSON contains all measured
+repeats, with their session blocks. `otm bench list` and `compare` group sessions.
+
+In a debug build, `-openBenchmarkGuided cpu|gpu|all` selects Performance's
+Benchmarks workspace and opens the preflight without starting a test. Add
+`-guidedFixture YES` (or `-sustainedFixture YES`) for made-up CPU and GPU sessions
+and preflight readings, never saved. Proceed and Run all are disabled for those
+fixtures. Use `-openResource benchmarks -guidedFixture YES
+-openBenchmarkCompare cpu:1,3` for grouped-session comparison screenshots.
+
 ## Conventions
 
 - Persisted preferences are declared only in OTMKit's `Settings` registry
@@ -798,8 +839,10 @@ the thermal state turns fair), so `-openResource benchmarks
   the middle label of a 72-point graph. The Thermals table's
   rows are 13 pt (body), with its supporting text at 12 pt. Benchmarks'
   comparison table keeps that size in a narrow window by dropping a figure's
-  variant under its name and stacking the two spreads (`ViewThatFits`). The
-  system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
+  variant under its name, stacking the two spreads and, where "Higher ·
+  conditions differ" won't fit even on two lines, keeping only the direction
+  (`shortVerdictTitle`), since the heading over it names the conditions
+  (`ViewThatFits`). The system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
   Search finds are marked in primary ink, bold, over `TextTone.highlight`,
   which keeps 4.5:1 on every card in both appearances.
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`

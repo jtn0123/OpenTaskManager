@@ -35,6 +35,8 @@ public struct NetworkQualityResult: SpeedTestRecord, Equatable, Identifiable {
     /// The Mac's state as the test started and ended; nil in results saved
     /// before it was recorded.
     public var context: BenchmarkContext?
+    /// The guided protocol that measured this repeat; nil in older results.
+    public var session: BenchmarkSession?
 
     public init(date: Date, requestedInterface: String?, interface: String?, downloadBitsPerSecond: Double?,
                 uploadBitsPerSecond: Double?, responsiveness: Double?, idleLatency: Double? = nil, bytesTransferred: UInt64? = nil,

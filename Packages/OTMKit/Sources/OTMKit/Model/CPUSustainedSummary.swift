@@ -227,5 +227,6 @@ public extension BenchmarkRun {
             sustained: BenchmarkSustainedTrace(unit: unit, windowSeconds: configuration.windowSeconds,
                                                thermalAtStart: result.thermalStateAtStart, windows: result.windows)
         )
+        session = result.session
     }
 }

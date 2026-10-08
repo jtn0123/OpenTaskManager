@@ -7,6 +7,11 @@ public protocol SpeedTestRecord: Codable, Sendable {
     var version: Int { get }
     var date: Date { get }
     var historyKey: String { get }
+    var session: BenchmarkSession? { get }
+}
+
+public extension SpeedTestRecord {
+    var session: BenchmarkSession? { nil }
 }
 
 /// The last few results of one kind of speed test, per interface or volume,
@@ -56,8 +61,9 @@ public struct SpeedTestHistory<Record: SpeedTestRecord>: Sendable {
         load().filter { $0.historyKey == key }
     }
 
-    /// Adds `record`, keeps the newest `keptPerKey` of its key and the
-    /// `keptKeys` most recently tested keys, and returns what's kept.
+    /// Adds `record`, keeps the newest `keptPerKey` entries of its key and the
+    /// `keptKeys` most recently tested keys, and returns what's kept. A session
+    /// counts once, with all its measured repeats retained.
     @discardableResult
     public func append(_ record: Record) throws -> [Record] {
         let kept = Self.pruned([record] + load(), perKey: keptPerKey, keys: keptKeys)
@@ -73,16 +79,27 @@ public struct SpeedTestHistory<Record: SpeedTestRecord>: Sendable {
         return kept
     }
 
-    /// Newest first; each key's newest `perKey`, and only the `keys` keys
+    /// Newest first; each key's newest `perKey` runs or sessions, and only the `keys` keys
     /// tested most recently.
     static func pruned(_ records: [Record], perKey: Int, keys: Int) -> [Record] {
         var counts: [String: Int] = [:]
         var order: [String] = []
+        var sessions: [String: Set<String>] = [:]
+        var repeatIndices: [String: Set<Int>] = [:]
         return records.sorted { $0.date > $1.date }.filter { record in
             let key = record.historyKey
             if counts[key] == nil {
                 guard order.count < keys else { return false }
                 order.append(key)
+            }
+            if let session = record.session, session.supported {
+                let identity = "\(key):\(session.id):\(session.protocolVersion)"
+                if sessions[key, default: []].contains(identity) {
+                    return repeatIndices[identity, default: []].insert(session.repeatIndex).inserted
+                }
+                guard counts[key, default: 0] < perKey else { return false }
+                sessions[key, default: []].insert(identity)
+                repeatIndices[identity, default: []].insert(session.repeatIndex)
             }
             counts[key, default: 0] += 1
             return counts[key, default: 0] <= perKey

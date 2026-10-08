@@ -24,7 +24,8 @@ final class PageSelection {
     /// starting page; `defaults` holds the saved one.
     init(defaults: UserDefaults = .standard, arguments: [String: Any] = LaunchArgument.domain) {
         self.defaults = defaults
-        let named = LaunchOptions.string("openPage", in: arguments) ?? LaunchOptions.string(Settings.page.key, in: arguments)
+        let named = LaunchOptions.string("openBenchmarkGuided", in: arguments).map { _ in "Performance" }
+            ?? LaunchOptions.string("openPage", in: arguments) ?? LaunchOptions.string(Settings.page.key, in: arguments)
         page = Page.starting(openPage: named, savedPage: defaults.string(forKey: Settings.page.key))
     }
 }

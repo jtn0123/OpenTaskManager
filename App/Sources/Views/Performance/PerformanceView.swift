@@ -96,7 +96,8 @@ struct PerformanceView: View {
             if resources(snapshot).contains(.network(interface)) { selected = .network(interface) }
             return
         }
-        guard !opened, let name = LaunchArgument.string("openResource") else { return }
+        guard !opened, let name = LaunchArgument.string("openBenchmarkGuided").map({ _ in "benchmarks" })
+            ?? LaunchArgument.string("openResource") else { return }
         opened = true
         let match = resources(snapshot).first { resource in
             switch resource {

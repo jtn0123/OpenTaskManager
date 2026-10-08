@@ -219,6 +219,8 @@ public struct GPUBenchmarkResult: SpeedTestRecord, Equatable, Identifiable {
     /// The Mac's state as the run started and ended; nil in runs saved
     /// before it was recorded.
     public var context: BenchmarkContext?
+    /// The guided protocol that measured this repeat; nil in older results.
+    public var session: BenchmarkSession?
 
     public init(date: Date, suiteVersion: Int, configuration: GPUBenchmarkConfiguration, device: GPUBenchmarkDevice, osVersion: String,
                 appVersion: String, optimized: Bool, thermalStateAtStart: ThermalState, thermalStateAtEnd: ThermalState,

@@ -56,6 +56,8 @@ final class BenchmarkWorkspace {
     /// Run all's steps: the last suite's, or the running one's.
     private(set) var steps: [Step] = []
     private(set) var suiteRunning = false
+    private(set) var guidedRunning = false
+    private(set) var passTitle: String?
     /// Each test's runs picked for comparison, by id, in the order picked: at most two.
     private(set) var picks: [BenchmarkKind: [String]]
     /// The last request to show a comparison; the workspace scrolls when it changes.
@@ -182,7 +184,7 @@ final class BenchmarkWorkspace {
     /// run. A failed step is noted and the next one starts; a cancelled one
     /// ends the suite.
     func runAll(targets: SuiteTargets) {
-        guard !suiteRunning else { return }
+        guard !suiteRunning, !BenchmarkHistories.anyRunning else { return }
         var kinds: [BenchmarkKind] = [.cpu, .gpu]
         if includesDisk, targets.diskTarget != nil { kinds.append(.disk) }
         if includesNetwork, targets.interface != nil { kinds.append(.network) }
@@ -198,6 +200,35 @@ final class BenchmarkWorkspace {
                 if Task.isCancelled || state == .cancelled { break }
             }
             self?.endSuite()
+        }
+    }
+
+    /// A full warm-up pass is discarded before measured passes use the same stores and settings.
+    func runGuided(kinds: [BenchmarkKind], targets: SuiteTargets, preflight: BenchmarkPreflight,
+                   repeatCount: Int = BenchmarkSessionProtocol.repeats) {
+        guard !suiteRunning, !BenchmarkHistories.anyRunning, !kinds.isEmpty else { return }
+        steps = kinds.map { Step(kind: $0, state: .waiting) }
+        suiteRunning = true
+        guidedRunning = true
+        let id = UUID().uuidString
+        let passes = BenchmarkSessionProtocol.passes(repeatCount: repeatCount)
+        suiteTask = Task { [weak self] in
+            guard let self else { return }
+            passes: for pass in passes {
+                passTitle = pass == 0 ? "Warm-up · discarded" : "Measured repeat \(pass) of \(passes.upperBound)"
+                steps = kinds.map { Step(kind: $0, state: .waiting) }
+                for index in kinds.indices {
+                    guard !Task.isCancelled else { break passes }
+                    steps[index].state = .running
+                    current = kinds[index]
+                    let session = pass == 0 ? nil : BenchmarkSession(id: id, preflight: preflight, repeatIndex: pass, repeatCount: passes.upperBound)
+                    let state = await run(kinds[index], targets: targets, session: session, discard: pass == 0)
+                    steps[index].state = state
+                    // A failed warm-up or repeat leaves a partial group rather than silently changing the protocol.
+                    if state != .finished || Task.isCancelled { break passes }
+                }
+            }
+            endSuite()
         }
     }
 
@@ -224,41 +255,43 @@ final class BenchmarkWorkspace {
             steps[index].state = .notRun
         }
         suiteRunning = false
+        guidedRunning = false
+        passTitle = nil
         current = nil
         suiteTask = nil
     }
 
-    private func run(_ kind: BenchmarkKind, targets: SuiteTargets) async -> StepState {
+    private func run(_ kind: BenchmarkKind, targets: SuiteTargets, session: BenchmarkSession? = nil, discard: Bool = false) async -> StepState {
         let started = Date()
         switch kind {
         case .cpu:
             let store = CPUBenchmarkStore.shared
-            store.start()
+            store.start(session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failure, newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failure, newest: store.completedAt, since: started)
         case .sustained:
             // Never one of Run all's steps: it would hold the rest up for minutes.
             return .notRun
         case .gpu:
             let store = GPUBenchmarkStore.shared
             guard store.device != nil else { return .failed(GPUBenchmarkError.noDevice.message) }
-            store.start()
+            store.start(session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failure, newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failure, newest: store.completedAt, since: started)
         case .disk:
             let store = DiskSpeedStore.shared
             guard let disk = targets.disk, let target = targets.diskTarget else { return .notRun }
             await store.load()
-            store.start(disk: disk, target: target)
+            store.start(disk: disk, target: target, session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failures[disk], newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failures[disk], newest: store.completedAt, since: started)
         case .network:
             let store = NetworkQualityStore.shared
             guard let interface = targets.interface else { return .notRun }
             await store.load()
-            store.start(interface: interface)
+            store.start(interface: interface, session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failures[interface], newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failures[interface], newest: store.completedAt, since: started)
         }
     }
 

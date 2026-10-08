@@ -53,7 +53,7 @@ struct SavedRuns: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Saved runs").font(.body.weight(.semibold))
+                Text("Saved runs and sessions").font(.body.weight(.semibold))
                 Text(hint(picked))
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
@@ -234,6 +234,7 @@ private struct RunRow: View {
     private static func details(_ run: BenchmarkRun) -> String {
         var parts = [run.build.map { "\($0.title) build · \($0.app)" }, run.osVersion, run.target?.detail].compactMap { $0 }
         parts += run.conditions
+        parts.append(run.sessionSummary)
         let started = run.context?.conditionsLine ?? ""
         parts.append(started.isEmpty ? BenchmarkContext.notRecorded : "Started \(started)")
         return parts.joined(separator: " · ")
@@ -363,7 +364,7 @@ private struct ChangeTable: View {
             ForEach(changes) { change in
                 // Figures keep their width; in a narrow window the name drops
                 // its variant to a second line ("Floating point," over "1 worker"),
-                // the two spreads stack and the verdict wraps instead.
+                // the two spreads stack and the verdict wraps, or keeps only its direction.
                 // A figure in doubt in either run is marked at its figures,
                 // which drop to secondary text, and its verdict isn't coloured.
                 GridRow {
@@ -384,17 +385,27 @@ private struct ChangeTable: View {
                     }
                     .multilineTextAlignment(.trailing)
                     .foregroundStyle(.secondaryText)
-                    Label(change.verdictTitle, systemImage: BenchmarkLook.symbol(change))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(BenchmarkLook.color(change))
-                        .help(change.verdictExplanation + (change.caveatNote.map { " \($0)" } ?? ""))
+                    // A qualified verdict keeps its whole wording where it fits, else its
+                    // direction alone: the heading over the table names the conditions.
+                    ViewThatFits(in: .horizontal) {
+                        verdict(change, title: change.verdictTitle)
+                        verdict(change, title: change.verdictTitle.replacingOccurrences(of: " · ", with: " ·\n"))
+                        verdict(change, title: change.shortVerdictTitle)
+                    }
+                    .foregroundStyle(BenchmarkLook.color(change))
+                    .help(change.verdictExplanation + (change.caveatNote.map { " \($0)" } ?? ""))
                 }
             }
         }
         .font(.tableText)
         .monospacedDigit()
         .lineLimit(1)
+    }
+
+    private func verdict(_ change: BenchmarkChange, title: String) -> some View {
+        Label(title, systemImage: BenchmarkLook.symbol(change))
+            .lineLimit(2)
+            .fixedSize()
     }
 
     @ViewBuilder

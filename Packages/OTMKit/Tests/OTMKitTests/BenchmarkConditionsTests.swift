@@ -31,6 +31,7 @@ struct BenchmarkConditionsTests {
         }
         let change = try #require(comparison.changes.first)
         #expect(change.verdictTitle == (repeats ? "Lower · conditions differ" : "Measured once"))
+        #expect(change.shortVerdictTitle == (repeats ? "Lower" : "Measured once"))
         #expect(change.conditionSummary == "Later run on battery, 38% CPU busy at start")
         #expect(comparison.contextWarnings.map(\.topic) == [.power, .cpuLoad])
         #expect(!comparison.verdictSummary.contains("worse"))
