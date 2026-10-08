@@ -396,8 +396,8 @@ struct HistoryProcessLane: View {
 
     private func help(_ track: HistoryProcessStore.Track, span: ClosedRange<Date>) -> String {
         let lifetime = track.lifetime
-        return "\(lifetime.name), PID \(lifetime.identity.pid): ran \(HistoryProcessStyle.span(span)) in this range. "
-            + HistoryProcessStyle.state(lifetime, isRunning: track.isRunning) + "."
+        return "\(lifetime.name), PID \(lifetime.identity.pid) · " + HistoryProcessStyle.ran(lifetime, span: span, domain: track.domain)
+            + " · " + HistoryProcessStyle.state(lifetime, isRunning: track.isRunning)
     }
 }
 

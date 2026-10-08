@@ -213,7 +213,7 @@ private struct HistoryProcessRow: View {
     private func details(_ lifetime: ProcessLifetime) -> String {
         let figures = HistoryProcessStyle.figures(match.summary, scale: model.cpuScale)
         guard let span = lifetime.span(within: domain, isRunning: isRunning, now: domain.upperBound) else { return figures }
-        return HistoryProcessStyle.span(span) + " · " + figures
+        return HistoryProcessStyle.ran(lifetime, span: span, domain: domain) + " · " + figures
     }
 }
 
@@ -318,8 +318,8 @@ private struct HistoryProcessSummary: View {
     /// When it ran within the range.
     private var ranLine: String {
         guard let span = track.span else { return "Didn't run in this range" }
-        let started = track.lifetime.started < track.domain.lowerBound ? "Running before the range · " : ""
-        return started + "Ran " + HistoryProcessStyle.span(span)
+        let ran = HistoryProcessStyle.ran(track.lifetime, span: span, domain: track.domain)
+        return HistoryProcessStyle.ranBefore(track.lifetime, domain: track.domain) ? ran : "Ran " + ran
     }
 
     /// Its figures over the part of the range it ran, and how many records kept them.
@@ -327,7 +327,8 @@ private struct HistoryProcessSummary: View {
         let summary = track.match.summary
         var line = HistoryProcessStyle.figures(summary, scale: model.cpuScale)
         if let read = summary.averageDiskRead, let write = summary.averageDiskWrite {
-            line += " · Disk avg read \(Format.bytesPerSecond(read)), write \(Format.bytesPerSecond(write))"
+            line += " · Disk avg read \(HistoryProcessStyle.unbroken(Format.bytesPerSecond(read))), "
+                + "write \(HistoryProcessStyle.unbroken(Format.bytesPerSecond(write)))"
         }
         if summary.records > 0 {
             let idle = summary.records - summary.stored

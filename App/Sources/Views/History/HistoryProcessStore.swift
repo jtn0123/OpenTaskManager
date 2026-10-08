@@ -199,9 +199,23 @@ enum HistoryProcessStyle {
         return time.formatted(style)
     }
 
-    /// When it ran within the range: "10:02 – 10:42 AM · 40 min".
-    static func span(_ span: ClosedRange<Date>) -> String {
-        HistorySessionStyle.span(span.lowerBound, span.upperBound) + " · " + Format.roughDuration(span.upperBound.timeIntervalSince(span.lowerBound))
+    /// When it ran within the range (`span`): "10:02 – 10:42 AM · 40 min";
+    /// for one started earlier, "Throughout the range" or "From before the
+    /// range to 10:42 AM · 40 min", so the range's start never reads as its own.
+    static func ran(_ lifetime: ProcessLifetime, span: ClosedRange<Date>, domain: ClosedRange<Date>) -> String {
+        let duration = " · " + Format.roughDuration(span.upperBound.timeIntervalSince(span.lowerBound))
+        guard lifetime.started < domain.lowerBound else {
+            return HistorySessionStyle.span(span.lowerBound, span.upperBound) + duration
+        }
+        if span.upperBound >= domain.upperBound { return "Throughout the range" }
+        let time: Date.FormatStyle = .dateTime.hour().minute()
+        let end = span.upperBound.formatted(Calendar.current.isDateInToday(span.upperBound) ? time : time.weekday(.abbreviated))
+        return "From before the range to \(end)" + duration
+    }
+
+    /// Whether `ran` starts from before the range, so it needs no "Ran".
+    static func ranBefore(_ lifetime: ProcessLifetime, domain: ClosedRange<Date>) -> Bool {
+        lifetime.started < domain.lowerBound
     }
 
     /// Its figures over the range, on the page's CPU scale: "CPU avg 3.2%,
@@ -209,9 +223,14 @@ enum HistoryProcessStyle {
     static func figures(_ summary: ProcessHistorySummary, scale: CPUScale) -> String {
         guard summary.records > 0 else { return "Not recorded while it ran" }
         guard let average = summary.averageCPU, let peak = summary.peakCPU else { return "Idle throughout, not stored" }
-        var parts = ["CPU avg \(scale.format(average)), peak \(scale.format(peak))"]
-        if let memory = summary.peakMemory { parts.append("Memory peak \(Format.bytes(memory))") }
+        var parts = ["CPU avg \(unbroken(scale.format(average))), peak \(unbroken(scale.format(peak)))"]
+        if let memory = summary.peakMemory { parts.append("Memory peak \(unbroken(Format.bytes(memory)))") }
         return parts.joined(separator: " · ")
+    }
+
+    /// A figure and its unit kept on one line: "68 B/s" never wraps after the slash or the number.
+    static func unbroken(_ figure: String) -> String {
+        figure.replacingOccurrences(of: " ", with: "\u{00A0}").replacingOccurrences(of: "/", with: "/\u{2060}")
     }
 
     /// What "idle, not stored" means, for tooltips.

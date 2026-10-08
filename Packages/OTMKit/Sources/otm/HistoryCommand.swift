@@ -124,9 +124,15 @@ func processHistoryList(_ matches: [ProcessHistoryMatch], query: String, range: 
         let isRunning = running.contains(match.id)
         let state = isRunning ? "running" : lifetime.ended.map { "ended \(clock($0))" } ?? "last seen \(clock(lifetime.lastSeen))"
         lines.append("\(lifetime.name)  PID \(lifetime.identity.pid)  \(state)")
-        let from = max(lifetime.started, end.addingTimeInterval(-range.seconds))
+        let rangeStart = end.addingTimeInterval(-range.seconds)
+        let from = max(lifetime.started, rangeStart)
         let to = isRunning ? end : (lifetime.ended ?? lifetime.lastSeen)
-        var figures = ["\(clock(from)) – \(clock(to)) (\(Format.roughDuration(max(to.timeIntervalSince(from), 0))))"]
+        let duration = Format.roughDuration(max(to.timeIntervalSince(from), 0))
+        var figures = [
+            lifetime.started >= rangeStart ? "\(clock(from)) – \(clock(to)) (\(duration))"
+                : isRunning ? "started \(clock(lifetime.started)), running throughout the range"
+                : "started \(clock(lifetime.started)), ran to \(clock(to)) (\(duration) in the range)",
+        ]
         if summary.records == 0 {
             figures.append("not recorded while it ran")
         } else if let average = summary.averageCPU, let peak = summary.peakCPU {

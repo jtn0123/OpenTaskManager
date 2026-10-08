@@ -513,7 +513,7 @@ private struct ProcessHistoryLink: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("The last few minutes.").foregroundStyle(.secondaryText)
+            Text("Further back:").foregroundStyle(.secondaryText)
             Button {
                 HistoryProcessStore.shared.show(name, identity: identity)
                 page = .history
