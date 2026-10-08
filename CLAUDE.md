@@ -233,8 +233,12 @@ Manager OG or any other proprietary task manager.
   A confirmed end says closed between the last sighting and the next walk; stopping
   a watch or reopening an unfinished row says still open when watching stopped,
   never inventing a close time. `ConnectionHistoryTracker` writes starts and ends,
-  with long-lived rows bumped at most once a minute; a coverage gap starts another
-  observed segment. Changing cadence starts a coverage interval while sockets
+  with long-lived rows bumped at most once a minute. A row not seen closing keeps
+  `open_key` (`Connection.historyKey`: PID, process start, descriptor, protocol,
+  kernel handle); the first walk after a start, a stop or a coverage gap looks
+  those up once, and the same socket with the same peer carries on in its row with
+  an unwatched step, so page visits and relaunches don't repeat a long-lived
+  socket. Changing cadence starts a coverage interval while sockets
   already followed by the shared watch keep their lifetime. `connection_coverage` keeps real watched intervals,
   their walk spacing and unreadable-process counts. Gaps over twice that spacing
   break coverage; an absent socket outside it means not watched, never no connection.

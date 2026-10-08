@@ -61,6 +61,8 @@ struct ConnectionHistoryView: View {
                 }
             }
         }
+        // A short list sits under the pickers, not in the middle of the page.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: Query(search: search, range: range)) { await load() }
         .onChange(of: selection) { if isNarrow { coversList = selection != nil } }
     }
@@ -75,7 +77,7 @@ struct ConnectionHistoryView: View {
             TableColumn("Process") { row in
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.process.name).lineLimit(1).truncationMode(.middle)
-                    Text("PID \(row.socket.connection.pid)").font(.metadata).foregroundStyle(.secondaryText)
+                    Text(verbatim: "PID \(row.socket.connection.pid)").font(.metadata).foregroundStyle(.secondaryText)
                 }
                 .help(row.process.path ?? row.process.name)
             }
@@ -117,7 +119,11 @@ struct ConnectionHistoryView: View {
                       at: coverage?.to ?? .now, processRunning: false, lifetime: row)
     }
 
-    private func stamp(_ date: Date) -> String { date.formatted(.dateTime.month().day().hour().minute().second()) }
+    /// Today's times stand alone; earlier ones name their day.
+    private func stamp(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date) ? date.formatted(.dateTime.hour().minute().second())
+            : date.formatted(.dateTime.month().day().hour().minute().second())
+    }
 
     private func load() async {
         let query = Query(search: search, range: range)

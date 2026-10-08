@@ -99,6 +99,55 @@ struct ConnectionHistoryTests {
         #expect(stopped.states == [.established, .closeWait])
     }
 
+    @Test func aStoppedRowCarriesOnWhenItsSocketIsFoundAgain() throws {
+        var watch = ConnectionWatch()
+        var tracker = ConnectionHistoryTracker()
+        watch.observe([socket()], at: date(100))
+        _ = tracker.observe(watch, at: date(100), spacing: 3, hidden: 0)
+        let stopped = try #require(tracker.stop().rows.first)
+        let key = try #require(socket().historyKey)
+        // A later visit, or a relaunch with a fresh watch, finds the same socket.
+        var fresh = ConnectionWatch()
+        fresh.observe([socket(state: .closeWait)], at: date(400))
+        let batch = tracker.observe(fresh, at: date(400), spacing: 3, hidden: 0, resumable: [key: stopped])
+        let carried = try #require(batch.rows.first)
+        #expect(batch.rows.count == 1)
+        #expect(carried.id == stopped.id)
+        #expect(carried.ending == .watching)
+        #expect(carried.socket.firstSeen == date(100))
+        #expect(carried.socket.lastSeen == date(400))
+        #expect(carried.socket.timeline.contains { $0.kind == .unwatched })
+        #expect(carried.states == [.established, .closeWait])
+        // Another peer behind the same key, or a row seen closing, starts afresh.
+        var closed = stopped
+        closed.ending = .closed
+        for (connection, row) in [(socket(port: 80), stopped), (socket(), closed)] {
+            var other = ConnectionHistoryTracker()
+            var walk = ConnectionWatch()
+            walk.observe([connection], at: date(500))
+            let started = try #require(other.observe(walk, at: date(500), spacing: 3, hidden: 0, resumable: [key: row]).rows.first)
+            #expect(started.id != stopped.id)
+            #expect(started.socket.firstSeen == date(500))
+        }
+        let unknownStart = Connection(id: .init(pid: 7, fd: 3, socket: 10), processName: "Browser", transport: .tcp, family: .ipv4,
+                                      local: Endpoint(address: "127.0.0.1", port: 50_000), remote: nil, tcpState: nil)
+        #expect(unknownStart.historyKey == nil)
+    }
+
+    @Test func aBreakInCoverageCarriesTheRowOnAndWritesItOnce() throws {
+        var watch = ConnectionWatch(maximumSpacing: 10)
+        var tracker = ConnectionHistoryTracker()
+        watch.observe([socket()], at: date(100))
+        let first = try #require(tracker.observe(watch, at: date(100), spacing: 3, hidden: 0).rows.first)
+        // The Mac slept: the next walk is far past two spacings.
+        watch.observe([socket()], at: date(900))
+        let after = tracker.observe(watch, at: date(900), spacing: 3, hidden: 0)
+        #expect(after.rows.count == 1)
+        #expect(after.rows.first?.id == first.id)
+        #expect(after.rows.first?.ending == .watching)
+        #expect(after.rows.first?.socket.firstSeen == date(100))
+    }
+
     @Test func searchMatchesNamePathAddressHostServicePortAndPID() throws {
         var watch = ConnectionWatch()
         watch.observe([socket()], at: date(100))
