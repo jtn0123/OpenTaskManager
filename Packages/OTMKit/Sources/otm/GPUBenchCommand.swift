@@ -20,7 +20,8 @@ func gpuBenchCommand(_ options: Options) {
             + "Other work on the GPU lowers the figures.\n"
         FileHandle.standardError.write(Data(notice.utf8))
     }
-    let result: GPUBenchmarkResult
+    let context = benchmarkContext()
+    var result: GPUBenchmarkResult
     do throws(GPUBenchmarkError) {
         result = try GPUBenchmark.run(appVersion: "otm \(version)", cancellation: cancellation) { progress in
             guard showsProgress else { return }
@@ -32,6 +33,7 @@ func gpuBenchCommand(_ options: Options) {
         fail(error.message)
     }
     if showsProgress { FileHandle.standardError.write(Data("\u{1B}[2K\r".utf8)) }
+    result.context = context.ended()
     _ = try? SpeedTestHistory.gpuBenchmark.append(result)
     if options.json {
         printJSON(result)
@@ -72,6 +74,7 @@ func gpuBenchSummary(_ result: GPUBenchmarkResult) -> String {
         ? "Thermal state \(result.thermalStateAtStart.rawValue) throughout"
         : "Thermal state \(result.thermalStateAtStart.rawValue) at the start, \(result.thermalStateAtEnd.rawValue) at the end"
     lines.append("\(thermal)\(result.lowPowerMode ? ", Low Power Mode on" : ""). Took \(Format.fixed(result.seconds, 1)) s.")
+    lines.append(contextLine(result.context))
     return lines.joined(separator: "\n")
 }
 

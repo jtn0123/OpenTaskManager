@@ -96,7 +96,7 @@ final class BenchmarkWorkspace {
 
     // MARK: - The newest result
 
-    /// Reads the four history files once, off the main actor, for the date
+    /// Reads the tests' history files once, off the main actor, for the date
     /// of the newest result.
     func loadSummary() async {
         guard !summaryLoaded else { return }
@@ -180,8 +180,9 @@ final class BenchmarkWorkspace {
     // MARK: - Run all
 
     /// Runs the CPU and GPU benchmarks, then the disk and Internet tests if
-    /// ticked, one at a time through their own stores. A failed step is
-    /// noted and the next one starts; a cancelled one ends the suite.
+    /// ticked, one at a time through their own stores; never the sustained
+    /// run. A failed step is noted and the next one starts; a cancelled one
+    /// ends the suite.
     func runAll(targets: SuiteTargets) {
         guard !suiteRunning else { return }
         var kinds: [BenchmarkKind] = [.cpu, .gpu]
@@ -206,6 +207,7 @@ final class BenchmarkWorkspace {
         suiteTask?.cancel()
         switch current {
         case .cpu: CPUBenchmarkStore.shared.cancel()
+        case .sustained: CPUSustainedStore.shared.cancel()
         case .gpu: GPUBenchmarkStore.shared.cancel()
         case .disk: DiskSpeedStore.shared.cancel()
         case .network: NetworkQualityStore.shared.cancel()
@@ -236,6 +238,9 @@ final class BenchmarkWorkspace {
             store.start()
             await store.waitForRun()
             return Self.outcome(failure: store.failure, newest: store.history.first?.date, since: started)
+        case .sustained:
+            // Never one of Run all's steps: it would hold the rest up for minutes.
+            return .notRun
         case .gpu:
             let store = GPUBenchmarkStore.shared
             guard store.device != nil else { return .failed(GPUBenchmarkError.noDevice.message) }

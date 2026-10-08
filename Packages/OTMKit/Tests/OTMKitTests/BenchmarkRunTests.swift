@@ -370,7 +370,7 @@ struct BenchmarkExportTests {
         let data = try export.json()
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["format"] as? String == BenchmarkExport.formatName)
-        #expect(object["version"] as? Int == 1)
+        #expect(object["version"] as? Int == 2)
         #expect(object["exported"] as? String == "1970-01-01T00:05:00Z")
         let read = try BenchmarkExport.read(data)
         #expect(read == export)

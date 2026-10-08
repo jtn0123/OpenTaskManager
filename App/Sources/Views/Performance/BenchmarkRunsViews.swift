@@ -224,9 +224,12 @@ private struct RunRow: View {
         .help(refusal.map { "Can't be compared with the run picked: \($0.reason)" } ?? Self.details(run))
     }
 
+    /// What ran and how, then how the Mac stood as it started.
     private static func details(_ run: BenchmarkRun) -> String {
         var parts = [run.build.map { "\($0.title) build · \($0.app)" }, run.osVersion, run.target?.detail].compactMap { $0 }
         parts += run.conditions
+        let started = run.context?.conditionsLine ?? ""
+        parts.append(started.isEmpty ? BenchmarkContext.notRecorded : "Started \(started)")
         return parts.joined(separator: " · ")
     }
 }
@@ -264,6 +267,9 @@ private struct ComparisonPanel: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BenchmarkLook.debug.opacity(0.35)))
             case let .compared(comparison):
                 ChangeTable(changes: comparison.changes)
+                if !comparison.contextWarnings.isEmpty {
+                    ContextWarnings(warnings: comparison.contextWarnings)
+                }
                 ForEach(comparison.caveats, id: \.self) { caveat in
                     Label(caveat, systemImage: "info.circle")
                         .font(.explanation)
@@ -280,6 +286,49 @@ private struct ComparisonPanel: View {
         .padding(10)
         .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.10)))
+    }
+}
+
+/// How two compared runs' starts differed (power, heat, load, memory, the
+/// Mac or the app): warnings beside the figures, apart from the refusals,
+/// since the runs are still compared.
+private struct ContextWarnings: View {
+    let warnings: [BenchmarkContextWarning]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("The runs started differently", systemImage: "exclamationmark.triangle")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(BenchmarkLook.caution)
+            ForEach(warnings) { warning in
+                Label {
+                    Text(warning.text).fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: Self.symbol(warning.topic)).foregroundStyle(.secondaryText)
+                }
+                .font(.explanation)
+            }
+            Text("The figures are compared anyway: these can move them, but don't make the runs incompatible.")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BenchmarkLook.caution.fillShade.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BenchmarkLook.caution.opacity(0.35)))
+    }
+
+    private static func symbol(_ topic: BenchmarkContextWarning.Topic) -> String {
+        switch topic {
+        case .notRecorded: "questionmark.circle"
+        case .power: "powerplug"
+        case .thermal: "thermometer.medium"
+        case .cpuLoad: "cpu"
+        case .memory: "memorychip"
+        case .hardware: "desktopcomputer"
+        case .build: "hammer"
+        }
     }
 }
 
