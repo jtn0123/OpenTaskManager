@@ -111,10 +111,11 @@ struct OwnerLookupLiveTests {
         try #require(fstat(handle.fileDescriptor, &stats) == 0)
         #expect(match.fileIdentity == OwnerFileIdentity(device: Int64(stats.st_dev), inode: UInt64(stats.st_ino)))
         // macOS may report either hard link's path for the vnode; its inode
-        // must still be the one held by the original open descriptor.
-        let originalPath = original.resolvingSymlinksInPath().path
-        let linkPath = link.resolvingSymlinksInPath().path
-        #expect(match.path == originalPath || match.path == linkPath)
+        // must still be the one held by the original open descriptor. The
+        // kernel spells the temporary folder /private/var/…, which Foundation's
+        // resolvingSymlinksInPath strips, so compare within the test's own folder.
+        let reported = try #require(match.path)
+        #expect(["original", "different-name"].contains { reported.hasSuffix("/\(folder.lastPathComponent)/\($0)") })
         #expect(!mine.name.isEmpty)
         #expect(mine.path != nil)
         #expect(!mine.user.isEmpty)
