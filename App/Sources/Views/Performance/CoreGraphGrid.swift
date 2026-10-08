@@ -3,10 +3,11 @@ import OTMKit
 import SwiftUI
 
 /// A graph for every logical CPU, filling the CPU page's main graph area:
-/// tiles laid out by `CoreAreaGrid` (18 CPUs in a wide pane are 6 by 3),
+/// tiles laid out by `CoreGraphLayout` (18 CPUs in a wide pane are 6 by 3),
 /// Performance cores first, each with its busy time filled in its core
 /// type's colour and its kernel time as a line, on one shared scale. The
-/// tiles are the Overview's Cores tiles grown to fill the area, in the same
+/// tiles share the Overview's Cores tiles' look, with their height capped by
+/// default to leave room for the summary figures, in the same
 /// `CoreTileLook`: the CPU's number and load over the plot, in a wash and
 /// border that firm up with the load.
 ///
@@ -34,9 +35,10 @@ struct CoreGraphGrid: NSViewRepresentable {
     /// The tiles' runs by core type, in order (`CoreAreaGrid.best`).
     var groups: [Int]
     var top: Double
-    /// The height to fill; more when tiles would otherwise be too short to read.
+    /// The available height, capped by CoreGraphLayout unless Larger Graphs is on.
     var height: CGFloat
     var kernelColor: Color
+    var larger: Bool
 
     func makeNSView(context: Context) -> CoreGraphGridView {
         CoreGraphGridView()
@@ -49,25 +51,22 @@ struct CoreGraphGrid: NSViewRepresentable {
                 CoreGraphGridView.Tile(cpu: $0.cpu, kind: $0.kind, kindName: $0.kindName, color: NSColor($0.color),
                                        busy: Array($0.busy.suffix(capacity + 1)), kernel: Array($0.kernel.suffix(capacity + 1)))
             },
-            groups: groups, top: top, kernelColor: NSColor(kernelColor), colors: GraphColors.shared.revision, capacity: max(capacity, 2)
+            groups: groups, requestedHeight: height, larger: larger, top: top, kernelColor: NSColor(kernelColor),
+            colors: GraphColors.shared.revision, capacity: max(capacity, 2)
         )
         view.update(readings, interval: context.environment.sampleInterval, streams: context.environment.streamsGraphs)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: CoreGraphGridView, context: Context) -> CGSize? {
         let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 600
-        let layout = CoreAreaGrid.best(count: tiles.count, width: Double(width), height: Double(height),
-                                       spacing: Double(CoreGraphGridView.spacing), groups: groups)
-        let needed = layout.height(atLeast: Double(height), minimumTile: Double(CoreGraphGridView.minimumTile),
-                                   spacing: Double(CoreGraphGridView.spacing))
-        return CGSize(width: width, height: CGFloat(needed))
+        let layout = CoreGraphLayout(count: tiles.count, width: Double(width), availableHeight: Double(height), larger: larger,
+                                     spacing: Double(CoreGraphGridView.spacing), groups: groups)
+        return CGSize(width: width, height: CGFloat(layout.height))
     }
 }
 
 final class CoreGraphGridView: NSView {
     static let spacing: CGFloat = 6
-    /// A tile's labels and a plot still worth reading.
-    static let minimumTile: CGFloat = 64
     private static let radius = CoreTileLook.cornerRadius
     private static let header = CoreTileLook.labelHeight
     private static let kindFont = NSFont.systemFont(ofSize: CoreTileLook.labelSize, weight: .bold)
@@ -88,6 +87,8 @@ final class CoreGraphGridView: NSView {
     struct Readings {
         var tiles: [Tile]
         var groups: [Int]
+        var requestedHeight: CGFloat
+        var larger: Bool
         var top: Double
         var kernelColor: NSColor
         /// The graph colours' revision, which restyles the tiles when it changes.
@@ -133,6 +134,8 @@ final class CoreGraphGridView: NSView {
     private var chrome: [Chrome] = []
     private var tiles: [Tile] = []
     private var groups: [Int] = []
+    private var requestedHeight: CGFloat = 0
+    private var larger = false
     /// The CPUs and colours the chrome was styled for.
     private var styledFor: [String] = []
     private var laidOutSize: CGSize = .zero
@@ -152,7 +155,13 @@ final class CoreGraphGridView: NSView {
 
     func update(_ readings: Readings, interval: TimeInterval, streams: Bool) {
         let tiles = readings.tiles
+        if groups != readings.groups || requestedHeight != readings.requestedHeight || larger != readings.larger {
+            laidOutSize = .zero
+            needsLayout = true
+        }
         groups = readings.groups
+        requestedHeight = readings.requestedHeight
+        larger = readings.larger
         kernelColor = readings.kernelColor
         syncChrome(count: tiles.count)
         self.tiles = tiles
@@ -193,8 +202,8 @@ final class CoreGraphGridView: NSView {
         laidOutSize = bounds.size
         backdrop.frame = bounds
         overlay.frame = bounds
-        let layout = CoreAreaGrid.best(count: chrome.count, width: bounds.width, height: bounds.height,
-                                       spacing: Self.spacing, groups: groups)
+        let layout = CoreGraphLayout(count: chrome.count, width: bounds.width, availableHeight: requestedHeight, larger: larger,
+                                     spacing: Self.spacing, groups: groups).grid
         let size = layout.tileSize(width: bounds.width, height: bounds.height, spacing: Self.spacing)
         let tile = CGSize(width: floor(size.width), height: floor(size.height))
         let scale = window?.backingScaleFactor ?? 2

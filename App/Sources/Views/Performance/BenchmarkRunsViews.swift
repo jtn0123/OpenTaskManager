@@ -35,7 +35,7 @@ struct BenchmarkFigureGroup: Identifiable {
 
 // MARK: - Saved runs and comparison
 
-/// A test's saved runs, newest first, each with a box to pick it for
+/// A test's compact saved-run list, newest first, each with a box to pick it for
 /// comparison, and the comparison of the two picked. Debug builds' runs are
 /// marked; with one run picked, those it can't be compared with drop to
 /// secondary text, the reason in their tooltip. It changes only with the runs or the picks.
@@ -59,7 +59,13 @@ struct SavedRuns: View, Equatable {
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            RunsTable(kind: kind, runs: runs, picked: picked)
+            if runs.isEmpty {
+                Text("No saved runs yet. Run this test below to save its figures.")
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+            } else {
+                CompactRunsList(runs: runs, picked: picked)
+            }
             if let caveat = runs.lazy.flatMap(\.measurements).compactMap(\.caveat).first {
                 FigureCaveatFootnote(caveat: caveat)
             }
@@ -266,6 +272,14 @@ private struct ComparisonPanel: View {
                 .background(BenchmarkLook.debug.fillShade.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BenchmarkLook.debug.opacity(0.35)))
             case let .compared(comparison):
+                if let summary = comparison.changes.first?.conditionSummary {
+                    FlowRow(spacing: 8, lineSpacing: 4, spreads: false) {
+                        Text(comparison.verdictSummary).fontWeight(.medium)
+                        Text(summary)
+                    }
+                    .font(.explanation)
+                    .foregroundStyle(BenchmarkLook.caution)
+                }
                 ChangeTable(changes: comparison.changes)
                 if !comparison.contextWarnings.isEmpty {
                     ContextWarnings(warnings: comparison.contextWarnings)
@@ -370,11 +384,11 @@ private struct ChangeTable: View {
                     }
                     .multilineTextAlignment(.trailing)
                     .foregroundStyle(.secondaryText)
-                    Label(change.verdict.title, systemImage: BenchmarkLook.symbol(change.verdict))
+                    Label(change.verdictTitle, systemImage: BenchmarkLook.symbol(change))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(change.caveat == nil ? BenchmarkLook.color(change.verdict) : AnyShapeStyle(.secondaryText))
-                        .help(change.verdict.explanation + (change.caveatNote.map { " \($0)" } ?? ""))
+                        .foregroundStyle(BenchmarkLook.color(change))
+                        .help(change.verdictExplanation + (change.caveatNote.map { " \($0)" } ?? ""))
                 }
             }
         }

@@ -83,11 +83,14 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     public var baselineSpread: Double?
     public var comparedSpread: Double?
     public var verdict: Verdict
+    /// A warned difference at the start, kept beside the verdict instead of judging performance.
+    public var conditionSummary: String?
     /// Why either run's figure may be off, as its measurement says.
     public var baselineCaveat: BenchmarkFigureCaveat?
     public var comparedCaveat: BenchmarkFigureCaveat?
 
-    public init(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement) {
+    public init(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement, conditionSummary: String? = nil) {
+        self.conditionSummary = conditionSummary
         id = baseline.id
         title = baseline.title
         unit = baseline.unit
@@ -112,6 +115,7 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     /// otherwise why it doesn't count: "within spread", "negligible",
     /// "measured once", or "unchanged".
     public var verdictWord: String {
+        if isQualified { return verdictTitle.lowercased() }
         switch verdict {
         case .better, .worse:
             let up = compared > baseline
@@ -119,6 +123,24 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         case .withinSpread, .negligible, .measuredOnce, .unchanged:
             return verdict.title.lowercased()
         }
+    }
+
+    /// A move beyond both runs' spread while the conditions differed: they
+    /// can explain it, so it says only which way the figure moved. Figures
+    /// within spread, negligible or measured once keep their own verdict.
+    public var isQualified: Bool {
+        conditionSummary != nil && (verdict == .better || verdict == .worse)
+    }
+
+    public var verdictTitle: String {
+        guard isQualified else { return verdict.title }
+        return (compared > baseline ? "Higher" : "Lower") + " · conditions differ"
+    }
+
+    /// Spread still matters, but a warned difference can't judge performance.
+    public var verdictExplanation: String {
+        guard isQualified, let conditionSummary else { return verdict.explanation }
+        return conditionSummary + ". The move is beyond both runs' spread, but different conditions can explain it."
     }
 
     /// "Fill rate: timing unverified in the later run, so this change may not be real."
@@ -185,8 +207,9 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     public static func compare(_ first: BenchmarkRun, _ second: BenchmarkRun) -> Outcome {
         let (baseline, compared) = first.date <= second.date ? (first, second) : (second, first)
         if let refusal = refusal(baseline, compared) { return .refused(refusal) }
+        let summary = conditionSummary(baseline, compared)
         let changes = baseline.measurements.compactMap { measurement in
-            compared.measurement(measurement.id).map { BenchmarkChange(baseline: measurement, compared: $0) }
+            compared.measurement(measurement.id).map { BenchmarkChange(baseline: measurement, compared: $0, conditionSummary: summary) }
         }
         return .compared(BenchmarkComparison(baseline: baseline.id, compared: compared.id, changes: changes,
                                              caveats: caveats(baseline, compared, changes: changes),
@@ -232,10 +255,16 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
 
     /// How many figures got each verdict, the moves first: "1 better · 5 within spread".
     public var verdictSummary: String {
+        var labels: [String] = []
         let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .negligible, .measuredOnce, .unchanged]
-        return order.compactMap { verdict in
-            let count = changes.count { $0.verdict == verdict }
-            return count == 0 ? nil : "\(count) \(verdict.title.lowercased())"
+        for verdict in order {
+            for change in changes where change.verdict == verdict {
+                let label = change.verdictTitle.lowercased()
+                if !labels.contains(label) { labels.append(label) }
+            }
+        }
+        return labels.map { label in
+            "\(changes.count { $0.verdictTitle.lowercased() == label }) \(label)"
         }.joined(separator: " · ")
     }
 

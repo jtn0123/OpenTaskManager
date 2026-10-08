@@ -4,6 +4,7 @@ import SwiftUI
 struct CPUDetail: View {
     @Environment(AppModel.self) private var model
     @Setting(Settings.cpuGraphMode) private var mode: String
+    @Setting(Settings.cpuLargerGraphs) private var largerGraphs: Bool
     @Setting(Settings.cpuGraphScale) private var scale: CPUGraphScale
     /// The page's window, which every graph here covers (`GraphFit`).
     @Environment(\.graphWindow) private var window
@@ -240,7 +241,7 @@ struct CPUDetail: View {
             }
         }
         return CoreGraphGrid(tiles: tiles, groups: runs.map(\.cpus.count).filter { $0 > 0 }, top: top, height: height,
-                             kernelColor: Theme.wired)
+                             kernelColor: Theme.wired, larger: largerGraphs)
     }
 }
 
@@ -258,14 +259,23 @@ private struct CPUGraphHeader: View {
     /// Said after the title in secondary text, such as the core grid's scale.
     let note: String
     @Setting(Settings.cpuGraphMode) private var mode: String
+    @Setting(Settings.cpuLargerGraphs) private var largerGraphs: Bool
 
     var body: some View {
         // Not a `ViewThatFits`: it measured both segmented controls again on
         // every layout pass, once a second, for about half a percent of a core.
-        CaptionControlsRow {
-            caption
-            graphPicker
-            CPUScalePicker()
+        VStack(alignment: .leading, spacing: 6) {
+            CaptionControlsRow {
+                caption
+                graphPicker
+                CPUScalePicker()
+            }
+            if mode == CPUGraphMode.cores {
+                Toggle("Larger Graphs", isOn: $largerGraphs)
+                    .toggleStyle(.checkbox)
+                    .font(.metadata)
+                    .help("Let each core's graph fill more of the pane; the summary figures follow the grid.")
+            }
         }
     }
 
