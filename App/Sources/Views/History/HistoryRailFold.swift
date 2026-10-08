@@ -263,6 +263,7 @@ private struct HistoryRailStrip: View {
             HistoryRailTrack(scrubber: scrubber, recorder: recorder, points: points, gaps: gaps, domain: domain, bucket: bucket,
                              height: 14, compact: true)
                 .overlay { HistorySpikeStripMarks(spikes: spikes, domain: domain) }
+                .overlay { HistoryProcessStripBand(domain: domain) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

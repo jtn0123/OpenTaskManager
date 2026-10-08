@@ -106,7 +106,28 @@ Manager OG or any other proprietary task manager.
   `SensorTable`'s rows, null where unread) go in each record's `hardware` blob
   (schema 2, series named once in `hardware_series`) and a file's optional,
   separately versioned `hardware` block, charted under History's folded Hardware
-  section; Compare's figures, `HistoryIntervalStats` and
+  section; process history (schemas 3 and 4, OTMKit's FlightRecorderProcesses):
+  every process seen at a record's end or kept with figures gets a
+  `process_lifetimes` row by `ProcessIdentity` (name, path,
+  user, bundle ID, launchd label once Startup has read launchd's list, first and
+  last seen, ended), its last sighting moved on through its run's one
+  `process_watches` row, so a record writes only starts and ends; one that
+  started and ended within a record with no figures kept is only counted, one
+  row per record and kind (`process_kinds`: name, path, user) in
+  `process_short_runs`, and the app's own such children (ps, nettop,
+  launchctl) not at all;
+  `ProcessHistoryTracker` takes each record's average CPU and disk from the
+  cumulative counters the sampler already reads (no new reads per tick), and
+  `ProcessHistoryKeep` keeps figures only for the 5 largest footprints, busy disk
+  and CPU users, 40 at most, so a missing row while it ran is "idle, not stored",
+  never zero, and a stretch without records a gap; History's Processes section
+  (`HistoryProcessStore`, `HistoryProcessSection`) searches lifetimes by name,
+  path, label or PID and charts one, marked on the rail and in the moment panel,
+  and lists short runs by name or path ("83 short runs between …", over records
+  that follow on, no PIDs, nothing to chart),
+  the process inspector's Show History opens it, `-openProcessHistory <query>`
+  searches it and picks the latest match, and `otm history processes <query>`
+  prints it; recording files carry no process history yet; Compare's figures, `HistoryIntervalStats` and
   `HistoryComparison`, leave gaps out, and Layout/CompareBrackets places its A
   and B brackets over the rail; each interval's column heading gives how much
   of it was recorded, and `HistoryComparison.limitation` (a side under
@@ -307,7 +328,9 @@ screencapture -x -o -l <windowID> out.png
 `-openPage Overview|Processes|Performance|History|Connections|Startup|Apps|Users|System|Drivers|Storage` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors|benchmarks` the Performance detail
 (`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
-selects a process so its inspector shows, `-openConnection <port or text>`
+selects a process so its inspector shows, `-openProcessHistory <query>` (with
+`-openPage History`) searches History's Processes section and charts the latest
+match, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show
 (`-openConnectionList closed` starts it on Closed recently),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
@@ -325,11 +348,13 @@ results, `-openStorageList largest|changes` showing the largest files or
 what changed since the last saved scan of that folder, and
 `-openStorageReconcile YES` unfolding "Where the space is". Pick a
 scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
-Documents, Downloads and other apps' containers raise a privacy prompt. Don't pass
-`-page` itself: a launch argument pins that setting for the whole run, so the
-sidebar stops working in that instance. The exception is a capture while other
-instances run: `-openPage` saves the page, so every running instance follows
-the last launch, and `-page <name>` keeps a throwaway instance on its page. Get the
+Documents, Downloads and other apps' containers raise a privacy prompt.
+`-page <name>` works too. Each running copy keeps its own page
+(`PageSelection`): it reads the saved page, or the one these arguments name,
+once at launch, and saves each change for the next launch. It never follows
+another copy, so a capture's copy and the user's own don't move each other.
+Don't read the page through `@AppStorage("page")`: a launch argument would pin
+it for the whole run and the sidebar would stop switching pages. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
 
