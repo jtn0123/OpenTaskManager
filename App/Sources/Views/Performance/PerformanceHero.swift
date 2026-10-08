@@ -245,10 +245,12 @@ enum GridLines {
     }
 
     /// The lines' colours: faint enough that a trace near the floor isn't
-    /// lost among them, firmer in light mode to hold up on a pale plot.
-    static func colors(dark: Bool) -> (minor: CGColor, major: CGColor) {
-        (NSColor.labelColor.withAlphaComponent(dark ? 0.05 : 0.07).cgColor,
-         NSColor.labelColor.withAlphaComponent(dark ? 0.09 : 0.12).cgColor)
+    /// lost among them, firmer in light mode to hold up on a pale plot, and
+    /// fainter by the palette's `GraphEmphasis`, as the live graphs' own grid is.
+    static func colors(dark: Bool, emphasis: GraphEmphasis) -> (minor: CGColor, major: CGColor) {
+        let weight = CGFloat(emphasis.grid)
+        return (NSColor.labelColor.withAlphaComponent((dark ? 0.05 : 0.07) * weight).cgColor,
+                NSColor.labelColor.withAlphaComponent((dark ? 0.09 : 0.12) * weight).cgColor)
     }
 }
 
@@ -262,7 +264,7 @@ struct FineGrid: NSViewRepresentable {
     }
 
     func updateNSView(_ view: FineGridView, context: Context) {
-        view.configure(inset: inset, rows: rows)
+        view.configure(inset: inset, rows: rows, emphasis: GraphColors.shared.emphasis)
     }
 }
 
@@ -272,6 +274,7 @@ final class FineGridView: NSView {
     private var inset: CGFloat = 4
     private var rows = 8
     private var builtSize: CGSize = .zero
+    private var emphasis = GraphEmphasis.standard
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -290,7 +293,11 @@ final class FineGridView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func configure(inset: CGFloat, rows: Int) {
+    func configure(inset: CGFloat, rows: Int, emphasis: GraphEmphasis) {
+        if emphasis != self.emphasis {
+            self.emphasis = emphasis
+            applyColors()
+        }
         guard inset != self.inset || rows != self.rows else { return }
         self.inset = inset
         self.rows = rows
@@ -322,7 +329,7 @@ final class FineGridView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            let colors = GridLines.colors(dark: effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+            let colors = GridLines.colors(dark: effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua, emphasis: emphasis)
             minor.strokeColor = colors.minor
             major.strokeColor = colors.major
         }

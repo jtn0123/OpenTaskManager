@@ -40,13 +40,15 @@ struct GraphPaletteTests {
     }
 
     /// The closest two colours of any chart, as `vision` sees them in `dark`
-    /// or light mode, with the chart and colours' names.
-    static func closest(_ palette: GraphPalette, vision: Vision, dark: Bool) -> (distance: Double, pair: String) {
+    /// or light mode, with the chart and colours' names: as text and legends
+    /// draw them, or as `traces`, which light mode draws deeper.
+    static func closest(_ palette: GraphPalette, vision: Vision, dark: Bool, traces: Bool = false) -> (distance: Double, pair: String) {
         var closest = (distance: Double.infinity, pair: "")
         for (chart, names) in charts {
             let seen = names.map { name -> (String, RGB) in
                 let swatch = swatch(name, in: palette)
-                return (name, vision.simulate(dark ? swatch.dark : swatch.light))
+                let shade = dark ? swatch.dark : traces ? palette.emphasis.trace(swatch.light) : swatch.light
+                return (name, vision.simulate(shade))
             }
             for (first, (a, colorA)) in seen.enumerated() {
                 for (b, colorB) in seen[(first + 1)...] {
@@ -138,6 +140,56 @@ struct GraphPaletteTests {
         }
     }
 
+    // MARK: Emphasis
+
+    @Test(arguments: GraphPalette.Preset.allCases)
+    func tracesAreAsDeepOrDeeperInTheSameHue(_ preset: GraphPalette.Preset) {
+        let palette = GraphPalette.preset(preset)
+        let swatches = Role.allCases.map { ($0.rawValue, palette[$0]) } + palette.series.enumerated().map { ("s\($0)", $1) }
+        for (name, swatch) in swatches {
+            let light = swatch.light, trace = palette.emphasis.trace(light)
+            #expect(ColorContrast.ratio(trace, .white) >= ColorContrast.ratio(light, .white), "\(preset) \(name)")
+            // Every component scaled alike: the hue and saturation stay.
+            #expect(abs(trace.red * light.green - trace.green * light.red) < 1e-9, "\(preset) \(name)")
+            #expect(abs(trace.blue * light.green - trace.green * light.blue) < 1e-9, "\(preset) \(name)")
+        }
+    }
+
+    @Test func standardTracesGoFromAAToAboutFiveAndAHalfToOne() {
+        let palette = GraphPalette.preset(.standard)
+        for role in Role.resources {
+            let ratio = ColorContrast.ratio(palette.emphasis.trace(palette[role].light), .white)
+            #expect(ratio > 5.3 && ratio < 5.9, "\(role) \(ratio)")
+        }
+    }
+
+    @Test(arguments: [GraphPalette.Preset.colorBlind, .highContrast])
+    func tracesKeepTheirShadeWhereDeeperWouldMergeThem(_ preset: GraphPalette.Preset) {
+        // High contrast's are 7:1 or deeper already; the colour-blind
+        // palette's pairs sit at the edge of `apart` for protanopes.
+        let palette = GraphPalette.preset(preset)
+        for role in Role.allCases {
+            #expect(palette.emphasis.trace(palette[role].light) == palette[role].light, "\(preset) \(role)")
+        }
+    }
+
+    @Test(arguments: Vision.allCases)
+    func colourBlindTracesStayApart(_ vision: Vision) {
+        let closest = Self.closest(GraphPalette.preset(.colorBlind), vision: vision, dark: false, traces: true)
+        #expect(closest.distance >= Self.apart, "\(vision): \(closest.pair) \(closest.distance)")
+    }
+
+    @Test func decorationFadesLessInHighContrast() {
+        for preset in GraphPalette.Preset.allCases {
+            let emphasis = GraphPalette.preset(preset).emphasis
+            #expect(emphasis.grid < 1 && emphasis.fill < 1 && emphasis.bands < 1, "\(preset)")
+            // A stack's bands are the readings, and fade less than a fill under a line.
+            #expect(emphasis.fill < emphasis.bands, "\(preset)")
+        }
+        #expect(GraphPalette.preset(.highContrast).emphasis.grid > GraphPalette.preset(.standard).emphasis.grid)
+        #expect(GraphEmphasis.traceWidth > 1)
+    }
+
     // MARK: Overrides
 
     @Test func anOverrideKeepsThePresetsFloors() {
@@ -149,6 +201,7 @@ struct GraphPaletteTests {
         #expect(palette[.gpu] == GraphPalette.preset(.standard)[.gpu], "the rest as they were")
         let high = GraphPalette.preset(.highContrast).overriding([.cpu: pale])
         #expect(ColorContrast.ratio(high[.cpu].light, .white) >= 7)
+        #expect(high.emphasis == GraphEmphasis.highContrast, "and its emphasis")
     }
 
     @Test func presetsGoByTheirSavedNames() {

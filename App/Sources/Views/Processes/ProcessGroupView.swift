@@ -120,7 +120,7 @@ struct ProcessGroupView: View {
                                     help: "Power: the members' energy use added up, where macOS measures it")
                 }
                 if let gpu = figures.gpuFraction {
-                    ProcessFieldRow("GPU", Format.percent(gpu, digits: 1), help: "GPU: the members' shares of the GPU's time, added up")
+                    ProcessFieldRow("GPU", Format.percent(gpu, digits: 1), help: "GPU: the members' GPU time ÷ elapsed time, added up")
                 }
                 ProcessFieldRow("Disk read", figures.isDiskRead ? .value(Format.bytesPerSecond(figures.diskReadRate)) : .denied)
                 ProcessFieldRow("Disk written", figures.isDiskRead ? .value(Format.bytesPerSecond(figures.diskWriteRate)) : .denied)

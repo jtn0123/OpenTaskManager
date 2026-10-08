@@ -291,7 +291,7 @@ final class CoreGraphGridView: NSView {
     /// palette or the appearance.
     private func applyStyle() {
         let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let lines = GridLines.colors(dark: dark)
+        let lines = GridLines.colors(dark: dark, emphasis: GraphColors.shared.emphasis)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
