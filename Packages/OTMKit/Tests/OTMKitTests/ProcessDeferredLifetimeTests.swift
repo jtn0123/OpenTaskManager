@@ -157,7 +157,7 @@ struct ProcessDeferredLifetimeTests {
         sqlite3_close(handle)
 
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 4, "deferral needs no new schema")
+        #expect(try await recorder.schemaVersionOnDisk() == FlightRecorder.schemaVersion, "deferral survives later migrations")
         var tracker = ProcessHistoryTracker()
         let idle = process()
         try await recorder.append(firstRecord(&tracker, process: idle))

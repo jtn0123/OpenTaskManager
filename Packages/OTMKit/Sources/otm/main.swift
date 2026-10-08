@@ -97,6 +97,8 @@ USAGE:
                                  when, for how long, and the busiest processes
   otm history processes QUERY [--range 1h|6h|24h|7d] [-n COUNT] [--json]
                                  History's processes by name, path, label or PID
+  otm startup history LABEL [--json]
+                                 Stored launch job observations from the last 7 days
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
   otm --version
 """
@@ -173,6 +175,9 @@ case "bench":
 
 case "captures":
     capturesCommand(options)
+
+case "startup":
+    await startupCommand(options)
 
 case "history":
     await historyCommand(options)

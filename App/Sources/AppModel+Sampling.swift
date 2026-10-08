@@ -41,6 +41,7 @@ extension AppModel {
                 let sensors = await readings
                 guard !Task.isCancelled else { return }
                 ingest(snapshot, sensors: sensors)
+                sampleLaunchHistory(processes: snapshot.processes)
                 deadline = max(deadline.advanced(by: .seconds(policy.interval)), clock.now)
                 try? await Task.sleep(until: deadline, clock: clock)
             }

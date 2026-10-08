@@ -209,6 +209,23 @@ Manager OG or any other proprietary task manager.
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
+  launch job history (schema 5, `FlightRecorderLaunchJobs`): `launch_job_events`
+  keeps observed transitions by label and launchd domain for 7 days, pruned with
+  the recorder, outside `.otmrecording` files. `LaunchHistoryDerivation` and
+  `LaunchHistoryTracker` keep first sightings separate from starts, a stale exit
+  separate from a new PID, and gaps separate from confirmed transitions;
+  configuration reads retain path, modification date, program and arguments.
+  `LaunchHistoryPattern` counts reported failure exits once, gives a cadence only
+  for consistent observed intervals without a gap, and explains only known exits.
+  The Startup inspector's `StartupHistorySection` shows a static 24-hour lane and
+  the latest events, at read times, with all time between reads labelled unknown;
+  `StartupFilesSection` checks the current plist and executable on opening or
+  Refresh, including `CodeSigning.validity` (contents validated on demand, not
+  notarization) and at most 20 log lines from a bounded tail. `LaunchJobFiles`
+  refuses protected paths and links into them before touching their targets,
+  reads only local regular files, and reports unavailable files as Not readable.
+  `otm startup history LABEL [--json]` reads stored events in both domains without
+  sampling or modifying the database;
   Views/Startup (launchd items in a SwiftUI `Table`, scanned off the main actor
   when the page opens and on Refresh, never per tick; while it's on screen
   launchd's list alone, no plists, is read again every 10 s and noted in
@@ -304,8 +321,17 @@ Manager OG or any other proprietary task manager.
   unrecorded look. A changed cadence or sleep gap restarts system graphs too,
   never stretching a held figure into invented points. Energy and peak power
   keep measured hidden ticks without publishing them. View-only nettop, sockets,
-  inspector files, launchd, user sessions and live History refreshes wait on
+  inspector files, user sessions and live History refreshes wait on
   visibility notifications while hidden, rather than polling their sources.
+  Launch job history is the one inventory exception: while the recorder is on,
+  the existing sampling wakeups may schedule one bulk snapshot a minute, off the
+  main actor, reading no plists and printing no individual job. `LaunchJobStore`
+  shares its deadline with Startup's existing reads; those reads supply the
+  recorder too. Each bulk snapshot uses a fixed pair of commands (`launchctl list`
+  for this session, `launchctl print system` for daemons), independent of job
+  count. Failed domains break observation coverage rather than unloading jobs.
+  Debug logs in the LaunchJobHistory category give wall seconds per bulk read;
+  background reads never publish view state. Fixture runs keep no job history.
 - `MenuBarLabel` observes only `MenuBarIconStore.drawing`, never the snapshot
   or full CPU history. OTMKit's `MenuBarDrawing` compares the last 14 bars at
   half-point resolution and the rounded text. The icon alone publishes changes

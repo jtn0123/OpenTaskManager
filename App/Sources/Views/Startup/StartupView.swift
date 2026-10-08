@@ -318,8 +318,9 @@ struct StartupView: View {
 
     private func scan() async {
         isScanning = true
-        let scanned = await Task.detached(priority: .userInitiated) { LaunchItems.scan() }.value
-        apply(scanned)
+        let inventory = await Task.detached(priority: .userInitiated) { LaunchItems.inventory() }.value
+        let scanned = inventory.items
+        apply(inventory, configurationsRead: true)
         scannedAt = .now
         isScanning = false
         // An item picked among an app's launch items on the Apps page, once.
@@ -353,9 +354,11 @@ struct StartupView: View {
     }
 
     /// Shows a read of launchd's list and notes it for the restart counts.
-    private func apply(_ read: [LaunchItem]) {
+    private func apply(_ inventory: LaunchItemInventory, configurationsRead: Bool = false) {
+        let read = inventory.items
         if read != items { items = read }
-        model.launchJobs.observe(read, processes: model.snapshot?.processes ?? [])
+        model.launchJobs.observe(inventory, processes: model.snapshot?.processes ?? [],
+                                 recorder: model.showsSensorFixture ? nil : model.recorder, configurationsRead: configurationsRead)
         if let selection, !read.contains(where: { $0.id == selection }) { self.selection = nil }
     }
 
@@ -368,7 +371,7 @@ struct StartupView: View {
             try? await Task.sleep(for: LaunchJobStore.readInterval)
             await model.samplingDemand.waitUntilVisible()
             guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow, !isScanning, let before = items else { continue }
-            let read = await Task.detached(priority: .utility) { LaunchItems.withCurrentStatus(before) }.value
+            let read = await Task.detached(priority: .utility) { LaunchItems.currentInventory(before) }.value
             // A full read, after Refresh or an action, finished meanwhile: its list is newer.
             guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow, !isScanning, items == before else { continue }
             apply(read)
