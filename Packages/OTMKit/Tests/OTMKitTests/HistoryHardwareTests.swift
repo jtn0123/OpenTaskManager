@@ -413,13 +413,13 @@ struct FlightRecorderSchemaTwoTests {
         #expect(sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK)
     }
 
-    @Test func bringsAVersionOneDatabaseToTwoKeepingEverything() async throws {
+    @Test func bringsAVersionOneDatabaseUpToDateKeepingEverything() async throws {
         let url = temporaryURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         try makeVersionOne(at: url)
 
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 2)
+        #expect(try await recorder.schemaVersionOnDisk() == FlightRecorder.schemaVersion)
         let old = try #require(try await recorder.records(from: date(0), to: date(2_000)).first)
         #expect(old.values.chipCelsius == 51.5)
         #expect(old.values.systemWatts == 12)
@@ -442,7 +442,7 @@ struct FlightRecorderSchemaTwoTests {
             try await recorder.append(hardwareRecord(at: 1_010))
         }
         let reopened = try FlightRecorder(url: url)
-        #expect(try await reopened.schemaVersionOnDisk() == 2)
+        #expect(try await reopened.schemaVersionOnDisk() == FlightRecorder.schemaVersion)
         try await reopened.append(hardwareRecord(at: 1_020, fan: 2_000))
         let records = try await reopened.records(from: date(1_000), to: date(1_100))
         #expect(records.map { $0.values.hardware["fan.0"] } == [1_356, 2_000])

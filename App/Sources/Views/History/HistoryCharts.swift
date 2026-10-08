@@ -181,7 +181,7 @@ struct HistoryChartSpec: Identifiable {
 /// A legend's sample of a line as its chart draws it: the stroke, solid
 /// with its glow, dashed or dotted, over a sliver of the fill when the line
 /// has one.
-private struct HistoryLineSample: View {
+struct HistoryLineSample: View {
     let line: HistoryLine
 
     var body: some View {
