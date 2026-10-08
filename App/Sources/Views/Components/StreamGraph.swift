@@ -528,7 +528,8 @@ final class StreamGraphView: NSView {
         layers.fillMask.frame = layers.fill.bounds
         layers.fillMask.path = paths.area
         let fade = CGFloat(configuration.stacked ? emphasis.bands : emphasis.fill)
-        let top: CGFloat = (configuration.stacked ? 0.70 : (configuration.glows ? 0.45 : 0.35)) * fade
+        let lineTop: CGFloat = configuration.glows ? 0.45 : 0.35
+        let top: CGFloat = (configuration.stacked ? 0.70 : lineTop) * fade
         let bottom: CGFloat = configuration.stacked ? 0.30 * fade : 0
         layers.fill.colors = [bright.withAlphaComponent(top).cgColor, bright.withAlphaComponent(bottom).cgColor]
         layers.fill.startPoint = CGPoint(x: 0.5, y: 1)

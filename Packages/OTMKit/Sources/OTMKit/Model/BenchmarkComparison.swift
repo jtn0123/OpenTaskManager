@@ -115,7 +115,8 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         switch verdict {
         case .better, .worse:
             let up = compared > baseline
-            return unit.isSpeed ? (up ? "faster" : "slower") : (up ? "higher" : "lower")
+            if unit.isSpeed { return up ? "faster" : "slower" }
+            return up ? "higher" : "lower"
         case .withinSpread, .negligible, .measuredOnce, .unchanged:
             return verdict.title.lowercased()
         }

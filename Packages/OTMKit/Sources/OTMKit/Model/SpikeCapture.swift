@@ -155,8 +155,10 @@ public struct SpikeCapture: Sendable, Equatable {
 
     private static func level(_ kind: SpikeKind, ordinal: Double) -> String? {
         switch kind {
-        case .memory: ordinal >= 2 ? MemoryPressure.critical.rawValue : ordinal >= 1 ? MemoryPressure.warning.rawValue : nil
-        case .thermal: ordinal >= 3 ? ThermalState.critical.rawValue : ordinal >= 2 ? ThermalState.serious.rawValue : nil
+        case .memory:
+            if ordinal >= 2 { MemoryPressure.critical.rawValue } else if ordinal >= 1 { MemoryPressure.warning.rawValue } else { nil }
+        case .thermal:
+            if ordinal >= 3 { ThermalState.critical.rawValue } else if ordinal >= 2 { ThermalState.serious.rawValue } else { nil }
         case .cpu, .disk, .network: nil
         }
     }

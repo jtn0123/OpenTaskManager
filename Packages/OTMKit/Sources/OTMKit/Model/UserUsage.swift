@@ -101,7 +101,8 @@ public enum UserUsageBuilder {
             return user.uid == 0 ? 2 : 3
         }
         return users.sorted { lhs, rhs in
-            let left = rank(lhs), right = rank(rhs)
+            let left = rank(lhs)
+            let right = rank(rhs)
             if left != right { return left < right }
             // Leading underscores would otherwise sort every daemon account together, apart from the rest.
             let order = displayKey(lhs.name).localizedStandardCompare(displayKey(rhs.name))

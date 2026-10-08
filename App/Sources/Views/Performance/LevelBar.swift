@@ -113,7 +113,8 @@ final class LevelBarView: NSView {
         CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let dim: CGFloat = fraction == nil ? 0.06 : (dark ? 0.13 : 0.10)
+            let litDim: CGFloat = dark ? 0.13 : 0.10
+            let dim: CGFloat = fraction == nil ? 0.06 : litDim
             track.fillColor = NSColor.labelColor.withAlphaComponent(dim).cgColor
             lit.colors = [color.fillShade.withAlphaComponent(dark ? 0.75 : 0.85).cgColor, color.cgColor]
         }

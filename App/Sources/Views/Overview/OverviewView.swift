@@ -291,7 +291,11 @@ struct ThroughputCard: View {
         case none, graph, graphAndAxis
 
         init(width: CGFloat) {
-            self = width >= 96 ? .graphAndAxis : width >= 40 ? .graph : .none
+            switch width {
+            case 96...: self = .graphAndAxis
+            case 40...: self = .graph
+            default: self = .none
+            }
         }
     }
 
