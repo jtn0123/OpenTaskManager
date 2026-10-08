@@ -320,15 +320,34 @@ public enum GPUBenchmarkError: Error, Equatable, Sendable {
 
 /// Stops a running benchmark from another thread; it stops before its next submission.
 public final class GPUBenchmarkCancellation: Sendable {
-    private let flag = OSAllocatedUnfairLock(initialState: false)
+    private struct State {
+        var cancelled = false
+        var heldBackSubmissions = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 
     public func cancel() {
-        flag.withLock { $0 = true }
+        state.withLock { $0.cancelled = true }
     }
 
-    public var isCancelled: Bool { flag.withLock { $0 } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    /// Command buffers the run didn't send because it was cancelled: 1 once
+    /// a cancel has stopped it before a submission. Tests read it to tell a
+    /// stop before the next submission from one after it.
+    var heldBackSubmissions: Int { state.withLock { $0.heldBackSubmissions } }
+
+    /// Whether the run is cancelled, so the command buffer about to be sent
+    /// is held back; counts it if so.
+    func holdsBackSubmission() -> Bool {
+        state.withLock { state in
+            if state.cancelled { state.heldBackSubmissions += 1 }
+            return state.cancelled
+        }
+    }
 }
 
 /// A GPU benchmark the user starts: FP32 compute, memory and fill-rate
@@ -393,7 +412,14 @@ public enum GPUBenchmark {
     public static func measure(configuration: GPUBenchmarkConfiguration = .standard, appVersion: String,
                                progress: @escaping @Sendable (GPUBenchmarkProgress) -> Void) async throws(GPUBenchmarkError)
         -> GPUBenchmarkResult {
-        let cancellation = GPUBenchmarkCancellation()
+        try await measure(configuration: configuration, appVersion: appVersion, cancellation: GPUBenchmarkCancellation(), progress: progress)
+    }
+
+    /// `measure`, with the cancellation that cancelling the task sets, so a
+    /// test can see how the run stopped.
+    static func measure(configuration: GPUBenchmarkConfiguration, appVersion: String, cancellation: GPUBenchmarkCancellation,
+                        progress: @escaping @Sendable (GPUBenchmarkProgress) -> Void) async throws(GPUBenchmarkError)
+        -> GPUBenchmarkResult {
         let outcome: Result<GPUBenchmarkResult, GPUBenchmarkError> = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 Thread.detachNewThread {
@@ -459,7 +485,7 @@ public enum GPUBenchmark {
     /// at once, rather than when the thread ends.
     static func submit(_ runner: any GPUWorkloadRunner, units: Int, context: GPUBenchmarkContext,
                        cancellation: GPUBenchmarkCancellation?) throws(GPUBenchmarkError) -> (gpu: Double, wall: Double) {
-        if cancellation?.isCancelled == true { throw .cancelled }
+        if cancellation?.holdsBackSubmission() == true { throw .cancelled }
         return try autoreleasepool {
             Result { () throws(GPUBenchmarkError) -> (gpu: Double, wall: Double) in
                 runner.reset()

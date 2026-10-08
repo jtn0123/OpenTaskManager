@@ -175,24 +175,39 @@ struct GPUBenchmarkTests {
         }
     }
 
+    /// The cancel lands with the run held between its first and second timed
+    /// repeats, so it's known to fall between two submissions; whether the
+    /// next one went ahead is read from the cancellation, never from a clock.
     @Test func cancellingTheTaskStopsBetweenSubmissions() async {
         // Thousands of short command buffers: a cancel lands at the next one.
         var long = quick
         long.repeats = 100_000
-        let started = Date()
+        let cancellation = GPUBenchmarkCancellation()
+        let gate = ProgressGate(holdingAt: 2)
         let task = Task { () async -> GPUBenchmarkError? in
+            defer { gate.runEnded() }
             do throws(GPUBenchmarkError) {
-                _ = try await GPUBenchmark.measure(configuration: long, appVersion: "tests") { _ in }
+                _ = try await GPUBenchmark.measure(configuration: long, appVersion: "tests", cancellation: cancellation) {
+                    gate.report(fraction: $0.fraction)
+                }
                 return nil
             } catch {
                 return error
             }
         }
-        try? await Task.sleep(for: .milliseconds(200))
+        let held = await gate.waitUntilHeld()
         task.cancel()
+        gate.open()
         let error = await task.value
-        #expect(error == .cancelled || (MTLCreateSystemDefaultDevice() == nil && error == .noDevice))
-        #expect(Date().timeIntervalSince(started) < 5)
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            // Without Metal, a run says so rather than failing some other way.
+            #expect(error == .noDevice)
+            return
+        }
+        #expect(held, "the run finished its first timed repeat")
+        #expect(error == .cancelled)
+        #expect(cancellation.heldBackSubmissions == 1, "the command buffer after the cancel is held back")
+        #expect(gate.reportsAfterHold == 0, "no repeat finishes after the cancel")
     }
 
     @Test func summarisesRepeats() {
