@@ -172,11 +172,17 @@ Manager OG or any other proprietary task manager.
   bridged), which narrows A and B to it until Back to Full Stretches;
   `-openHistoryCompare <minutesAgoA>,<lengthA>[,<minutesAgoB>,<lengthB>]`
   opens Compare with them picked, counted back from the range's end, with B the
-  same length before A when left out; the pinned rail folds to a strip (the
+  same length before A when left out; Compare's Change column is headed "A vs B"
+  (points for shares, degrees for temperatures, else relative to B), with
+  spoken "A is … higher/lower than B" labels (`HistoryComparison.Change`,
+  wording in `HistoryCompareLabels`). Under
+  900 window points its interval and coverage headings shorten, the headline
+  grid shows averages, and notices keep their full explanations in help;
+  the wide layout keeps its wording and figures. The pinned rail folds to a strip (the
   section at the top, the span, the moment, Play and speed, a slim track that
-  marks spike events) once the charts' top has scrolled under it, and comes
-  back whole at the top or
-  from the strip's button: `RailFold` in OTMKit's Layout/ holds the rule, and
+  marks spike events) once the charts' top has scrolled under it; hovering a
+  gap in either rail shows its span and possible causes (`HistoryGapLabels`).
+  The rail comes back whole at the top or from the strip's button: `RailFold` in OTMKit's Layout/ holds the rule, and
   `HistoryPageScroll` follows the clip view's bounds, so it moves only on
   scroll, never per tick, and only `HistoryPinnedRail` reads it, so the charts
   never reload; spike captures, off until "Capture spikes automatically" (Settings'
@@ -668,7 +674,10 @@ the thermal state turns fair), so `-openResource benchmarks
   one), so two lines on a chart never differ by colour alone, and give what
   the line and its figure mean in the tooltip. During a replay the toolbar says
   "Collecting · 1 s" for this Mac and "Replay · 10×" for the file; the
-  recording's name is the page banner's.
+  recording's name is the page banner's. History's transport says "Pause Replay"
+  or "Resume Replay"; the toolbar and View menu say "Pause Live" or "Resume Live"
+  while a file is shown, with the toolbar's short form kept narrow. Their help
+  and accessibility labels name the separate controls (`UpdateControlLabels`).
 - Graph colours come from the palette picked in Settings (`GraphColors`; the
   presets, Standard, Color-blind friendly and High contrast, are data in
   OTMKit's `GraphPalette`; `-graphPalette colorBlind|highContrast` picks one

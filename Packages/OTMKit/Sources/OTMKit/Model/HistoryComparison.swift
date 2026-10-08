@@ -393,25 +393,49 @@ public struct HistoryComparison: Sendable, Equatable {
         /// for the rest, relative to B ("+140%", "−35%", "×12"), or "from
         /// none" when B had none.
         public func label(isFraction: Bool) -> String {
+            switch reading(isFraction: isFraction) {
+            case .same: "no change"
+            case .fromNone: "from none"
+            case .times(let times): "×" + times
+            case let .signed(lower, amount): (lower ? "\u{2212}" : "+") + amount
+            }
+        }
+
+        /// The label in words, its direction spelled out for VoiceOver:
+        /// "A is 7.0 points higher than B", "A is 12 times B".
+        public func spokenLabel(isFraction: Bool) -> String {
+            switch reading(isFraction: isFraction) {
+            case .same: "A and B are the same at the shown precision"
+            case .fromNone: "A has some where B had none"
+            case .times(let times): "A is \(times) times B"
+            case let .signed(lower, amount):
+                "A is \(amount.replacingOccurrences(of: " pts", with: " points")) \(lower ? "lower" : "higher") than B"
+            }
+        }
+
+        /// How A differs, worked out once for the label and its spoken form.
+        private enum Reading {
+            case same, fromNone
+            case times(String)
+            /// The size of the difference with its unit ("7.0 pts", "35%").
+            case signed(lower: Bool, amount: String)
+        }
+
+        private func reading(isFraction: Bool) -> Reading {
             if let absoluteUnit {
-                guard abs(difference) >= 0.05 else { return "no change" }
-                return Self.signed(difference, digits: 1) + " " + absoluteUnit.symbol
+                guard abs(difference) >= 0.05 else { return .same }
+                return .signed(lower: difference < 0, amount: Format.fixed(abs(difference), 1) + " " + absoluteUnit.symbol)
             }
             if isFraction {
                 let points = difference * 100
-                guard abs(points) >= 0.05 else { return "no change" }
-                return Self.signed(points, digits: abs(points) < 10 ? 1 : 0) + " pts"
+                guard abs(points) >= 0.05 else { return .same }
+                return .signed(lower: points < 0, amount: Format.fixed(abs(points), abs(points) < 10 ? 1 : 0) + " pts")
             }
-            guard let ratio else { return a == 0 ? "no change" : "from none" }
-            guard abs(ratio - 1) >= 0.0005 else { return "no change" }
-            if ratio >= 10 { return "×" + Format.fixed(ratio, 0) }
+            guard let ratio else { return a == 0 ? .same : .fromNone }
+            guard abs(ratio - 1) >= 0.0005 else { return .same }
+            if ratio >= 10 { return .times(Format.fixed(ratio, 0)) }
             let percent = (ratio - 1) * 100
-            return Self.signed(percent, digits: abs(percent) < 10 ? 1 : 0) + "%"
-        }
-
-        /// "+7.0", or with a true minus sign, "−3.5".
-        private static func signed(_ value: Double, digits: Int) -> String {
-            (value < 0 ? "\u{2212}" : "+") + Format.fixed(abs(value), digits)
+            return .signed(lower: percent < 0, amount: Format.fixed(abs(percent), abs(percent) < 10 ? 1 : 0) + "%")
         }
     }
 

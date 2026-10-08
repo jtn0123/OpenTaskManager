@@ -24,6 +24,11 @@ enum HistoryGapStyle {
         gap.duration < 3_600 ? Format.timeSpan(gap.duration) : Format.roughDuration(gap.duration)
     }
 
+    /// The full and folded rails use the same times and possible causes.
+    static func help(_ gap: HistoryGap) -> String {
+        HistoryGapLabels.help(span: HistorySessionStyle.span(gap.start, gap.end), duration: duration(gap))
+    }
+
     /// "10:12:06 – 10:14:30 AM · 2 min 24 s".
     static func describe(_ gap: HistoryGap) -> String {
         HistorySessionStyle.span(gap.start, gap.end) + " · " + duration(gap)
