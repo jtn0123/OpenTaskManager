@@ -109,10 +109,9 @@ public struct ConnectionHistoryCoverage: Sendable, Codable {
 
     public var watchedWords: String {
         guard !intervals.isEmpty else { return "Not watched in this range. Absence from history does not mean no connection." }
-        let spans = intervals.prefix(8).map {
-            "\($0.start.formatted(.dateTime.month().day().hour().minute()))–\($0.end.formatted(.dateTime.month().day().hour().minute()))"
-        }
-        let remaining = intervals.count > 8 ? " and \(intervals.count - 8) more intervals" : ""
-        return "Watched " + spans.joined(separator: ", ") + remaining + ". Other stretches were not watched."
+        // Each day is named once, as Startup's watched spans are: "Oct 8, 2026: 10:07 AM–10:09 AM, 2:15 PM–2:20 PM".
+        let spans = LaunchHistoryCoverage.merged(intervals.map { LaunchHistoryInterval(start: $0.start, end: $0.end) })
+        let remaining = spans.count > 8 ? " and \(spans.count - 8) more intervals" : ""
+        return "Watched " + LaunchHistoryCoverage.spansText(Array(spans.prefix(8))) + remaining + ". Other stretches were not watched."
     }
 }

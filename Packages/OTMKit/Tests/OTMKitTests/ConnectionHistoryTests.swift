@@ -224,6 +224,8 @@ struct ConnectionHistoryTests {
         #expect(!coverage.isWatched(at: date(110)))
         #expect(coverage.intervals.first?.start == date(101))
         #expect(coverage.watchedWords.contains("not watched"))
+        // Both watched stretches fall on one day, which is named once.
+        #expect(coverage.watchedWords.components(separatedBy: ": ").count == 2)
         let none = ConnectionHistoryCoverage(from: date(0), to: date(10), intervals: [])
         #expect(none.gaps == 1)
         #expect(none.watchedWords.hasPrefix("Not watched"))

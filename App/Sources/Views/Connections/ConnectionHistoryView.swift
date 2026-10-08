@@ -26,7 +26,8 @@ struct ConnectionHistoryView: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 Spacer(minLength: 0)
-                Text(rows.count == 1 ? "1 stored lifetime" : "\(rows.count.formatted()) stored lifetimes")
+                Text(rows.count == 1 ? "1 \(search.isEmpty ? "stored" : "matching") lifetime"
+                     : "\(rows.count.formatted()) \(search.isEmpty ? "stored" : "matching") lifetimes")
                     .font(.metadata).foregroundStyle(.secondaryText)
                     .lineLimit(1)
             }
