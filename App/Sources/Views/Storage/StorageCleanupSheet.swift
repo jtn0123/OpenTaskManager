@@ -65,10 +65,9 @@ struct StorageCleanupSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text((item.id as NSString).lastPathComponent).font(.tableText.weight(.medium))
                 path(item.id)
-                Text("At scan: \(Format.bytes(item.pick.allocated)) allocated · Now: \(size(item.state.allocated))")
-                    .font(.explanation).foregroundStyle(.secondaryText).monospacedDigit()
-                Text("File size at scan: \(Format.bytes(item.pick.logical)) · Now: \(size(item.state.logical))")
-                    .font(.explanation).foregroundStyle(.secondaryText).monospacedDigit()
+                ForEach(StorageCleanupText.sizes(item), id: \.self) { line in
+                    Text(line).font(.explanation).foregroundStyle(.secondaryText).monospacedDigit()
+                }
                 Text(stateText(item)).font(.explanation).foregroundStyle(.secondaryText)
                 if let included = item.includesText { Text(included).font(.explanation).foregroundStyle(.secondaryText) }
                 if let refusal = item.refusal {
@@ -90,8 +89,6 @@ struct StorageCleanupSheet: View {
         let date = state.modified.map { " · Modified " + $0.formatted(date: .abbreviated, time: .shortened) } ?? ""
         return "\(kind) · \(readable) · \(volume)" + date
     }
-
-    private func size(_ bytes: UInt64?) -> String { bytes.map(Format.bytes) ?? "Not measured" }
 
     private func path(_ value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {

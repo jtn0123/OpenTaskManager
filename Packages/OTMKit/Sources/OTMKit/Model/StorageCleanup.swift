@@ -208,6 +208,18 @@ public enum StorageCleanupText {
             + "(clones, hard links and snapshots can keep blocks)"
     }
 
+    /// Figures that still match the scan read once; a change keeps the scan's beside today's.
+    public static func sizes(_ item: StorageCleanupItem) -> [String] {
+        let pick = item.pick
+        let state = item.state
+        if state.allocated == pick.allocated, state.logical == pick.logical {
+            return ["\(Format.bytes(pick.allocated)) allocated · \(Format.bytes(pick.logical)) file size · as at the scan"]
+        }
+        func now(_ bytes: UInt64?) -> String { bytes.map(Format.bytes) ?? "not measured" }
+        return ["At scan: \(Format.bytes(pick.allocated)) allocated · Now: \(now(state.allocated))",
+                "File size at scan: \(Format.bytes(pick.logical)) · Now: \(now(state.logical))"]
+    }
+
     public static func capacityChange(before: Int64?, after: Int64?) -> String {
         guard let before, let after else { return "Volume available space change couldn't be measured." }
         let change = after - before

@@ -154,6 +154,23 @@ struct StorageCleanupRulesTests {
         #expect(StorageCleanupText.capacityChange(before: nil, after: 1000) == "Volume available space change couldn't be measured.")
     }
 
+    @Test func unchangedSizesReadOnceAndAChangeKeepsBothSides() {
+        let same = StorageCleanupItem(pick: cleanupPick(), state: cleanupState(), home: cleanupHome)
+        #expect(StorageCleanupText.sizes(same)
+            == ["\(Format.bytes(8192 as UInt64)) allocated · \(Format.bytes(4096 as UInt64)) file size · as at the scan"])
+        var grown = cleanupState()
+        grown.allocated = 16_384
+        let changed = StorageCleanupItem(pick: cleanupPick(), state: grown, home: cleanupHome)
+        #expect(StorageCleanupText.sizes(changed) == [
+            "At scan: \(Format.bytes(8192 as UInt64)) allocated · Now: \(Format.bytes(16_384 as UInt64))",
+            "File size at scan: \(Format.bytes(4096 as UInt64)) · Now: \(Format.bytes(4096 as UInt64))",
+        ])
+        var unmeasured = cleanupState()
+        unmeasured.allocated = nil
+        let unknown = StorageCleanupItem(pick: cleanupPick(), state: unmeasured, home: cleanupHome)
+        #expect(StorageCleanupText.sizes(unknown).first?.hasSuffix("Now: not measured") == true)
+    }
+
     @Test func commandAndShiftSelectionFollowTheListOrder() {
         let order = ["first", "second", "third", "last"]
         let initial = StorageCleanupRules.select("second", order: order, current: .init(paths: ["tile"]), command: false, shift: false)
