@@ -54,6 +54,7 @@ struct StartupItemDetail: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
                 ScrollView { details.padding(12) }
+                    .defaultScrollAnchor(Self.scrollAnchor)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
@@ -62,6 +63,7 @@ struct StartupItemDetail: View {
                     }
                     .padding(12)
                 }
+                .defaultScrollAnchor(Self.scrollAnchor)
             }
             Divider()
             footer(restriction: restriction)
@@ -150,6 +152,10 @@ struct StartupItemDetail: View {
             }
         }
     }
+
+    /// `-openScroll bottom` starts the details at their end, History and Files,
+    /// for screenshots.
+    private static let scrollAnchor: UnitPoint = LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top
 
     /// What it runs first, then a notice where the status line over it can't
     /// say enough, launchd's figures for the job and what the property list

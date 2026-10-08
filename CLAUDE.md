@@ -548,7 +548,8 @@ screencapture -x -o -l <windowID> out.png
 
 `-openPage Overview|Processes|Performance|History|Connections|Startup|Apps|Users|System|Drivers|Storage` sets the starting page, and
 `-openResource cpu|memory|gpu|disk|network|power|sensors|benchmarks` the Performance detail
-(`-openScroll bottom` starts the page scrolled to the end), `-openProcess <pid>`
+(`-openScroll bottom` starts the page scrolled to the end, and Startup's
+details at their History and Files), `-openProcess <pid>`
 selects a process so its inspector shows, `-openProcessHistory <query>` (with
 `-openPage History`) searches History's Processes section and charts the latest
 match, `-openConnection <port or text>`
