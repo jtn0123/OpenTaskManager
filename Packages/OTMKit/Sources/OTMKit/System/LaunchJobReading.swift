@@ -44,19 +44,32 @@ public struct LaunchItemInventory: Sendable {
 }
 
 extension LaunchItems {
-    public static func inventory(directories: [LaunchDirectory] = LaunchDirectory.standard(), uid: uid_t = getuid()) -> LaunchItemInventory {
-        currentInventory(directories.flatMap { read($0) }, uid: uid)
+    public static func inventory(directories: [LaunchDirectory] = LaunchDirectory.standard(),
+                                 appPaths: [String]? = nil, uid: uid_t = getuid()) -> LaunchItemInventory {
+        let bundled = discoverBundled(in: appPaths ?? registrationAppPaths())
+        return currentInventory(directories.flatMap { read($0) } + bundled.items, uid: uid)
     }
 
     public static func currentInventory(_ items: [LaunchItem], uid: uid_t = getuid()) -> LaunchItemInventory {
         let reading = Launchctl.jobReading(uid: uid)
         let overrides = Launchctl.userOverrides(uid: uid)
-        let correlated = correlate(items, userJobs: reading.domains["gui/\(uid)"] ?? [:],
-                                   systemJobs: reading.domains["system"] ?? [:], userOverrides: overrides,
-                                   systemOverrides: reading.systemOverrides)
-        let result = zip(items, correlated).map { old, new in
+        return inventory(items, reading: reading, userOverrides: overrides, uid: uid)
+    }
+
+    /// Failed domains retain their last state; a successful read removes vanished
+    /// jobs without files. Neither path reads any configuration from disk.
+    public static func inventory(_ items: [LaunchItem], reading: LaunchJobReading,
+                                 userOverrides: [String: Bool], uid: uid_t = getuid()) -> LaunchItemInventory {
+        let files = items.filter(\.hasFile)
+        let userJobs = reading.domains["gui/\(uid)"] ?? [:]
+        let systemJobs = reading.domains["system"] ?? [:]
+        let correlated = correlate(files, userJobs: userJobs, systemJobs: systemJobs,
+                                   userOverrides: userOverrides, systemOverrides: reading.systemOverrides)
+        var result = zip(files, correlated).map { old, new in
             reading.domains[LaunchHistoryKey(old, uid: uid).domain] == nil ? old : new
         }
+        result += items.filter { !$0.hasFile && reading.domains[LaunchHistoryKey($0, uid: uid).domain] == nil }
+        result += loadedWithoutFiles(files, userJobs: userJobs, systemJobs: systemJobs)
         return LaunchItemInventory(items: result, reading: reading)
     }
 }

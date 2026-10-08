@@ -1,8 +1,30 @@
 import Foundation
 import OTMKit
 
-/// Reads the stored observations only; it never asks launchd for current state.
+/// Lists current registrations, or reads stored observations for the history subcommand.
 func startupCommand(_ options: Options) async {
+    if options.positional.isEmpty { startupInventoryCommand(options); return }
+    await startupHistoryCommand(options)
+}
+
+private func startupInventoryCommand(_ options: Options) {
+    let items = LaunchItems.scan().filter { options.source == nil || $0.source == options.source }
+    var watch = LaunchJobWatch()
+    watch.observe(items, startTimes: [:], at: .now)
+    if options.json {
+        printJSON(items)
+    } else {
+        print(pad("NAME", 32) + pad("KIND", 14) + pad("SOURCE", 28) + pad("STATUS", 16) + "LABEL")
+        for item in items {
+            let status = LaunchItemStatus(item: item, health: watch.health(of: item))
+            print(pad(item.name, 32) + pad(item.scope.title, 14) + pad(item.source.title, 28)
+                  + pad(status.summary, 16) + item.label)
+        }
+        print("\n\(items.count) items · Open at Login apps and macOS approval switches are not readable here.")
+    }
+}
+
+private func startupHistoryCommand(_ options: Options) async {
     guard options.positional.count == 2, options.positional.first == "history" else {
         fail("usage: otm startup history LABEL [--json]")
     }

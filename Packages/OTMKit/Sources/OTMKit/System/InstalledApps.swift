@@ -53,7 +53,7 @@ public enum InstalledApps {
         }
         let locations = deduplicate(candidates)
         let apps = BoundedWork.map(locations, width: width) { read(bundleAt: $0.path, resolvedPath: $0.resolved) }
-        return attach(launchItems ?? LaunchItems.scan(), to: apps.compactMap { $0 })
+        return attach(launchItems ?? LaunchItems.scan(appPaths: locations.map(\.path)), to: apps.compactMap { $0 })
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
@@ -214,7 +214,7 @@ public enum InstalledApps {
         return name.lowercased().hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
 
-    private static func propertyList(atPath path: String) -> [String: Any] {
+    static func propertyList(atPath path: String) -> [String: Any] {
         // The optional format output is nil; Foundation owns the decoded plist values.
         guard let data = FileManager.default.contents(atPath: path),
               let plist = unsafe try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return [:] }
@@ -263,6 +263,7 @@ public enum InstalledApps {
         let bundles = Set([app.path, app.resolvedPath])
         let identifier = app.bundleIdentifier?.lowercased()
         return items.filter { item in
+            if let owner = item.owningAppPath { return bundles.contains(normalized(owner)) }
             let paths = ([item.program].compactMap { $0 } + item.arguments).filter { $0.hasPrefix("/") }.map(normalized)
             let pointsInside = paths.contains { path in
                 bundles.contains(path) || bundles.contains { path.hasPrefix($0 + "/") }

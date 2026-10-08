@@ -4,7 +4,7 @@ import Foundation
 /// they give way in when the table runs short (`ColumnFit`). The raw value
 /// is the column's customization ID.
 public enum StartupColumn: String, CaseIterable, Sendable {
-    case name, kind, status, cpu, memory, launches, publisher
+    case name, kind, source, status, cpu, memory, launches, publisher
 
     /// Narrowest the column gets: room for its usual values in their short
     /// forms (Kind's "Agent" or "Daemon", Status's "Failed exit 1" without a
@@ -14,6 +14,7 @@ public enum StartupColumn: String, CaseIterable, Sendable {
     public var minWidth: CGFloat {
         switch self {
         case .name: 250
+        case .source: 120
         case .kind: 58
         case .status: 100
         case .cpu: 54
@@ -27,6 +28,7 @@ public enum StartupColumn: String, CaseIterable, Sendable {
     public var maxWidth: CGFloat? {
         switch self {
         case .name: nil
+        case .source: 200
         case .kind: 110
         case .status: 165
         case .cpu: 76
@@ -37,7 +39,8 @@ public enum StartupColumn: String, CaseIterable, Sendable {
     }
 
     /// When the table runs short of room, columns give way lowest priority
-    /// first, so Name and Status keep theirs. Launches goes first: its few
+    /// first, so Name and Status keep theirs. Source goes first: the Source filter
+    /// and details still give it. Launches goes next: its few
     /// values repeat down the table and the details spell them out. Publisher
     /// next, as third-party rows keep a mark in Name. Then the job's memory
     /// and its CPU, which most jobs, waiting between runs, leave blank or
@@ -47,6 +50,7 @@ public enum StartupColumn: String, CaseIterable, Sendable {
     public var priority: Int? {
         switch self {
         case .name, .status: nil
+        case .source: 0
         case .kind: 5
         case .cpu: 4
         case .memory: 3

@@ -172,8 +172,10 @@ struct StartupItemDetail: View {
             launches
             StartupHistorySection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item,
                                   refreshID: refreshID, jobs: model.launchJobs)
-            StartupFilesSection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item, refreshID: refreshID)
-            labelled("Property list", item.plistPath)
+            if item.hasPlist {
+                StartupFilesSection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item, refreshID: refreshID)
+            }
+            if item.hasFile { labelled(item.hasPlist ? "Property list" : "Login helper", item.plistPath) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -188,15 +190,17 @@ struct StartupItemDetail: View {
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                 }
-            } else if item.publisher == .thirdParty, let restriction {
+            } else if let restriction, item.publisher == .thirdParty || item.source.isAppBundled || !item.hasFile {
                 Text(restriction).font(.explanation).foregroundStyle(.secondaryText)
             }
             // Wrapping onto a second line in a narrow pane.
             FlowRow(spacing: 8, lineSpacing: 8, spreads: false) {
-                Button("Reveal in Finder") { StartupActions.reveal(item) }
-                Button("Copy Path") { StartupActions.copyPath(item) }
-                    .help("Copy the property list's whole path")
-                Button("Show plist") { StartupActions.openPlist(item) }
+                if item.hasFile {
+                    Button("Reveal in Finder") { StartupActions.reveal(item) }
+                    Button("Copy Path") { StartupActions.copyPath(item) }
+                        .help("Copy the item's whole path")
+                }
+                if item.hasPlist { Button("Show plist") { StartupActions.openPlist(item) } }
             }
         }
         .padding(12)
@@ -237,6 +241,7 @@ struct StartupItemDetail: View {
             // A gap rather than a rule, which would read as another region.
             Color.clear.frame(height: 2).gridCellUnsizedAxes(.horizontal)
             FactRow(label: "Kind", value: item.scope.title)
+            FactRow(label: "Source", value: item.sourceDescription)
             FactRow(label: "Publisher", value: item.publisher.title)
             if let modified = item.modified {
                 FactRow(label: "Modified", value: modified.formatted(date: .abbreviated, time: .shortened))
@@ -247,7 +252,7 @@ struct StartupItemDetail: View {
     @ViewBuilder private var program: some View {
         if let path = item.program {
             labelled("Program", path)
-        } else if !item.isUnreadable {
+        } else if item.hasPlist, !item.isUnreadable {
             labelled("Program", "None: the property list names no program", isCode: false)
         }
         let arguments = item.arguments.first == item.program ? Array(item.arguments.dropFirst()) : item.arguments
@@ -266,7 +271,12 @@ struct StartupItemDetail: View {
     private var launches: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Launches").font(.callout).foregroundStyle(.secondaryText)
-            if item.isUnreadable {
+            if item.source == .loginItem {
+                Text(item.job == nil ? "Registered state unknown: launchd does not list this helper" : "At login, registered by its app")
+                    .font(.callout)
+            } else if !item.hasFile {
+                Text("Unknown: no configuration file was found").font(.callout)
+            } else if item.isUnreadable {
                 Text("Unknown: the property list can't be read").font(.callout)
             } else {
                 ForEach(item.triggers.details(for: item.scope), id: \.self) { line in

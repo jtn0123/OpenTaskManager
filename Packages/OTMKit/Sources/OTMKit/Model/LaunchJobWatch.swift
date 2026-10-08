@@ -187,6 +187,12 @@ public struct LaunchJobWatch: Sendable {
     public mutating func observe(_ items: [LaunchItem], startTimes: [Int32: Date], at date: Date) {
         if since == nil { since = date }
         lastRead = date
+        // Jobs without files leave the inventory when unloaded. Forget their
+        // last process too, so a later registration isn't counted as a restart.
+        let present = Set(items.map { LaunchJobKey($0) })
+        for key in records.keys where !present.contains(key) {
+            if records[key]?.instance != nil { records[key]?.instance = nil }
+        }
         for item in items where !item.isMissingLabel {
             let key = LaunchJobKey(item)
             guard let job = item.job else {

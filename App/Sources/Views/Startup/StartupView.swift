@@ -43,8 +43,8 @@ struct StartupRow: Identifiable, Equatable {
     var id: LaunchItem.ID { item.id }
 }
 
-/// Everything launchd starts by itself: the agents and daemons in the
-/// LaunchAgents and LaunchDaemons folders, with what launchd says about each.
+/// Registrations in launchd folders and app bundles, and loaded jobs without
+/// a file, with what launchd says about each.
 ///
 /// The scan runs off the main actor when the page opens and on Refresh. While
 /// the page is on screen launchd is asked again every few seconds, without
@@ -56,6 +56,7 @@ struct StartupView: View {
     @CurrentPage private var page
     @Setting(Settings.startupFilter) private var filter: StartupFilter
     @Setting(Settings.showStartupInspector) private var showInspector: Bool
+    @State private var source: LaunchItemSource?
     @State private var items: [LaunchItem]?
     @State private var scannedAt: Date?
     @State private var isScanning = false
@@ -90,7 +91,7 @@ struct StartupView: View {
         }
         .toolbar {
             ToolbarItem {
-                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Read the launchd folders and ask launchd again") {
+                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Read launchd folders, app registrations and launchd state") {
                     Task { await scan() }
                 }
             }
@@ -111,6 +112,8 @@ struct StartupView: View {
                 search = query
                 filter = .all
             }
+            source = LaunchArgument.string("openStartupSource").flatMap { LaunchItemSource(name: $0) }
+            if source != nil { filter = .all }
             requestedItem = model.requestedStartupItem
             model.requestedStartupItem = nil
             if items == nil { await scan() }
@@ -118,6 +121,7 @@ struct StartupView: View {
         // The selected row may have moved out of view; these are the user's
         // own changes, never a tick or a read of launchd's list.
         .onChange(of: filter) { revealSelection() }
+        .onChange(of: source) { revealSelection() }
         .onChange(of: search) { revealSelection() }
         .onChange(of: sortOrder) { revealSelection() }
         // Only while the page is on screen, and not while updates are paused.
@@ -150,12 +154,20 @@ struct StartupView: View {
             VStack(alignment: .leading, spacing: 10) {
                 summary(items, watch: watch)
                     .padding(.bottom, 2)
-                Picker("Show", selection: $filter) {
-                    ForEach(StartupFilter.allCases) { Text($0.rawValue).tag($0) }
+                FlowRow(spacing: 12, lineSpacing: 8, spreads: false) {
+                    Picker("Show", selection: $filter) {
+                        ForEach(StartupFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    Picker("Source", selection: $source) {
+                        Text("All sources").tag(nil as LaunchItemSource?)
+                        ForEach(LaunchItemSource.allCases) { Text($0.title).tag(Optional($0)) }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
                 LoginItemsNote()
             }
             .padding(.horizontal, 16)
@@ -223,18 +235,16 @@ struct StartupView: View {
         let problems = items.filter { watch.health(of: $0).needsAttention }.count
         return FillGrid(minimum: 140, spacing: 12) {
             SummaryCard(title: "Total", value: items.count, tint: Theme.cpu,
-                        help: "Property lists in the five LaunchAgents and LaunchDaemons folders")
+                        help: "Launchd folders, app-bundled registrations and loaded jobs without a file")
             SummaryCard(title: "Running", value: items.filter { $0.pid != nil }.count, tint: Theme.disk,
                         help: "Jobs with a process running right now")
             SummaryCard(title: "Third party", value: items.filter { $0.publisher == .thirdParty }.count, tint: Theme.network,
                         help: "Installed by something other than macOS")
-            // Its caption says what's counted, so the note below about the
-            // Login Items it leaves out reads as a distinction, not a contradiction.
-            SummaryCard(title: "Start at login", value: items.filter(\.startsAutomatically).count, tint: Theme.memory,
-                        caption: "Launch jobs set to run at login",
-                        help: "launchd agents and daemons set to run as soon as they're loaded: agents when you log in, "
-                            + "daemons when the Mac starts up, unless they're disabled. The Login Items in System "
-                            + "Settings aren't in this count: macOS keeps them private.")
+            // Boot daemons and unregistered helpers are not login starts.
+            SummaryCard(title: "Start at login", value: items.filter(\.startsAtLogin).count, tint: Theme.memory,
+                        caption: "Agents and loaded app login helpers",
+                        help: "Agents set to run at load or kept alive, including those bundled in apps, and app login helpers "
+                            + "listed by launchd. Excludes boot daemons, Open at Login apps and macOS approval switches.")
             SummaryCard(title: "Problems", value: problems, tint: problems > 0 ? LaunchJobHealth.tint : Theme.other,
                         glow: problems > 0 ? 0.35 : 0,
                         help: "Jobs whose last run crashed or failed, or that were seen restarting again and again. "
@@ -246,7 +256,7 @@ struct StartupView: View {
         let query = search.trimmingCharacters(in: .whitespaces)
         return items.compactMap { item -> StartupRow? in
             let health = watch.health(of: item)
-            guard filter.includes(item, health: health), Self.matches(item, query) else { return nil }
+            guard source == nil || source == item.source, filter.includes(item, health: health), Self.matches(item, query) else { return nil }
             var row = StartupRow(item: item, health: health)
             // The samples are read only while the table sorts by them; otherwise
             // a tick would rebuild every row for figures only their cells show.
@@ -281,6 +291,7 @@ struct StartupView: View {
     /// gives way, and in a narrow window the list comes back over the details.
     private func showInList() {
         guard let selection, let item = items?.first(where: { $0.id == selection }) else { return }
+        if source != nil, source != item.source { source = nil }
         if !filter.includes(item, health: model.launchJobs.watch.health(of: item)) { filter = .all }
         if !Self.matches(item, search.trimmingCharacters(in: .whitespaces)) { search = "" }
         showsFullDetail = false
@@ -407,7 +418,7 @@ private struct SummaryCard: View {
 // MARK: - Table
 
 /// The columns, their widths and the order they give way in are
-/// `StartupColumn` in OTMKit: Launches, Publisher, Memory, CPU, then Kind.
+/// `StartupColumn` in OTMKit: Source, Launches, Publisher, Memory, CPU, then Kind.
 extension StartupColumn: FittingColumn {}
 
 private struct StartupTable: View {
@@ -455,6 +466,7 @@ private struct StartupTable: View {
         return Table(rows, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columns) {
             nameColumn(badgesThirdParty: filterShowsPublisher && hidden.contains(.publisher))
             kindColumn
+            sourceColumn
             statusColumn
             cpuColumn
             memoryColumn
@@ -468,11 +480,11 @@ private struct StartupTable: View {
                     Button(item.isDisabled ? "Enable" : "Disable…") { toggle(item) }
                     Divider()
                 }
-                Button("Reveal in Finder") { StartupActions.reveal(item) }
-                Button("Show plist") { StartupActions.openPlist(item) }
+                if item.hasFile { Button("Reveal in Finder") { StartupActions.reveal(item) } }
+                if item.hasPlist { Button("Show plist") { StartupActions.openPlist(item) } }
                 Divider()
                 Button("Copy Label") { StartupActions.copyLabel(item) }
-                Button("Copy Path") { StartupActions.copyPath(item) }
+                if item.hasFile { Button("Copy Path") { StartupActions.copyPath(item) } }
             }
         } primaryAction: { _ in
             open()
@@ -547,6 +559,13 @@ private struct StartupTable: View {
             .help(row.item.scope.title)
         }
         .fitted(StartupColumn.kind)
+    }
+
+    private var sourceColumn: some Column {
+        TableColumn("Source", value: \.item.source.rawValue) { row in
+            Text(row.item.source.title).lineLimit(1).help(row.item.sourceDescription)
+        }
+        .fitted(StartupColumn.source)
     }
 
     /// "Failed exit code 1", "Failed exit 1" in a narrow column, and the
@@ -763,23 +782,19 @@ private struct NoProblemsNote: View {
     }
 }
 
-/// What the table can't show, above it where it reads as the table's scope:
-/// Login Items live where only an administrator can read them, so neither
-/// the list nor the Start at login card (whose caption says it counts launch
-/// jobs) has them. The text wraps rather than truncating in a narrow window.
+/// The app bundles reveal shipped registrations, but not macOS approval switches.
 private struct LoginItemsNote: View {
     static let settings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Label("Login Items (System Settings > General > Login Items) aren't in this list or the Start at login "
-                + "count: macOS doesn't let other apps read them.",
-                  systemImage: "info.circle")
+            Label("Items apps ship inside their bundles are listed. Apps set to open at login, and whether macOS "
+                + "allows each background item, are kept where other apps can't read them.", systemImage: "info.circle")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
-                .help("This page lists launchd's agents and daemons, from the LaunchAgents and LaunchDaemons folders. "
-                    + "Apps that open at login, and background items apps register with macOS, are kept where only "
-                    + "an administrator can read them, so they aren't here or in Start at login.")
+                .help("An item inside an app may not be registered or allowed: launchd's list confirms the ones loaded, "
+                    + "but macOS keeps its list of allowed items and Open at Login apps private. Login Items Settings "
+                    + "shows both. Apple's own jobs without a file, services macOS starts on demand, are left out.")
             Spacer(minLength: 0)
             Button("Open Login Items Settings") {
                 if let url = Self.settings { NSWorkspace.shared.open(url) }

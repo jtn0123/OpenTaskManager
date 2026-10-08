@@ -92,9 +92,9 @@ public struct LaunchDirectory: Sendable, Hashable {
     }
 }
 
-/// A launchd property list and, once correlated, what launchd says about its job.
+/// A launch registration found in a folder, app bundle or launchd table, and its current job.
 public struct LaunchItem: Sendable, Codable, Hashable, Identifiable {
-    public var id: String { plistPath }
+    public var id: String { hasFile ? plistPath : "launchd:\(scope.rawValue):\(label)" }
     /// The `Label` key, or the file name when the plist has none or can't be read.
     public let label: String
     /// A readable name made from the label, such as "Microsoft Update Agent".
@@ -102,6 +102,9 @@ public struct LaunchItem: Sendable, Codable, Hashable, Identifiable {
     public let plistPath: String
     public let modified: Date?
     public let scope: LaunchItemScope
+    public var source: LaunchItemSource = .sharedAgents
+    /// The app carrying this registration, even when Program points elsewhere.
+    public var owningAppPath: String?
     public let publisher: LaunchItemPublisher
     /// What launchd runs: `Program`, or else the first of `ProgramArguments`.
     public let program: String?
@@ -119,7 +122,7 @@ public struct LaunchItem: Sendable, Codable, Hashable, Identifiable {
     /// `launchctl enable` (false) or `disable` (true), which wins over `disabledInPlist`.
     public var disabledOverride: Bool?
 
-    public var isDisabled: Bool { disabledOverride ?? disabledInPlist }
+    public var isDisabled: Bool { source == .loginItem ? false : disabledOverride ?? disabledInPlist }
 
     public var pid: Int32? { job?.pid }
 
@@ -131,36 +134,39 @@ public struct LaunchItem: Sendable, Codable, Hashable, Identifiable {
 
     /// Starts by itself whenever it's enabled: at login for agents, at boot for daemons.
     public var startsAutomatically: Bool {
-        !isMissingLabel && !isUnreadable && !isDisabled && triggers.startsWhenLoaded
+        if source == .loginItem { return job != nil && !isMissingLabel && !isUnreadable }
+        return hasPlist && !isMissingLabel && !isUnreadable && !isDisabled && triggers.startsWhenLoaded
     }
 
-    public var timing: LaunchTiming { isUnreadable ? .unknown : triggers.timing }
+    public var timing: LaunchTiming {
+        if source == .loginItem { return job == nil ? .unknown : .atLoad }
+        return !hasFile || isUnreadable ? .unknown : triggers.timing
+    }
 
     /// Short form for a table column: "At login", "Every hour", "On demand".
     public var launchSummary: String {
-        isUnreadable ? LaunchTiming.unknown.title(for: scope) : triggers.summary(for: scope)
+        if source == .loginItem { return job == nil ? "Registered state unknown" : "At login" }
+        return !hasFile || isUnreadable ? LaunchTiming.unknown.title(for: scope) : triggers.summary(for: scope)
     }
 
     /// The outermost app bundle around the program, for its icon.
-    public var appBundlePath: String? { LaunchItems.appBundlePath(forProgram: program) }
+    public var appBundlePath: String? { owningAppPath ?? LaunchItems.appBundlePath(forProgram: program) }
 }
 
 /// Reads launchd property lists and works out what each one does.
 public enum LaunchItems {
-    /// Reads every property list in `directories` and asks launchctl which
-    /// jobs are loaded, running or disabled. This reads hundreds of files and
-    /// runs launchctl three times, so call it off the main actor.
-    public static func scan(directories: [LaunchDirectory] = LaunchDirectory.standard(), uid: uid_t = getuid()) -> [LaunchItem] {
-        withCurrentStatus(directories.flatMap { read($0) }, uid: uid)
+    /// Reads the launchd folders and bounded app registrations, then asks launchctl
+    /// for loaded jobs. This reads hundreds of files, so call it off the main actor.
+    public static func scan(directories: [LaunchDirectory] = LaunchDirectory.standard(),
+                            appPaths: [String]? = nil, uid: uid_t = getuid()) -> [LaunchItem] {
+        inventory(directories: directories, appPaths: appPaths, uid: uid).items
     }
 
     /// The same items with launchd asked again which jobs are loaded, running
     /// or disabled. It runs launchctl three times and reads no property list,
     /// so the Startup page can follow restarts with it; call it off the main actor.
     public static func withCurrentStatus(_ items: [LaunchItem], uid: uid_t = getuid()) -> [LaunchItem] {
-        let system = Launchctl.systemDomain()
-        return correlate(items, userJobs: Launchctl.userJobs(), systemJobs: system.jobs,
-                         userOverrides: Launchctl.userOverrides(uid: uid), systemOverrides: system.overrides)
+        currentInventory(items, uid: uid).items
     }
 
     static func read(_ directory: LaunchDirectory) -> [LaunchItem] {
@@ -173,21 +179,28 @@ public enum LaunchItems {
     }
 
     /// Classifies one property list. `data` is nil when the file couldn't be read.
-    public static func item(plist data: Data?, path: String, scope: LaunchItemScope, modified: Date? = nil) -> LaunchItem {
+    public static func item(plist data: Data?, path: String, scope: LaunchItemScope, modified: Date? = nil,
+                            source: LaunchItemSource? = nil, owningAppPath: String? = nil) -> LaunchItem {
         // The optional format output is nil; Foundation owns the decoded plist values.
         let fileLabel = (URL(fileURLWithPath: path).lastPathComponent as NSString).deletingPathExtension
         guard let data, let plist = unsafe try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
             return LaunchItem(label: fileLabel, name: displayName(forLabel: fileLabel), plistPath: path, modified: modified,
-                              scope: scope, publisher: publisher(plistPath: path, label: fileLabel), program: nil,
+                              scope: scope, source: source ?? .folder(path: path, scope: scope), owningAppPath: owningAppPath,
+                              publisher: publisher(plistPath: path, label: fileLabel), program: nil,
                               arguments: [], triggers: LaunchTriggers(), disabledInPlist: false,
                               isMissingLabel: false, isUnreadable: true)
         }
         let label = (plist["Label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let arguments = plist["ProgramArguments"] as? [String] ?? []
-        let program = (plist["Program"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? arguments.first
+        let bundleProgram = (plist["BundleProgram"] as? String).flatMap { relative -> String? in
+            guard let owningAppPath, !relative.isEmpty, !relative.hasPrefix("/") else { return nil }
+            return URL(fileURLWithPath: owningAppPath).appendingPathComponent(relative).standardizedFileURL.path
+        }
+        let program = bundleProgram ?? (plist["Program"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? arguments.first
         let shownLabel = label ?? fileLabel
         return LaunchItem(label: shownLabel, name: displayName(forLabel: shownLabel), plistPath: path, modified: modified,
-                          scope: scope, publisher: publisher(plistPath: path, label: shownLabel), program: program,
+                          scope: scope, source: source ?? .folder(path: path, scope: scope), owningAppPath: owningAppPath,
+                          publisher: publisher(plistPath: path, label: shownLabel), program: program,
                           arguments: arguments, triggers: LaunchTriggers(plist: plist),
                           disabledInPlist: plist["Disabled"] as? Bool ?? false,
                           isMissingLabel: label == nil, isUnreadable: false)

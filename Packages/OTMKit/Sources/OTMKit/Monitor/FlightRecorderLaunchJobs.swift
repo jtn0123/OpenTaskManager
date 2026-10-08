@@ -133,7 +133,7 @@ struct LaunchHistoryWriter: Sendable {
 extension FlightRecorder {
     /// Configuration reads have their own clock, so they don't invent a job-state read.
     public func observeLaunchConfiguration(_ item: LaunchItem, at time: Date) throws(FlightRecorderError) {
-        guard !item.isUnreadable, !item.isMissingLabel else { return }
+        guard item.hasFile, !item.isUnreadable, !item.isMissingLabel else { return }
         let key = LaunchHistoryKey(item)
         let configuration = LaunchJobConfiguration(item)
         let saved = try launchJobConfigurations()
@@ -158,7 +158,7 @@ extension FlightRecorder {
             next.configured = true
         }
         if let scanned {
-            for item in scanned where !item.isMissingLabel && !item.isUnreadable { next.items[LaunchHistoryKey(item)] = item }
+            for item in scanned where item.hasFile && !item.isMissingLabel && !item.isUnreadable { next.items[LaunchHistoryKey(item)] = item }
         }
         for domain in next.reads.domains where reading.domains[domain] == nil {
             next.reads.interrupt(domain: domain, at: reading.time)
