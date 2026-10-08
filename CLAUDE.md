@@ -227,6 +227,30 @@ Manager OG or any other proprietary task manager.
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
   Views/Connections (socket table; `ConnectionStore` runs the walk),
+  socket history (schema 6, `FlightRecorderConnections`): `connection_lifetimes`
+  keeps one row per observed segment from `ConnectionWatch`, with process identity,
+  executable path and user, endpoints, the TCP states seen and its bounded timeline.
+  A confirmed end says closed between the last sighting and the next walk; stopping
+  a watch or reopening an unfinished row says still open when watching stopped,
+  never inventing a close time. `ConnectionHistoryTracker` writes starts and ends,
+  with long-lived rows bumped at most once a minute. A row not seen closing keeps
+  `open_key` (`Connection.historyKey`: PID, process start, descriptor, protocol,
+  kernel handle); the first walk after a start, a stop or a coverage gap looks
+  those up once, and the same socket with the same peer carries on in its row with
+  an unwatched step, so page visits and relaunches don't repeat a long-lived
+  socket. Changing cadence starts a coverage interval while sockets
+  already followed by the shared watch keep their lifetime. `connection_coverage` keeps real watched intervals,
+  their walk spacing and unreadable-process counts. Gaps over twice that spacing
+  break coverage; an absent socket outside it means not watched, never no connection.
+  These tables are pruned with the recorder after 7 days, coverage clipped at the
+  cutoff; 50,000 lifetimes at most, oldest ended rows dropped first, with losses
+  counted in `connection_limits` and named in the coverage line. Connections' History
+  list loads on opening, search and interval change, never per walk, with Last hour,
+  Today and 7 days. Search text is filtered in SQLite before timelines are decoded,
+  and coverage and rows come from one database snapshot. It shares the details
+  pane and opens live History at a stored
+  observation through Show in History. `otm connections history [TEXT] [--since
+  1h|24h|7d] [--json]` reads lifetimes and coverage without sampling or migration;
   launch job history (schema 5, `FlightRecorderLaunchJobs` and
   `FlightRecorderLaunchState`): `launch_job_events` keeps observed transitions
   by label and launchd domain; `launch_job_state` keeps the last changed state,
@@ -389,8 +413,16 @@ Manager OG or any other proprietary task manager.
   keep measured hidden ticks without publishing them. View-only nettop, sockets,
   inspector files, user sessions and live History refreshes wait on
   visibility notifications while hidden, rather than polling their sources.
-  Launch job history is the one inventory exception: while the recorder is on,
-  the existing sampling wakeups may schedule one bulk snapshot a minute, off the
+  Launch job history and opt-in socket history are inventory exceptions. Settings'
+  History switch, Keep watching connections in the background (`backgroundConnections`,
+  off by default), schedules sockets at most once a minute while recording and the
+  page isn't visible, on the same `ConnectionStore.shared` watch, off the main actor.
+  No new timer or per-tick descriptor work is added. Background walks publish no
+  table rows, and page reads move the shared deadline on. The ConnectionHistory debug
+  category logs wall and thread CPU seconds for each walk; a headless `otm ports`
+  with `OTM_CONNECTION_WALK_TIMING=1` prints that measurement to stderr.
+  While the recorder is on, launch job history uses
+  the existing sampling wakeups to schedule one bulk snapshot a minute, off the
   main actor, reading no plists and printing no individual job. `LaunchJobStore`
   shares its deadline with Startup's existing reads; those reads supply the
   recorder too. Each bulk snapshot uses a fixed pair of commands (`launchctl list`
@@ -509,7 +541,9 @@ Manager OG or any other proprietary task manager.
   the match gone to, and puts Clear Search beside its count.
 - The Connections page's socket walk (`ConnectionSampler`, every process's
   descriptors) is too heavy for the main sampler's tick. `ConnectionStore`
-  runs it off the main actor every 3 s, only while the page is on screen.
+  runs it off the main actor every 3 s while the page is on screen. Opt-in
+  background walks run at most once a minute while recording; the same watch
+  feeds both and SQLite writes are batched per walk on the recorder actor.
   Anything on that page that changes every tick (the traffic card) reads the
   model in its own view, so the table isn't rebuilt each second.
   `ConnectionWatch` (OTMKit, pure) diffs the walks into observed lifetimes:
@@ -568,7 +602,8 @@ selects a process so its inspector shows, `-openProcessHistory <query>` (with
 `-openPage History`) searches History's Processes section and charts the latest
 match, `-openConnection <port or text>`
 selects the first matching socket on the Connections page so its details show
-(`-openConnectionList closed` starts it on Closed recently),
+(`-openConnectionList closed|history` starts it on Closed recently or History;
+`-openConnectionSearch <text>` opens History with a search),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,
 `-openApp <name or bundle ID>` selects and scrolls to an app on the Apps page
 (add `-openAppRemoval YES` to open its Move to Trash review),

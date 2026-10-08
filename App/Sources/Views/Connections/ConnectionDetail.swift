@@ -69,7 +69,8 @@ struct ConnectionDetail: View {
                     Text(row.processName).font(.headline).lineLimit(1).help(row.processName)
                     // A closed socket's last state is in its timeline.
                     let tint = row.isOpen ? connection.kind.tint : Color.secondary
-                    Text(row.isOpen ? connection.stateLabel : "Closed")
+                    Text(row.lifetime.map { $0.ending == .closed ? "Closed" : $0.ending == .watching ? "Observed open" : "Watch stopped" }
+                         ?? (row.isOpen ? connection.stateLabel : "Closed"))
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(row.isOpen ? AnyShapeStyle(tint) : AnyShapeStyle(.secondaryText))
                         .lineLimit(1)
@@ -125,6 +126,13 @@ struct ConnectionDetail: View {
                             in: RoundedRectangle(cornerRadius: 8))
             }
 
+            if let lifetime = row.lifetime {
+                Text(lifetime.endedWords(time: ConnectionClock.time))
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                if let path = lifetime.process.path { CopyableText(value: path, splitsPath: true) }
+                Text("User: " + lifetime.process.user).font(.explanation).foregroundStyle(.secondaryText)
+            }
             ObservedTimeline(socket: row.socket)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -206,7 +214,7 @@ private struct ObservedTimeline: View {
         let steps = steps
         let seconds = Int(ConnectionStore.refreshInterval.components.seconds)
         VStack(alignment: .leading, spacing: 8) {
-            Text("Seen by this page").font(.callout.weight(.semibold))
+            Text("Observed timeline").font(.callout.weight(.semibold))
             Text(socket.seenSummary(time: ConnectionClock.time))
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
@@ -217,8 +225,8 @@ private struct ObservedTimeline: View {
             }
             .padding(.top, 2)
             Text("""
-            The page reads sockets every \(seconds) s while it's open, so each step happened in the \(seconds) s \
-            before its time.
+            The page reads sockets every \(seconds) s while open; optional background reads run once a minute. \
+            Times are observations, and sockets that open and close between walks can be missed.
             """)
             .font(.explanation)
             .foregroundStyle(.secondaryText)

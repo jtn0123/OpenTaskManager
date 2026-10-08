@@ -11,6 +11,7 @@ import UniformTypeIdentifiers
 @MainActor
 final class HistoryRecordingStore {
     static let shared = HistoryRecordingStore()
+    var connectionMoment: Date?
 
     /// A recording file, `.otmrecording`, declared in the app's Info.plist.
     static let contentType = UTType(exportedAs: RecordingFile.format, conformingTo: .json)

@@ -39,12 +39,35 @@ struct ConnectionsView: View {
 
     var body: some View {
         Group {
-            if store.hasLoaded {
+            if list == .history {
+                ConnectionHistoryView(search: search)
+            } else if store.hasLoaded {
                 content
             } else {
                 ProgressView("Reading sockets…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker("List", selection: $list) {
+                Text(ConnectionList.open.rawValue).tag(ConnectionList.open)
+                let closed = store.closedRows.count
+                Text(closed > 0 ? "\(ConnectionList.closed.rawValue) · \(closed.formatted())" : ConnectionList.closed.rawValue)
+                    .tag(ConnectionList.closed)
+                Text(ConnectionList.history.rawValue).tag(ConnectionList.history)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .help("""
+            The sockets open now, those seen closing in the last \(Format.timeSpan(ConnectionWatch.closedWindow)) \
+            (the latest \(ConnectionWatch.keptClosed) at most), or the stored lifetimes of the last 7 days
+            """)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .onAppear {
+            if LaunchArgument.string("openConnectionList") == "history" { list = .history }
+            if let query = LaunchArgument.string("openConnectionSearch") { search = query; list = .history }
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Process, address or port")
         .toolbar {
@@ -228,8 +251,8 @@ struct ConnectionsView: View {
         selection = listedRows.sorted(using: sortOrder.wrappedValue).first { $0.matches(query) }?.id
     }
 
-    /// The filters, and at the end, open sockets or those seen closing. The
-    /// filters apply to both: Listening with Closed recently lists the
+    /// The filters, for open sockets and those seen closing alike (the list
+    /// picker sits above the page): Listening with Closed recently lists the
     /// listeners that went away. Whose sockets they are, and how many
     /// processes are left out, is the header's over the counts.
     private var filterBar: some View {
@@ -241,19 +264,6 @@ struct ConnectionsView: View {
             .labelsHidden()
             .fixedSize()
             .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
-            Picker("List", selection: $list) {
-                Text(ConnectionList.open.rawValue).tag(ConnectionList.open)
-                let closed = store.closedRows.count
-                Text(closed > 0 ? "\(ConnectionList.closed.rawValue) · \(closed.formatted())" : ConnectionList.closed.rawValue)
-                    .tag(ConnectionList.closed)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("""
-            The sockets open now, or those this page saw close in the last \
-            \(Format.timeSpan(ConnectionWatch.closedWindow)) (the latest \(ConnectionWatch.keptClosed) at most)
-            """)
         }
     }
 
@@ -276,14 +286,18 @@ struct ConnectionsView: View {
             Read every \(seconds) s while this page is open. The last walk of every process's sockets took \
             \(Format.fixed(store.walkDuration * 1000, 1)) ms.\(since)
             """)
+        case .history:
+            count = "Stored socket lifetimes"
+            processes = nil
+            note = ("7 days", "Only observed lifetimes are stored")
         case .closed:
             // An empty list has `NoClosedSocketsNote` in place of this.
             let closed = Self.count(total, "closed socket", "closed sockets")
             count = shown == total ? closed : shown == 0 ? "None of \(closed) match" : "\(shown.formatted()) of \(closed)"
             processes = nil
-            note = ("Last \(Format.timeSpan(ConnectionWatch.closedWindow)), while this page is open", """
-            Sockets are read every \(seconds) s, and only while this page is open, so one that opens and closes between \
-            two reads, or while the page is closed, isn't seen. Closed sockets stay \
+            note = ("Last \(Format.timeSpan(ConnectionWatch.closedWindow)) of observations", """
+            Sockets are read every \(seconds) s while this page is open, or once a minute in the background when enabled. \
+            One that opens and closes between reads, or while not watched, isn't seen. Closed sockets stay \
             \(Format.timeSpan(ConnectionWatch.closedWindow)) after they were last seen, the latest \
             \(ConnectionWatch.keptClosed) at most.\(since)
             """)
@@ -326,8 +340,9 @@ struct ConnectionsView: View {
 
 /// Which sockets the table lists: open now, or seen closing.
 enum ConnectionList: String, CaseIterable {
-    case open = "Open"
+    case open = "Open now"
     case closed = "Closed recently"
+    case history = "History"
 }
 
 /// Under an empty Closed recently list: since when none has been seen
@@ -347,8 +362,8 @@ private struct NoClosedSocketsNote: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .help("""
                 Sockets are read every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page \
-                is open, so one that opens and closes between two reads, or while the page is closed, isn't seen. \
-                Closed sockets stay \(Format.timeSpan(ConnectionWatch.closedWindow)) after they were last seen.
+                is open, or once a minute in the background when enabled. One that opens and closes between reads, \
+                or while not watched, isn't seen. Closed sockets stay \(Format.timeSpan(ConnectionWatch.closedWindow)) after they were last seen.
                 """)
             Button("Show Open Sockets", action: showOpen)
                 .controlSize(.small)

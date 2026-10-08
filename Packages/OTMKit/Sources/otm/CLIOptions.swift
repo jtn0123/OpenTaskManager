@@ -16,6 +16,7 @@ struct Options {
     var reconcile = false
     var extremes: Double?
     var range: String?
+    var since: String?
     var sustained = false
     var benchmarkRepeats = BenchmarkSessionProtocol.repeats
 }
@@ -39,6 +40,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--sizes": options.sizes = true
         case "--schedule": options.schedule = true
         case "--changes": options.changes = true
+        case "--since": options.since = iterator.next()
         case "--range": options.range = iterator.next()
         case "--reconcile": options.reconcile = true
         case "--sustained": options.sustained = true

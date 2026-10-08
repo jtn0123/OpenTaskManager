@@ -191,6 +191,7 @@ struct HistoryView: View {
     @State private var pageScroll = HistoryPageScroll()
     private let store = HistoryRecordingStore.shared
     @State private var points: [HistoryPoint]?
+    @State private var connectionHistoryEnd: Date?
     @State private var domain = Date.now.addingTimeInterval(-HistoryRange.hour.seconds)...Date.now
     /// Seconds each graph point averages.
     @State private var bucket = FlightRecorder.span
@@ -283,6 +284,7 @@ struct HistoryView: View {
             }
         }
         .task(id: LoadKey(range: range, fits: fitsRecording, recording: opened?.id)) {
+            if store.connectionMoment == nil { connectionHistoryEnd = nil }
             if shownRecording != opened?.id {
                 player.pause()
                 scrubber.reset()
@@ -607,7 +609,7 @@ struct HistoryView: View {
 
     /// The range shown of the live recording, and its saved sessions.
     private func loadLive(_ recorder: FlightRecorder) async {
-        let end = Date.now
+        let end = store.connectionMoment.map { min(.now, $0.addingTimeInterval(30 * 60)) } ?? connectionHistoryEnd ?? Date.now
         let start = end.addingTimeInterval(-range.seconds)
         let first = try? await recorder.earliest()
         let span = try? await recorder.recordedSpan(from: start, to: end)
@@ -632,6 +634,15 @@ struct HistoryView: View {
         player.points = loaded
         store.update(sessions)
         openLaunchComparison()
+        if let moment = store.connectionMoment {
+            store.connectionMoment = nil
+            connectionHistoryEnd = end
+            player.pause()
+            scrubber.hover(nil)
+            scrubber.pin(moment)
+            scrubber.selectedEvent = nil
+            scrubber.playhead = nil
+        }
         // A pinned moment or playhead that has slid out of the range goes back to the latest.
         if let pinned = scrubber.pinned, !domain.contains(pinned) { scrubber.pinned = nil }
         if let playhead = scrubber.playhead, !domain.contains(playhead) { player.stop(scrubber) }

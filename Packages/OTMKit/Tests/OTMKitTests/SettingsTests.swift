@@ -49,6 +49,7 @@ struct SettingsTests {
         "cpuRelativeToSystem": .bool(true),
         "sustainedMinutes": .integer(2),
         "captureSpikes": .bool(false),
+        "backgroundConnections": .bool(false),
         "spikesSeen": .date(.distantPast),
         "systemReportFormat": .string("markdown"),
         "graphPalette": .string("standard"),

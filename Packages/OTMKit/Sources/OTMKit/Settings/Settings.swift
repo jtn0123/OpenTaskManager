@@ -131,6 +131,9 @@ public enum Settings {
     public static let sustainedMinutes = SettingKey<Int, Int>(
         "sustainedMinutes", default: 2, meaning: "Length of the next sustained CPU run in minutes."
     )
+    public static let backgroundConnections = SettingKey<Bool, Bool>(
+        "backgroundConnections", default: false, meaning: "Whether sockets are watched once a minute away from Connections."
+    )
     public static let captureSpikes = SettingKey<Bool, Bool>(
         "captureSpikes", default: false, meaning: "Whether spikes are captured automatically."
     )
@@ -269,6 +272,7 @@ public enum Settings {
         cpuRelativeToSystem.descriptor,
         sustainedMinutes.descriptor,
         captureSpikes.descriptor,
+        backgroundConnections.descriptor,
         spikesSeen.descriptor,
         systemReportFormat.descriptor,
         graphPalette.descriptor,

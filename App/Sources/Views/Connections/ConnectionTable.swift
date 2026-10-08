@@ -79,6 +79,7 @@ struct ConnectionTable: View {
                 Button("Copy Remote Endpoint") { row.connection.remote.map(ConnectionActions.copy) }
                     .disabled(row.connection.remote == nil)
                 Divider()
+                Button("Show in History") { HistoryRecordingStore.shared.showConnectionMoment(row.socket.lastSeen) }
                 Button("Show Process") { showProcess(row.pid) }
                     // A closed socket's process may have ended, and its PID gone to another.
                     .disabled(!row.processRunning)

@@ -2,7 +2,7 @@ import Foundation
 
 /// What a socket was doing at one walk: its kind, its TCP state and its
 /// peer. A change in any of them is a step in its observed timeline.
-public struct ConnectionPhase: Sendable, Hashable {
+public struct ConnectionPhase: Sendable, Hashable, Codable {
     public let kind: ConnectionKind
     public let tcpState: TCPState?
     public let remote: Endpoint?
@@ -27,8 +27,8 @@ public struct ConnectionPhase: Sendable, Hashable {
 /// Times are the socket walk's, not the kernel's, which keeps none: the
 /// walk runs every few seconds while the Connections page is open, so a step
 /// happened after the walk before (`after`) and by the one that saw it (`time`).
-public struct ConnectionEvent: Sendable, Hashable {
-    public enum Kind: Sendable, Hashable {
+public struct ConnectionEvent: Sendable, Hashable, Codable {
+    public enum Kind: Sendable, Hashable, Codable {
         /// First seen, doing this.
         case opened(ConnectionPhase)
         /// Seen doing something other than at the walk before.
@@ -81,7 +81,7 @@ public struct ConnectionEvent: Sendable, Hashable {
 
 /// A socket as OpenTaskManager has followed it: when a walk first found
 /// it, when one last did, and what it was seen doing in between.
-public struct ObservedConnection: Sendable, Identifiable {
+public struct ObservedConnection: Sendable, Identifiable, Codable {
     /// Given in the order sockets are found, never reused in a session,
     /// unlike descriptors and PIDs.
     public let id: UInt64
@@ -110,6 +110,38 @@ public struct ObservedConnection: Sendable, Identifiable {
         lastSeen = date
         listeningSince = previous != nil && connection.kind.acceptsInbound ? date : nil
         timeline = [ConnectionEvent(kind: .opened(ConnectionPhase(connection)), time: date, after: previous, isAfterGap: isAfterGap)]
+    }
+
+    /// Uses the same phase transitions for a durable segment that started after this session's first walk.
+    func observing(_ connection: Connection, at time: Date) -> ObservedConnection {
+        var socket = self
+        socket.see(connection, at: time, after: lastSeen, isAfterGap: false)
+        return socket
+    }
+
+    /// Found again after watching stopped: the unwatched stretch is a step, and the first sighting stays.
+    func resumed(_ connection: Connection, at time: Date) -> ObservedConnection {
+        var socket = self
+        socket.closedBy = nil
+        socket.see(connection, at: time, after: lastSeen, isAfterGap: true)
+        return socket
+    }
+
+    /// A closing step even when a large walk overflowed the recently closed list.
+    func ending(at time: Date) -> ObservedConnection {
+        var socket = self
+        socket.close(at: time, isAfterGap: false)
+        return socket
+    }
+
+    /// A fresh observed segment after watching stopped, without claiming an earlier first sighting.
+    func segment(since start: Date) -> ObservedConnection {
+        guard start > firstSeen else { return self }
+        var segment = ObservedConnection(id: id, connection: connection, at: start, after: nil, isAfterGap: false)
+        segment.lastSeen = lastSeen
+        segment.closedBy = closedBy
+        segment.timeline += timeline.filter { $0.time > start }
+        return segment
     }
 
     public var isOpen: Bool { closedBy == nil }
@@ -214,7 +246,7 @@ public struct ConnectionWatch: Sendable {
 
     /// Walks further apart than this have a gap between them: the page was
     /// closed, updates were paused or the Mac slept.
-    public let maximumSpacing: TimeInterval
+    public var maximumSpacing: TimeInterval
 
     /// The sockets the latest walk found, in its order.
     public private(set) var open: [ObservedConnection] = []
