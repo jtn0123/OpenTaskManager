@@ -20,7 +20,7 @@ enum PSReader {
     }
 
     // The parsers walk ps's output byte by byte through a pointer: it's about
-    // 650 lines every tick (and a line per thread every few seconds), and
+    // 650 lines per read (and a line per thread for counts), and
     // splitting it into Substrings cost more than running ps.
 
     static func parse(_ output: String) -> [Int32: Row] {

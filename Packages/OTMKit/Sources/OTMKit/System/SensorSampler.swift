@@ -9,12 +9,18 @@ public actor SensorMonitor {
     private let temperatures = HIDTemperatureReader()
     private let smc: SMCSensorReader?
 
+    private var cadence = SamplingCadence()
+    private var held = SensorSample(temperatures: [], fans: [], rails: [])
+
     public init() {
         smc = SMCConnection().map(SMCSensorReader.init)
     }
 
-    public func sample() -> SensorSample {
-        SensorSample(temperatures: temperatures?.read() ?? [], fans: smc?.fans() ?? [], rails: smc?.rails() ?? [])
+    public func sample(live: Bool = true) -> SensorSample {
+        if cadence.shouldRead(at: ProcessInfo.processInfo.systemUptime, live: live) {
+            held = SensorSample(temperatures: temperatures?.read() ?? [], fans: smc?.fans() ?? [], rails: smc?.rails() ?? [])
+        }
+        return held
     }
 }
 

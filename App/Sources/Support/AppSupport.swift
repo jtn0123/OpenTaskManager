@@ -51,28 +51,18 @@ enum IconCache {
 /// figure, drawn as a template so it follows the menu bar's appearance.
 @MainActor
 enum MenuBarIcon {
-    private static let bars = 14
+    private static let bars = MenuBarDrawing.bars
     private static let barWidth: CGFloat = 2
     private static let gap: CGFloat = 1
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-    /// The last image and what it shows. An idle Mac's bars and figure
-    /// often look the same from one sample to the next, and handing back
-    /// the same image spares the menu bar a redraw.
-    private static var last: Drawn?
+    private static var lastDrawing: MenuBarDrawing?
+    private static var lastImage: NSImage?
 
-    private struct Drawn {
-        let heights: [CGFloat]
-        let text: String
-        let image: NSImage
-    }
-
-    static func image(history: [Double], usage: Double) -> NSImage {
+    static func image(_ drawing: MenuBarDrawing) -> NSImage {
+        if lastDrawing == drawing, let lastImage { return lastImage }
         let height: CGFloat = 16
-        // Bar heights to the half point, a pixel on a Retina menu bar.
-        let heights = history.suffix(bars).map { max(1, (CGFloat(min(max($0, 0), 1)) * (height - 2) * 2).rounded() / 2) }
-        let label = Format.percent(usage)
-        if let last, last.heights == heights, last.text == label { return last.image }
-
+        let heights = drawing.heights.map { CGFloat($0) }
+        let label = drawing.text
         let graphWidth = CGFloat(bars) * (barWidth + gap) - gap
         let text = label as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
@@ -93,7 +83,8 @@ enum MenuBarIcon {
             return true
         }
         image.isTemplate = true
-        last = Drawn(heights: heights, text: label, image: image)
+        lastDrawing = drawing
+        lastImage = image
         return image
     }
 }

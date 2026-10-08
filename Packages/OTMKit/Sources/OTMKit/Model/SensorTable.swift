@@ -9,7 +9,7 @@ public enum SensorTable {
     public static let temperatureScale = 20.0...110.0
 
     /// Every row this tick's readings give, in table order.
-    public static func readings(sensors: SensorSample?, power: PowerSample?, gpus: [GPUSample]) -> [SensorReading] {
+    public static func readings(sensors: SensorSample?, power: PowerSample?, gpus: [GPUSample], ordered: Bool = true) -> [SensorReading] {
         var rows: [SensorReading] = []
         if let sensors {
             appendTemperatures(sensors, to: &rows)
@@ -25,6 +25,8 @@ public enum SensorTable {
         if let sensors {
             appendFans(sensors.fans, to: &rows)
         }
+        // History and ranges use IDs, so only the visible table needs sorting.
+        guard ordered else { return rows }
         // Sorted by group and rank; rows of equal rank keep the order they
         // were added in, which for temperatures is natural label order.
         return rows.enumerated()

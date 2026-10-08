@@ -37,6 +37,22 @@ struct UserUsageTests {
         #expect(!justin.totals.includesResidentMemory)
     }
 
+    @Test func hiddenPageHistoryTotalsMatchTheLiveDisplay() {
+        let processes = [
+            process(10, uid: 501, user: "me", cpu: 30, memory: 100, power: 2, threads: 4),
+            process(11, uid: 501, user: "me", cpu: 20, memory: 200),
+            process(1, uid: 0, user: "root", cpu: 10, memory: 300, restricted: true),
+        ]
+        let hidden = UserUsageBuilder.historyTotals(processes)
+        for user in UserUsageBuilder.build(processes) {
+            #expect(hidden[user.uid]?.cpuPercent == user.totals.cpuPercent)
+            #expect(hidden[user.uid]?.memory == user.totals.memory)
+            #expect(hidden[user.uid]?.powerWatts == nil)
+            #expect(hidden[user.uid]?.threads == 0)
+        }
+        #expect(UserUsageBuilder.historyTotals([]).isEmpty)
+    }
+
     @Test func restrictedUsersHaveNoPowerRatherThanZero() throws {
         let users = UserUsageBuilder.build([
             process(1, uid: 0, user: "root", cpu: 3, memory: 400, restricted: true),

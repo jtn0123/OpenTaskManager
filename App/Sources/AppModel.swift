@@ -196,6 +196,8 @@ final class AppModel {
 
     let monitor = SystemMonitor()
     let sensorMonitor = SensorMonitor()
+    let samplingDemand = SamplingDemandStore()
+    let menuBarIcon = MenuBarIconStore()
     /// The on-disk history behind the History page. Nil if it can't be opened.
     let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
     /// Network traffic by app, read with nettop only while a view shows it.
@@ -223,8 +225,8 @@ final class AppModel {
     /// Temperatures and fans, read alongside each snapshot. Empty in a VM.
     private(set) var sensors: SensorSample?
     private(set) var sensorHistory = SensorHistory()
-    /// The Thermals table: every sensor, clock and power rail, rebuilt each
-    /// tick from what the samplers read (`SensorTable` in OTMKit).
+    /// The Thermals table: rows published only while the detail is on screen.
+    /// Readings and ranges still cover the session and feed History.
     private(set) var sensorRows: [SensorReading] = []
     /// Each row's lowest and highest since launch or the last Reset.
     private(set) var sensorExtremes = SensorExtremes(since: Date())
@@ -280,8 +282,9 @@ final class AppModel {
     /// (launchd's, on Startup).
     private(set) var processIdentityByPID: [Int32: ProcessIdentity] = [:]
     /// Each user's processes summed, for the Users page.
-    private(set) var users: [UserUsage] = []
-    private(set) var userHistory: [UInt32: UserHistory] = [:]
+    let userUsage = UserUsageStore()
+    var users: [UserUsage] { userUsage.users }
+    var userHistory: [UInt32: UserHistory] { userUsage.histories }
     /// Directory lookups by uid, including misses, so each runs once.
     @ObservationIgnored private var accounts: [UInt32: UserAccount?] = [:]
     /// Regular (Dock) apps by PID, for grouping and icons.
@@ -353,7 +356,7 @@ final class AppModel {
         CPUScale(relativeToSystem: cpuRelativeToSystem, logicalCores: topology.logicalCores)
     }
 
-    private var samplingTask: Task<Void, Never>?
+    @ObservationIgnored var samplingTask: Task<Void, Never>?
 
     init() {
         topology = monitor.topology
@@ -373,28 +376,6 @@ final class AppModel {
     }
 
     // MARK: - Sampling
-
-    func start() {
-        guard samplingTask == nil, !isPaused else { return }
-        let interval = updateSpeed.rawValue
-        samplingTask = Task { [weak self, monitor, sensorMonitor] in
-            // Keep a steady cadence (sleep until the next deadline rather than
-            // for a fixed time) so the graphs scroll at an even speed.
-            let clock = ContinuousClock()
-            var deadline = clock.now
-            while !Task.isCancelled {
-                // The temperature sensors are slow to answer, so read them
-                // alongside the snapshot rather than after it.
-                async let readings = sensorMonitor.sample()
-                let snapshot = await monitor.sample()
-                let sensors = await readings
-                guard let self else { return }
-                self.ingest(snapshot, sensors: sensors)
-                deadline = max(deadline.advanced(by: .seconds(interval)), clock.now)
-                try? await Task.sleep(until: deadline, clock: clock)
-            }
-        }
-    }
 
     func stop() {
         samplingTask?.cancel()
@@ -434,28 +415,22 @@ final class AppModel {
         if apps != regularApps { regularApps = apps }
     }
 
-    private func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
+    func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
         // The first sample has no baseline, so its rates are all zero; keep it
         // for the process list but leave it out of the graphs.
         defer { self.snapshot = snapshot }
-        if let sensors = fixture(or: sensors), !sensors.isEmpty {
-            self.sensors = sensors
-            if snapshot.interval > 0 { sensorHistory.append(sensors) }
-        }
+        if let sensors = fixture(or: sensors) { self.sensors = sensors }
+        // A slower sensor read holds its figure, so graphs keep one point per tick.
+        if let held = self.sensors, !held.isEmpty, snapshot.interval > 0 { sensorHistory.append(held) }
         updateSensorTable(snapshot)
         refreshRegularApps()
-        users = UserUsageBuilder.build(snapshot.processes)
+        userUsage.ingest(snapshot.processes, interval: snapshot.interval, live: samplingDemand.contains(.users))
         guard snapshot.interval > 0 else { return }
 
-        var histories: [UInt32: UserHistory] = [:]
-        for user in users {
-            var history = userHistory[user.uid] ?? UserHistory()
-            history.append(user.totals)
-            histories[user.uid] = history
-        }
-        userHistory = histories
-
         cpuHistory.append(snapshot.cpu.usage)
+        if samplingDemand.contains(.menuBarIcon) {
+            menuBarIcon.update(history: cpuHistory, usage: snapshot.cpu.usage, at: ProcessInfo.processInfo.systemUptime)
+        }
         cpuSystemHistory.append(snapshot.cpu.system)
         for (index, usage) in snapshot.cpu.coreUsage.enumerated() where index < coreHistory.count {
             coreHistory[index].append(usage)
@@ -512,7 +487,7 @@ final class AppModel {
             .flatMap(\.children)
         appGroupsUptime = snapshot.uptime
         appendGroupHistories()
-        record(snapshot, sensorsRead: fixture(or: sensors)?.isEmpty == false, appeared: changes.appeared, gone: changes.gone)
+        record(snapshot, sensorsRead: self.sensors?.isEmpty == false, appeared: changes.appeared, gone: changes.gone)
     }
 
     /// Adds each app group's totals to its history and running total, as
@@ -615,10 +590,12 @@ final class AppModel {
     /// table's ranges: a few dozen dictionary updates, so it runs every tick
     /// and the ranges cover the whole session, not just while the page shows.
     private func updateSensorTable(_ snapshot: SystemSnapshot) {
-        let readings = fixtureReadings() ?? SensorTable.readings(sensors: sensors, power: snapshot.power, gpus: snapshot.gpus)
+        let live = samplingDemand.contains(.sensorTable)
+        let readings = fixtureReadings() ?? SensorTable.readings(sensors: sensors, power: snapshot.power,
+                                                               gpus: snapshot.gpus, ordered: live)
         sensorReadings = readings
         sensorExtremes.record(readings, thermalState: snapshot.power.thermalState)
-        sensorRows = sensorExtremes.rows(readings)
+        if live { sensorRows = sensorExtremes.rows(readings) }
     }
 
     /// Whether a debug build's `-sensorFixture` stands in for this Mac's
@@ -656,8 +633,8 @@ final class AppModel {
     }
 
     /// Feeds the flight recorder, which writes a record every few seconds.
-    /// `sensorsRead` is false when this tick didn't read the temperature
-    /// sensors and fans, so their last readings aren't recorded again.
+    /// Held sensors cover the ticks between slow reads too, so each 10 s
+    /// hardware record has temperatures and fans without artificial gaps.
     /// `appeared` and `gone` are the processes started and ended since the
     /// last tick, which alone cost the process history work between records.
     private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool, appeared: [ProcessSample], gone: [ProcessSample]) {

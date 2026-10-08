@@ -86,6 +86,25 @@ private func hardwareRecord(at seconds: Double, fan: Double? = 1_356, clock: Dou
 // MARK: - Picking the series
 
 struct HistoryHardwareSampleTests {
+    @Test func heldSensorsKeepEveryHardwareRecordPopulated() {
+        var cadence = SamplingCadence()
+        var accumulator = HistoryAccumulator(span: 10)
+        var held = readings()
+        var records: [HistoryRecord] = []
+        for second in 1...20 {
+            if cadence.shouldRead(at: Double(second), live: false) { held = readings() }
+            let hardware = HistoryHardwareSample(readings: held, cpu: cpu([0.5, 0.5, 0.5, 0.5]), topology: topology)
+            var values = HistoryValues()
+            values.chipCelsius = 61
+            if let record = accumulator.add(values, hardware: hardware, apps: [], interval: 1, at: date(Double(second))) {
+                records.append(record)
+            }
+        }
+        #expect(records.count == 2)
+        #expect(records.allSatisfy { $0.values.hardware["temperature.cpu"] == 61 && $0.values.hardware["fan.0"] == 1_356 })
+        #expect(records.allSatisfy { $0.values.chipCelsius == 61 })
+    }
+
     @Test func picksAFewSeriesWithStableIDsUnitsAndSources() throws {
         let sample = HistoryHardwareSample(readings: readings(), cpu: cpu([1, 0.5, 0.25, 0.25]), topology: topology)
         #expect(sample.values == [

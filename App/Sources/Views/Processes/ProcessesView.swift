@@ -66,6 +66,7 @@ struct ProcessesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .samplingDemand(.restrictedProcesses)
         .onChange(of: isNarrow) {
             // The split covers the table with an open inspector when the window
             // turns narrow. At launch it can decide that before `-openProcess`'s

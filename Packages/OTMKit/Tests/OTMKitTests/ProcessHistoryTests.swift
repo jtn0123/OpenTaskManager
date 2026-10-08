@@ -174,6 +174,22 @@ struct ProcessHistoryTrackerTests {
         #expect(batch.samples.first { $0.identity.pid == 1 }?.diskRead == nil, "macOS gives no disk figures for it")
     }
 
+    @Test func restrictedCPUStaysContinuousAcrossRecordBoundariesBetweenReads() throws {
+        var tracker = ProcessHistoryTracker(span: 10)
+        var latest = process(1, cpuTime: 100, cpuPercent: 50, restricted: true)
+        for tick in 1...20 {
+            // A cumulative ps counter arrives only every five seconds. The
+            // held rate still covers every tick, including record boundaries.
+            if tick % 5 == 0 { latest.cpuTime += 2.5 }
+            tracker.add([latest], appeared: tick == 1 ? [latest] : [], disappeared: [], interval: 1,
+                        at: date(1_000 + Double(tick)))
+            if tick % 10 == 0 {
+                let batch = tracker.close(at: date(1_000 + Double(tick)), samples: [latest])
+                #expect(try #require(batch.samples.first).cpuPercent == 50)
+            }
+        }
+    }
+
     @Test func handsOnEachLaunchdLabelOnce() {
         var tracker = ProcessHistoryTracker(span: 10)
         let job = process(40)

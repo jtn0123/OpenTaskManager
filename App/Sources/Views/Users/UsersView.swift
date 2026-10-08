@@ -26,6 +26,8 @@ struct UsersView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .samplingDemand(.restrictedProcesses)
+        .samplingDemand(.users)
         .task { await followSessions() }
         .onChange(of: model.users.count, initial: true) {
             openRequestedUser()

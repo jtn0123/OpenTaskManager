@@ -146,6 +146,7 @@ struct ProcessInspectorView: View {
                 }
             }
             .padding(12)
+            .samplingDemand(.restrictedProcesses)
             .task(id: shownTab == .overview ? identity : nil) { await loadDetails() }
             .task(id: shownTab == .files ? identity : nil) { await loadOpenFiles() }
             .onChange(of: identity) { pickedThread = nil }
