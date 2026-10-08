@@ -119,7 +119,7 @@ struct GPUHero: View {
             Stat(label: "Cores", value: "\(cores)")
         }
         if gpu.deviceUtilization == nil {
-            CapabilityNote(label: "Utilization", text: Unavailable.gpuUtilizationShort,
+            CapabilityNote(label: "Utilization", text: "Not reported",
                            detail: Unavailable.gpuUtilizationDetail + " GPU time by app and memory in use are measured.")
         }
     }

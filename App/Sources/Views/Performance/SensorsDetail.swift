@@ -23,7 +23,7 @@ struct SensorsDetail: View {
     var body: some View {
         let thermalState = snapshot.power.thermalState
         VStack(alignment: .leading, spacing: 16) {
-            DeviceHeader(title: "Thermals", subtitle: "Thermal pressure \(thermalState.rawValue)", level: level(thermalState))
+            DeviceHeader(title: "Thermals", subtitle: subtitle(thermalState), level: level(thermalState))
             if let sensors, !sensors.temperatures.isEmpty {
                 temperatures(sensors, thermalState: thermalState)
             } else {
@@ -36,6 +36,12 @@ struct SensorsDetail: View {
             }
             sensorTable(thermalState)
         }
+    }
+
+    /// The thermal pressure, where the level bar gives the hottest die; with
+    /// no temperatures the bar gives the pressure, so this says why.
+    private func subtitle(_ thermalState: ThermalState) -> String {
+        sensors?.hottest(.chip) == nil ? "No temperature sensors reported" : "Thermal pressure \(thermalState.rawValue)"
     }
 
     /// The hottest die on a 0 to 100 °C scale, or, with no temperatures,

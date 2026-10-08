@@ -568,8 +568,8 @@ private struct ResourceText {
             let pressure = snapshot.power.thermalState
             title = "Thermals"
             // With no sensors (a VM), macOS's thermal pressure is all there is.
-            figure = chipTemperature.map { "\($0) chip" } ?? "Pressure \(pressure.rawValue)"
-            detail = fans.isEmpty ? (chipTemperature == nil ? "No sensors" : "Pressure \(pressure.rawValue)")
+            figure = chipTemperature.map { "\($0) chip" } ?? pressure.title
+            detail = fans.isEmpty ? (chipTemperature == nil ? "Thermal pressure" : "Pressure \(pressure.rawValue)")
                 : "Fans " + fans.joined(separator: ", ")
             chip = chipTemperature ?? fans.first ?? pressure.title
         case .benchmarks:
@@ -590,8 +590,8 @@ private struct ResourceText {
                 // place of the load it doesn't report.
                 let memory = gpu?.memoryInUse.map { Self.unbroken(Format.bytes($0)) }
                 chip = memory ?? "—"
-                figure = memory.map { "\($0) memory" } ?? "—"
-                detail = gpu?.tellingName ?? ""
+                figure = memory ?? "—"
+                detail = gpu?.tellingName ?? (memory == nil ? "" : "Memory in use")
                 unreported = gpu == nil ? nil : Unavailable.gpuUtilization
                 help = gpu.map { _ in
                     memory == nil ? Unavailable.gpuUtilizationDetail

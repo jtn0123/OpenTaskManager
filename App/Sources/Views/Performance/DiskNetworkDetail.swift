@@ -61,7 +61,7 @@ struct DiskDetail: View {
             LegendItem(name: "Read", color: Theme.disk, value: Format.bytesPerSecond(disk.readBytesPerSecond)),
             LegendItem(name: "Write (dashed)", color: Theme.diskSecondary, value: Format.bytesPerSecond(disk.writeBytesPerSecond)),
         ]) {
-            DeviceCaption(title: "Activity", trailing: "read solid, write dashed")
+            DeviceCaption(title: "Activity")
         } plot: {
             VStack(alignment: .leading, spacing: 8) {
                 HeroGraphTitle(title: "Active time", trailing: Format.percent(disk.activeFraction))
@@ -195,7 +195,7 @@ struct NetworkDetail: View {
                     LegendItem(name: "Receive", color: Theme.network, value: Format.bitsPerSecond(link.receivedBytesPerSecond)),
                     LegendItem(name: "Send (dashed)", color: Theme.networkSecondary, value: Format.bitsPerSecond(link.sentBytesPerSecond)),
                 ]) {
-                    DeviceCaption(title: "Throughput", trailing: "receive solid, send dashed")
+                    DeviceCaption(title: "Throughput")
                 } plot: {
                     GraphView(series: [
                                   GraphSeries(values: received, color: Theme.network),
