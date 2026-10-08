@@ -407,7 +407,10 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
   "Pages", whatever the page, out of the toolbar's glass so it sits with the
   title, not the live badge) sits before
-  the title, and in a narrow window Pause drops its word to make room; keep
+  the title, and in a narrow window Pause drops its word to make room, as do
+  the pages' own items (`compactToolbar`: Startup's, Apps' and Drivers' read
+  time loses "Read at" to its tooltip, Processes' Columns becomes a submenu
+  of its View menu); keep
   the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
   overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
   nothing, never the toolbar's toggle (`HiddenSidebarFocus`). The detail column
