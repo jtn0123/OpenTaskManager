@@ -164,6 +164,9 @@ struct StartupItemDetail: View {
             facts
             if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
             launches
+            StartupHistorySection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item,
+                                  refreshID: refreshID, jobs: model.launchJobs)
+            StartupFilesSection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item, refreshID: refreshID)
             labelled("Property list", item.plistPath)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

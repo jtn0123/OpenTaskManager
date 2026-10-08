@@ -29,7 +29,8 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// `hardware_series` and kept per record in a compact `hardware` column; 3
 /// the process history (`process_lifetimes`, `process_watches` and
 /// `process_samples`; see FlightRecorderProcesses); 4 its short runs
-/// (`process_kinds`, `process_short_runs`). An older database is
+/// (`process_kinds`, `process_short_runs`); 5 launch job observations
+/// (`launch_job_events`; see FlightRecorderLaunchJobs). An older database is
 /// brought up to date when it opens, and an older build still opens a newer
 /// one: it never reads the tables and columns it doesn't know, and its
 /// records simply have no hardware figures or process history.
@@ -39,7 +40,7 @@ public actor FlightRecorder {
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
     /// The schema this build writes (`user_version`).
-    static let schemaVersion: Int32 = 4
+    static let schemaVersion: Int32 = 5
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -75,6 +76,7 @@ public actor FlightRecorder {
     private let catalogue = HardwareCatalogue()
     /// This run's process history rows (`ProcessHistoryWriter`).
     let processWriter = ProcessHistoryWriter()
+    var launchWriter = LaunchHistoryWriter()
 
     /// Opens the recording at `url`, creating it and its folder if needed.
     public init(url: URL) throws(FlightRecorderError) {
@@ -165,6 +167,7 @@ public actor FlightRecorder {
             unsafe try step(statement)
         }
         if try keepsProcessHistory() { try pruneProcesses(before: date) }
+        try pruneLaunchJobs(before: date)
     }
 
     // MARK: - Reading
@@ -550,6 +553,10 @@ public actor FlightRecorder {
             if version < 4 {
                 // Short runs, counted by kind rather than each given a lifetime.
                 unsafe try execute(shortRunTables, on: handle)
+            }
+            if version < 5 {
+                // Observed launch job transitions, kept independently of recording files.
+                unsafe try execute(launchJobTables, on: handle)
             }
             if version < schemaVersion { unsafe try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
             unsafe try execute("COMMIT", on: handle)

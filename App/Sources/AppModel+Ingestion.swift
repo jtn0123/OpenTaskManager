@@ -247,7 +247,7 @@ extension AppModel {
     /// Whether a debug build's `-sensorFixture` stands in for this Mac's
     /// sensors. Its readings were some other Mac's, so the run records
     /// nothing to History, which it still shows.
-    private var showsSensorFixture: Bool {
+    var showsSensorFixture: Bool {
         #if DEBUG
         sensorFixture != nil
         #else
