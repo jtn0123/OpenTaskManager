@@ -40,3 +40,19 @@ enum BenchmarkContextFeed {
         await BenchmarkContextReader.capture(appVersion: appVersion, cpuLoad: recentLoad())
     }
 }
+
+extension BenchmarkContextFeed {
+    /// Uses only the latest published snapshot; a paused or stale sampler reports unavailable.
+    static func preflightReading(after previous: Date? = nil, now: Date = Date()) -> BenchmarkPreflightReading? {
+        guard let model, !model.isPaused, let sample = model.snapshot, sample.interval > 0,
+              now.timeIntervalSince(sample.timestamp) <= min(model.samplingInterval * 2 + 1, 10) else { return nil }
+        let elapsed = previous.map { sample.timestamp.timeIntervalSince($0) } ?? sample.interval
+        let seconds = elapsed <= max(model.samplingInterval * 2 + 1, 2) ? elapsed : sample.interval
+        let load = BenchmarkCPULoad.recent(model.cpuHistory.values, step: model.samplingInterval, seconds: max(seconds, 0))
+        let power: BenchmarkPowerSource = sample.power.battery.map { $0.isPluggedIn ? .ac : .battery } ?? .ac
+        return BenchmarkPreflightReading(date: sample.timestamp, interval: min(max(seconds, 0), load?.seconds ?? sample.interval),
+                                         cpuBusy: !sample.cpu.coreUsage.isEmpty ? load?.busy : nil,
+                                         memoryPressure: sample.memory.physical > 0 ? sample.memory.pressure : nil,
+                                         thermal: sample.power.thermalState, power: power, lowPowerMode: sample.power.isLowPowerMode)
+    }
+}

@@ -87,6 +87,9 @@ USAGE:
                                  last third, and the thermal state macOS gave
   otm gpubench [--json]          FP32 compute, memory bandwidth and fill rate on
                                  the GPU (Metal), timed by the GPU, about 10 s
+  otm bench guided [cpu|gpu|all] [--repeats N] [--json]
+                               Quiet-state preflight, discarded warm-up and
+                               N measured repeats (default 3), one at a time.
   otm bench [list|compare A B] [--json]
                                  Every saved CPU, GPU, disk, Internet and
                                  sustained result, numbered newest first; compare
@@ -169,7 +172,7 @@ case "gpubench":
     gpuBenchCommand(options)
 
 case "bench":
-    benchCommand(options)
+    await benchCommand(options)
 
 case "captures":
     capturesCommand(options)

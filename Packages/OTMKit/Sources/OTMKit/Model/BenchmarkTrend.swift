@@ -101,7 +101,7 @@ public struct BenchmarkTrend: Sendable, Equatable {
 
     /// `runs` of one test, any order. A `baseline` that isn't among them is ignored.
     public init(runs: [BenchmarkRun], baseline: String? = nil) {
-        let ordered = runs.sorted { $0.date < $1.date }
+        let ordered = BenchmarkRun.groupedSessions(runs).sorted { $0.date < $1.date }
         kind = ordered.first?.kind ?? .cpu
         dates = ordered.map(\.date)
         let base = ordered.first { $0.id == baseline }
@@ -145,6 +145,7 @@ public struct BenchmarkTrend: Sendable, Equatable {
         let parts: [(BenchmarkRun) -> String?] = [
             { $0.kind.versionName.prefix(1).uppercased() + $0.kind.versionName.dropFirst() + " v\($0.workloadVersion)" },
             { $0.build.map { "\($0.title) build" } },
+            { $0.session.map { "Session protocol v\($0.protocolVersion)" } ?? "Individual run" },
             { $0.machine?.name },
             { $0.target?.name },
         ]
@@ -237,7 +238,7 @@ public extension BenchmarkComparison {
     /// the earlier first: the pair a "compare" link picks. Nil when no
     /// earlier run can be compared with the newest.
     static func latestPair(_ runs: [BenchmarkRun]) -> (earlier: BenchmarkRun, later: BenchmarkRun)? {
-        let newestFirst = runs.sorted { $0.date > $1.date }
+        let newestFirst = BenchmarkRun.groupedSessions(runs).sorted { $0.date > $1.date }
         guard let newest = newestFirst.first,
               let earlier = newestFirst.dropFirst().first(where: { refusal($0, newest) == nil }) else { return nil }
         return (earlier, newest)

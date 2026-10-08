@@ -25,6 +25,7 @@ final class CPUBenchmarkStore {
     /// Why the last run failed.
     private(set) var failure: String?
     @ObservationIgnored private let machineKey: String
+    private(set) var completedAt: Date?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Bumped by every start and cancel, so a stopped run's late result is dropped.
     @ObservationIgnored private var generation = 0
@@ -36,7 +37,9 @@ final class CPUBenchmarkStore {
         history = SpeedTestHistory.cpuBenchmark.results(for: key)
     }
 
-    func start() {
+    func start(session: BenchmarkSession? = nil, discard: Bool = false) {
+        guard !BenchmarkWorkspace.shared.guidedRunning || session != nil || discard else { return }
+        completedAt = nil
         guard running == nil, CPUSustainedStore.shared.running == nil else { return }
         generation += 1
         let generation = generation
@@ -56,9 +59,17 @@ final class CPUBenchmarkStore {
                 let context = await BenchmarkContextFeed.capture()
                 if Task.isCancelled { throw .cancelled }
                 var measured = try await CPUBenchmark.measure(workers: workers, appVersion: appVersion, progress: report)
+                if Task.isCancelled { throw .cancelled }
                 measured.context = context.ended()
+                measured.session = session
+                if discard {
+                    self?.completedAt = measured.date
+                    self?.finish(generation)
+                    return
+                }
                 let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.cpuBenchmark.append(result) }.value
+                self?.completedAt = result.date
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 history = (saved ?? [result] + history).filter { $0.historyKey == self.machineKey }
@@ -72,7 +83,6 @@ final class CPUBenchmarkStore {
 
     func cancel() {
         task?.cancel()
-        finish(generation)
     }
 
     /// Returns once the run in progress, if any, has ended, for Run all.

@@ -18,7 +18,14 @@ struct CompactRunsList: View {
                     .toggleStyle(.checkbox)
                     .labelsHidden()
                     .accessibilityLabel("Compare the run of \(BenchmarkLook.when(run.date))")
-                    Text(BenchmarkLook.when(run.date)).fixedSize()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(BenchmarkLook.when(run.date)).fixedSize()
+                        if let session = run.session {
+                            Text("Session · \(session.recordedRepeats ?? 1)/\(session.repeatCount) repeats")
+                                .font(.metadata).foregroundStyle(.secondaryText)
+                        }
+                    }
+                    .help(run.sessionSummary)
                     Text(run.build?.title ?? run.context?.optimized.map { $0 ? "Release" : "Debug" } ?? "—")
                         .foregroundStyle(run.build?.optimized == false ? AnyShapeStyle(BenchmarkLook.debug) : AnyShapeStyle(.secondaryText))
                     if let figure = run.headline.first {
@@ -30,7 +37,7 @@ struct CompactRunsList: View {
                         Text("No figures")
                     }
                 }
-                .help(run.target?.name ?? run.kind.title)
+                .help(run.sessionSummary + " · " + (run.target?.name ?? run.kind.title))
             }
         }
         .font(.tableText)

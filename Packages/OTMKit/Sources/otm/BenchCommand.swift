@@ -7,8 +7,12 @@ import OTMKit
 
 /// `otm bench [list|compare A B] [--json]`. Runs are numbered newest first
 /// across the tests, so `compare` takes two numbers from `list`.
-func benchCommand(_ options: Options) {
-    let runs = BenchmarkLibrary().load()
+func benchCommand(_ options: Options) async {
+    if options.positional.first == "guided" {
+        await benchGuidedCommand(options)
+        return
+    }
+    let runs = BenchmarkRun.groupedSessions(BenchmarkLibrary().load())
     let arguments = options.positional
     switch arguments.first ?? "list" {
     case "list":
@@ -41,7 +45,7 @@ func benchCommand(_ options: Options) {
             }
         }
     default:
-        fail("unknown bench command \(arguments[0]): use list or compare")
+        fail("unknown bench command \(arguments[0]): use list, compare or guided")
     }
 }
 
@@ -61,8 +65,9 @@ func benchList(_ runs: [BenchmarkRun]) -> String {
     for (index, run) in runs.enumerated() {
         // The volume or interface, or the chip without the model ("Apple M5 Pro").
         let on = run.target?.name ?? run.machine.map { $0.name.components(separatedBy: " · ")[0] } ?? "—"
+        let session = run.session.map { " · session \($0.recordedRepeats ?? 1)/\($0.repeatCount), protocol v\($0.protocolVersion)" } ?? ""
         lines.append(pad("\(index + 1)", 4, right: true) + "  " + pad(run.kind.title, 18) + pad(benchDate.string(from: run.date), 18)
-            + pad(run.build?.title.lowercased() ?? "—", 9) + pad(on, 25) + " " + run.headlineSummary)
+            + pad(run.build?.title.lowercased() ?? "—", 9) + pad(on, 25) + " " + run.headlineSummary + session)
     }
     lines += [
         "",

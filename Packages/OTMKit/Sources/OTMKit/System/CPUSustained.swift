@@ -111,6 +111,8 @@ public struct CPUSustainedResult: SpeedTestRecord, Equatable, Identifiable {
     public var windows: [CPUSustainedWindow]
     /// The Mac's state as the run started and ended.
     public var context: BenchmarkContext?
+    /// The guided protocol that measured this repeat; nil in older results.
+    public var session: BenchmarkSession?
 
     public init(date: Date, suiteVersion: Int = CPUSustained.suiteVersion, configuration: CPUSustainedConfiguration, workers: Int,
                 machine: CPUBenchmarkMachine, osVersion: String, appVersion: String, optimized: Bool, thermalStateAtStart: ThermalState,

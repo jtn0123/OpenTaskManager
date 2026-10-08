@@ -3,6 +3,7 @@ import Foundation
 /// Why two runs can't be compared, said plainly. Only runs of the same test,
 /// version, settings, kind of build, Mac and target measure the same thing.
 public enum BenchmarkRefusal: Sendable, Equatable {
+    case differentSessions
     case sameRun
     case differentTests(BenchmarkKind, BenchmarkKind)
     case differentVersions(BenchmarkKind, Int, Int)
@@ -14,6 +15,8 @@ public enum BenchmarkRefusal: Sendable, Equatable {
 
     public var reason: String {
         switch self {
+        case .differentSessions:
+            return "Sessions compare only with sessions of the same supported protocol version and repeat count."
         case .sameRun:
             return "That's the same run twice. Pick two different runs."
         case let .differentTests(baseline, compared) where Set([baseline, compared]) == [.cpu, .sustained]:
@@ -44,6 +47,7 @@ public enum BenchmarkRefusal: Sendable, Equatable {
     /// The reason in a few words, for a line that has room for little else: "different builds".
     public var summary: String {
         switch self {
+        case .differentSessions: "different session protocols"
         case .sameRun: "the same run twice"
         case .differentTests: "different tests"
         case .differentVersions: "different workload versions"
@@ -220,14 +224,26 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     /// refusal rules and caveats already cover: a Mac or a build the runs
     /// record themselves.
     public static func contextWarnings(_ baseline: BenchmarkRun, _ compared: BenchmarkRun) -> [BenchmarkContextWarning] {
-        BenchmarkContext.warnings(earlier: baseline.context, later: compared.context,
-                                  runsRecordBuild: baseline.build != nil && compared.build != nil,
-                                  runsRecordMachine: baseline.machine != nil && compared.machine != nil)
+        let warnings = sessionWarnings(baseline, compared) + BenchmarkContext.warnings(earlier: baseline.context, later: compared.context,
+            runsRecordBuild: baseline.build != nil && compared.build != nil,
+            runsRecordMachine: baseline.machine != nil && compared.machine != nil)
+        // A topic keeps one row even when both the preflight and the run recorded a difference.
+        return warnings.reduce(into: []) { combined, warning in
+            if let index = combined.firstIndex(where: { $0.topic == warning.topic }) {
+                combined[index].text += " " + warning.text
+            } else {
+                combined.append(warning)
+            }
+        }
     }
 
     /// Why `baseline` and `compared` can't be compared, or nil when they can.
     public static func refusal(_ baseline: BenchmarkRun, _ compared: BenchmarkRun) -> BenchmarkRefusal? {
         if baseline.id == compared.id { return .sameRun }
+        if baseline.session != nil || compared.session != nil {
+            guard let one = baseline.session, let other = compared.session, one.supported, other.supported,
+                  one.protocolVersion == other.protocolVersion, one.repeatCount == other.repeatCount else { return .differentSessions }
+        }
         if baseline.kind != compared.kind { return .differentTests(baseline.kind, compared.kind) }
         if baseline.workloadVersion != compared.workloadVersion {
             return .differentVersions(baseline.kind, baseline.workloadVersion, compared.workloadVersion)

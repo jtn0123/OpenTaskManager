@@ -22,6 +22,7 @@ final class NetworkQualityStore {
     /// Why the last run on each interface failed.
     private(set) var failures: [String: String] = [:]
     @ObservationIgnored private var loaded = false
+    private(set) var completedAt: Date?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Bumped by every start and cancel, so a stopped run's late result is dropped.
     @ObservationIgnored private var generation = 0
@@ -40,7 +41,9 @@ final class NetworkQualityStore {
         history.filter { $0.historyKey == interface }
     }
 
-    func start(interface: String) {
+    func start(interface: String, session: BenchmarkSession? = nil, discard: Bool = false) {
+        guard !BenchmarkWorkspace.shared.guidedRunning || session != nil || discard else { return }
+        completedAt = nil
         guard running == nil else { return }
         generation += 1
         let generation = generation
@@ -51,9 +54,17 @@ final class NetworkQualityStore {
                 let context = await BenchmarkContextFeed.capture()
                 if Task.isCancelled { throw .cancelled }
                 var measured = try await NetworkQuality.run(interface: interface)
+                if Task.isCancelled { throw .cancelled }
                 measured.context = context.ended()
+                measured.session = session
+                if discard {
+                    self?.completedAt = measured.date
+                    self?.finish(generation)
+                    return
+                }
                 let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.networkQuality.append(result) }.value
+                self?.completedAt = result.date
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 history = saved ?? [result] + history
@@ -67,7 +78,6 @@ final class NetworkQualityStore {
 
     func cancel() {
         task?.cancel()
-        finish(generation)
     }
 
     /// Returns once the test in progress, if any, has ended, for Run all.
@@ -162,6 +172,7 @@ final class DiskSpeedStore {
     /// The volume behind each target path, for its results.
     private(set) var volumeKeys: [String: String] = [:]
     @ObservationIgnored private var loaded = false
+    private(set) var completedAt: Date?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var handledLaunchArgument = false
@@ -217,7 +228,9 @@ final class DiskSpeedStore {
         }
     }
 
-    func start(disk: String, target: DiskSpeedTarget) {
+    func start(disk: String, target: DiskSpeedTarget, session: BenchmarkSession? = nil, discard: Bool = false) {
+        guard !BenchmarkWorkspace.shared.guidedRunning || session != nil || discard else { return }
+        completedAt = nil
         guard running == nil else { return }
         generation += 1
         let generation = generation
@@ -235,9 +248,17 @@ final class DiskSpeedStore {
                 let context = await BenchmarkContextFeed.capture()
                 if Task.isCancelled { throw .cancelled }
                 var measured = try await DiskSpeedTest.measure(in: target.path, progress: report)
+                if Task.isCancelled { throw .cancelled }
                 measured.context = context.ended()
+                measured.session = session
+                if discard {
+                    self?.completedAt = measured.date
+                    self?.finish(generation)
+                    return
+                }
                 let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.diskSpeed.append(result) }.value
+                self?.completedAt = result.date
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 volumeKeys[target.path] = result.historyKey
@@ -252,7 +273,6 @@ final class DiskSpeedStore {
 
     func cancel() {
         task?.cancel()
-        finish(generation)
     }
 
     /// Returns once the test in progress, if any, has ended, for Run all.

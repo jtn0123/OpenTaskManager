@@ -287,6 +287,7 @@ public struct BenchmarkRun: Sendable, Codable, Equatable, Identifiable {
     /// The Mac's state as the run started and ended (power, heat, load,
     /// memory); nil for a run saved before it was recorded.
     public var context: BenchmarkContext?
+    public var session: BenchmarkSession?
     /// A sustained run's windows, for its chart; nil for the other tests.
     public var sustained: BenchmarkSustainedTrace?
 
@@ -379,6 +380,7 @@ public extension BenchmarkRun {
             conditions: Self.conditions(thermal: result.worstThermalState, lowPower: result.lowPowerMode),
             measurements: measurements, context: result.context
         )
+        session = result.session
     }
 
     init(_ result: GPUBenchmarkResult) {
@@ -410,6 +412,7 @@ public extension BenchmarkRun {
             machine: BenchmarkMachine(key: device.key, name: [device.summary, device.model].compactMap { $0 }.joined(separator: " · ")),
             target: nil, osVersion: result.osVersion, conditions: conditions, measurements: measurements, context: result.context
         )
+        session = result.session
     }
 
     init(_ result: DiskSpeedResult) {
@@ -442,6 +445,7 @@ public extension BenchmarkRun {
             target: BenchmarkTarget(key: result.volume.key, name: result.volume.name, detail: result.folder),
             osVersion: result.context?.osVersion, conditions: conditions, measurements: measurements, context: result.context
         )
+        session = result.session
     }
 
     init(_ result: NetworkQualityResult) {
@@ -467,6 +471,7 @@ public extension BenchmarkRun {
             osVersion: result.toolVersion, conditions: Self.conditions(result.context), measurements: measurements,
             context: result.context
         )
+        session = result.session
     }
 
     private static func timing(warmUp: Double, repeats: Int, seconds: Double) -> BenchmarkSetting {

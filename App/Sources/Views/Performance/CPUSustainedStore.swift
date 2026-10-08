@@ -58,6 +58,7 @@ final class CPUSustainedStore {
     }
 
     func start() {
+        guard !BenchmarkWorkspace.shared.guidedRunning else { return }
         guard canStart else { return }
         let configuration = CPUSustainedConfiguration.standard(minutes: minutes)
         generation += 1
@@ -80,6 +81,7 @@ final class CPUSustainedStore {
                 if Task.isCancelled { throw .cancelled }
                 var measured = try await CPUSustained.measure(configuration: configuration, workers: workers, appVersion: appVersion,
                                                               progress: report)
+                if Task.isCancelled { throw .cancelled }
                 measured.context = context.ended()
                 let result = measured
                 var saved: [CPUSustainedResult]?
@@ -99,7 +101,6 @@ final class CPUSustainedStore {
 
     func cancel() {
         task?.cancel()
-        finish(generation)
     }
 
     private func finish(_ generation: Int) {

@@ -1,3 +1,5 @@
+import OTMKit
+
 struct Options {
     var command = "ps"
     var positional: [String] = []
@@ -14,6 +16,7 @@ struct Options {
     var extremes: Double?
     var range: String?
     var sustained = false
+    var benchmarkRepeats = BenchmarkSessionProtocol.repeats
 }
 
 func parseOptions(_ arguments: [String]) -> Options {
@@ -37,6 +40,11 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--range": options.range = iterator.next()
         case "--reconcile": options.reconcile = true
         case "--sustained": options.sustained = true
+        case "--repeats":
+            guard let count = iterator.next().flatMap(Int.init), BenchmarkSessionProtocol.repeatRange.contains(count) else {
+                fail("--repeats needs a number from 1 to 10")
+            }
+            options.benchmarkRepeats = count
         case "--extremes":
             guard let seconds = iterator.next().flatMap(Double.init), seconds >= 0 else { fail("--extremes needs a number of seconds") }
             options.extremes = seconds

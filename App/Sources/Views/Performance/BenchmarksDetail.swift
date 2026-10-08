@@ -25,6 +25,7 @@ struct BenchmarksDetail: View, Equatable {
 
     /// The pinned strip's height, which a jump clears so its target isn't under it.
     @State private var stripHeight: CGFloat = 0
+    @State private var guidedPresented = false
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.homeVolume == rhs.homeVolume && lhs.homeDisk == rhs.homeDisk && lhs.interface == rhs.interface
@@ -64,7 +65,13 @@ struct BenchmarksDetail: View, Equatable {
                 }
             }
         }
+        .sheet(isPresented: $guidedPresented) {
+            BenchmarkGuidedSheet(targets: places.suiteTargets, initialSelection: LaunchArgument.string("openBenchmarkGuided") ?? "all")
+        }
         .task {
+            #if DEBUG
+            if LaunchArgument.string("openBenchmarkGuided") != nil { guidedPresented = true }
+            #endif
             await DiskSpeedStore.shared.load()
             await NetworkQualityStore.shared.load()
             let runs = Dictionary(uniqueKeysWithValues: BenchmarkKind.allCases.map { ($0, BenchmarkHistories.runs($0)) })
@@ -120,13 +127,15 @@ struct BenchmarkPlaces: Equatable {
 @MainActor
 enum BenchmarkHistories {
     static func runs(_ kind: BenchmarkKind) -> [BenchmarkRun] {
-        switch kind {
+        if let fixture = GuidedBenchmarkFixture.runs(kind) { return BenchmarkRun.groupedSessions(fixture) }
+        let runs: [BenchmarkRun] = switch kind {
         case .cpu: CPUBenchmarkStore.shared.history.map(BenchmarkRun.init)
         case .sustained: CPUSustainedStore.shared.history.map(BenchmarkRun.init)
         case .gpu: GPUBenchmarkStore.shared.history.map(BenchmarkRun.init)
         case .disk: DiskSpeedStore.shared.history.map(BenchmarkRun.init)
         case .network: NetworkQualityStore.shared.history.map(BenchmarkRun.init)
         }
+        return BenchmarkRun.groupedSessions(runs)
     }
 
     static var anyRunning: Bool {
@@ -316,6 +325,7 @@ private struct SectionLink: View {
 /// and Internet tests if ticked, with each step's state. It reads only the
 /// workspace and whether a test is running, not any test's progress.
 private struct SuiteCard: View {
+    @State private var guidedPresented = false
     let places: BenchmarkPlaces
 
     var body: some View {
@@ -334,8 +344,10 @@ private struct SuiteCard: View {
                     Button("Cancel All") { workspace.cancelAll() }
                         .help("Stop the test that's running and skip the rest")
                 } else {
+                    Button("Guided run…") { guidedPresented = true }
+                        .disabled(BenchmarkHistories.anyRunning || GuidedBenchmarkFixture.enabled)
                     Button("Run All") { workspace.runAll(targets: targets) }
-                        .disabled(BenchmarkHistories.anyRunning)
+                        .disabled(BenchmarkHistories.anyRunning || GuidedBenchmarkFixture.enabled)
                         .help(BenchmarkHistories.anyRunning ? "Wait for the test that's running to finish"
                             : "Run the ticked tests one after the other")
                 }
@@ -355,6 +367,9 @@ private struct SuiteCard: View {
             if !workspace.steps.isEmpty {
                 SuiteSteps(steps: workspace.steps, position: workspace.position)
             }
+        }
+        .sheet(isPresented: $guidedPresented) {
+            BenchmarkGuidedSheet(targets: targets, initialSelection: "all")
         }
     }
 
@@ -397,7 +412,9 @@ private struct SuiteSteps: View {
         VStack(alignment: .leading, spacing: 6) {
             Divider()
             if let position, let running = steps.first(where: { $0.state == .running }) {
-                Text("Step \(position.step) of \(position.of): \(running.kind.title)…").font(.body.weight(.medium))
+                Text((BenchmarkWorkspace.shared.passTitle.map { $0 + " · " } ?? "")
+                    + "Step \(position.step) of \(position.of): \(running.kind.title)…")
+                    .font(.body.weight(.medium))
             } else {
                 Text("Last Run all").font(.body.weight(.medium))
             }

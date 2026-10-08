@@ -25,6 +25,7 @@ final class GPUBenchmarkStore {
     private(set) var progress: GPUBenchmarkProgress?
     /// Why the last run failed.
     private(set) var failure: String?
+    private(set) var completedAt: Date?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Bumped by every start and cancel, so a stopped run's late result is dropped.
     @ObservationIgnored private var generation = 0
@@ -37,7 +38,9 @@ final class GPUBenchmarkStore {
         history = device.map { SpeedTestHistory.gpuBenchmark.results(for: $0.key) } ?? []
     }
 
-    func start() {
+    func start(session: BenchmarkSession? = nil, discard: Bool = false) {
+        guard !BenchmarkWorkspace.shared.guidedRunning || session != nil || discard else { return }
+        completedAt = nil
         guard running == nil, let device else { return }
         generation += 1
         let generation = generation
@@ -58,9 +61,17 @@ final class GPUBenchmarkStore {
                 let context = await BenchmarkContextFeed.capture()
                 if Task.isCancelled { throw .cancelled }
                 var measured = try await GPUBenchmark.measure(appVersion: appVersion, progress: report)
+                if Task.isCancelled { throw .cancelled }
                 measured.context = context.ended()
+                measured.session = session
+                if discard {
+                    self?.completedAt = measured.date
+                    self?.finish(generation)
+                    return
+                }
                 let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.gpuBenchmark.append(result) }.value
+                self?.completedAt = result.date
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }
                 history = (saved ?? [result] + history).filter { $0.historyKey == device.key }
@@ -74,7 +85,6 @@ final class GPUBenchmarkStore {
 
     func cancel() {
         task?.cancel()
-        finish(generation)
     }
 
     /// Returns once the run in progress, if any, has ended, for Run all.

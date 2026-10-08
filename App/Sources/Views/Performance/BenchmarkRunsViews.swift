@@ -53,7 +53,7 @@ struct SavedRuns: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Saved runs").font(.body.weight(.semibold))
+                Text("Saved runs and sessions").font(.body.weight(.semibold))
                 Text(hint(picked))
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
@@ -234,6 +234,7 @@ private struct RunRow: View {
     private static func details(_ run: BenchmarkRun) -> String {
         var parts = [run.build.map { "\($0.title) build · \($0.app)" }, run.osVersion, run.target?.detail].compactMap { $0 }
         parts += run.conditions
+        parts.append(run.sessionSummary)
         let started = run.context?.conditionsLine ?? ""
         parts.append(started.isEmpty ? BenchmarkContext.notRecorded : "Started \(started)")
         return parts.joined(separator: " · ")
