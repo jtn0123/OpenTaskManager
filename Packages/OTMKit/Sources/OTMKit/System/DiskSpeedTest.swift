@@ -208,15 +208,36 @@ public enum DiskSpeedError: Error, Equatable, Sendable {
 
 /// Stops a running test from another thread; the test notices between operations.
 public final class DiskSpeedCancellation: Sendable {
-    private let flag = OSAllocatedUnfairLock(initialState: false)
+    private struct State {
+        var cancelled = false
+        var stoppedOperations = 0
+        var stoppedPhase: DiskSpeedPhase?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 
     public func cancel() {
-        flag.withLock { $0 = true }
+        state.withLock { $0.cancelled = true }
     }
 
-    public var isCancelled: Bool { flag.withLock { $0 } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    /// Operations that saw the cancel before starting, and the phase that
+    /// stopped. Tests can distinguish a stop mid-phase from a completed run.
+    var stoppedOperations: Int { state.withLock { $0.stoppedOperations } }
+    var stoppedPhase: DiskSpeedPhase? { state.withLock { $0.stoppedPhase } }
+
+    func stopsOperation(in phase: DiskSpeedPhase) -> Bool {
+        state.withLock { state in
+            if state.cancelled {
+                state.stoppedOperations += 1
+                state.stoppedPhase = phase
+            }
+            return state.cancelled
+        }
+    }
 }
 
 /// Measures a volume through one temporary file: sequential write and read
@@ -301,7 +322,13 @@ public enum DiskSpeedTest {
     /// Swift concurrency thread. Cancelling the calling task stops it.
     public static func measure(in folder: String, configuration: DiskSpeedConfiguration = DiskSpeedConfiguration(),
                                progress: @escaping @Sendable (DiskSpeedProgress) -> Void) async throws(DiskSpeedError) -> DiskSpeedResult {
-        let cancellation = DiskSpeedCancellation()
+        try await measure(in: folder, configuration: configuration, cancellation: DiskSpeedCancellation(), progress: progress)
+    }
+
+    /// `measure`, with the cancellation that cancelling the task sets, so a
+    /// test can see how the run stopped.
+    static func measure(in folder: String, configuration: DiskSpeedConfiguration, cancellation: DiskSpeedCancellation,
+                        progress: @escaping @Sendable (DiskSpeedProgress) -> Void) async throws(DiskSpeedError) -> DiskSpeedResult {
         let outcome: Result<DiskSpeedResult, DiskSpeedError> = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
@@ -427,7 +454,7 @@ private struct SplitMix64 {
         let blocks = Int(settings.fileSize / UInt64(block))
         var nanoseconds: UInt64 = 0
         for index in 0..<blocks {
-            try checkCancelled()
+            try checkCancelled(in: .sequentialWrite)
             let offset = UInt64(index * block)
             unsafe fill(buffer, length: block, at: offset, generation: 0)
             unsafe nanoseconds += try transfer(.sequentialWrite, buffer, length: block, at: offset)
@@ -443,7 +470,7 @@ private struct SplitMix64 {
         let blocks = Int(settings.fileSize / UInt64(block))
         var nanoseconds: UInt64 = 0
         for index in 0..<blocks {
-            try checkCancelled()
+            try checkCancelled(in: .sequentialRead)
             let offset = UInt64(index * block)
             unsafe nanoseconds += try transfer(.sequentialRead, buffer, length: block, at: offset)
             unsafe fill(expected, length: block, at: offset, generation: 0)
@@ -490,8 +517,10 @@ private struct SplitMix64 {
         let slots = slotCount
         var operations = 0
         var nanoseconds: UInt64 = 0
-        while operations < settings.randomOperationLimit, Self.now() - start < limit {
-            try checkCancelled()
+        while operations < settings.randomOperationLimit {
+            // A cancel still stops this phase if the thread was stalled past its time limit.
+            try checkCancelled(in: phase)
+            guard Self.now() - start < limit else { break }
             let slot = random.next() % slots
             nanoseconds += try operation(slot, slot * UInt64(settings.randomBlockSize))
             operations += 1
@@ -552,8 +581,8 @@ private struct SplitMix64 {
 
     // MARK: Bookkeeping
 
-    private func checkCancelled() throws(DiskSpeedError) {
-        if cancellation?.isCancelled == true { throw .cancelled }
+    private func checkCancelled(in phase: DiskSpeedPhase) throws(DiskSpeedError) {
+        if cancellation?.stopsOperation(in: phase) == true { throw .cancelled }
     }
 
     private func progress(_ phase: DiskSpeedPhase, done: Double, bytes: UInt64, nanoseconds: UInt64) {
