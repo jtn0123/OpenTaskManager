@@ -28,7 +28,8 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// core loads, clocks, fans, temperatures, power rails), named once each in
 /// `hardware_series` and kept per record in a compact `hardware` column; 3
 /// the process history (`process_lifetimes`, `process_watches` and
-/// `process_samples`; see FlightRecorderProcesses). An older database is
+/// `process_samples`; see FlightRecorderProcesses); 4 its short runs
+/// (`process_kinds`, `process_short_runs`). An older database is
 /// brought up to date when it opens, and an older build still opens a newer
 /// one: it never reads the tables and columns it doesn't know, and its
 /// records simply have no hardware figures or process history.
@@ -38,7 +39,7 @@ public actor FlightRecorder {
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
     /// The schema this build writes (`user_version`).
-    static let schemaVersion: Int32 = 3
+    static let schemaVersion: Int32 = 4
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -511,6 +512,10 @@ public actor FlightRecorder {
             if version < 3 {
                 // Process lifetimes, the app's runs that watch them, and the figures records keep.
                 try execute(processTables, on: handle)
+            }
+            if version < 4 {
+                // Short runs, counted by kind rather than each given a lifetime.
+                try execute(shortRunTables, on: handle)
             }
             if version < schemaVersion { try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
             try execute("COMMIT", on: handle)

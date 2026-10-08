@@ -89,11 +89,16 @@ Manager OG or any other proprietary task manager.
   `SensorTable`'s rows, null where unread) go in each record's `hardware` blob
   (schema 2, series named once in `hardware_series`) and a file's optional,
   separately versioned `hardware` block, charted under History's folded Hardware
-  section; process history (schema 3, OTMKit's FlightRecorderProcesses): every
-  process seen gets a `process_lifetimes` row by `ProcessIdentity` (name, path,
+  section; process history (schemas 3 and 4, OTMKit's FlightRecorderProcesses):
+  every process seen at a record's end or kept with figures gets a
+  `process_lifetimes` row by `ProcessIdentity` (name, path,
   user, bundle ID, launchd label once Startup has read launchd's list, first and
   last seen, ended), its last sighting moved on through its run's one
-  `process_watches` row, so a record writes only starts and ends;
+  `process_watches` row, so a record writes only starts and ends; one that
+  started and ended within a record with no figures kept is only counted, one
+  row per record and kind (`process_kinds`: name, path, user) in
+  `process_short_runs`, and the app's own such children (ps, nettop,
+  launchctl) not at all;
   `ProcessHistoryTracker` takes each record's average CPU and disk from the
   cumulative counters the sampler already reads (no new reads per tick), and
   `ProcessHistoryKeep` keeps figures only for the 5 largest footprints, busy disk
@@ -101,6 +106,8 @@ Manager OG or any other proprietary task manager.
   never zero, and a stretch without records a gap; History's Processes section
   (`HistoryProcessStore`, `HistoryProcessSection`) searches lifetimes by name,
   path, label or PID and charts one, marked on the rail and in the moment panel,
+  and lists short runs by name or path ("83 short runs between …", over records
+  that follow on, no PIDs, nothing to chart),
   the process inspector's Show History opens it, `-openProcessHistory <query>`
   searches it and picks the latest match, and `otm history processes <query>`
   prints it; recording files carry no process history yet; Compare's figures, `HistoryIntervalStats` and

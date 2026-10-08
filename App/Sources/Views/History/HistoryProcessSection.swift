@@ -7,7 +7,8 @@ import SwiftUI
 /// says when it ran within the range, its average and peak CPU and peak
 /// memory, and whether it still runs; picking one charts its CPU, memory and
 /// disk over the range under the card, marks its lifetime on the rail, and
-/// puts its figures beside the pinned moment's.
+/// puts its figures beside the pinned moment's. Short runs, idle processes
+/// counted by kind rather than kept one by one, list how many and when.
 ///
 /// The search and the picked process's points are read when the query, the
 /// pick, the range or a new graph point asks (`HistoryProcessStore`), never
@@ -112,7 +113,7 @@ struct HistoryProcessSection: View {
                 .help("Clear the search")
             }
             Spacer(minLength: 0)
-            if store.picked == nil, let results = store.results, !results.matches.isEmpty {
+            if store.picked == nil, let results = store.results, !results.entries.isEmpty {
                 Text(count(results))
                     .font(.metadata)
                     .foregroundStyle(.secondaryText)
@@ -121,26 +122,35 @@ struct HistoryProcessSection: View {
         }
     }
 
+    /// "3 found · 83 short runs", "latest 50 shown" when the search hit its limit.
     private func count(_ results: HistoryProcessStore.Results) -> String {
+        var parts: [String] = []
         let found = results.matches.count
-        if found >= HistoryProcessStore.limit { return "latest \(found) shown" }
-        return found == 1 ? "1 found" : "\(found) found"
+        if found > 0 { parts.append(found >= HistoryProcessStore.limit ? "latest \(found) shown" : "\(found) found") }
+        let runs = results.shortRunCount
+        if runs > 0 { parts.append("\(runs) short \(runs == 1 ? "run" : "runs")") }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private func list(_ results: HistoryProcessStore.Results) -> some View {
-        if results.matches.isEmpty {
+        if results.entries.isEmpty {
             note("Nothing matching “\(results.query)” ran while History was recording in this range.")
         } else {
-            let shown = showsAll ? results.matches : Array(results.matches.prefix(Self.listed))
+            let shown = showsAll ? results.entries : Array(results.entries.prefix(Self.listed))
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(shown) { match in
-                    HistoryProcessRow(match: match, domain: domain, isRunning: results.running.contains(match.id)) {
-                        store.pick(match)
+                ForEach(shown) { entry in
+                    switch entry {
+                    case .lifetime(let match):
+                        HistoryProcessRow(match: match, domain: domain, isRunning: results.running.contains(match.id)) {
+                            store.pick(match)
+                        }
+                    case .shortRuns(let runs):
+                        HistoryShortRunsRow(runs: runs)
                     }
                 }
             }
-            if results.matches.count > shown.count {
-                Button("Show all \(results.matches.count)") { showsAll = true }
+            if results.entries.count > shown.count {
+                Button("Show all \(results.entries.count)") { showsAll = true }
                     .buttonStyle(.link)
                     .font(.callout)
             }
@@ -214,6 +224,35 @@ private struct HistoryProcessRow: View {
         let figures = HistoryProcessStyle.figures(match.summary, scale: model.cpuScale)
         guard let span = lifetime.span(within: domain, isRunning: isRunning, now: domain.upperBound) else { return figures }
         return HistoryProcessStyle.ran(lifetime, span: span, domain: domain) + " · " + figures
+    }
+}
+
+/// A kind's short runs found: its name and executable, how many and when.
+/// They have no PIDs or figures, so there's nothing to pick.
+private struct HistoryShortRunsRow: View {
+    let runs: ProcessHistoryShortRuns
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(runs.name).font(.tableText.weight(.semibold)).lineLimit(1)
+                Text("×\(runs.count)").font(.metadata).monospacedDigit().foregroundStyle(.secondaryText).fixedSize()
+                if let path = runs.path {
+                    Text(path).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+            Text(HistoryProcessStyle.shortRuns(runs))
+                .font(.metadata)
+                .foregroundStyle(.secondaryText)
+                .lineLimit(2)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .help(HistoryProcessStyle.shortRunsHelp)
     }
 }
 

@@ -9,6 +9,14 @@ import Foundation
 /// Stretches follow `HistoryAccumulator`'s: a tick longer than a record, or
 /// a gap between ticks, starts afresh, so a record's figures never cover
 /// time nobody watched.
+///
+/// A process that started and ended within one record, its end seen, with
+/// no figures kept (a shell's `sleep`, a build's compiler runs), gets no
+/// lifetime of its own: the record counts it with others of its name,
+/// executable and user (`ProcessHistoryBatch.ShortRuns`). One the app
+/// itself started (its own `ps`, `nettop` or `launchctl` reads) isn't
+/// counted at all. Anything seen at a record's end, or kept with figures,
+/// keeps its lifetime.
 public struct ProcessHistoryTracker: Sendable {
     /// A process's cumulative counters.
     struct Counters: Sendable, Equatable {
@@ -52,9 +60,15 @@ public struct ProcessHistoryTracker: Sendable {
     }
 
     public let span: TimeInterval
+    /// The app's own PID: processes it starts aren't counted as short runs.
+    public let ownPID: Int32
     /// Whether other users' and system processes are sampled. While they
     /// aren't, one gone from the list hasn't necessarily ended.
     public var watchesRestricted = true
+    /// When the record being made began: the last one's end.
+    private var recordStart: Date?
+    /// The app's own children seen starting since the last record.
+    private var children: Set<ProcessIdentity> = []
     /// Each process's counters at the start of the stretch, or at its own
     /// start within it.
     private var baselines: [ProcessIdentity: Counters] = [:]
@@ -67,8 +81,9 @@ public struct ProcessHistoryTracker: Sendable {
     /// The launchd labels handed on already, by process.
     private var labelsNoted: [ProcessIdentity: String] = [:]
 
-    public init(span: TimeInterval = FlightRecorder.span) {
+    public init(span: TimeInterval = FlightRecorder.span, ownPID: Int32 = getpid()) {
         self.span = span
+        self.ownPID = ownPID
     }
 
     /// Notes one tick covering `interval` seconds up to `time`. `samples` is
@@ -80,7 +95,16 @@ public struct ProcessHistoryTracker: Sendable {
                              interval: TimeInterval, at time: Date) {
         let afterGap = interval > span || last.map { time.timeIntervalSince($0) > interval + span } ?? false
         let endTime = afterGap ? last ?? time : time
-        for process in appeared { started.append(ProcessHistoryBatch.Start(process, at: time)) }
+        if afterGap {
+            // One that started before or during the gap may have run all through it: only later ones are short runs.
+            recordStart = time
+        } else if recordStart == nil {
+            recordStart = time.addingTimeInterval(-min(max(interval, 0), span))
+        }
+        for process in appeared {
+            started.append(ProcessHistoryBatch.Start(process, at: time))
+            if process.parentPID == ownPID { children.insert(process.identity) }
+        }
         for process in disappeared {
             ended.append(ProcessHistoryBatch.End(identity: process.identity, time: endTime,
                                                  isEnded: watchesRestricted || !process.isRestricted))
@@ -110,7 +134,8 @@ public struct ProcessHistoryTracker: Sendable {
     /// Ends the record at `time`, once `HistoryAccumulator` has made it:
     /// the figures it keeps (`ProcessHistoryKeep`) from `samples`, the
     /// processes now, and those that ended within it, with the starts, ends
-    /// and new launchd `labels` since the last record.
+    /// and new launchd `labels` since the last record, and the short runs
+    /// counted in their place.
     public mutating func close(at time: Date, samples: [ProcessSample], labels: [ProcessIdentity: String] = [:]) -> ProcessHistoryBatch {
         var figures: [ProcessHistorySample] = []
         if covered > 0, !needsBaselines {
@@ -124,15 +149,22 @@ public struct ProcessHistoryTracker: Sendable {
                 figures.append(figure(process.identity, used: process.used, memory: process.memory, isRestricted: process.isRestricted))
             }
         }
+        let kept = ProcessHistoryKeep.select(figures)
+        let short = shortRuns(kept: kept, since: recordStart ?? time.addingTimeInterval(-span))
         var learned: [ProcessIdentity: String] = [:]
-        for (identity, label) in labels where labelsNoted[identity] != label {
+        for (identity, label) in labels where labelsNoted[identity] != label && !short.identities.contains(identity) {
             learned[identity] = label
             labelsNoted[identity] = label
         }
-        let batch = ProcessHistoryBatch(time: time, started: started, labels: learned, samples: ProcessHistoryKeep.select(figures),
-                                        ended: ended)
+        let batch = ProcessHistoryBatch(
+            time: time, started: short.identities.isEmpty ? started : started.filter { !short.identities.contains($0.identity) },
+            labels: learned, samples: kept,
+            ended: short.identities.isEmpty ? ended : ended.filter { !short.identities.contains($0.identity) }, shortRuns: short.runs
+        )
         started = []
         ended = []
+        children = []
+        recordStart = time
         finished = []
         covered = 0
         if !needsBaselines {
@@ -142,6 +174,34 @@ public struct ProcessHistoryTracker: Sendable {
             baselines = next
         }
         return batch
+    }
+
+    /// The processes that started at or after `since` (the record's start,
+    /// by the kernel's start time) and were seen to end within the record,
+    /// none of them in `kept`, and how many of each kind, the app's own
+    /// children left out of the counts.
+    private func shortRuns(kept: [ProcessHistorySample],
+                           since: Date) -> (identities: Set<ProcessIdentity>, runs: [ProcessHistoryBatch.ShortRuns]) {
+        guard !started.isEmpty, !ended.isEmpty else { return ([], []) }
+        let gone = Set(ended.lazy.filter(\.isEnded).map(\.identity))
+        let keptIdentities = Set(kept.lazy.map(\.identity))
+        var identities = Set<ProcessIdentity>()
+        var counts: [ShortRunKind: Int] = [:]
+        for start in started where gone.contains(start.identity) && !keptIdentities.contains(start.identity) {
+            guard let began = start.identity.startTime, began >= since else { continue }
+            identities.insert(start.identity)
+            if !children.contains(start.identity) {
+                counts[ShortRunKind(name: start.name, path: start.path, user: start.user), default: 0] += 1
+            }
+        }
+        let runs = counts.map { ProcessHistoryBatch.ShortRuns(name: $0.key.name, path: $0.key.path, user: $0.key.user, count: $0.value) }
+        return (identities, runs.sorted { ($0.name, $0.path ?? "", $0.user) < ($1.name, $1.path ?? "", $1.user) })
+    }
+
+    private struct ShortRunKind: Hashable {
+        let name: String
+        let path: String?
+        let user: String
     }
 
     private func figure(_ identity: ProcessIdentity, used: Counters, memory: UInt64, isRestricted: Bool) -> ProcessHistorySample {

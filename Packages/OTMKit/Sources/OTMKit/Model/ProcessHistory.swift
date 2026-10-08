@@ -84,9 +84,10 @@ public struct ProcessHistorySample: Sendable, Equatable, Codable {
     public var diskTotal: Double { (diskRead ?? 0) + (diskWrite ?? 0) }
 }
 
-/// Which processes a record keeps figures for. Every process gets a
-/// lifetime, but figures cost a row each, so a record keeps only the ones
-/// doing something:
+/// Which processes a record keeps figures for. Every process that lives
+/// across a record's end, or whose figures a record keeps, gets a lifetime
+/// (shorter ones are only counted, `ProcessHistoryBatch.ShortRuns`), but
+/// figures cost a row each, so a record keeps only the ones doing something:
 ///
 /// - the `memoryTop` largest footprints, so the biggest apps' memory has
 ///   no holes;
@@ -175,6 +176,23 @@ public struct ProcessHistoryBatch: Sendable, Equatable {
         }
     }
 
+    /// How many processes of one kind (name, executable and user) started
+    /// and ended within the record with no figures kept: counted together
+    /// rather than each given a lifetime (`ProcessHistoryTracker`).
+    public struct ShortRuns: Sendable, Equatable {
+        public let name: String
+        public let path: String?
+        public let user: String
+        public let count: Int
+
+        public init(name: String, path: String?, user: String, count: Int) {
+            self.name = name
+            self.path = path
+            self.user = user
+            self.count = count
+        }
+    }
+
     /// The record's time.
     public var time: Date
     public var started: [Start]
@@ -182,15 +200,44 @@ public struct ProcessHistoryBatch: Sendable, Equatable {
     public var labels: [ProcessIdentity: String]
     public var samples: [ProcessHistorySample]
     public var ended: [End]
+    public var shortRuns: [ShortRuns]
 
     public init(time: Date, started: [Start] = [], labels: [ProcessIdentity: String] = [:], samples: [ProcessHistorySample] = [],
-                ended: [End] = []) {
+                ended: [End] = [], shortRuns: [ShortRuns] = []) {
         self.time = time
         self.started = started
         self.labels = labels
         self.samples = samples
         self.ended = ended
+        self.shortRuns = shortRuns
     }
+}
+
+/// Short runs of one kind a search found (`ProcessHistoryBatch.ShortRuns`),
+/// added up over records that follow on: "sleep, 83 short runs between
+/// 10:02:10 and 10:04:40 AM". They have no PIDs or figures.
+public struct ProcessHistoryShortRuns: Sendable, Equatable, Identifiable, Codable {
+    public let name: String
+    public let path: String?
+    public let user: String
+    public let count: Int
+    /// The records that counted them.
+    public let records: Int
+    /// The start of the first record that counted them and the end of the last: they all ran between.
+    public let from: Date
+    public let to: Date
+
+    public init(name: String, path: String?, user: String, count: Int, records: Int, from: Date, to: Date) {
+        self.name = name
+        self.path = path
+        self.user = user
+        self.count = count
+        self.records = records
+        self.from = from
+        self.to = to
+    }
+
+    public var id: String { [name, path ?? "", user, String(to.timeIntervalSince1970)].joined(separator: "\u{0}") }
 }
 
 /// A process's figures summed up over a stretch. Records where it ran but

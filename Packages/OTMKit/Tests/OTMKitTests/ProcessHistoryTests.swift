@@ -488,7 +488,7 @@ struct FlightRecorderSchemaThreeTests {
         #expect(try await FlightRecorder(reading: url).keepsProcessHistory() == false)
 
         let recorder = try FlightRecorder(url: url)
-        #expect(try await recorder.schemaVersionOnDisk() == 3)
+        #expect(try await recorder.schemaVersionOnDisk() == FlightRecorder.schemaVersion)
         #expect(try await recorder.keepsProcessHistory())
         let old = try #require(try await recorder.records(from: date(0), to: date(2_000)).first)
         #expect(old.values.chipCelsius == 51.5)

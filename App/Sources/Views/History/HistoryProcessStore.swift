@@ -19,6 +19,44 @@ final class HistoryProcessStore {
         let matches: [ProcessHistoryMatch]
         /// Those running now, by lifetime.
         let running: Set<Int64>
+        /// Processes counted rather than kept one by one, by kind over records that follow on.
+        let shortRuns: [ProcessHistoryShortRuns]
+
+        /// A result to list: a lifetime, or a kind's short runs.
+        enum Entry: Identifiable, Equatable {
+            case lifetime(ProcessHistoryMatch)
+            case shortRuns(ProcessHistoryShortRuns)
+
+            var id: String {
+                switch self {
+                case .lifetime(let match): "lifetime \(match.id)"
+                case .shortRuns(let runs): "short \(runs.id)"
+                }
+            }
+        }
+
+        /// Lifetimes and short runs together, latest first: a lifetime by
+        /// its last sighting (now while it runs), short runs by their last record.
+        let entries: [Entry]
+
+        init(query: String, matches: [ProcessHistoryMatch], running: Set<Int64>, shortRuns: [ProcessHistoryShortRuns]) {
+            self.query = query
+            self.matches = matches
+            self.running = running
+            self.shortRuns = shortRuns
+            let lifetimes = matches.map { match in
+                (time: running.contains(match.id) ? Date.distantFuture : match.lifetime.ended ?? match.lifetime.lastSeen,
+                 entry: Entry.lifetime(match))
+            }
+            // Stable: equal times keep lifetimes first, each list in its own order.
+            entries = (lifetimes + shortRuns.map { (time: $0.to, entry: Entry.shortRuns($0)) })
+                .enumerated()
+                .sorted { $0.element.time == $1.element.time ? $0.offset < $1.offset : $0.element.time > $1.element.time }
+                .map(\.element.entry)
+        }
+
+        /// How many short runs were found in all.
+        var shortRunCount: Int { shortRuns.reduce(0) { $0 + $1.count } }
     }
 
     /// The lifetime picked, with its points over the range shown.
@@ -110,9 +148,11 @@ final class HistoryProcessStore {
         }
         let found = (try? await recorder.processLifetimes(matching: text, from: domain.lowerBound, to: domain.upperBound,
                                                           limit: Self.limit)) ?? []
+        let short = (try? await recorder.processShortRuns(matching: text, from: domain.lowerBound, to: domain.upperBound,
+                                                          limit: Self.limit)) ?? []
         guard !Task.isCancelled, text == query else { return }
         let running = Set(found.filter { isRunning($0.lifetime.identity) }.map(\.id))
-        let next = Results(query: text, matches: found, running: running)
+        let next = Results(query: text, matches: found, running: running, shortRuns: short)
         if results != next { results = next }
         switch pending {
         case .identity(let identity):
@@ -232,6 +272,17 @@ enum HistoryProcessStyle {
     static func unbroken(_ figure: String) -> String {
         figure.replacingOccurrences(of: " ", with: "\u{00A0}").replacingOccurrences(of: "/", with: "/\u{2060}")
     }
+
+    /// "83 short runs between 10:02:10 AM and 10:04:40 AM · each under 10 s, idle".
+    static func shortRuns(_ runs: ProcessHistoryShortRuns) -> String {
+        "\(runs.count) short \(runs.count == 1 ? "run" : "runs") between \(clock(runs.from)) and \(clock(runs.to))"
+            + " · each under \(Format.roughDuration(FlightRecorder.span)), idle"
+    }
+
+    /// What short runs are, for tooltips.
+    static let shortRunsHelp = "Processes that started and ended within one \(Format.roughDuration(FlightRecorder.span)) record "
+        + "and stayed under every keep threshold are counted by name, executable and user rather than kept one by one, "
+        + "so they have no PIDs or charts. One seen at a record's end, or busy enough to keep figures, is listed on its own."
 
     /// What "idle, not stored" means, for tooltips.
     static let idleHelp = "Idle, not stored: it ran, but under every keep threshold (CPU under "

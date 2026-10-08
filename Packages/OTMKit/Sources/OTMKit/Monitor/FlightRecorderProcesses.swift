@@ -15,6 +15,10 @@ import SQLite3
 ///   one row per kept process: the record's time in whole seconds, CPU in
 ///   tenths of a percent of one core, footprint in bytes, disk bytes a
 ///   second (null where unread).
+/// - `process_kinds` and `process_short_runs` (schema 4): processes that
+///   started and ended within one record with no figures kept get no
+///   lifetime; a record counts them by kind (name, executable, user; the
+///   path '' where unread), one row per record and kind.
 ///
 /// A record without a process's row while it ran left it out as idle;
 /// a stretch without records wasn't recorded at all, and a record outside
@@ -29,6 +33,12 @@ extension FlightRecorder {
         CREATE UNIQUE INDEX IF NOT EXISTS process_lifetimes_identity ON process_lifetimes (pid, start_time);
         CREATE TABLE IF NOT EXISTS process_samples (lifetime INTEGER NOT NULL, time INTEGER NOT NULL, cpu INTEGER NOT NULL,
             memory INTEGER NOT NULL, disk_read INTEGER, disk_write INTEGER, PRIMARY KEY (lifetime, time)) WITHOUT ROWID;
+        """
+    static let shortRunTables = """
+        CREATE TABLE IF NOT EXISTS process_kinds (id INTEGER PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL DEFAULT '',
+            user_name TEXT NOT NULL DEFAULT '', UNIQUE (name, path, user_name));
+        CREATE TABLE IF NOT EXISTS process_short_runs (kind INTEGER NOT NULL, time INTEGER NOT NULL, count INTEGER NOT NULL,
+            PRIMARY KEY (kind, time)) WITHOUT ROWID;
         """
 
     /// A lifetime's last sighting: its end, or else the later of its own
@@ -55,13 +65,13 @@ extension FlightRecorder {
         }
     }
 
-    /// Deletes process figures before `date`, and the lifetimes and runs
-    /// last seen before it.
+    /// Deletes process figures and short runs before `date`, the lifetimes
+    /// and runs last seen before it, and kinds no short run is left of.
     func pruneProcesses(before date: Date) throws(FlightRecorderError) {
         let cutoff = date.timeIntervalSince1970
         // A lifetime's last figures can come a record after its end; give
         // it a minute so none is left without its lifetime.
-        let statements = [
+        var statements = [
             "DELETE FROM process_samples WHERE lifetime IN (SELECT id FROM process_lifetimes WHERE first_seen < ?1) AND time < ?1",
             """
             DELETE FROM process_lifetimes WHERE id IN (SELECT l.id FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
@@ -69,10 +79,16 @@ extension FlightRecorder {
             """,
             "DELETE FROM process_watches WHERE last < ?1 AND id NOT IN (SELECT watch FROM process_lifetimes WHERE watch IS NOT NULL)",
         ]
+        if try Self.hasTable("process_short_runs", database) {
+            statements += [
+                "DELETE FROM process_short_runs WHERE time < ?1",
+                "DELETE FROM process_kinds WHERE id NOT IN (SELECT kind FROM process_short_runs)",
+            ]
+        }
         for sql in statements {
             let statement = try Self.prepare(sql, on: database)
             defer { sqlite3_finalize(statement) }
-            sqlite3_bind_double(statement, 1, cutoff)
+            if sqlite3_bind_parameter_count(statement) > 0 { sqlite3_bind_double(statement, 1, cutoff) }
             guard sqlite3_step(statement) == SQLITE_DONE else { throw .sqlite(String(cString: sqlite3_errmsg(database))) }
         }
     }
@@ -82,9 +98,56 @@ extension FlightRecorder {
     /// Whether the database has process history tables: false for one an
     /// older build made that this build hasn't opened to write yet.
     public func keepsProcessHistory() throws(FlightRecorderError) -> Bool {
-        let statement = try Self.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'process_samples'", on: database)
+        try Self.hasTable("process_samples", database)
+    }
+
+    static func hasTable(_ name: String, _ handle: OpaquePointer) throws(FlightRecorderError) -> Bool {
+        let statement = try prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", on: handle)
         defer { sqlite3_finalize(statement) }
+        bind(name, to: statement, at: 1)
         return sqlite3_step(statement) == SQLITE_ROW
+    }
+
+    /// The short runs between two dates of processes whose name or
+    /// executable path holds `query` (`ProcessHistorySearch`; they have no
+    /// PIDs, bundles or labels), added up by kind over records that follow
+    /// on, the latest first, `limit` at most.
+    public func processShortRuns(matching query: String, from start: Date, to end: Date,
+                                 limit: Int = 100) throws(FlightRecorderError) -> [ProcessHistoryShortRuns] {
+        guard let query = ProcessHistorySearch.normalized(query), try Self.hasTable("process_short_runs", database) else { return [] }
+        let statement = try Self.prepare("""
+            SELECT k.id, k.name, k.path, k.user_name, s.time, s.count FROM process_kinds k
+            JOIN process_short_runs s ON s.kind = k.id AND s.time >= ?2 AND s.time <= ?3
+            WHERE k.name LIKE ?1 ESCAPE '\\' OR k.path LIKE ?1 ESCAPE '\\'
+            ORDER BY k.id, s.time
+            """, on: database)
+        defer { sqlite3_finalize(statement) }
+        Self.bind(ProcessHistorySearch.likePattern(query), to: statement, at: 1)
+        sqlite3_bind_double(statement, 2, Self.sampleTime(start))
+        sqlite3_bind_double(statement, 3, end.timeIntervalSince1970)
+        // Records follow on a record's length apart, give or take the second they're kept to.
+        let followOn = recordSpan * 1.5 + 1
+        var found: [ProcessHistoryShortRuns] = []
+        var current: (kind: Int64, runs: ProcessHistoryShortRuns)?
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let kind = sqlite3_column_int64(statement, 0)
+            let time = Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+            let count = Int(sqlite3_column_int64(statement, 5))
+            if let open = current, open.kind == kind, time.timeIntervalSince(open.runs.to) <= followOn {
+                let runs = open.runs
+                current = (kind, ProcessHistoryShortRuns(name: runs.name, path: runs.path, user: runs.user, count: runs.count + count,
+                                                         records: runs.records + 1, from: runs.from, to: time))
+                continue
+            }
+            if let open = current { found.append(open.runs) }
+            let path = Self.text(statement, 2) ?? ""
+            current = (kind, ProcessHistoryShortRuns(name: Self.text(statement, 1) ?? "", path: path.isEmpty ? nil : path,
+                                                     user: Self.text(statement, 3) ?? "", count: count, records: 1,
+                                                     from: time.addingTimeInterval(-recordSpan), to: time))
+        }
+        if let open = current { found.append(open.runs) }
+        found.sort { $0.to == $1.to ? $0.name < $1.name : $0.to > $1.to }
+        return Array(found.prefix(max(limit, 0)))
     }
 
     /// The lifetimes seen between two dates whose name, executable path,
@@ -356,6 +419,7 @@ final class ProcessHistoryWriter {
         if !batch.labels.isEmpty { try label(batch.labels, on: handle) }
         if !batch.samples.isEmpty { try keep(batch.samples, at: batch.time, on: handle) }
         if !batch.ended.isEmpty { try end(batch.ended, watch: watch, on: handle) }
+        if !batch.shortRuns.isEmpty { try count(batch.shortRuns, at: batch.time, on: handle) }
         let moved = try FlightRecorder.prepare("UPDATE process_watches SET last = MAX(last, ?) WHERE id = ?", on: handle)
         defer { sqlite3_finalize(moved) }
         sqlite3_bind_double(moved, 1, time)
@@ -455,6 +519,37 @@ final class ProcessHistoryWriter {
             sqlite3_bind_int64(statement, 2, row)
             if !end.isEnded { sqlite3_bind_int64(statement, 3, watch) }
             try Self.step(statement, on: handle)
+        }
+    }
+
+    /// Adds the record's short runs, each kind's row found or made. Kinds
+    /// aren't remembered between records: pruning, here or in another
+    /// copy of the app, may have deleted one since.
+    private func count(_ runs: [ProcessHistoryBatch.ShortRuns], at time: Date, on handle: OpaquePointer) throws(FlightRecorderError) {
+        let kind = try FlightRecorder.prepare("""
+            INSERT INTO process_kinds (name, path, user_name) VALUES (?, ?, ?)
+            ON CONFLICT (name, path, user_name) DO UPDATE SET name = excluded.name RETURNING id
+            """, on: handle)
+        defer { sqlite3_finalize(kind) }
+        // Another copy of the app counting the same second's runs counts the same processes.
+        let counted = try FlightRecorder.prepare("""
+            INSERT INTO process_short_runs (kind, time, count) VALUES (?, ?, ?)
+            ON CONFLICT (kind, time) DO UPDATE SET count = MAX(count, excluded.count)
+            """, on: handle)
+        defer { sqlite3_finalize(counted) }
+        for run in runs {
+            sqlite3_reset(kind)
+            FlightRecorder.bind(run.name, to: kind, at: 1)
+            FlightRecorder.bind(run.path ?? "", to: kind, at: 2)
+            FlightRecorder.bind(run.user, to: kind, at: 3)
+            guard sqlite3_step(kind) == SQLITE_ROW else { throw .sqlite(String(cString: sqlite3_errmsg(handle))) }
+            let id = sqlite3_column_int64(kind, 0)
+            while sqlite3_step(kind) == SQLITE_ROW {}
+            sqlite3_reset(counted)
+            sqlite3_bind_int64(counted, 1, id)
+            sqlite3_bind_int64(counted, 2, Int64(FlightRecorder.sampleTime(time)))
+            sqlite3_bind_int64(counted, 3, Int64(run.count))
+            try Self.step(counted, on: handle)
         }
     }
 
