@@ -345,6 +345,7 @@ final class AppModel {
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
             Task { @MainActor in self?.runningAppsChanged = true }
         }
+        BenchmarkContextFeed.attach(self)
         start()
     }
 

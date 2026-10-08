@@ -11,7 +11,8 @@ import SwiftUI
 /// carry a badge by the title and a line just above them, so they're never
 /// read as this Mac's speed; a release build's carry nothing extra. The
 /// figures come first; what the workloads do and how they're timed fold away
-/// under Methodology.
+/// under Methodology. The sustained run (`CPUSustainedPanel`) follows, its
+/// own section; only one of the two runs goes at a time.
 struct CPUBenchmarkCard: View, Equatable {
     /// Debug builds' figures, in the badge.
     private static let debugColor = BenchmarkLook.debug
@@ -58,6 +59,8 @@ struct CPUBenchmarkCard: View, Equatable {
                     Text(Self.details(latest))
                 }
             }
+            CPUSustainedPanel()
+                .equatable()
         }
         .task { store.handleLaunchArgument() }
     }
@@ -105,8 +108,11 @@ struct CPUBenchmarkCard: View, Equatable {
                 Button("Cancel") { store.cancel() }
                     .help("Stop the benchmark")
             } else {
+                let sustained = CPUSustainedStore.shared.running != nil
                 Button("Run Benchmark") { store.start() }
-                    .help("Measure this Mac's CPU and memory speed for about \(Self.plannedSeconds) s")
+                    .disabled(sustained)
+                    .help(sustained ? "Wait for the sustained run to finish"
+                        : "Measure this Mac's CPU and memory speed for about \(Self.plannedSeconds) s")
             }
         }
     }

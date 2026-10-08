@@ -78,13 +78,19 @@ USAGE:
                                  Integer, floating-point and memory speed on one
                                  worker and on every core, about 20 s; layout
                                  shows the chip's core types, clusters and caches
+  otm cpubench --sustained [2|5] [--json]
+                                 The floating-point workload on every core for 2
+                                 (default) or 5 minutes, timed in 10 s windows:
+                                 the first window, the level it held over the
+                                 last third, and the thermal state macOS gave
   otm gpubench [--json]          FP32 compute, memory bandwidth and fill rate on
                                  the GPU (Metal), timed by the GPU, about 10 s
   otm bench [list|compare A B] [--json]
-                                 Every saved CPU, GPU, disk and Internet result,
-                                 numbered newest first; compare shows each
-                                 figure's change between runs A and B of one
-                                 test, and refuses runs that don't compare
+                                 Every saved CPU, GPU, disk, Internet and
+                                 sustained result, numbered newest first; compare
+                                 shows each figure's change between runs A and B
+                                 of one test, how their starts differed, and
+                                 refuses runs that don't compare
   otm captures [--json]          The spike captures the app kept: what crossed,
                                  when, for how long, and the busiest processes
   otm kill PID [--signal NAME]   NAME: term (default), kill, int, hup, stop, cont
@@ -104,6 +110,7 @@ struct Options {
     var sizes = false
     var changes = false
     var extremes: Double?
+    var sustained = false
 }
 
 func parseOptions(_ arguments: [String]) -> Options {
@@ -124,6 +131,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
         case "--changes": options.changes = true
+        case "--sustained": options.sustained = true
         case "--extremes":
             guard let seconds = iterator.next().flatMap(Double.init), seconds >= 0 else { fail("--extremes needs a number of seconds") }
             options.extremes = seconds
