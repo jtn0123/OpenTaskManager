@@ -224,15 +224,50 @@ struct HistoryRunTests {
         #expect(runs == [0, 0, 0])
         #expect(HistoryPoint.breaks(points, runs: runs).isEmpty)
         #expect(HistoryPoint.runs(points, value: \.systemWatts) == [nil, nil, nil])
-        #expect(HistoryPoint.lone(runs).isEmpty)
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: date(0)...date(20), minimumSpan: 20).isEmpty)
     }
 
-    @Test func findsTheRunsOfOnePoint() {
+    @Test func leavesRunsOfOnePointUnfilled() {
         // A point alone between missing readings, one between a missing reading and a gap, then a run of two.
         let points = points([nil, 1, nil, 2, 3, 4], segments: [0, 0, 0, 0, 1, 1])
         let runs = HistoryPoint.runs(points, value: \.gpu)
         #expect(runs == [nil, 0, nil, 1, 2, 2])
-        #expect(HistoryPoint.lone(runs) == [0, 1])
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: date(0)...date(50), minimumSpan: 1) == [0, 1])
+        // A single reading is a dot.
+        #expect(HistoryPoint.ends(of: [0, 1], in: runs) == [1, 3])
+    }
+
+    @Test func leavesRunsTooShortForTheChartUnfilled() {
+        // Over six hours, a run of two 60-second points fills a sliver a point
+        // or so wide, which reads as a bar up from the axis.
+        let values: [Double?] = [56, 56, nil] + Array(repeating: 40, count: 20)
+        let points = values.enumerated().map { index, value in
+            var figures = HistoryValues()
+            figures.gpu = value
+            return HistoryPoint(time: date(Double(index) * 60), values: figures)
+        }
+        let runs = HistoryPoint.runs(points, value: \.gpu)
+        let domain = date(0)...date(21_600)
+        // Unfilled under six points' worth of the plot, 50 s a point.
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: domain, minimumSpan: 300) == [0])
+        #expect(HistoryPoint.ends(of: [0], in: runs) == [0, 1])
+        // Over the last half hour the same run spans plenty.
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: date(0)...date(1_800), minimumSpan: 30).isEmpty)
+    }
+
+    @Test func measuresARunByWhatTheChartShowsOfIt() {
+        // A run that began before the window shows only its last few seconds,
+        // a sliver at the window's left edge.
+        let points = (0..<10).map { index in
+            var figures = HistoryValues()
+            figures.gpu = index < 7 ? 56 : nil
+            return HistoryPoint(time: date(Double(index) * 10), values: figures)
+        }
+        let runs = HistoryPoint.runs(points, value: \.gpu)
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: date(0)...date(3_600), minimumSpan: 30).isEmpty)
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: date(55)...date(3_655), minimumSpan: 30) == [0])
+        // One wholly outside the window has nothing to fill either.
+        #expect(HistoryPoint.unfilled(points, runs: runs, within: date(100)...date(3_700), minimumSpan: 30) == [0])
     }
 }
 

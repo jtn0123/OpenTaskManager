@@ -128,7 +128,7 @@ struct GraphColorPreview: View {
         var filled = false
     }
 
-    private static let solid = StrokeStyle(lineWidth: 1.75, lineCap: .round, lineJoin: .round)
+    private static let solid = StrokeStyle(lineWidth: 1.75 * GraphEmphasis.traceWidth, lineCap: .round, lineJoin: .round)
     private static let lines = [
         PreviewLine(role: .cpu, values: wave(base: 0.30, swing: 0.16, phase: 0), style: solid, filled: true),
         PreviewLine(role: .memory, values: wave(base: 0.62, swing: 0.05, phase: 1.3), style: solid),
@@ -139,15 +139,17 @@ struct GraphColorPreview: View {
     ]
 
     /// Four lines over the graphs' faint grid: CPU filled, memory solid,
-    /// disk dashed and network dotted.
+    /// disk dashed and network dotted, weighed as the graphs weigh them
+    /// (`GraphEmphasis`).
     private func draw(in context: inout GraphicsContext, size: CGSize, dark: Bool) {
+        let emphasis = palette.emphasis
         let grid = Path { path in
             for fraction in [0.25, 0.5, 0.75] {
                 path.move(to: CGPoint(x: 0, y: size.height * fraction))
                 path.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
             }
         }
-        context.stroke(grid, with: .color((dark ? Color.white : .black).opacity(dark ? 0.065 : 0.11)), lineWidth: 0.5)
+        context.stroke(grid, with: .color((dark ? Color.white : .black).opacity((dark ? 0.065 : 0.11) * emphasis.grid)), lineWidth: 0.5)
         for line in Self.lines {
             let count = CGFloat(line.values.count - 1)
             let points = line.values.enumerated().map { index, value in
@@ -161,10 +163,12 @@ struct GraphColorPreview: View {
                 area.closeSubpath()
                 // Washes keep the bright tone in both appearances, as on the graphs.
                 let wash = shade(palette[line.role], dark: true)
-                context.fill(area, with: .linearGradient(Gradient(colors: [wash.opacity(0.4), wash.opacity(0.02)]),
+                context.fill(area, with: .linearGradient(Gradient(colors: [wash.opacity(0.4 * emphasis.fill), wash.opacity(0.02 * emphasis.fill)]),
                                                          startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
             }
-            context.stroke(trace, with: .color(shade(palette[line.role], dark: dark)), style: line.style)
+            let swatch = palette[line.role]
+            let stroke = dark ? swatch.dark : emphasis.trace(swatch.light)
+            context.stroke(trace, with: .color(Color(nsColor: GraphColors.nsColor(stroke))), style: line.style)
         }
     }
 

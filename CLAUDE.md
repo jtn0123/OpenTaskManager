@@ -437,7 +437,13 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   the view; AppKit views that keep colours compare `GraphColors.shared.revision`
   (see `SensorReadingTable`). "By app" graphs colour apps with
   `Theme.appColors(for:in:)` (`SeriesSlots`), so an app keeps its colour as the
-  ranking changes.
+  ranking changes. Lines outweigh the grid and fills by the palette's
+  `GraphEmphasis` (live graphs, History, the Settings preview): solid traces
+  wider, light-mode traces deeper (`traceShade`; Color-blind friendly and High
+  contrast keep their shades, already at their limits), grid and fills
+  fainter; the unrecorded look keeps its weight. On History a run of readings
+  under about 8 points wide (`HistoryPoint.unfilled`) gets no fill, only its
+  line and end dots, so it never reads as a bar.
 - Secondary text (labels, captions, units, footnotes) takes
   `.foregroundStyle(.secondaryText)` and `.font(.metadata)` (12 pt, the
   floor for anything a reading depends on); explanations meant to be read

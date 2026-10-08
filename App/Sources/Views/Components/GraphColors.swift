@@ -68,6 +68,12 @@ final class GraphColors: Observable, Sendable {
         return resolved.withLock { $0.palette }
     }
 
+    /// How much the lines outweigh the grid and fills, for the palette in use.
+    var emphasis: GraphEmphasis {
+        registrar.access(self, keyPath: \.revision)
+        return resolved.withLock { $0.palette.emphasis }
+    }
+
     /// A role's colour: its light-mode shade in light mode, its tone in dark.
     func color(_ role: Role) -> Color {
         registrar.access(self, keyPath: \.revision)
@@ -159,6 +165,32 @@ final class GraphColors: Observable, Sendable {
 
     static func nsColor(_ rgb: RGB) -> NSColor {
         NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+    }
+}
+
+extension NSColor {
+    /// The shade a graph strokes a trace in, for the current drawing
+    /// appearance: in light mode as deep as the palette's `GraphEmphasis`
+    /// draws its lines, so they outweigh the grid and fills around them; in
+    /// dark mode the colour as it is. Opacity carries over.
+    var traceShade: NSColor {
+        guard NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) != .darkAqua else { return self }
+        let emphasis = GraphColors.shared.emphasis
+        guard emphasis.lightTrace != 1, let srgb = usingColorSpace(.sRGB) else { return self }
+        let trace = emphasis.trace(ColorContrast.RGB(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent))
+        return NSColor(srgbRed: trace.red, green: trace.green, blue: trace.blue, alpha: srgb.alphaComponent)
+    }
+}
+
+extension Color {
+    /// `NSColor.traceShade`, in whichever appearance draws it.
+    var traceShade: Color {
+        let base = NSColor(self)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            var shade = base
+            appearance.performAsCurrentDrawingAppearance { shade = base.traceShade }
+            return shade
+        })
     }
 }
 

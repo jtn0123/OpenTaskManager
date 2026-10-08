@@ -39,7 +39,8 @@ struct GraphView: NSViewRepresentable {
     var capacity: Int?
     var showsGrid = true
     /// A little over the grid's and the unrecorded hatch's, so a low trace
-    /// still stands out from them.
+    /// still stands out from them: a dashed line's width, which a solid
+    /// line's is `GraphEmphasis.traceWidth` times.
     var lineWidth: CGFloat = 1.75
     /// Bloom under each line and a glowing marker on the newest value.
     var glows = false
@@ -320,10 +321,11 @@ final class StreamGraphView: NSView {
         syncSeriesLayers(count: shown.count)
 
         var rescaleAnimations: [(CAShapeLayer, CGPath)] = []
+        let emphasis = GraphColors.shared.emphasis
         // Colours resolve for this view's appearance: the data colours are
         // deeper in light mode, and re-render when it changes.
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            drawGrid(in: plotRect, step: step, configuration: configuration)
+            drawGrid(in: plotRect, step: step, configuration: configuration, emphasis: emphasis)
             drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, step: step, configuration: configuration)
             // Each made once: a stacked band's lower edge is the band below's trace.
             let traces = shown.map { makeTrace($0, ceiling: ceiling, height: plotRect.height) }
@@ -342,7 +344,7 @@ final class StreamGraphView: NSView {
                     rescaleAnimations.append((layers.line, old.line))
                     rescaleAnimations.append((layers.fillMask, old.area))
                 }
-                style(layers, line: line, configuration: configuration, paths: paths)
+                style(layers, line: line, configuration: configuration, emphasis: emphasis, paths: paths)
                 placeHead(layers, line: line, trace: trace, edge: plotRect.maxX, animated: scrolls)
             }
         }
@@ -459,14 +461,16 @@ final class StreamGraphView: NSView {
         }
     }
 
-    /// The line takes the colour's shade for this appearance (deeper in light
-    /// mode); its glow and the area under it keep the bright fill shade.
-    private func style(_ layers: SeriesLayers, line: Line, configuration: Configuration, paths: (line: CGPath, area: CGPath)) {
-        let color = line.color
-        let bright = color.fillShade
+    /// The line takes the colour's trace shade for this appearance (deeper in
+    /// light mode), a solid one wider than the graph's `lineWidth`
+    /// (`GraphEmphasis`); its glow and the area under it keep the bright fill
+    /// shade, the area fainter than the line.
+    private func style(_ layers: SeriesLayers, line: Line, configuration: Configuration, emphasis: GraphEmphasis,
+                       paths: (line: CGPath, area: CGPath)) {
+        let bright = line.color.fillShade
         layers.line.path = paths.line
-        layers.line.strokeColor = color.cgColor
-        layers.line.lineWidth = configuration.lineWidth
+        layers.line.strokeColor = line.color.traceShade.cgColor
+        layers.line.lineWidth = line.dashed ? configuration.lineWidth : configuration.lineWidth * GraphEmphasis.traceWidth
         layers.line.lineDashPattern = line.dashed ? [4, 3] : nil
         layers.line.shadowColor = bright.cgColor
         layers.line.shadowRadius = configuration.glows ? 5 : 0
@@ -477,8 +481,9 @@ final class StreamGraphView: NSView {
         layers.fill.frame = scroller.bounds
         layers.fillMask.frame = layers.fill.bounds
         layers.fillMask.path = paths.area
-        let top: CGFloat = configuration.stacked ? 0.70 : (configuration.glows ? 0.45 : 0.35)
-        let bottom: CGFloat = configuration.stacked ? 0.30 : 0
+        let fade = CGFloat(configuration.stacked ? emphasis.bands : emphasis.fill)
+        let top: CGFloat = (configuration.stacked ? 0.70 : (configuration.glows ? 0.45 : 0.35)) * fade
+        let bottom: CGFloat = configuration.stacked ? 0.30 * fade : 0
         layers.fill.colors = [bright.withAlphaComponent(top).cgColor, bright.withAlphaComponent(bottom).cgColor]
         layers.fill.startPoint = CGPoint(x: 0.5, y: 1)
         layers.fill.endPoint = CGPoint(x: 0.5, y: 0)
@@ -493,7 +498,7 @@ final class StreamGraphView: NSView {
         guard visible, let last = trace.ys.last else { return }
         let bright = line.color.fillShade
         layers.halo.backgroundColor = bright.withAlphaComponent(0.16).cgColor
-        layers.dot.backgroundColor = line.color.cgColor
+        layers.dot.backgroundColor = line.color.traceShade.cgColor
         layers.dot.shadowColor = bright.cgColor
         layers.head.position = CGPoint(x: edge, y: CGFloat(last))
         layers.head.removeAnimation(forKey: "glide")
@@ -516,13 +521,14 @@ final class StreamGraphView: NSView {
     }
 
     /// Runs inside `render`'s appearance block, so the colours resolve for this view.
-    private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration) {
+    private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration, emphasis: GraphEmphasis) {
         grid.isHidden = !configuration.showsGrid
         columns.isHidden = !configuration.showsGrid
         // Light mode needs a firmer grid to hold up on a pale plot. Both stay
-        // faint enough that a trace near the floor isn't lost among them.
+        // faint enough that a trace near the floor isn't lost among them,
+        // fainter still by the palette's emphasis.
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let lineColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.065 : 0.11).cgColor
+        let lineColor = NSColor.labelColor.withAlphaComponent((isDark ? 0.065 : 0.11) * CGFloat(emphasis.grid)).cgColor
         let labelColor = NSColor.secondaryText.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
