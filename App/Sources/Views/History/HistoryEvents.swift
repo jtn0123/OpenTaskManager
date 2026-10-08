@@ -243,7 +243,6 @@ struct HistoryMomentEvents: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .gridCellUnsizedAxes(.horizontal)
                         Text(HistoryReplayLabels.eventOffset(event, at: time, bucket: bucket))
                             .font(.metadata)
                             .foregroundStyle(.secondaryText)

@@ -35,7 +35,7 @@ struct CoreGraphGrid: NSViewRepresentable {
     /// The tiles' runs by core type, in order (`CoreAreaGrid.best`).
     var groups: [Int]
     var top: Double
-    /// The available height, capped by CoreGraphLayout unless Larger Graphs is on.
+    /// The available height, capped by CoreGraphLayout unless "Larger graphs" is on.
     var height: CGFloat
     var kernelColor: Color
     var larger: Bool

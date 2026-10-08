@@ -271,7 +271,7 @@ private struct CPUGraphHeader: View {
                 CPUScalePicker()
             }
             if mode == CPUGraphMode.cores {
-                Toggle("Larger Graphs", isOn: $largerGraphs)
+                Toggle("Larger graphs", isOn: $largerGraphs)
                     .toggleStyle(.checkbox)
                     .font(.metadata)
                     .help("Let each core's graph fill more of the pane; the summary figures follow the grid.")

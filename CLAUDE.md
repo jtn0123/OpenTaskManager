@@ -702,7 +702,7 @@ the thermal state turns fair), so `-openResource benchmarks
   `CoreAreaGrid` in OTMKit, 18 CPUs 6 by 3, core types on rows of their own
   where that costs nothing; `CoreGraphLayout` caps the whole tiles at 130 points
   by default, up to 180 when there is spare height, reserving another 100 points
-  for the remaining summary rows and the toggle. Larger Graphs
+  for the remaining summary rows and the toggle. "Larger graphs"
   (`cpuLargerGraphs` in Settings, off by default) fills the original area
   with the same graph views and no new per-frame work; the CPU and Overview's
   tiles are both drawn in
