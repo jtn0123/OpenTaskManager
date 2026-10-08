@@ -12,6 +12,12 @@ private func endedLifetime(path: String? = "/Applications/Worker.app/Contents/Ma
                     jobLabel: "local.worker", firstSeen: endTime(1), lastSeen: endTime(50), ended: endTime(60))
 }
 
+/// The folder listing spells the temporary folder /private/var/…, the fixtures /var/…:
+/// the same files, compared in their standard spelling.
+private func reportFiles(_ evidence: [ProcessEnding.Evidence]) -> [URL?] {
+    evidence.map { $0.report?.standardizedFileURL }
+}
+
 struct ProcessDiagnosticReportTests {
     private func folder() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("otm-ending-\(UUID().uuidString)")
@@ -45,7 +51,7 @@ struct ProcessDiagnosticReportTests {
         _ = try fixture(in: directory, suffix: "late", at: 181)
         _ = try fixture(in: directory, suffix: "other-path", path: "/tmp/Worker")
         let reports = ProcessDiagnosticReports.read(for: endedLifetime(), in: [directory])
-        #expect(reports.map(\.report) == [crash, jetsam])
+        #expect(reportFiles(reports) == [crash, jetsam].map(\.standardizedFileURL))
         #expect(reports[0].summary.contains("Crash report"))
         #expect(reports[0].summary.contains("EXC_BAD_ACCESS"))
         #expect(reports[0].summary.contains("SIGSEGV"))
@@ -67,7 +73,7 @@ struct ProcessDiagnosticReportTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let padding = String(repeating: "x", count: ProcessDiagnosticReports.byteLimit * 2)
         let report = try fixture(in: directory, suffix: "big", tail: ",\"threads\":[{\"stack\":\"\(padding)\"}]")
-        #expect(ProcessDiagnosticReports.read(for: endedLifetime(), in: [directory]).first?.report == report)
+        #expect(reportFiles(ProcessDiagnosticReports.read(for: endedLifetime(), in: [directory])).first == report.standardizedFileURL)
         try FileManager.default.setAttributes([.modificationDate: endTime(181)], ofItemAtPath: report.path)
         #expect(ProcessDiagnosticReports.read(for: endedLifetime(), in: [directory]).isEmpty)
     }
@@ -102,7 +108,7 @@ struct ProcessDiagnosticReportTests {
         }
         let report = try fixture(in: system, suffix: "system")
         let missing = user.appendingPathComponent("missing")
-        #expect(ProcessDiagnosticReports.read(for: endedLifetime(), in: [user, system, missing]).map(\.report) == [report])
+        #expect(reportFiles(ProcessDiagnosticReports.read(for: endedLifetime(), in: [user, system, missing])) == [report.standardizedFileURL])
     }
 }
 
