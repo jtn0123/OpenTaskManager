@@ -352,7 +352,8 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   count shared memory more than once; disk, GPU and power only where read).
   Its CPU graph is `AppModel.appGroupHistory` in Grouped; Tree keeps no group
   history, so it adds up the current members' own. A member's name selects it
-  in the table, expanding the rows above it. End All and Force Quit All first
+  in the table, expanding the rows above it. End and Force Quit, titled with
+  how many they'd end ("End 2 Processes…", "Force Quit 2…"), first
   list every target by name and PID, fixed when clicked, end the furthest from
   the root first, check each one's identity again just before
   (`ProcessGroupEnding`), and leave others', the system's and this app's

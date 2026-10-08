@@ -226,4 +226,31 @@ struct ProcessGroupTests {
         #expect(result.live == [running], "listed once, though confirmed twice")
         #expect(result.gone == [replaced, ended])
     }
+
+    /// The buttons count what the review would end: your own processes,
+    /// never the app itself or others'.
+    @Test func buttonsSayHowManyTheyEnd() throws {
+        let processes = [
+            process(1, parent: 0, name: "launchd", restricted: true),
+            process(50, parent: 1, name: "shell"),
+            process(51, parent: 50, name: "sudo", restricted: true),
+            process(52, parent: 50, name: "OpenTaskManager"),
+            process(53, parent: 50, name: "make"),
+        ]
+        let group = try #require(ProcessGroup.find(processes[1].identity, in: processes, mode: .tree))
+        let count = group.endingPlan(ownPID: 52).targets.count
+        #expect(ProcessGroupEnding.endTitle(count: count) == "End 2 Processes…")
+        #expect(ProcessGroupEnding.forceQuitTitle(count: count) == "Force Quit 2…")
+        #expect(ProcessGroupEnding.forceQuitAccessibilityLabel(count: count) == "Force Quit 2 Processes")
+
+        #expect(ProcessGroupEnding.endTitle(count: 1) == "End 1 Process…")
+        #expect(ProcessGroupEnding.forceQuitTitle(count: 1) == "Force Quit 1…")
+        #expect(ProcessGroupEnding.forceQuitAccessibilityLabel(count: 1) == "Force Quit 1 Process")
+
+        // launchd's branch ends nothing, and its buttons say no number.
+        let launchd = try #require(ProcessGroup.find(processes[0].identity, in: processes, mode: .tree))
+        let none = launchd.endingPlan(ownPID: 52).targets.count
+        #expect(ProcessGroupEnding.endTitle(count: none) == "End Processes…")
+        #expect(ProcessGroupEnding.forceQuitTitle(count: none) == "Force Quit…")
+    }
 }
