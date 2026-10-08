@@ -90,14 +90,29 @@ struct DiskSpeedTestTests {
     @Test func cancellingTheTaskStopsALongRandomPhase() async throws {
         let folder = try scratchFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
-        let started = Date()
-        let task = Task {
-            try await DiskSpeedTest.measure(in: folder.path, configuration: tiny(seconds: 60, operations: .max)) { _ in }
+        let cancellation = DiskSpeedCancellation()
+        let gate = ProgressGate(holdingAt: 1)
+        let task = Task { () async -> DiskSpeedError? in
+            defer { gate.runEnded() }
+            do throws(DiskSpeedError) {
+                _ = try await DiskSpeedTest.measure(in: folder.path, configuration: tiny(seconds: 60, operations: .max),
+                                                    cancellation: cancellation) { progress in
+                    // The first random write has finished; the next operation must see the cancel.
+                    if progress.phase == .randomWrite { gate.report(fraction: progress.fraction) }
+                }
+                return nil
+            } catch {
+                return error
+            }
         }
-        try await Task.sleep(for: .milliseconds(100))
+        let held = await gate.waitUntilHeld()
         task.cancel()
-        await #expect(throws: DiskSpeedError.cancelled) { try await task.value }
-        #expect(Date().timeIntervalSince(started) < 10)
+        gate.open()
+        #expect(held, "the run reached its random write phase")
+        #expect(await task.value == .cancelled)
+        #expect(cancellation.stoppedOperations == 1, "the next operation sees the cancel")
+        #expect(cancellation.stoppedPhase == .randomWrite, "the random write phase stops before finishing")
+        #expect(gate.reportsAfterHold == 0, "no random write progress after the cancel")
         #expect(try contents(folder).isEmpty)
     }
 

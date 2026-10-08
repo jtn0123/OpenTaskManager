@@ -61,7 +61,9 @@ public struct MountBoundary<Volume: Hashable> {
         let prefix = root.hasSuffix("/") ? root : root + "/"
         let inside = Set(mountPoints.filter { $0.hasPrefix(prefix) && $0.count > prefix.count })
         self.mountPoints = inside
-        deepestMount = inside.map(Self.depth).max() ?? 0
+        var deepest = 0
+        for path in inside { deepest = max(deepest, Self.depth(of: path)) }
+        deepestMount = deepest
     }
 
     /// Path components below `/`: 0 for `/`, 3 for /System/Volumes/Data.
