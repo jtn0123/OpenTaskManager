@@ -80,6 +80,12 @@ public enum Settings {
     public static let historyFitsRecording = SettingKey<Bool, Bool>(
         "historyFitsRecording", default: false, meaning: "Whether History fits the full opened recording."
     )
+    public static let storageSchedules = SettingKey<DiskScanSchedules, String>(
+        "storageSchedules", default: DiskScanSchedules(), meaning: "Opt-in Storage scans while the app is running."
+    )
+    public static let storageScheduleNotifications = SettingKey<Bool, Bool>(
+        "storageScheduleNotifications", default: false, meaning: "Notify when a scheduled scan finds big growth."
+    )
     public static let storageChangesOnly = SettingKey<Bool, Bool>(
         "storageChangesOnly", default: true, meaning: "Whether Storage lists only changed entries in Changes mode."
     )
@@ -246,6 +252,8 @@ public enum Settings {
         historyRange.descriptor,
         historyFitsRecording.descriptor,
         storageChangesOnly.descriptor,
+        storageSchedules.descriptor,
+        storageScheduleNotifications.descriptor,
         processViewMode.descriptor,
         processSortKey.descriptor,
         processSortAscending.descriptor,

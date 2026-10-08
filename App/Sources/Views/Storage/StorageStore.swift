@@ -100,23 +100,29 @@ enum StorageArchive {
         let earlier: [DiskScanSummary]
         /// This scan against the newest earlier one.
         let comparison: DiskScanComparison?
+        let saveFailure: String?
     }
 
-    static func save(_ usage: DiskUsage, request: DiskScanRequest) -> Saved {
-        let summary = DiskScanSummary(usage, scope: DiskScanScope(usage, request: request))
+    static func save(_ usage: DiskUsage, request: DiskScanRequest, scheduled: DiskScanScheduledOrigin? = nil) -> Saved {
+        let summary = DiskScanSummary(usage, scope: DiskScanScope(usage, request: request), scheduled: scheduled)
         let history = DiskScanHistory()
         // Read before saving: the save prunes this scope down to its last scans.
         let earlier = Array(history.summaries(of: summary.scope).filter { $0.scannedAt < summary.scannedAt }
             .prefix(DiskScanHistory.keptPerScope - 1))
-        // Not saving only costs the next scan its comparison.
-        _ = try? history.save(summary)
-        return Saved(summary: summary, earlier: earlier, comparison: earlier.first.map { DiskScanComparison(earlier: $0, later: summary) })
+        var saveFailure: String?
+        do {
+            try history.save(summary)
+        } catch {
+            saveFailure = "Could not save scan: \(error.localizedDescription)"
+        }
+        return Saved(summary: summary, earlier: earlier,
+                     comparison: earlier.first.map { DiskScanComparison(earlier: $0, later: summary) }, saveFailure: saveFailure)
     }
 }
 
 /// The Storage page's state, kept for the whole session so a scan survives
-/// switching pages. Nothing scans until asked: a scan starts from the Scan
-/// button or a scope pick, runs on its own thread, and reports progress at
+/// switching pages. Manual and opt-in automatic scans share one walk and
+/// archive, run on their own thread, and report progress at
 /// most four times a second.
 @Observable
 @MainActor
@@ -135,6 +141,9 @@ final class StorageStore {
     private(set) var summary: DiskScanSummary?
     /// The earlier saved scans of `result`'s scope, newest first.
     private(set) var history: [DiskScanSummary] = []
+    /// All saved choices, including scans newer than a reopened summary.
+    var savedScans: [DiskScanSummary] = []
+    var showingSavedScan = false
     /// `result` against the earlier scan picked, the newest by default.
     private(set) var comparison: DiskScanComparison?
     /// How `result` relates to its volume: read once per scan, off the main actor.
@@ -175,8 +184,8 @@ final class StorageStore {
         if read != volumes { volumes = read }
     }
 
-    func scan(_ scope: StorageScope) {
-        task?.cancel()
+    func scan(_ scope: StorageScope, scheduled: DiskScanSchedule? = nil) {
+        guard !isScanning else { return }
         generation += 1
         let generation = generation
         self.scope = scope
@@ -187,7 +196,8 @@ final class StorageStore {
         readingCleanup = false
         scanning = scope
         progress = nil
-        let request = scope.request
+        var request = scope.request
+        request.background = scheduled != nil
         let report: @Sendable (DiskScanProgress) -> Void = { [weak self] progress in
             let store = self
             Task { @MainActor in
@@ -195,10 +205,25 @@ final class StorageStore {
                 store.progress = progress
             }
         }
+        let requestToScan = request
         task = Task { [weak self] in
+            let request = requestToScan
+            var archived: StorageArchive.Saved?
+            defer {
+                if let self, self.generation == generation {
+                    self.scanning = nil
+                    self.progress = nil
+                    if let scheduled {
+                        StorageScheduler.shared.completed(scheduled, saved: archived, cancelled: Task.isCancelled)
+                    } else {
+                        StorageScheduler.shared.scanEnded()
+                    }
+                }
+            }
             let usage = try? await DiskUsageScanner.scan(request, progress: report)
             guard let self, self.generation == generation else { return }
             if let usage {
+                showingSavedScan = false
                 result = StorageResult(scope: scope, usage: usage)
                 summary = nil
                 history = []
@@ -207,9 +232,8 @@ final class StorageStore {
                 if let path = requestedFolder, let item = usage.item(atPath: path), item.isFolder { folder = item.id }
                 requestedFolder = nil
             }
-            scanning = nil
-            progress = nil
             guard let usage else { return }
+            var opensCleanup = false
             if !requestedCleanup.isEmpty {
                 let paths = requestedCleanup
                 requestedCleanup = []
@@ -221,15 +245,25 @@ final class StorageStore {
                 }.value
                 guard self.generation == generation else { return }
                 for path in resolved { addToCleanup(path) }
-                reviewCleanup()
+                opensCleanup = true
             }
             readReconciliation(of: usage, request: request)
-            // Saved once per scan, off the main actor; the results show meanwhile.
-            let saved = await Task.detached(priority: .utility) { StorageArchive.save(usage, request: request) }.value
+            // Keep the slot until saving ends, so another scan cannot race history pruning.
+            let origin = scheduled.map { DiskScanScheduledOrigin(cadence: $0.cadence) }
+            let saved = await Task.detached(priority: .utility) {
+                StorageArchive.save(usage, request: request, scheduled: origin)
+            }.value
+            archived = saved
             guard self.generation == generation else { return }
             summary = saved.summary
             history = saved.earlier
+            savedScans = [saved.summary] + saved.earlier
             comparison = saved.comparison
+            if opensCleanup {
+                scanning = nil
+                progress = nil
+                reviewCleanup()
+            }
         }
     }
 
@@ -258,10 +292,26 @@ final class StorageStore {
         }
     }
 
+    func applySavedScan(_ scan: DiskScanSummary, scope: StorageScope) {
+        self.scope = scope
+        showingSavedScan = true
+        result = StorageResult(scope: scope, usage: scan.boundedUsage())
+        summary = scan
+        history = savedScans.filter { $0.scannedAt < scan.scannedAt }
+        comparison = history.first.map { DiskScanComparison(earlier: $0, later: scan) }
+        folder = 0
+        reconciliation = nil
+        readingReconciliation = false
+        cleanupSelection = []
+        cleanupAnchor = nil
+        cleanupReview = nil
+    }
+
     /// Deletes the saved scans of the current scan's scope, this one included.
     func forgetSavedScans() {
         guard let scope = summary?.scope else { return }
         history = []
+        savedScans = []
         comparison = nil
         Task.detached(priority: .utility) { try? DiskScanHistory().forget(scope) }
     }
@@ -272,10 +322,8 @@ final class StorageStore {
 
     func stop() {
         task?.cancel()
-        task = nil
-        generation += 1
-        scanning = nil
-        progress = nil
+        // Keep the scan occupied until its thread and archive have stopped.
+        // A new scan must never overlap a cancelled walk.
     }
 
     /// Picks a folder with the open panel, then scans it.
@@ -307,6 +355,10 @@ final class StorageStore {
     func handleLaunchArguments() {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
+        if let path = LaunchArgument.string("openStorageSchedule") {
+            StorageScheduler.shared.editing = StorageScope.resolve(path, volumes: volumes)
+            return
+        }
         if LaunchArgument.string("openStorageReconcile") == "YES" { showsReconciliation = true }
         switch LaunchArgument.string("openStorageList") {
         case "largest": list = .largest

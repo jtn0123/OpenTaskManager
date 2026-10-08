@@ -11,6 +11,7 @@ struct Options {
     var signal = "term"
     var depth = 1
     var sizes = false
+    var schedule = false
     var changes = false
     var reconcile = false
     var extremes: Double?
@@ -36,6 +37,7 @@ func parseOptions(_ arguments: [String]) -> Options {
         case "--json": options.json = true
         case "-a", "--all": options.all = true
         case "--sizes": options.sizes = true
+        case "--schedule": options.schedule = true
         case "--changes": options.changes = true
         case "--range": options.range = iterator.next()
         case "--reconcile": options.reconcile = true

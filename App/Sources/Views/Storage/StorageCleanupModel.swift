@@ -46,7 +46,7 @@ private struct WorkspaceRecycler: StorageCleanupRecycler {
 extension StorageStore {
     /// A pick uses the scan's metadata, never metadata first read after selection.
     func cleanupPick(_ path: String) -> StorageCleanupPick? {
-        guard let usage = result?.usage else { return nil }
+        guard !showingSavedScan, let usage = result?.usage else { return nil }
         if let file = usage.largestFiles.first(where: { $0.path == path }) {
             return StorageCleanupPick(path: path, identity: file.identity, allocated: file.allocatedSize, logical: file.logicalSize,
                                       modified: file.modified, scannedAt: usage.finishedAt, isFolder: file.isPackage)

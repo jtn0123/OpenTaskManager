@@ -7,7 +7,7 @@ import SwiftUI
 /// open folder by folder, a ranked list beside it, the largest files and the
 /// space by category.
 ///
-/// Nothing is read until asked (the Scan button or a scope pick), the page
+/// Manual scans start from Scan or a scope pick; automatic scans are opt-in. The page
 /// reads nothing from `AppModel`, and the last scan is kept for the session,
 /// so the page costs nothing while it sits open.
 struct StorageView: View {
@@ -50,6 +50,11 @@ struct StorageView: View {
         .sheet(item: Binding(get: { store.cleanupReview }, set: { store.cleanupReview = $0 })) { model in
             StorageCleanupSheet(model: model, store: store)
         }
+        .sheet(item: Binding(get: { StorageScheduler.shared.editing }, set: { StorageScheduler.shared.editing = $0 })) { scope in
+            StorageScheduleSheet(scope: scope)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) { StorageSavedScanPicker(store: store) }
+        .safeAreaInset(edge: .bottom, spacing: 0) { StorageScheduleStatus() }
         .toolbar {
             ToolbarItem {
                 if !store.cleanupSelection.isEmpty {
@@ -109,13 +114,17 @@ private struct ScopeMenu: View {
                 } label: {
                     Label("\(scope.title) — \(scope.subtitle)", systemImage: scope.symbol)
                 }
+                .disabled(store.isScanning)
             }
+            Divider()
+            Button("Scan This Automatically…") { StorageScheduler.shared.editing = store.scope }
             Divider()
             Button {
                 store.chooseFolder()
             } label: {
                 Label("Choose Folder…", systemImage: "folder.badge.plus")
             }
+            .disabled(store.isScanning)
         } label: {
             Label(store.scope.title, systemImage: store.scope.symbol)
         }
@@ -631,8 +640,10 @@ private struct EmptyFolder: View {
             ContentUnavailableView {
                 Label("Only the total was kept", systemImage: "square.dashed")
             } description: {
-                Text("To keep memory down on a big scan, folders under \(Format.bytes(usage.detailThreshold)) "
-                    + "keep their size but not their contents.")
+                Text(store.showingSavedScan
+                     ? "Saved summaries keep only the largest folders. Scan this folder by hand to see its full contents."
+                     : "To keep memory down on a big scan, folders under \(Format.bytes(usage.detailThreshold)) "
+                        + "keep their size but not their contents.")
             } actions: {
                 Button("Scan This Folder") { store.scan(.folder(URL(fileURLWithPath: usage.path(of: folder.id), isDirectory: true))) }
             }

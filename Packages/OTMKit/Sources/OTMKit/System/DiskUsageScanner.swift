@@ -16,6 +16,8 @@ public struct DiskScanRequest: Sendable {
     /// folders keep their totals but drop their contents, so memory stays
     /// bounded however many files the disk holds.
     public var nodeBudget = 200_000
+    /// Manual scans keep their usual priority; automatic scans yield to foreground work.
+    public var background = false
     public var rules = DiskCategoryRules()
     /// How to classify the scanned folder's contents. Nil works it out from
     /// the folder's path, so scanning `~/Library/Caches` counts as caches.
@@ -75,7 +77,7 @@ public enum DiskUsageScanner {
                     }
                 }
                 thread.name = "OpenTaskManager disk scan"
-                thread.qualityOfService = .userInitiated
+                thread.qualityOfService = request.background ? .utility : .userInitiated
                 thread.start()
             }
         } onCancel: {
@@ -278,6 +280,7 @@ private final class DiskScan {
     }
 
     func run(isCancelled: () -> Bool, progress: (DiskScanProgress) -> Void) -> DiskUsage? {
+        if request.background && DiskScanScheduleSafety.refusal(path: rootPath, home: NSHomeDirectory()) != nil { return nil }
         let started = Date()
         let root = URL(fileURLWithPath: rootPath, isDirectory: true)
         let rootValues = try? root.resourceValues(forKeys: Self.rootKeys)
@@ -336,6 +339,14 @@ private final class DiskScan {
     // MARK: - Walking
 
     private func visit(_ url: URL, level: Int, enumerator: FileManager.DirectoryEnumerator) {
+        if request.background && DiskScanScheduleSafety.refusal(path: url.path, home: NSHomeDirectory()) != nil {
+            // Refuse a protected descendant before asking the enumerator to enter it.
+            enumerator.skipDescendants()
+            let errors = ErrorLog()
+            errors.pending.append(url)
+            recordErrors(errors)
+            return
+        }
         guard let values = try? url.resourceValues(forKeys: Self.keySet) else {
             itemCount += 1
             stack[stack.count - 1].items += 1

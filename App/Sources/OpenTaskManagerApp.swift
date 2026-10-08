@@ -474,6 +474,7 @@ struct SettingsView: View {
                 }
             }
             SpikeCaptureSettings()
+            StorageScheduleSettings()
             Section("Access") {
                 Toggle("Show in menu bar", isOn: $showMenuBarExtra)
                 Toggle("Open with ⌃⇧⎋ from anywhere", isOn: $globalHotKeyEnabled)

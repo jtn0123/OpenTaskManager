@@ -31,6 +31,8 @@ struct SettingsTests {
         "groupMemberSort": .string("cpu"),
         "historyRange": .integer(3_600),
         "historyFitsRecording": .bool(false),
+        "storageSchedules": .string("[]"),
+        "storageScheduleNotifications": .bool(false),
         "storageChangesOnly": .bool(true),
         "processViewMode": .string("grouped"),
         "processSortKey": .string("cpu"),
@@ -136,6 +138,22 @@ struct SettingsTests {
             checkNative(Settings.spikesSeen, sample: Date(timeIntervalSince1970: 1_700_000_000), in: defaults)
             checkNative(Settings.benchmarkComparePicks, sample: ["cpu": ["cpu-1", "cpu-2"]], in: defaults)
             checkNative(Settings.benchmarkTrendBaselines, sample: ["gpu": "gpu-3"], in: defaults)
+        }
+    }
+
+    @Test func schedulesUseCodableStringsAndDefaultToNone() throws {
+        try withDefaults { defaults in
+            let schedule = DiskScanSchedule(path: "/Library", cadence: .weekly, now: Date(timeIntervalSince1970: 1_800_000_000))
+            let list = DiskScanSchedules([schedule])
+            #expect(Settings.storageSchedules.get(in: defaults).entries.isEmpty)
+            Settings.storageSchedules.set(list, in: defaults)
+            #expect(defaults.string(forKey: "storageSchedules") == list.rawValue)
+            #expect(Settings.storageSchedules.get(in: defaults) == list)
+            defaults.set("broken", forKey: "storageSchedules")
+            #expect(Settings.storageSchedules.get(in: defaults).entries.isEmpty)
+            Settings.storageSchedules.remove(in: defaults)
+            #expect(Settings.storageSchedules.get(in: defaults).entries.isEmpty)
+            #expect(!Settings.storageScheduleNotifications.get(in: defaults))
         }
     }
 

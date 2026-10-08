@@ -378,7 +378,7 @@ private struct BaselineMenu: View {
         Menu {
             Picker("Compare With", selection: selection) {
                 ForEach(store.history, id: \.scannedAt) { earlier in
-                    Text("\(StorageChangeStyle.when(earlier.scannedAt)) — \(Format.bytes(earlier.allocatedSize))").tag(earlier.scannedAt)
+                    StorageScanChoice(scan: earlier).tag(earlier.scannedAt)
                 }
             }
             .pickerStyle(.inline)

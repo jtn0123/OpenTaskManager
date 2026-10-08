@@ -200,6 +200,7 @@ func diskChangesSummary(_ comparison: DiskScanComparison, count: Int) -> String 
 }
 
 func diskUsageCommand(_ options: Options) {
+    if options.schedule { diskScheduleCommand(options); return }
     let path = ((options.positional.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
     // FileManager borrows this local directory flag only until the call returns.
     var isFolder: ObjCBool = false
