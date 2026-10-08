@@ -1,5 +1,6 @@
 included:
   - App/Sources
+  - App/Tests
   - Packages/OTMKit/Sources
   - Packages/OTMKit/Tests
   - scripts
