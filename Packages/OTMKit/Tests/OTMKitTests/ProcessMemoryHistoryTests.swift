@@ -170,7 +170,7 @@ struct ProcessMemoryRecorderTests {
         }
         let matches = try await recorder.processLifetimes(matching: "daemon", from: memoryDate(0), to: memoryDate(100), sort: .grew)
         #expect(matches.map(\.lifetime.identity.pid) == [42, 43])
-        #expect(matches.first?.memoryGrowth == 860 * 1_024 * 1_024)
+        #expect(matches.first?.memoryGrowth == Int64(860 * 1_024 * 1_024))
         let lifetime = try #require(matches.first?.lifetime)
         #expect(lifetime.peakFootprint == 1_000 * 1_024 * 1_024)
         #expect(lifetime.peakFootprintTime == memoryDate(30))
