@@ -216,10 +216,14 @@ public struct GPUBenchmarkResult: SpeedTestRecord, Equatable, Identifiable {
     /// The whole run, compiling and checking included.
     public var seconds: Double
     public var workloads: [GPUWorkloadResult]
+    /// The Mac's state as the run started and ended; nil in runs saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
 
     public init(date: Date, suiteVersion: Int, configuration: GPUBenchmarkConfiguration, device: GPUBenchmarkDevice, osVersion: String,
                 appVersion: String, optimized: Bool, thermalStateAtStart: ThermalState, thermalStateAtEnd: ThermalState,
-                lowPowerMode: Bool, seconds: Double, workloads: [GPUWorkloadResult]) {
+                lowPowerMode: Bool, seconds: Double, workloads: [GPUWorkloadResult], context: BenchmarkContext? = nil) {
+        self.context = context
         self.date = date
         self.suiteVersion = suiteVersion
         self.configuration = configuration
