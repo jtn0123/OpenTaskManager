@@ -74,7 +74,8 @@ enum SystemExtensionList {
     /// and the copy it was installed from from `originPath`, for the entry of
     /// the same version. Anything unexpected in the file leaves the paths empty.
     static func attachApps(_ extensions: [SystemExtension], database: Data) -> [SystemExtension] {
-        guard let plist = try? PropertyListSerialization.propertyList(from: database, format: nil) as? [String: Any],
+        // The optional format output is nil; Foundation owns the decoded plist values.
+        guard let plist = unsafe try? PropertyListSerialization.propertyList(from: database, format: nil) as? [String: Any],
               let entries = plist["extensions"] as? [[String: Any]] else { return extensions }
         var apps: [String: String] = [:]
         var origins: [String: String] = [:]

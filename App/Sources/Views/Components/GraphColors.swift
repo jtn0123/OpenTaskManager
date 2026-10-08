@@ -20,12 +20,6 @@ final class GraphColors: Observable, Sendable {
 
     static let shared = GraphColors()
 
-    static let presetKey = "graphPalette"
-
-    static func overrideKey(_ role: Role) -> String {
-        "graphColor.\(role.rawValue)"
-    }
-
     /// A change's colours, made once.
     private struct Resolved: Sendable {
         var preset = GraphPalette.Preset.standard
@@ -99,25 +93,22 @@ final class GraphColors: Observable, Sendable {
     // MARK: Changing
 
     @MainActor func select(_ preset: GraphPalette.Preset) {
-        UserDefaults.standard.set(preset.rawValue, forKey: Self.presetKey)
+        Settings.graphPalette.set(preset)
         reload()
     }
 
     /// Sets a resource's own tone, or with nil goes back to the preset's.
     @MainActor func setOverride(_ tone: RGB?, for role: Role) {
-        if let tone {
-            UserDefaults.standard.set(tone.hex, forKey: Self.overrideKey(role))
-        } else {
-            UserDefaults.standard.removeObject(forKey: Self.overrideKey(role))
-        }
+        guard let key = Settings.graphColorOverrides[role] else { return }
+        key.set(tone?.hex)
         reload()
     }
 
     /// The standard preset, with no colours of the user's own.
     @MainActor func reset() {
-        UserDefaults.standard.removeObject(forKey: Self.presetKey)
+        Settings.graphPalette.remove()
         for role in Role.resources {
-            UserDefaults.standard.removeObject(forKey: Self.overrideKey(role))
+            Settings.graphColorOverrides[role]?.remove()
         }
         reload()
     }
@@ -125,11 +116,10 @@ final class GraphColors: Observable, Sendable {
     /// Reads the settings again and, if they changed, resolves their colours
     /// and tells the views that read them.
     private func reload() {
-        let defaults = UserDefaults.standard
-        let preset = defaults.string(forKey: Self.presetKey).flatMap(GraphPalette.Preset.init(rawValue:)) ?? .standard
+        let preset = Settings.graphPalette.get()
         var overrides: [Role: RGB] = [:]
         for role in Role.resources {
-            if let tone = defaults.string(forKey: Self.overrideKey(role)).flatMap(RGB.init(hex:)) {
+            if let tone = Settings.graphColorOverrides[role]?.get().flatMap(RGB.init(hex:)) {
                 overrides[role] = tone
             }
         }

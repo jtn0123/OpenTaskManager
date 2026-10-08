@@ -79,12 +79,13 @@ public enum InstalledApps {
 
     /// Every application bundle Spotlight has indexed, on any volume.
     static func spotlightBundles() -> [String] {
+        // The query retains each MDItem until this walk ends; its path is copied before the query is released.
         let predicate = "kMDItemContentType == 'com.apple.application-bundle'" as CFString
         guard let query = MDQueryCreate(kCFAllocatorDefault, predicate, nil, nil),
               MDQueryExecute(query, CFOptionFlags(kMDQuerySynchronous.rawValue)) else { return [] }
         return (0..<MDQueryGetResultCount(query)).compactMap { index in
-            guard let result = MDQueryGetResultAtIndex(query, index) else { return nil }
-            let item = Unmanaged<MDItem>.fromOpaque(result).takeUnretainedValue()
+            guard let result = unsafe MDQueryGetResultAtIndex(query, index) else { return nil }
+            let item = unsafe Unmanaged<MDItem>.fromOpaque(result).takeUnretainedValue()
             return MDItemCopyAttribute(item, kMDItemPath) as? String
         }
     }
@@ -166,9 +167,10 @@ public enum InstalledApps {
     /// Reads one bundle: its Info.plist, executable header, signature and
     /// Spotlight dates. Nil when there's no bundle folder at `resolvedPath`.
     public static func read(bundleAt path: String, resolvedPath: String) -> InstalledApp? {
+        // FileManager borrows the local directory flag only until this call returns.
         let fileManager = FileManager.default
         var isFolder: ObjCBool = false
-        guard fileManager.fileExists(atPath: resolvedPath, isDirectory: &isFolder), isFolder.boolValue else { return nil }
+        guard unsafe fileManager.fileExists(atPath: resolvedPath, isDirectory: &isFolder), isFolder.boolValue else { return nil }
         // iPhone and iPad apps arrive wrapped: Foo.app/WrappedBundle links to Wrapper/Foo.app,
         // a flat iOS bundle with no Contents folder.
         let wrapped = resolvedPath + "/WrappedBundle"
@@ -213,8 +215,9 @@ public enum InstalledApps {
     }
 
     private static func propertyList(atPath path: String) -> [String: Any] {
+        // The optional format output is nil; Foundation owns the decoded plist values.
         guard let data = FileManager.default.contents(atPath: path),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return [:] }
+              let plist = unsafe try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return [:] }
         return plist
     }
 

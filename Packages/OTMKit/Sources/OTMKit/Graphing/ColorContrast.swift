@@ -33,7 +33,9 @@ public enum ColorContrast {
         /// "#56B4E9": each component rounded to 8 bits.
         public var hex: String {
             func byte(_ component: Double) -> Int { Int((min(max(component, 0), 1) * 255).rounded()) }
-            return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
+            return "#" + Format.hexadecimal(byte(red), width: 2, uppercase: true)
+                + Format.hexadecimal(byte(green), width: 2, uppercase: true)
+                + Format.hexadecimal(byte(blue), width: 2, uppercase: true)
         }
 
         public static let white = RGB(red: 1, green: 1, blue: 1)

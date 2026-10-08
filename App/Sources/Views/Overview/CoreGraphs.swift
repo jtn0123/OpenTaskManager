@@ -8,8 +8,8 @@ import SwiftUI
 struct CoreGraphsCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.graphWindow) private var window
-    @AppStorage("overviewShowsCores") private var isOpen = true
-    @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
+    @Setting(Settings.overviewShowsCores) private var isOpen: Bool
+    @Setting(Settings.cpuGraphScale) private var scale: CPUGraphScale
     /// The tiles' shared auto bound, held between samples.
     @State private var bounds = AutoScaleBounds()
 

@@ -28,7 +28,8 @@ public actor SensorMonitor {
 /// source the system's thermal tools use. The client functions are private
 /// IOKit API, looked up at run time like IOReport's, so a Mac or VM without
 /// them simply reports no temperatures.
-final class HIDTemperatureReader {
+/// The system symbols stay loaded, and this reader retains its client and services for every read.
+@safe final class HIDTemperatureReader {
     private typealias CreateClient = @convention(c) (CFAllocator?) -> Unmanaged<AnyObject>?
     private typealias SetMatching = @convention(c) (AnyObject, CFDictionary) -> Int32
     private typealias CopyServices = @convention(c) (AnyObject) -> Unmanaged<CFArray>?
@@ -52,36 +53,38 @@ final class HIDTemperatureReader {
     private let sensors: [Sensor]
 
     init?() {
+        // The system library stays loaded; each symbol matches its C signature, and Copy results are retained before use.
         // IOKit is already linked; this only resolves the private symbols.
-        let process = UnsafeMutableRawPointer(bitPattern: -2)
+        let process = unsafe UnsafeMutableRawPointer(bitPattern: -2)
         func load<T>(_ name: String, as _: T.Type) -> T? {
-            dlsym(process, name).map { unsafeBitCast($0, to: T.self) }
+            unsafe dlsym(process, name).map { unsafe unsafeBitCast($0, to: T.self) }
         }
-        guard let createClient = load("IOHIDEventSystemClientCreate", as: CreateClient.self),
+        guard let createClient = unsafe load("IOHIDEventSystemClientCreate", as: CreateClient.self),
               let setMatching = load("IOHIDEventSystemClientSetMatching", as: SetMatching.self),
-              let copyServices = load("IOHIDEventSystemClientCopyServices", as: CopyServices.self),
-              let copyProperty = load("IOHIDServiceClientCopyProperty", as: CopyProperty.self),
-              let copyEvent = load("IOHIDServiceClientCopyEvent", as: CopyEvent.self),
+              let copyServices = unsafe load("IOHIDEventSystemClientCopyServices", as: CopyServices.self),
+              let copyProperty = unsafe load("IOHIDServiceClientCopyProperty", as: CopyProperty.self),
+              let copyEvent = unsafe load("IOHIDServiceClientCopyEvent", as: CopyEvent.self),
               let floatValue = load("IOHIDEventGetFloatValue", as: FloatValue.self),
-              let client = createClient(kCFAllocatorDefault)?.takeRetainedValue() else { return nil }
+              let client = unsafe createClient(kCFAllocatorDefault)?.takeRetainedValue() else { return nil }
         // Apple's vendor usage page, temperature sensor usage.
         _ = setMatching(client, ["PrimaryUsagePage": 0xFF00, "PrimaryUsage": 5] as CFDictionary)
-        let services = copyServices(client)?.takeRetainedValue() as? [AnyObject] ?? []
+        let services = unsafe copyServices(client)?.takeRetainedValue() as? [AnyObject] ?? []
         // Only keep the sensors the app shows; each read is a round trip.
         sensors = services.compactMap { service in
-            guard let name = copyProperty(service, "Product" as CFString)?.takeRetainedValue() as? String,
+            guard let name = unsafe copyProperty(service, "Product" as CFString)?.takeRetainedValue() as? String,
                   SensorModel.classify(name) != nil else { return nil }
             return Sensor(name: name, service: service)
         }
         guard !sensors.isEmpty else { return nil }
         self.client = client
-        self.copyEvent = copyEvent
+        unsafe self.copyEvent = copyEvent
         self.floatValue = floatValue
     }
 
     func read() -> [SensorSample.Temperature] {
+        // The system library stays loaded; each symbol matches its C signature, and Copy results are retained before use.
         let readings = sensors.compactMap { sensor -> (name: String, celsius: Double)? in
-            guard let event = copyEvent(sensor.service, Self.temperatureEvent, 0, 0)?.takeRetainedValue() else { return nil }
+            guard let event = unsafe copyEvent(sensor.service, Self.temperatureEvent, 0, 0)?.takeRetainedValue() else { return nil }
             return (sensor.name, floatValue(event, Self.temperatureField))
         }
         return SensorModel.temperatures(from: readings)

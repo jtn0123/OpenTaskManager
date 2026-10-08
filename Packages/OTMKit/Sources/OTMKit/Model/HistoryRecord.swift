@@ -359,9 +359,10 @@ extension HistoryRecord {
     /// Mac didn't report are left empty. Hardware series, when the records
     /// have any, follow in chart order ("fan_0_rpm"), then each core's load.
     public static func csv(_ records: [HistoryRecord]) -> String {
+        // The numeric format specifiers match the arguments passed to Foundation's C formatting API.
         func number(_ value: Double?, scale: Double = 1, digits: Int = 2) -> String {
             guard let value, value.isFinite else { return "" }
-            return String(format: "%.\(digits)f", value * scale)
+            return unsafe String(format: "%.\(digits)f", value * scale)
         }
         func field(_ text: String) -> String {
             guard text.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" }) else { return text }

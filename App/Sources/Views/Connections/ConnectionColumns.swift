@@ -2,9 +2,7 @@ import AppKit
 import OTMKit
 
 /// Columns of the socket table. The raw value is the column's customization ID.
-enum ConnectionColumn: String, CaseIterable {
-    case process, pid, transport = "protocol", local, remote, state, age, scope
-
+extension ConnectionColumn {
     var title: String {
         switch self {
         case .process: "Process"
@@ -98,32 +96,5 @@ enum ConnectionColumn: String, CaseIterable {
     /// column that can has given way. Beside the details pane it never gets less.
     @MainActor static func tableMinimum(userHidden: Set<ConnectionColumn>) -> CGFloat {
         CGFloat(ColumnFit.minimumWidth(wanted(userHidden: userHidden))) + chrome
-    }
-}
-
-/// The columns switched off in the Columns menu, saved as "pid,protocol".
-/// Process can't be.
-struct HiddenConnectionColumns: RawRepresentable, Equatable {
-    var columns: Set<ConnectionColumn>
-
-    init(columns: Set<ConnectionColumn> = []) {
-        self.columns = columns.subtracting([.process])
-    }
-
-    init?(rawValue: String) {
-        self.init(columns: Set(rawValue.split(separator: ",").compactMap { ConnectionColumn(rawValue: String($0)) }))
-    }
-
-    var rawValue: String {
-        columns.map(\.rawValue).sorted().joined(separator: ",")
-    }
-
-    func isOn(_ column: ConnectionColumn) -> Bool {
-        !columns.contains(column)
-    }
-
-    mutating func toggle(_ column: ConnectionColumn) {
-        guard column != .process else { return }
-        if columns.contains(column) { columns.remove(column) } else { columns.insert(column) }
     }
 }

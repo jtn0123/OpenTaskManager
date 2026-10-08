@@ -141,9 +141,10 @@ public enum VolumeReader {
 
     /// The BSD device a volume is mounted from, e.g. "disk3s1s1".
     private static func deviceName(of path: String) -> String? {
+        // statfs borrows an aligned local record; mount-source text stops within the fixed C tuple.
         var stats = statfs()
-        guard statfs(path, &stats) == 0 else { return nil }
-        let source = withUnsafeBytes(of: stats.f_mntfromname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        guard unsafe statfs(path, &stats) == 0 else { return nil }
+        let source = withUnsafeBytes(of: stats.f_mntfromname) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         return bsdName(mountSource: source)
     }
 

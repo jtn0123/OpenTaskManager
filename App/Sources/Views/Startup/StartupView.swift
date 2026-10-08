@@ -2,17 +2,7 @@ import OTMKit
 import SwiftUI
 
 /// Which items the Startup table shows.
-enum StartupFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case thirdParty = "Third party"
-    case apple = "Apple"
-    case running = "Running"
-    case agents = "Agents"
-    case daemons = "Daemons"
-    case problems = "Problems"
-
-    var id: String { rawValue }
-
+extension StartupFilter {
     func includes(_ item: LaunchItem, health: LaunchJobHealth) -> Bool {
         switch self {
         case .all: true
@@ -64,8 +54,8 @@ struct StartupRow: Identifiable, Equatable {
 struct StartupView: View {
     @Environment(AppModel.self) private var model
     @CurrentPage private var page
-    @AppStorage("startupFilter") private var filter: StartupFilter = .all
-    @AppStorage("showStartupInspector") private var showInspector = true
+    @Setting(Settings.startupFilter) private var filter: StartupFilter
+    @Setting(Settings.showStartupInspector) private var showInspector: Bool
     @State private var items: [LaunchItem]?
     @State private var scannedAt: Date?
     @State private var isScanning = false
@@ -177,7 +167,7 @@ struct StartupView: View {
                 wantsInspector: wantsInspector,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
-                widthKey: "startupInspectorWidth",
+                widthKey: Settings.startupInspectorWidth,
                 backTitle: "Startup"
             ) {
                 VStack(spacing: 0) {
