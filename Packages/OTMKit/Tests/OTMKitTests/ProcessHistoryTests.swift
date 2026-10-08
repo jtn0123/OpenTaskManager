@@ -427,6 +427,28 @@ struct FlightRecorderProcessTests {
         #expect(try await reader.processLifetimes(matching: "seen", from: date(1_000), to: date(1_100)).count == 1)
         await #expect(throws: FlightRecorderError.self) { try await reader.append(record(at: 1_020)) }
     }
+
+    @Test func readsADatabaseNothingHasOpen() async throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        do {
+            let recorder = try FlightRecorder(url: url)
+            try await recorder.append(ProcessHistoryBatch(time: date(1_010), started: [start(71, 900, name: "seen", at: 1_001)]))
+        }
+        // As the app leaves it once quit: a WAL database with everything in the file and no -wal or -shm beside it,
+        // which SQLite won't open read-only as such. A copy has nothing beside it.
+        var handle: OpaquePointer?
+        #expect(sqlite3_open(url.path, &handle) == SQLITE_OK)
+        #expect(sqlite3_exec(handle, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(handle)
+        let copy = url.deletingLastPathComponent().appendingPathComponent("quit copy.sqlite")
+        try FileManager.default.copyItem(at: url, to: copy)
+
+        let reader = try FlightRecorder(reading: copy)
+        #expect(try await reader.processLifetimes(matching: "seen", from: date(1_000), to: date(1_100)).count == 1)
+        let beside = try FileManager.default.contentsOfDirectory(atPath: copy.deletingLastPathComponent().path)
+        #expect(!beside.contains("quit copy.sqlite-shm"), "read without creating anything")
+    }
 }
 
 // MARK: - Schema 3

@@ -71,8 +71,8 @@ struct HistoryProcessCharts: View {
                 HistoryLine(name: memoryName, legend: "Peak", color: Theme.memory, value: { $0.hardware[HistoryProcessKey.memory] },
                             summary: .maximum,
                             meaning: track.lifetime.isRestricted ? "its resident memory" : "its memory footprint, as the Memory column shows"),
-            ], figures: [show(summary.peakMemory.map(Double.init)) { Format.bytes($0) }], lead: "Over the range",
-               format: { Format.bytes(UInt64(max($0, 0))) }, floor: 64 * 1_048_576, units: .binaryBytes),
+            ], figures: [summary.peakMemory.map { Format.bytes($0) } ?? "—"], lead: "Over the range",
+               format: { Format.bytes(UInt64(max($0, 0))) }, floor: 1_048_576, units: .binaryBytes),
         ]
         if !track.lifetime.isRestricted {
             charts.append(HistoryProcessChart(title: "Disk", symbol: "internaldrive", tint: Theme.disk, lines: [
@@ -179,7 +179,10 @@ private struct HistoryProcessChartCard: View {
         if lifetime.firstSeen.timeIntervalSince(lifetime.started) > bucket {
             add(lifetime.started, lifetime.firstSeen, to: &unseen)
         }
-        if !track.isRunning, lifetime.ended == nil {
+        // Since its last sighting, unless it ended then; for one running now,
+        // only once that's longer than a hiccup (this run hasn't recorded it yet).
+        if lifetime.ended == nil,
+           domain.upperBound.timeIntervalSince(lifetime.lastSeen) > (track.isRunning ? bucket * HistoryGap.spacing : 0) {
             add(lifetime.lastSeen, domain.upperBound, to: &unseen)
         }
         // Recorded by an older build, which kept no process history.

@@ -108,8 +108,15 @@ public actor FlightRecorder {
     /// The recording at `url` to read, never written or migrated, as the
     /// `otm` tool reads the app's: it fails when there's no such file.
     public init(reading url: URL) throws(FlightRecorderError) {
-        let connection = try Self.open(url.path, flags: SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX)
+        let reading = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+        var connection = try Self.open(url.path, flags: reading)
         sqlite3_busy_timeout(connection.handle, 2_000)
+        if !Self.canRead(connection.handle) {
+            // A WAL database nothing has open (no -shm beside it) can't be
+            // opened read-only; with no writer, reading it as unchanging is safe.
+            let immutable = URL(fileURLWithPath: url.path).absoluteString + "?immutable=1"
+            connection = try Self.open(immutable, flags: reading | SQLITE_OPEN_URI)
+        }
         self.url = url
         recordSpan = Self.span
         self.connection = connection
@@ -453,6 +460,14 @@ public actor FlightRecorder {
             throw .sqlite(message)
         }
         return Connection(handle)
+    }
+
+    /// Whether a query can read the database: SQLite opens lazily.
+    private static func canRead(_ handle: OpaquePointer) -> Bool {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(handle, "SELECT COUNT(*) FROM sqlite_master", -1, &statement, nil) == SQLITE_OK else { return false }
+        return sqlite3_step(statement) == SQLITE_ROW
     }
 
     /// The first schema's tables, then the steps since (`migrate`).
