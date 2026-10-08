@@ -138,13 +138,21 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
 
     public var verdictTitle: String {
         guard isQualified else { return verdict.title }
-        return (compared > baseline ? "Higher" : "Lower") + " · conditions differ"
+        return shortVerdictTitle + " · conditions differ"
+    }
+
+    /// For a narrow table, whose heading already says the conditions differed.
+    public var shortVerdictTitle: String {
+        guard isQualified else { return verdict.title }
+        return compared > baseline ? "Higher" : "Lower"
     }
 
     /// Spread still matters, but a warned difference can't judge performance.
     public var verdictExplanation: String {
         guard isQualified, let conditionSummary else { return verdict.explanation }
-        return conditionSummary + ". The move is beyond both runs' spread, but different conditions can explain it."
+        // A session's summary is already whole sentences; a run's context is a clause.
+        let sentence = conditionSummary.hasSuffix(".") ? conditionSummary : conditionSummary + "."
+        return sentence + " The move is beyond both runs' spread, but different conditions can explain it."
     }
 
     /// "Fill rate: timing unverified in the later run, so this change may not be real."

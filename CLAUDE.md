@@ -784,8 +784,10 @@ fixtures. Use `-openResource benchmarks -guidedFixture YES
   the middle label of a 72-point graph. The Thermals table's
   rows are 13 pt (body), with its supporting text at 12 pt. Benchmarks'
   comparison table keeps that size in a narrow window by dropping a figure's
-  variant under its name and stacking the two spreads (`ViewThatFits`). The
-  system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
+  variant under its name, stacking the two spreads and, where "Higher ·
+  conditions differ" won't fit even on two lines, keeping only the direction
+  (`shortVerdictTitle`), since the heading over it names the conditions
+  (`ViewThatFits`). The system's `.secondary` falls under 4.5:1 on the tinted cards (see `TextTone`).
   Search finds are marked in primary ink, bold, over `TextTone.highlight`,
   which keeps 4.5:1 on every card in both appearances.
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`

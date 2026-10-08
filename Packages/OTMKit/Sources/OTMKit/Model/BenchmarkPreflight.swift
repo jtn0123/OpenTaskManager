@@ -55,6 +55,9 @@ public struct BenchmarkPreflight: Sendable, Codable, Equatable {
 public struct BenchmarkSettling: Sendable {
     public static let defaultWindow = 30.0
     public static let maximumWait = 120.0
+    /// Published samples land milliseconds off their nominal step; a hole this
+    /// short belongs to the stretch, while a pause or a missed sample is a second or more.
+    public static let jitter = 0.25
     public let window: Double
     public let started: Date
     public private(set) var readings: [BenchmarkPreflightReading] = []
@@ -84,19 +87,20 @@ public struct BenchmarkSettling: Sendable {
         var end = endDate
         var continuous = fresh
         for reading in recent.reversed() {
-            if reading.interval > 10 || end.timeIntervalSince(reading.date) > 0.01 { continuous = false }
+            let hole = end.timeIntervalSince(reading.date)
+            if reading.interval > 10 || hole > Self.jitter { continuous = false }
             let lower = max(started, endDate.addingTimeInterval(-window), reading.date.addingTimeInterval(-reading.interval))
-            covered += max(min(reading.date, end).timeIntervalSince(lower), 0)
-            end = min(end, reading.date.addingTimeInterval(-reading.interval))
+            covered += max((hole > Self.jitter ? reading.date : end).timeIntervalSince(lower), 0)
+            end = min(end, lower)
         }
         let stablePower = recent.allSatisfy { $0.power == last?.power && $0.lowPowerMode == last?.lowPowerMode }
-        let settled = continuous && covered >= window - 0.01 && recent.allSatisfy(\.quiet) && stablePower
+        let settled = continuous && covered >= window - Self.jitter && recent.allSatisfy(\.quiet) && stablePower
         let validCPU = recent.filter { $0.interval <= 10 && $0.cpuBusy?.isFinite == true && (0...1).contains($0.cpuBusy ?? -1) }
         let weight = validCPU.reduce(0) { $0 + min($1.interval, window) }
         let busy = fresh && weight > 0 ? validCPU.reduce(0) { $0 + ($1.cpuBusy ?? 0) * min($1.interval, window) } / weight : nil
-        let cpuText = busy.map { "CPU load \(Format.percent($0)) over the last \(Int(min(covered, window))) s" }
+        let cpuText = busy.map { "CPU load \(Format.percent($0)) over the last \(Int(min(covered, window).rounded())) s" }
             ?? "CPU load unavailable"
-        let cpuQuiet = continuous && covered >= window - 0.01 && validCPU.count == recent.count && recent.allSatisfy {
+        let cpuQuiet = continuous && covered >= window - Self.jitter && validCPU.count == recent.count && recent.allSatisfy {
             ($0.cpuBusy ?? 1) <= 0.1
         }
         let memory = fresh ? last?.memoryPressure : nil

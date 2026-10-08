@@ -37,6 +37,25 @@ struct BenchmarkSessionTests {
         #expect(preflight.rows.first?.text == "CPU load 3% over the last 30 s · quiet")
     }
 
+    /// The app's samples land a few milliseconds past each whole-step interval
+    /// it reports; that drift once kept a quiet Mac at "29 s" until the wait ran out.
+    @Test func samplesThatDriftByMillisecondsStillFillTheWindow() {
+        for spacing in [1.003, 1.02, 0.997] {
+            var watch = BenchmarkSettling(started: epoch)
+            for index in 1...31 {
+                var drifting = reading(Double(index) * spacing)
+                drifting.interval = 1
+                watch.append(drifting)
+            }
+            let preflight = watch.snapshot(now: epoch.addingTimeInterval(31 * spacing))
+            #expect(preflight.settled, "spacing \(spacing)")
+            #expect(preflight.rows.first?.text == "CPU load 3% over the last 30 s · quiet")
+        }
+        var paused = BenchmarkSettling(started: epoch)
+        for second in 1...40 where !(20...21).contains(second) { paused.append(reading(Double(second))) }
+        #expect(!paused.snapshot(now: epoch.addingTimeInterval(40)).settled, "a missed sample is a pause, not drift")
+    }
+
     @Test func busyHeatAndMemoryEachPreventSettling() {
         for bad in [reading(15, busy: 0.4), reading(15, thermal: .fair), reading(15, pressure: .warning)] {
             var watch = BenchmarkSettling(started: epoch)
@@ -160,6 +179,15 @@ struct BenchmarkSessionTests {
         let summary = BenchmarkComparison.conditionSummary(one, other)
         #expect(summary?.hasPrefix("Session A started on power; B on battery. Session A started thermal ") == true)
         #expect(summary?.contains(".;") == false, "sentences never take a semicolon after their full stop")
+        var faster = run(2, group: "two", value: 150)
+        faster.session?.preflight?.readings[29].power = .battery
+        guard case let .compared(comparison) = BenchmarkComparison.compare(one, faster),
+              let change = comparison.changes.first else {
+            Issue.record("Sessions under different conditions still compare")
+            return
+        }
+        #expect(change.verdictTitle == "Higher · conditions differ")
+        #expect(change.verdictExplanation.hasPrefix("Session A started on power; B on battery. The move is beyond"))
     }
 }
 
