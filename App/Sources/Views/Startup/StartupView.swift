@@ -376,10 +376,11 @@ struct StartupView: View {
         guard !model.isPaused else { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: LaunchJobStore.readInterval)
-            guard !Task.isCancelled, !isScanning, let before = items else { continue }
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow, !isScanning, let before = items else { continue }
             let read = await Task.detached(priority: .utility) { LaunchItems.withCurrentStatus(before) }.value
             // A full read, after Refresh or an action, finished meanwhile: its list is newer.
-            guard !Task.isCancelled, !isScanning, items == before else { continue }
+            guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow, !isScanning, items == before else { continue }
             apply(read)
         }
     }

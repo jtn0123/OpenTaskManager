@@ -29,7 +29,7 @@ enum BenchmarkContextFeed {
     /// it's sampling and its latest update is recent; nil otherwise.
     static func recentLoad(now: Date = Date()) -> BenchmarkCPULoad? {
         guard let model, !model.isPaused, let snapshot = model.snapshot else { return nil }
-        let step = model.updateSpeed.rawValue
+        let step = model.samplingInterval
         guard now.timeIntervalSince(snapshot.timestamp) <= step * 2 + 1 else { return nil }
         return BenchmarkCPULoad.recent(model.cpuHistory.values, step: step, seconds: loadSeconds)
     }

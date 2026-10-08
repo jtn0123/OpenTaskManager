@@ -30,6 +30,7 @@ public actor SystemMonitor {
     private let power: PowerSampler
     private let processes = ProcessSampler()
     private var lastSample: ContinuousClock.Instant?
+    private var lastProcessSample: ContinuousClock.Instant?
     private var volumes: [VolumeInfo] = []
     private var volumesRead = Date.distantPast
 
@@ -48,17 +49,22 @@ public actor SystemMonitor {
         self.options = options
     }
 
-    public func sample(restrictedProcessesLive: Bool = true) -> SystemSnapshot {
+    public func sample(restrictedProcessesLive: Bool = true, processFigures: Bool = true,
+                       processDetails: Bool = true, processGPU: Bool = true) -> SystemSnapshot {
         let now = ContinuousClock.now
         let interval = lastSample.map { Self.seconds(now - $0) } ?? 0
         lastSample = now
 
-        let gpuResult = gpu.sample(includeProcesses: options.includeProcesses && options.includeProcessGPU)
+        let readsProcesses = options.includeProcesses && processFigures
+        let gpuResult = gpu.sample(includeProcesses: readsProcesses && options.includeProcessGPU && processGPU)
         let powerResult = power.sample(includeComponents: options.includeComponentPower)
         processes.includeRestricted = options.includeRestrictedProcesses
-        let processList = options.includeProcesses
-            ? processes.sample(interval: interval, gpuTime: gpuResult.processGPUTime, restrictedLive: restrictedProcessesLive)
+        let processInterval = lastProcessSample.map { Self.seconds(now - $0) } ?? 0
+        let processList = readsProcesses
+            ? processes.sample(interval: processInterval, gpuTime: gpuResult.processGPUTime,
+                               restrictedLive: restrictedProcessesLive, details: processDetails)
             : []
+        if readsProcesses { lastProcessSample = now }
 
         // Volume capacity changes slowly and querying it can touch the disk.
         if Date().timeIntervalSince(volumesRead) > 10 {

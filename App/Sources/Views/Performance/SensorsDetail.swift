@@ -158,7 +158,7 @@ struct SensorsDetail: View {
             // top of the page with the column titles.
             SensorReadingTable(rows: rows, extremes: model.sensorExtremes, thermalState: pressure ? thermalState : nil,
                                since: "Lowest and highest since \(Self.time(model.sensorExtremes.since))",
-                               sinceHelp: "Every reading counts toward the range, one each \(Format.timeSpan(model.updateSpeed.rawValue)). "
+                               sinceHelp: "Every reading counts toward the range, one each \(Format.timeSpan(model.samplingInterval)). "
                                    + "A sensor that gives no reading leaves its range alone.") {
                 model.resetSensorExtremes()
             }

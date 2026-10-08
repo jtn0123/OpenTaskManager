@@ -34,6 +34,7 @@ final class SpikeCaptureStore {
                 capturing = nil
                 debugCapture = false
             }
+            samplingChanged?()
         }
     }
 
@@ -48,6 +49,20 @@ final class SpikeCaptureStore {
     @ObservationIgnored private var recorder = SpikeRecorder()
     /// `isEnabled`, read once an update without going through observation.
     @ObservationIgnored private var watching: Bool
+    var needsSamples: Bool { watching }
+    @ObservationIgnored var samplingChanged: (() -> Void)?
+    @ObservationIgnored private var publishesViews = false
+    @ObservationIgnored private var pendingEntries: [SpikeCaptureEntry]?
+
+    func setVisible(_ visible: Bool) {
+        publishesViews = visible
+        guard visible else { return }
+        if capturing != recorder.capturing { capturing = recorder.capturing }
+        if let entries = pendingEntries {
+            pendingEntries = nil
+            show(entries)
+        }
+    }
     /// A debug build's `-captureSpikeNow <kind>`: forced after this many updates.
     @ObservationIgnored private var forced: (kind: SpikeKind, updates: Int)?
     /// A forced capture is under way: updates are watched until it's
@@ -90,13 +105,14 @@ final class SpikeCaptureStore {
                                  interval: snapshot.interval, at: snapshot.timestamp)
         let capture = recorder.add(sample, processes: snapshot.processes, logicalCores: snapshot.cpu.coreUsage.count)
         let now = recorder.capturing
-        if now != capturing { capturing = now }
+        if publishesViews, now != capturing { capturing = now }
         if let capture { write(capture, history: history) }
         if debugCapture, now == nil {
             // The forced capture is handed off; with the setting off, nothing more is watched.
             debugCapture = false
             watching = isEnabled
             if !watching { recorder.reset() }
+            samplingChanged?()
         }
     }
 
@@ -134,6 +150,10 @@ final class SpikeCaptureStore {
     }
 
     private func show(_ entries: [SpikeCaptureEntry]) {
+        guard publishesViews else {
+            pendingEntries = entries
+            return
+        }
         if entries != captures { captures = entries }
         let seen = UserDefaults.standard.object(forKey: Self.seenKey) as? Date ?? .distantPast
         let count = entries.filter { $0.session.start > seen }.count

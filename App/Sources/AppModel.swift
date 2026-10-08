@@ -2,181 +2,6 @@ import AppKit
 import Observation
 import OTMKit
 
-/// Memory composition over time, one history per kind of page.
-struct MemoryHistory {
-    var app = History<Double>(capacity: AppModel.historyCapacity)
-    var wired = History<Double>(capacity: AppModel.historyCapacity)
-    var compressed = History<Double>(capacity: AppModel.historyCapacity)
-    var cached = History<Double>(capacity: AppModel.historyCapacity)
-    var swapUsed = History<Double>(capacity: AppModel.historyCapacity)
-    /// 0...1, from the kernel's "memory available" level.
-    var pressure = History<Double>(capacity: AppModel.historyCapacity)
-    /// Bytes per second.
-    var pageIns = History<Double>(capacity: AppModel.historyCapacity)
-    var pageOuts = History<Double>(capacity: AppModel.historyCapacity)
-    var swapIns = History<Double>(capacity: AppModel.historyCapacity)
-    var swapOuts = History<Double>(capacity: AppModel.historyCapacity)
-    var compressions = History<Double>(capacity: AppModel.historyCapacity)
-    var decompressions = History<Double>(capacity: AppModel.historyCapacity)
-
-    mutating func append(_ memory: MemorySample) {
-        app.append(Double(memory.app))
-        wired.append(Double(memory.wired))
-        compressed.append(Double(memory.compressed))
-        cached.append(Double(memory.cached))
-        swapUsed.append(Double(memory.swapUsed))
-        pressure.append(memory.availablePercent.map { 1 - Double($0) / 100 } ?? memory.usedFraction)
-        pageIns.append(memory.pageInRate)
-        pageOuts.append(memory.pageOutRate)
-        swapIns.append(memory.swapInRate)
-        swapOuts.append(memory.swapOutRate)
-        compressions.append(memory.compressionRate)
-        decompressions.append(memory.decompressionRate)
-    }
-}
-
-/// Renderer, tiler and memory history for one GPU.
-struct GPUHistory {
-    var renderer = History<Double>(capacity: AppModel.historyCapacity)
-    var tiler = History<Double>(capacity: AppModel.historyCapacity)
-    var memoryInUse = History<Double>(capacity: AppModel.historyCapacity)
-    /// Average clock while powered on, in MHz. An idle interval has no clock,
-    /// so it repeats the last one rather than dropping the line to zero.
-    var frequency = History<Double>(capacity: AppModel.historyCapacity)
-
-    mutating func append(_ gpu: GPUSample) {
-        renderer.append(gpu.rendererUtilization ?? 0)
-        tiler.append(gpu.tilerUtilization ?? 0)
-        memoryInUse.append(Double(gpu.memoryInUse ?? 0))
-        frequency.append(gpu.frequencyMHz ?? frequency.last ?? 0)
-    }
-}
-
-/// Whole-system power split into parts of the chip, and energy used since launch.
-struct PowerHistory {
-    var cpu = History<Double>(capacity: AppModel.historyCapacity)
-    var gpu = History<Double>(capacity: AppModel.historyCapacity)
-    var ane = History<Double>(capacity: AppModel.historyCapacity)
-    var dram = History<Double>(capacity: AppModel.historyCapacity)
-    /// The system figure minus the chip's parts: display, SSD, radios, fans,
-    /// power conversion. Never negative, though the system figure lags a beat.
-    var rest = History<Double>(capacity: AppModel.historyCapacity)
-    /// Per CPU cluster, keyed by name: watts, average clock (MHz) and share of
-    /// time running. An idle cluster repeats its last clock, like `GPUHistory`.
-    var clusterWatts: [String: History<Double>] = [:]
-    var clusterFrequency: [String: History<Double>] = [:]
-    var clusterActive: [String: History<Double>] = [:]
-    var adapterInput = History<Double>(capacity: AppModel.historyCapacity)
-    /// Into the battery; negative while it discharges.
-    var battery = History<Double>(capacity: AppModel.historyCapacity)
-    /// Joules since launch, for the whole system and for each measured part.
-    private(set) var energy = 0.0
-    private(set) var componentEnergy: [PowerComponent: Double] = [:]
-    private(set) var seconds = 0.0
-
-    mutating func append(_ power: PowerSample, interval: TimeInterval) {
-        let parts = power.components
-        cpu.append(parts?.watts(.cpu) ?? 0)
-        gpu.append(parts?.watts(.gpu) ?? 0)
-        ane.append(parts?.watts(.ane) ?? 0)
-        dram.append(parts?.watts(.dram) ?? 0)
-        if let system = power.systemWatts, let parts {
-            rest.append(max(system - parts.total, 0))
-        } else {
-            rest.append(0)
-        }
-        for cluster in parts?.clusters ?? [] {
-            clusterWatts[cluster.name, default: Self.history()].append(cluster.watts ?? 0)
-            var clock = clusterFrequency[cluster.name] ?? Self.history()
-            clock.append(cluster.frequencyMHz ?? clock.last ?? 0)
-            clusterFrequency[cluster.name] = clock
-            clusterActive[cluster.name, default: Self.history()].append(cluster.activeFraction ?? 0)
-        }
-        adapterInput.append(power.adapter?.inputWatts ?? 0)
-        battery.append(power.adapter?.batteryWatts ?? power.battery?.watts ?? 0)
-
-        if let system = power.systemWatts {
-            energy += system * interval
-            seconds += interval
-        }
-        for component in PowerComponent.allCases {
-            if let watts = parts?.watts(component) { componentEnergy[component, default: 0] += watts * interval }
-        }
-    }
-
-    /// Average whole-system draw since launch.
-    var averageWatts: Double? { seconds > 0 ? energy / seconds : nil }
-
-    private static func history() -> History<Double> {
-        History(capacity: AppModel.historyCapacity)
-    }
-}
-
-/// One user's CPU (100 = one core) and summed process memory over time.
-struct UserHistory {
-    var cpu = History<Double>(capacity: AppModel.userHistoryCapacity)
-    var memory = History<Double>(capacity: AppModel.userHistoryCapacity)
-
-    mutating func append(_ totals: UsageTotals) {
-        cpu.append(totals.cpuPercent)
-        memory.append(Double(totals.memory))
-    }
-}
-
-enum UpdateSpeed: Double, CaseIterable, Identifiable {
-    case fast = 0.5
-    case normal = 1
-    case slow = 2
-    case verySlow = 5
-
-    var id: Double { rawValue }
-
-    var label: String {
-        switch self {
-        case .fast: "Fast (2× per second)"
-        case .normal: "Normal (every second)"
-        case .slow: "Slow (every 2 seconds)"
-        case .verySlow: "Very slow (every 5 seconds)"
-        }
-    }
-}
-
-/// How per-process CPU is shown. macOS tools count 100% per core, so a busy
-/// app on an 18-core Mac can read 1,200%; the default is share of the whole CPU.
-struct CPUScale: Equatable {
-    var relativeToSystem: Bool
-    var logicalCores: Int
-
-    /// Converts a per-process figure (100 = one core) to the chosen scale.
-    func value(_ percentOfCore: Double) -> Double {
-        guard relativeToSystem else { return percentOfCore }
-        return min(percentOfCore / Double(max(logicalCores, 1)), 100)
-    }
-
-    func format(_ percentOfCore: Double) -> String {
-        Format.fixed(value(percentOfCore), 1) + "%"
-    }
-}
-
-/// Temperatures and fan speeds over time.
-struct SensorHistory {
-    private(set) var hottest: [SensorKind: History<Double>] = [:]
-    private(set) var chipAverage = History<Double>(capacity: AppModel.historyCapacity)
-    private(set) var fans: [Int: History<Double>] = [:]
-
-    mutating func append(_ sample: SensorSample) {
-        for kind in SensorKind.allCases {
-            if let celsius = sample.hottest(kind) {
-                hottest[kind, default: History(capacity: AppModel.historyCapacity)].append(celsius)
-            }
-        }
-        if let average = sample.average(.chip) { chipAverage.append(average) }
-        for fan in sample.fans {
-            fans[fan.id, default: History(capacity: AppModel.historyCapacity)].append(fan.rpm)
-        }
-    }
-}
-
 /// Live state shared by every window: the latest snapshot plus graph history.
 @Observable
 @MainActor
@@ -197,6 +22,7 @@ final class AppModel {
     let monitor = SystemMonitor()
     let sensorMonitor = SensorMonitor()
     let samplingDemand = SamplingDemandStore()
+    @ObservationIgnored let backgroundSampling = BackgroundSamplingState()
     let menuBarIcon = MenuBarIconStore()
     /// The on-disk history behind the History page. Nil if it can't be opened.
     let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
@@ -204,83 +30,83 @@ final class AppModel {
     let networkActivity = NetworkActivityStore()
     /// Restarts of launchd's jobs, counted from the Startup page's reads.
     let launchJobs = LaunchJobStore()
-    private var recording = HistoryAccumulator(span: FlightRecorder.span)
+    var recording = HistoryAccumulator(span: FlightRecorder.span)
     /// Each process's figures over each record, from the counters the sampler
     /// already read, for History's process history.
-    @ObservationIgnored private var processTracker = ProcessHistoryTracker()
+    @ObservationIgnored var processTracker = ProcessHistoryTracker()
     /// launchd's label for each process it runs, gathered once per read of its
     /// list on the Startup page (`launchJobs`), and that read's time.
     @ObservationIgnored private var jobLabels: (read: Date?, labels: [ProcessIdentity: String]) = (nil, [:])
     /// Saves what happened beside the history: apps launched and quit, busy
     /// processes, network changes, sleep and wake.
-    @ObservationIgnored private lazy var historyEvents = recorder.map { HistoryEventMonitor(recorder: $0) }
+    @ObservationIgnored lazy var historyEvents = recorder.map { HistoryEventMonitor(recorder: $0) }
     let topology: CPUTopology
 
-    private(set) var snapshot: SystemSnapshot?
+    var snapshot: SystemSnapshot?
     /// The uptime of the sample `appGroups` were built from, unobserved: for
     /// a view their change redraws that must tell one sample from the next
     /// (`TopAppsCard`). Reading `snapshot` there as well drew it about twice
     /// a tick.
-    @ObservationIgnored private(set) var appGroupsUptime: TimeInterval?
+    @ObservationIgnored var appGroupsUptime: TimeInterval?
     /// Temperatures and fans, read alongside each snapshot. Empty in a VM.
-    private(set) var sensors: SensorSample?
-    private(set) var sensorHistory = SensorHistory()
+    var sensors: SensorSample?
+    var sensorHistory = SensorHistory()
     /// The Thermals table: rows published only while the detail is on screen.
     /// Readings and ranges still cover the session and feed History.
-    private(set) var sensorRows: [SensorReading] = []
+    var sensorRows: [SensorReading] = []
     /// Each row's lowest and highest since launch or the last Reset.
-    private(set) var sensorExtremes = SensorExtremes(since: Date())
+    var sensorExtremes = SensorExtremes(since: Date())
     /// This tick's readings without the rows kept for channels that stopped
     /// reporting, so Reset can start the ranges from them.
-    @ObservationIgnored private var sensorReadings: [SensorReading] = []
+    @ObservationIgnored var sensorReadings: [SensorReading] = []
     #if DEBUG
     /// `-sensorFixture <file>`: a report from `otm sensors --extremes N --json`
     /// shown in place of this Mac's sensors, for screenshots in a VM that has none.
-    @ObservationIgnored private let sensorFixture = SensorFixture.load()
+    @ObservationIgnored let sensorFixture = SensorFixture.load()
     #endif
-    private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
+    var cpuHistory = History<Double>(capacity: historyCapacity)
     /// The kernel's share of the whole CPU (`CPUSample.system`), for the
     /// Overview's CPU graph under the total and the CPU page's line in its busy time.
-    private(set) var cpuSystemHistory = History<Double>(capacity: historyCapacity)
-    private(set) var coreHistory: [History<Double>]
+    var cpuSystemHistory = History<Double>(capacity: historyCapacity)
+    var coreHistory: [History<Double>]
     /// Each logical CPU's kernel share, indexed as `coreHistory`.
-    private(set) var coreSystemHistory: [History<Double>]
-    private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
-    private(set) var memoryDetail = MemoryHistory()
-    private(set) var gpuDetail: [String: GPUHistory] = [:]
+    var coreSystemHistory: [History<Double>]
+    var memoryHistory = History<Double>(capacity: historyCapacity)
+    var memoryDetail = MemoryHistory()
+    var gpuDetail: [String: GPUHistory] = [:]
     /// Sum over every process each tick, so "by app" graphs can show the rest as "Other".
-    private(set) var processGPUHistory = History<Double>(capacity: processHistoryCapacity)
-    private(set) var processPowerHistory = History<Double>(capacity: processHistoryCapacity)
-    private(set) var processMemoryHistory = History<Double>(capacity: processHistoryCapacity)
+    var processGPUHistory = History<Double>(capacity: processHistoryCapacity)
+    var processPowerHistory = History<Double>(capacity: processHistoryCapacity)
+    var processMemoryHistory = History<Double>(capacity: processHistoryCapacity)
     /// Apps with their helpers folded in (Safari includes its web content processes).
-    private(set) var appGroups: [ProcessNode] = []
-    private(set) var gpuHistory: [String: History<Double>] = [:]
-    private(set) var powerHistory = History<Double>(capacity: historyCapacity)
+    var appGroups: [ProcessNode] = []
+    var gpuHistory: [String: History<Double>] = [:]
+    var powerHistory = History<Double>(capacity: historyCapacity)
     /// macOS's thermal pressure as `ThermalState.level`, for a Mac with no
     /// temperatures to graph.
-    private(set) var thermalPressureHistory = History<Double>(capacity: historyCapacity)
-    private(set) var powerDetail = PowerHistory()
-    private(set) var diskReadHistory: [String: History<Double>] = [:]
-    private(set) var diskWriteHistory: [String: History<Double>] = [:]
+    var thermalPressureHistory = History<Double>(capacity: historyCapacity)
+    var powerDetail = PowerHistory()
+    var diskReadHistory: [String: History<Double>] = [:]
+    var diskWriteHistory: [String: History<Double>] = [:]
     /// Each disk's share of the time it was busy, 0 to 1.
-    private(set) var diskActiveHistory: [String: History<Double>] = [:]
-    private(set) var networkInHistory: [String: History<Double>] = [:]
-    private(set) var networkOutHistory: [String: History<Double>] = [:]
+    var diskActiveHistory: [String: History<Double>] = [:]
+    var networkInHistory: [String: History<Double>] = [:]
+    var networkOutHistory: [String: History<Double>] = [:]
     /// By PID and start time, so a PID macOS gives to a later process starts
     /// a graph of its own rather than carrying on the ended one's.
-    private(set) var processHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
+    var processHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
     /// Each process's history added up, kept with `processHistory`, which
     /// is what views observe.
-    @ObservationIgnored private var processTotals: [ProcessIdentity: ProcessTotal] = [:]
+    @ObservationIgnored var processTotals: [ProcessIdentity: ProcessTotal] = [:]
     /// Each app group's figures as the group stood each tick, by the group's
     /// own process, for the "by app" graphs. A helper that quits leaves its
     /// part of the past in place, and a graph reads one ring per app rather
     /// than adding up every member's.
-    @ObservationIgnored private var groupHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
-    @ObservationIgnored private var groupTotals: [ProcessIdentity: ProcessTotal] = [:]
+    @ObservationIgnored var groupHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
+    @ObservationIgnored var groupTotals: [ProcessIdentity: ProcessTotal] = [:]
     /// The latest tick's processes by PID, for pages that know only a PID
     /// (launchd's, on Startup).
-    private(set) var processIdentityByPID: [Int32: ProcessIdentity] = [:]
+    var processIdentityByPID: [Int32: ProcessIdentity] = [:]
     /// Each user's processes summed, for the Users page.
     let userUsage = UserUsageStore()
     var users: [UserUsage] { userUsage.users }
@@ -288,12 +114,12 @@ final class AppModel {
     /// Directory lookups by uid, including misses, so each runs once.
     @ObservationIgnored private var accounts: [UInt32: UserAccount?] = [:]
     /// Regular (Dock) apps by PID, for grouping and icons.
-    private(set) var regularApps: [Int32: NSRunningApplication] = [:]
+    var regularApps: [Int32: NSRunningApplication] = [:]
     /// Set when NSWorkspace reports an app launching or quitting, so
     /// `regularApps` is rebuilt on the next tick; and when it last was.
-    @ObservationIgnored private var runningAppsChanged = true
+    @ObservationIgnored var runningAppsChanged = true
     @ObservationIgnored private var runningAppsObservation: NSKeyValueObservation?
-    @ObservationIgnored private var regularAppsRead = Date.distantPast
+    @ObservationIgnored var regularAppsRead = Date.distantPast
     private(set) var lastError: String?
     /// A process another page asked the Processes page to select, such as
     /// the owner of a socket on the Connections page. Cleared once shown.
@@ -311,22 +137,22 @@ final class AppModel {
     /// exposed sockets" on the System page's Firewall card). Cleared once applied.
     var requestedConnectionFilter: ConnectionFilter?
     /// Highest whole-system draw seen on this Mac, kept across launches.
-    private(set) var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
+    var peakSystemWatts = UserDefaults.standard.double(forKey: "peakSystemWatts")
     /// `SystemSnapshot.measuresProcessEnergy`, read off the tick's walk over
     /// the processes and written only when it changes. Kept across launches,
     /// so a Mac without power sensors (a VM) hides its power figures from the
     /// first frame rather than a second later. nil until a sample has told.
-    private(set) var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
+    var measuresProcessEnergy = UserDefaults.standard.object(forKey: "measuresProcessEnergy") as? Bool
     /// Whether this Mac attributes GPU time to processes (`ProcessFigureReporting`),
     /// kept across launches and written only when it changes, like
     /// `measuresProcessEnergy`. nil until the samples have told.
-    private(set) var reportsProcessGPU = UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
-    @ObservationIgnored private var gpuReporting = ProcessFigureReporting(
+    var reportsProcessGPU = UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
+    @ObservationIgnored var gpuReporting = ProcessFigureReporting(
         isReported: UserDefaults.standard.object(forKey: "reportsProcessGPU") as? Bool
     )
     /// Whether any process has held Neural Engine memory, kept like `reportsProcessGPU`.
-    private(set) var reportsProcessNeuralMemory = UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
-    @ObservationIgnored private var neuralMemoryReporting = ProcessFigureReporting(
+    var reportsProcessNeuralMemory = UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
+    @ObservationIgnored var neuralMemoryReporting = ProcessFigureReporting(
         isReported: UserDefaults.standard.object(forKey: "reportsProcessNeuralMemory") as? Bool
     )
 
@@ -357,6 +183,8 @@ final class AppModel {
     }
 
     @ObservationIgnored var samplingTask: Task<Void, Never>?
+    /// The actual visible graph step, capped at one second for spike captures.
+    var samplingInterval = 1.0
 
     init() {
         topology = monitor.topology
@@ -371,6 +199,8 @@ final class AppModel {
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
             Task { @MainActor in self?.runningAppsChanged = true }
         }
+        samplingDemand.visibilityChanged = { [weak self] in self?.visibilityChanged() }
+        SpikeCaptureStore.shared.samplingChanged = { [weak self] in self?.visibilityChanged() }
         BenchmarkContextFeed.attach(self)
         start()
     }
@@ -397,267 +227,6 @@ final class AppModel {
         var options = SystemMonitor.Options()
         options.includeRestrictedProcesses = includeSystemProcesses
         Task { [monitor] in await monitor.setOptions(options) }
-    }
-
-    /// Asking every app for its activation policy, or even its PID, can wait
-    /// on a LaunchServices round trip per app, more than the rest of a tick's
-    /// bookkeeping, so the list is rebuilt only when NSWorkspace reports apps
-    /// launching or quitting, and every 10 s for an app that changes policy.
-    private func refreshRegularApps() {
-        let now = Date()
-        guard runningAppsChanged || now.timeIntervalSince(regularAppsRead) >= 10 else { return }
-        runningAppsChanged = false
-        regularAppsRead = now
-        let apps = Dictionary(
-            NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map { ($0.processIdentifier, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        if apps != regularApps { regularApps = apps }
-    }
-
-    func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
-        // The first sample has no baseline, so its rates are all zero; keep it
-        // for the process list but leave it out of the graphs.
-        defer { self.snapshot = snapshot }
-        if let sensors = fixture(or: sensors) { self.sensors = sensors }
-        // A slower sensor read holds its figure, so graphs keep one point per tick.
-        if let held = self.sensors, !held.isEmpty, snapshot.interval > 0 { sensorHistory.append(held) }
-        updateSensorTable(snapshot)
-        refreshRegularApps()
-        userUsage.ingest(snapshot.processes, interval: snapshot.interval, live: samplingDemand.contains(.users))
-        guard snapshot.interval > 0 else { return }
-
-        cpuHistory.append(snapshot.cpu.usage)
-        if samplingDemand.contains(.menuBarIcon) {
-            menuBarIcon.update(history: cpuHistory, usage: snapshot.cpu.usage, at: ProcessInfo.processInfo.systemUptime)
-        }
-        cpuSystemHistory.append(snapshot.cpu.system)
-        for (index, usage) in snapshot.cpu.coreUsage.enumerated() where index < coreHistory.count {
-            coreHistory[index].append(usage)
-        }
-        for (index, system) in snapshot.cpu.coreSystem.enumerated() where index < coreSystemHistory.count {
-            coreSystemHistory[index].append(system)
-        }
-        memoryHistory.append(snapshot.memory.usedFraction)
-        memoryDetail.append(snapshot.memory)
-        powerHistory.append(snapshot.power.systemWatts ?? 0)
-        thermalPressureHistory.append(snapshot.power.thermalState.level)
-        powerDetail.append(snapshot.power, interval: snapshot.interval)
-        if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
-            peakSystemWatts = watts
-            UserDefaults.standard.set(watts, forKey: "peakSystemWatts")
-        }
-        for gpu in snapshot.gpus {
-            // An unreported load stays out of the history, so no graph draws it as 0%.
-            if let busy = gpu.deviceUtilization {
-                gpuHistory[gpu.id, default: History(capacity: Self.historyCapacity)].append(busy)
-            }
-            gpuDetail[gpu.id, default: GPUHistory()].append(gpu)
-        }
-        for disk in snapshot.disks {
-            diskReadHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.readBytesPerSecond)
-            diskWriteHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.writeBytesPerSecond)
-            diskActiveHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.activeFraction)
-        }
-        for link in snapshot.network {
-            networkInHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.receivedBytesPerSecond)
-            networkOutHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.sentBytesPerSecond)
-        }
-
-        let changes = appendProcessHistories(snapshot.processes)
-        var totalGPU = 0.0
-        var totalPower = 0.0
-        var totalMemory = 0.0
-        var anyPower = false
-        var anyGPU = false
-        var anyNeural = false
-        for process in snapshot.processes {
-            totalGPU += process.gpuFraction ?? 0
-            totalPower += process.powerWatts ?? 0
-            totalMemory += Double(process.memory)
-            if process.powerWatts != nil { anyPower = true }
-            if process.gpuTime != nil { anyGPU = true }
-            if process.hasHeldNeuralMemory { anyNeural = true }
-        }
-        noteWhatProcessesReport(snapshot, anyPower: anyPower, anyGPU: anyGPU, anyNeural: anyNeural)
-        processGPUHistory.append(totalGPU)
-        processPowerHistory.append(totalPower)
-        processMemoryHistory.append(totalMemory)
-        appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
-            .flatMap(\.children)
-        appGroupsUptime = snapshot.uptime
-        appendGroupHistories()
-        record(snapshot, sensorsRead: self.sensors?.isEmpty == false, appeared: changes.appeared, gone: changes.gone)
-    }
-
-    /// Adds each app group's totals to its history and running total, as
-    /// `appendProcessHistories` does for processes. A group whose process
-    /// has quit leaves both.
-    private func appendGroupHistories() {
-        var previous = groupHistory
-        groupHistory = [:]
-        var previousTotals = groupTotals
-        groupTotals = [:]
-        var histories: [ProcessIdentity: History<ProcessPoint>] = [:]
-        histories.reserveCapacity(appGroups.count)
-        var totals: [ProcessIdentity: ProcessTotal] = [:]
-        totals.reserveCapacity(appGroups.count)
-        for group in appGroups {
-            guard let identity = group.process?.identity else { continue }
-            var history = previous.removeValue(forKey: identity) ?? History(capacity: Self.processHistoryCapacity)
-            var total = previousTotals.removeValue(forKey: identity) ?? ProcessTotal()
-            let point = ProcessPoint(cpuPercent: group.totals.cpuPercent, memory: group.totals.memory,
-                                     gpuFraction: group.totals.gpuFraction, powerWatts: group.totals.powerWatts)
-            if let dropped = history.append(point) { total.remove(dropped) }
-            total.add(point)
-            histories[identity] = history
-            totals[identity] = total
-        }
-        groupHistory = histories
-        groupTotals = totals
-    }
-
-    /// Adds each process's sample to its history and running total. A process
-    /// that has quit leaves both. The histories are taken out of the model
-    /// while they grow, so each is appended to in place, not copied whole
-    /// every tick. Returns the processes new since the last tick, and the
-    /// last tick's samples of those gone since.
-    private func appendProcessHistories(_ samples: [ProcessSample]) -> (appeared: [ProcessSample], gone: [ProcessSample]) {
-        var previous = processHistory
-        processHistory = [:]
-        var previousTotals = processTotals
-        processTotals = [:]
-        var histories: [ProcessIdentity: History<ProcessPoint>] = [:]
-        histories.reserveCapacity(samples.count)
-        var totals: [ProcessIdentity: ProcessTotal] = [:]
-        totals.reserveCapacity(samples.count)
-        var identities: [Int32: ProcessIdentity] = [:]
-        identities.reserveCapacity(samples.count)
-        var appeared: [ProcessSample] = []
-        for process in samples {
-            let identity = process.identity
-            identities[process.pid] = identity
-            // Bound only within the `if`, so `history` holds the only reference when it's appended to.
-            var history: History<ProcessPoint>
-            if let kept = previous.removeValue(forKey: identity) {
-                history = kept
-            } else {
-                history = History(capacity: Self.processHistoryCapacity)
-                appeared.append(process)
-            }
-            var total = previousTotals.removeValue(forKey: identity) ?? ProcessTotal()
-            let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
-                                     gpuFraction: process.gpuFraction ?? 0, powerWatts: process.powerWatts ?? 0)
-            if let dropped = history.append(point) { total.remove(dropped) }
-            total.add(point)
-            histories[identity] = history
-            totals[identity] = total
-        }
-        processHistory = histories
-        processTotals = totals
-        processIdentityByPID = identities
-        // What's left of the last tick's histories is the processes gone since; `snapshot` is still that tick's.
-        var gone: [ProcessSample] = []
-        if !previous.isEmpty, let last = snapshot?.processes {
-            for process in last where previous[process.identity] != nil { gone.append(process) }
-        }
-        return (appeared, gone)
-    }
-
-    /// Whether this Mac measures energy, GPU time and Neural Engine memory per
-    /// process, from the tick's walk over the processes (any reading at all),
-    /// saved when it changes.
-    private func noteWhatProcessesReport(_ snapshot: SystemSnapshot, anyPower: Bool, anyGPU: Bool, anyNeural: Bool) {
-        guard !snapshot.processes.isEmpty else { return }
-        // The rule in `ProcessSample.measuresEnergy`, without a second walk.
-        if snapshot.interval > 0, anyPower != measuresProcessEnergy {
-            measuresProcessEnergy = anyPower
-            UserDefaults.standard.set(anyPower, forKey: "measuresProcessEnergy")
-        }
-        gpuReporting.record(anyProcess: anyGPU)
-        if let reported = gpuReporting.isReported, reported != reportsProcessGPU {
-            reportsProcessGPU = reported
-            UserDefaults.standard.set(reported, forKey: "reportsProcessGPU")
-        }
-        neuralMemoryReporting.record(anyProcess: anyNeural)
-        if let reported = neuralMemoryReporting.isReported, reported != reportsProcessNeuralMemory {
-            reportsProcessNeuralMemory = reported
-            UserDefaults.standard.set(reported, forKey: "reportsProcessNeuralMemory")
-        }
-    }
-
-    /// Records this tick's sensors, clocks and power rails in the Thermals
-    /// table's ranges: a few dozen dictionary updates, so it runs every tick
-    /// and the ranges cover the whole session, not just while the page shows.
-    private func updateSensorTable(_ snapshot: SystemSnapshot) {
-        let live = samplingDemand.contains(.sensorTable)
-        let readings = fixtureReadings() ?? SensorTable.readings(sensors: sensors, power: snapshot.power,
-                                                               gpus: snapshot.gpus, ordered: live)
-        sensorReadings = readings
-        sensorExtremes.record(readings, thermalState: snapshot.power.thermalState)
-        if live { sensorRows = sensorExtremes.rows(readings) }
-    }
-
-    /// Whether a debug build's `-sensorFixture` stands in for this Mac's
-    /// sensors. Its readings were some other Mac's, so the run records
-    /// nothing to History, which it still shows.
-    private var showsSensorFixture: Bool {
-        #if DEBUG
-        sensorFixture != nil
-        #else
-        false
-        #endif
-    }
-
-    /// The sensors to show: this Mac's, or in a debug build the fixture's.
-    private func fixture(or sensors: SensorSample?) -> SensorSample? {
-        #if DEBUG
-        if let sensorFixture { return sensorFixture.sensors }
-        #endif
-        return sensors
-    }
-
-    /// In a debug build with a fixture, its rows, with its ranges seeded into the table's.
-    private func fixtureReadings() -> [SensorReading]? {
-        #if DEBUG
-        if let sensorFixture { return sensorFixture.readings(seeding: &sensorExtremes) }
-        #endif
-        return nil
-    }
-
-    /// Starts the Thermals table's lowest and highest again from the latest readings.
-    func resetSensorExtremes() {
-        sensorExtremes.reset(at: Date())
-        sensorExtremes.record(sensorReadings, thermalState: snapshot?.power.thermalState)
-        sensorRows = sensorExtremes.rows(sensorReadings)
-    }
-
-    /// Feeds the flight recorder, which writes a record every few seconds.
-    /// Held sensors cover the ticks between slow reads too, so each 10 s
-    /// hardware record has temperatures and fans without artificial gaps.
-    /// `appeared` and `gone` are the processes started and ended since the
-    /// last tick, which alone cost the process history work between records.
-    private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool, appeared: [ProcessSample], gone: [ProcessSample]) {
-        guard let recorder, !showsSensorFixture else { return }
-        processTracker.watchesRestricted = includeSystemProcesses
-        processTracker.add(snapshot.processes, appeared: appeared, disappeared: gone, interval: snapshot.interval, at: snapshot.timestamp)
-        // The apps NSWorkspace reports launching and quitting; background agents are left to the tracker.
-        historyEvents?.update(snapshot.processes, apps: Set(regularApps.keys), at: snapshot.timestamp)
-        let apps = appGroups.compactMap { group in
-            group.process.map { AppUsage(name: displayName(for: $0), cpuPercent: group.totals.cpuPercent, memory: Double(group.totals.memory)) }
-        }
-        let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))
-        // One fixed-size sample into the spike recorder's ring, when captures are on.
-        SpikeCaptureStore.shared.add(values, snapshot: snapshot, history: recorder)
-        // Core loads, clocks, fans, temperatures and power rails, picked from the Thermals table's rows.
-        let hardware = HistoryHardwareSample(readings: sensorReadings, cpu: snapshot.cpu, topology: topology, sensorsRead: sensorsRead)
-        guard let record = recording.add(values, hardware: hardware, apps: apps, interval: snapshot.interval,
-                                         at: snapshot.timestamp) else { return }
-        let processes = processTracker.close(at: record.time, samples: snapshot.processes, labels: launchdLabels())
-        Task.detached(priority: .utility) {
-            try? await recorder.append(record)
-            try? await recorder.append(processes)
-        }
     }
 
     // MARK: - Queries
@@ -831,7 +400,7 @@ final class AppModel {
 extension AppModel {
     /// launchd's label for each process it was running at the Startup page's
     /// latest read of its list, gathered again only after another read.
-    private func launchdLabels() -> [ProcessIdentity: String] {
+    func launchdLabels() -> [ProcessIdentity: String] {
         let watch = launchJobs.watch
         guard watch.lastRead != jobLabels.read else { return jobLabels.labels }
         var labels: [ProcessIdentity: String] = [:]

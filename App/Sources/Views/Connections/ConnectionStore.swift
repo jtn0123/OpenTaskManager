@@ -43,12 +43,16 @@ final class ConnectionStore {
     /// the page opens, so the page isn't empty or stale, then leaves the data
     /// frozen like the other pages.
     func run(model: AppModel, opening: Bool) async {
+        await model.samplingDemand.waitUntilVisible()
+        guard !Task.isCancelled else { return }
         guard !model.isPaused else {
             if opening || !hasLoaded { await refresh(model) }
             return
         }
         while !Task.isCancelled {
-            await refresh(model)
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled else { return }
+            if model.samplingDemand.hasVisibleWindow { await refresh(model) }
             try? await Task.sleep(for: Self.refreshInterval)
         }
     }
@@ -66,7 +70,7 @@ final class ConnectionStore {
             next.observe(snapshot.connections, at: snapshot.time)
             return (snapshot, next)
         }.value
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { return }
         self.watch = next
         apply(snapshot, model: model)
     }

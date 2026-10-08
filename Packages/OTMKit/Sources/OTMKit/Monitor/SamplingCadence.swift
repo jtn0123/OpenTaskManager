@@ -28,7 +28,7 @@ public struct SamplingCadence: Sendable {
 /// slow the source while another still shows it.
 public struct SamplingDemand: Sendable {
     public enum Source: Sendable, Hashable {
-        case sensors, restrictedProcesses, users, sensorTable, menuBarIcon
+        case sensors, restrictedProcesses, users, sensorTable, menuBarIcon, window
     }
 
     private var counts: [Source: Int] = [:]

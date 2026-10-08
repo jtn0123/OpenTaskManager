@@ -257,7 +257,7 @@ struct TimeAxis: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("Last \(Format.timeSpan(Double(samples ?? window) * (interval ?? model.updateSpeed.rawValue)))")
+            Text("Last \(Format.timeSpan(Double(samples ?? window) * (interval ?? model.samplingInterval)))")
             if offersFit, fitOffered { GraphFitToggle() }
             Spacer(minLength: 0)
             if showsNow { Text("now") }

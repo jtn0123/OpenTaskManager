@@ -9,6 +9,8 @@ final class UserUsageStore {
     private(set) var users: [UserUsage] = []
     private(set) var histories: [UInt32: UserHistory] = [:]
 
+    func resetHistories() { histories = [:] }
+
     func ingest(_ processes: [ProcessSample], interval: Double, live: Bool) {
         if live { users = UserUsageBuilder.build(processes) }
         guard interval > 0 else { return }
