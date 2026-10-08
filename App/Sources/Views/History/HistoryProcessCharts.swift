@@ -18,6 +18,7 @@ struct HistoryProcessChart: Identifiable {
     let format: (Double) -> String
     var floor = 0.0
     var units = GraphMath.AxisUnits.plain
+    var showsMemory = false
 
     func top(for points: [HistoryPoint]) -> Double {
         let peak = points.reduce(0.0) { result, point in lines.reduce(result) { max($0, $1.value(point.values) ?? 0) } }
@@ -46,7 +47,7 @@ struct HistoryProcessCharts: View {
             HistoryProcessChartCard(chart: chart, track: track, pagePoints: points, bucket: bucket, domain: domain, gaps: gaps,
                                     ticks: ticks, timeLabels: timeLabels, scrubber: scrubber)
         }
-        if track.lifetime.isRestricted {
+        if track.lifetime.isRestricted, !track.match.summary.isIdle {
             NoticeStrip(title: "Disk", symbol: "internaldrive", color: Theme.disk,
                         text: "Not given for other users' and system processes",
                         help: "macOS gives another user's or a system process's CPU and memory, not its disk use, so none was recorded.",
@@ -57,7 +58,8 @@ struct HistoryProcessCharts: View {
     private var charts: [HistoryProcessChart] {
         let scale = model.cpuScale
         let summary = track.match.summary
-        let memoryName = track.lifetime.isRestricted ? "Resident" : "Footprint"
+        let measures = Set(track.memory.map(\.measure))
+        let memoryName = measures.count > 1 ? "Stored memory" : (measures.first?.title ?? (track.lifetime.isRestricted ? "Resident" : "Footprint"))
         func show(_ value: Double?, _ format: (Double) -> String) -> String { value.map(format) ?? "—" }
         var charts = [
             HistoryProcessChart(title: "CPU", symbol: "cpu", tint: Theme.cpu, lines: [
@@ -71,9 +73,10 @@ struct HistoryProcessCharts: View {
                 HistoryLine(name: memoryName, legend: "Peak", color: Theme.memory, value: { $0.hardware[HistoryProcessKey.memory] },
                             summary: .maximum,
                             meaning: track.lifetime.isRestricted ? "its resident memory" : "its memory footprint, as the Memory column shows"),
-            ], figures: [summary.peakMemory.map { Format.bytes($0) } ?? "—"], lead: "Over the range",
-               format: { Format.bytes(UInt64(max($0, 0))) }, floor: 1_048_576, units: .binaryBytes),
+            ], figures: [(track.lifetime.peakFootprint ?? summary.peakMemory).map { Format.bytes($0) } ?? "—"], lead: "Lifetime peak",
+               format: { Format.bytes(UInt64(max($0, 0))) }, floor: 1_048_576, units: .binaryBytes, showsMemory: true),
         ]
+        if summary.isIdle { return charts.filter(\.showsMemory) }
         if !track.lifetime.isRestricted {
             charts.append(HistoryProcessChart(title: "Disk", symbol: "internaldrive", tint: Theme.disk, lines: [
                 HistoryLine(name: "Read", color: Theme.disk, value: { $0.hardware[HistoryProcessKey.diskRead] },
@@ -107,7 +110,8 @@ private struct HistoryProcessChartCard: View {
 
     var body: some View {
         let points = track.points
-        let top = chart.top(for: points)
+        let memoryTop = chart.showsMemory ? track.memoryPoints.map { Double($0.footprint) }.max() ?? 0 : 0
+        let top = max(chart.top(for: points), GraphMath.ceiling(peak: memoryTop, floor: chart.floor, units: chart.units))
         Card(tint: chart.tint) {
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -148,6 +152,15 @@ private struct HistoryProcessChartCard: View {
             .fixedSize()
             .help("Its figures over the part of the range it ran, counting recorded time only. Records that left it out as idle "
                 + "count as nothing in an average.")
+        if chart.showsMemory, !track.memory.isEmpty {
+            HStack(spacing: 5) {
+                HistoryLineSample(line: HistoryLine(name: "Memory track", color: Theme.memory, value: { _ in nil },
+                                                    fill: false, stroke: .dashed, meaning: "coarse memory readings"))
+                Text("Memory track").foregroundStyle(.secondaryText)
+            }
+            .font(.metadata)
+            .help("A step line of changes of at least 10% or 16 MB, or any change after 30 minutes. Gaps are not recorded.")
+        }
         ForEach(Array(chart.lines.enumerated()), id: \.element.id) { index, line in
             HStack(spacing: 5) {
                 HistoryLineSample(line: line)
@@ -204,6 +217,7 @@ private struct HistoryProcessChartCard: View {
                 RectangleMark(xStart: .value("Time", shade.start), xEnd: .value("Time", shade.end))
                     .foregroundStyle(Self.style(of: shade.kind, wash: wash))
             }
+            memoryMarks(top: top)
             lineMarks(points, top: top)
             // Where it started and ended, when that's within the range.
             ForEach(edges, id: \.self) { edge in
@@ -253,13 +267,27 @@ private struct HistoryProcessChartCard: View {
                 .foregroundStyle(HistoryProcessStyle.idle(dark: dark))
                 .annotation(position: .overlay, alignment: .bottomLeading) {
                     if stretch.upperBound.timeIntervalSince(stretch.lowerBound) > span / 6 {
-                        Text("Idle, not stored").font(.metadata).foregroundStyle(.secondaryText).padding([.leading, .bottom], 6)
+                        Text(chart.showsMemory ? "Memory track" : "Idle, not stored")
+                            .font(.metadata).foregroundStyle(.secondaryText).padding([.leading, .bottom], 6)
                     }
                 }
         }
         ForEach(unwatched) { gap in
             RectangleMark(xStart: .value("Time", gap.start), xEnd: .value("Time", gap.end))
                 .foregroundStyle(wash)
+        }
+    }
+
+    @ChartContentBuilder
+    private func memoryMarks(top: Double) -> some ChartContent {
+        if chart.showsMemory {
+            ForEach(track.memoryPoints) { point in
+                LineMark(x: .value("Time", point.time), y: .value(point.measure.title, min(Double(point.footprint), top)),
+                         series: .value("Track", "\(point.measure.rawValue) \(point.segment)"))
+                    .foregroundStyle(Theme.memory.traceShade)
+                    .lineStyle(HistoryLine.Stroke.dashed.style)
+                    .interpolationMethod(.stepEnd)
+            }
         }
     }
 
@@ -441,7 +469,8 @@ struct HistoryMomentProcess: View {
     typealias Moment = ProcessHistoryLabels.Moment
 
     static func moment(of track: HistoryProcessStore.Track, at time: Date) -> Moment {
-        ProcessHistoryLabels.moment(of: track.lifetime, at: time, points: track.figures, bucket: track.bucket)
+        ProcessHistoryLabels.moment(of: track.lifetime, at: time, points: track.figures, bucket: track.bucket,
+                                    memory: track.memory, coverage: track.memoryCoverage)
     }
 
     var body: some View {
@@ -456,6 +485,8 @@ struct HistoryMomentProcess: View {
                 switch Self.moment(of: track, at: time) {
                 case .figures(let point):
                     figures(point, restricted: track.lifetime.isRestricted)
+                case .memory(let step):
+                    note(ProcessHistoryLabels.memoryMoment(step)).monospacedDigit()
                 case .idle:
                     note(ProcessHistoryLabels.idleMoment)
                         .help(HistoryProcessStyle.idleHelp)
@@ -540,6 +571,7 @@ struct HistoryMomentProcessLine: View {
                 parts.append("disk \(Format.bytesPerSecond(read + write))")
             }
             return parts.compactMap { $0 }.joined(separator: " · ")
+        case .memory(let step): return ProcessHistoryLabels.memoryMoment(step)
         case .idle: return ProcessHistoryLabels.idleMoment
         case .notRunning: return "not running"
         case .notRecorded: return ProcessHistoryLabels.notRecorded

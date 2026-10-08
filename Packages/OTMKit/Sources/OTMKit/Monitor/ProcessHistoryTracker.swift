@@ -25,6 +25,7 @@ public struct ProcessHistoryTracker: Sendable {
         var cpuSeconds: Double
         var diskRead: Double
         var diskWrite: Double
+        var memory: ProcessMemoryState?
 
         static let zero = Counters(cpuSeconds: 0, diskRead: 0, diskWrite: 0)
 
@@ -59,6 +60,8 @@ public struct ProcessHistoryTracker: Sendable {
         let used: Counters
         let memory: UInt64
         let isRestricted: Bool
+        var track: ProcessMemoryState?
+        let lastReading: Date
     }
 
     public let span: TimeInterval
@@ -79,6 +82,8 @@ public struct ProcessHistoryTracker: Sendable {
     private var restrictedCPU: [ProcessIdentity: Double] = [:]
     private var needsBaselines = true
     private var finished: [Finished] = []
+    private var memoryEnds: [ProcessMemoryUpdate] = []
+    private var memoryPending: [ProcessMemoryUpdate] = []
     private var covered = 0.0
     private var last: Date?
     private var started: [ProcessHistoryBatch.Start] = []
@@ -119,9 +124,11 @@ public struct ProcessHistoryTracker: Sendable {
         }
 
         if afterGap {
+            closeMemoryStretch()
             resetStretch()
         }
         guard interval > 0, interval <= span else { return }
+        let previousTime = last
         last = time
         for process in samples where process.isRestricted {
             let seconds = process.startTime.map { min(interval, max(time.timeIntervalSince($0), 0)) } ?? interval
@@ -134,11 +141,13 @@ public struct ProcessHistoryTracker: Sendable {
         } else {
             for process in appeared { baselines[process.identity] = baseline(before: process, interval: interval, at: time) }
         }
+        observeMemory(samples, at: time)
         for process in disappeared {
             defer { restrictedCPU.removeValue(forKey: process.identity) }
             guard let base = baselines.removeValue(forKey: process.identity) else { continue }
             finished.append(Finished(identity: process.identity, used: Self.used(counters(process), since: base),
-                                     memory: process.memory, isRestricted: process.isRestricted))
+                                     memory: process.memory, isRestricted: process.isRestricted,
+                                     track: base.memory, lastReading: previousTime ?? time))
         }
         covered += interval
     }
@@ -175,10 +184,11 @@ public struct ProcessHistoryTracker: Sendable {
             if !waiting.contains(identity) { learned[identity] = label }
             labelsNoted[identity] = label
         }
+        let memory = memoryUpdates(samples: samples, waiting: waiting, short: short.identities, at: time)
         let batch = ProcessHistoryBatch(
             time: time, started: starts,
             labels: learned, samples: kept,
-            ended: short.identities.isEmpty ? ended : ended.filter { !short.identities.contains($0.identity) }, shortRuns: short.runs
+            ended: short.identities.isEmpty ? ended : ended.filter { !short.identities.contains($0.identity) }, shortRuns: short.runs, memory: memory
         )
         deferred = started.filter { waiting.contains($0.identity) }
         deferredSince = time
@@ -192,7 +202,11 @@ public struct ProcessHistoryTracker: Sendable {
         if !needsBaselines {
             var next: [ProcessIdentity: Counters] = [:]
             next.reserveCapacity(samples.count)
-            for process in samples { next[process.identity] = counters(process) }
+            for process in samples {
+                var counter = counters(process)
+                counter.memory = baselines[process.identity]?.memory
+                next[process.identity] = counter
+            }
             baselines = next
         }
         return batch
@@ -250,11 +264,50 @@ public struct ProcessHistoryTracker: Sendable {
     }
 
     private func baseline(before process: ProcessSample, interval: TimeInterval, at time: Date) -> Counters {
-        guard process.isRestricted else { return Counters(before: process, interval: interval, at: time) }
-        var result = counters(process)
+        var result = process.isRestricted ? counters(process) : Counters(before: process, interval: interval, at: time)
+        result.memory = ProcessMemoryState(process, at: time)
+        guard process.isRestricted else { return result }
         let seconds = process.startTime.map { min(interval, max(time.timeIntervalSince($0), 0)) } ?? interval
         result.cpuSeconds -= process.cpuPercent / 100 * seconds
         return result
+    }
+
+    /// Reuses sampler figures; thresholds share a buffer and peaks remain
+    /// in value state until the record writes them once. No new reads.
+    private mutating func observeMemory(_ samples: [ProcessSample], at time: Date) {
+        for process in samples {
+            guard var state = baselines[process.identity]?.memory else { continue }
+            state.record(process, at: time, reportPeak: false, into: &memoryPending)
+            baselines[process.identity]?.memory = state
+        }
+    }
+
+    /// One pass over existing entries, with value state and one shared output buffer.
+    private mutating func memoryUpdates(samples: [ProcessSample], waiting: Set<ProcessIdentity>,
+                                        short: Set<ProcessIdentity>, at time: Date) -> [ProcessMemoryUpdate] {
+        var updates = memoryEnds.filter { !short.contains($0.identity) && !waiting.contains($0.identity) }
+        updates.append(contentsOf: memoryPending.filter { !short.contains($0.identity) && !waiting.contains($0.identity) })
+        memoryPending = memoryPending.filter { waiting.contains($0.identity) && !short.contains($0.identity) }
+        memoryEnds.removeAll(keepingCapacity: true)
+        for process in samples where !waiting.contains(process.identity) {
+            guard var state = baselines[process.identity]?.memory else { continue }
+            state.record(process, at: time, into: &updates)
+            baselines[process.identity]?.memory = state
+        }
+        for process in finished where !short.contains(process.identity) {
+            guard var state = process.track else { continue }
+            let step = ProcessMemoryStep(time: process.lastReading, footprint: process.memory,
+                                         measure: process.isRestricted ? .resident : .footprint)
+            state.record(step, identity: process.identity, ending: true, into: &updates)
+        }
+        return updates
+    }
+
+    private mutating func closeMemoryStretch() {
+        for (identity, counter) in baselines {
+            guard var state = counter.memory, state.stored != nil else { continue }
+            state.record(state.latest, identity: identity, ending: true, into: &memoryEnds)
+        }
     }
 
     private mutating func resetStretch() {

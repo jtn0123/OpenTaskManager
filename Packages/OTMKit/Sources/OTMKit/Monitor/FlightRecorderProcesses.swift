@@ -53,6 +53,11 @@ extension FlightRecorder {
     /// A record written while a run of a build keeping process history watched.
     private static let watchedRecord = "EXISTS (SELECT 1 FROM process_watches w WHERE w.started <= records.time AND w.last >= records.time)"
 
+    private func selectedLifetimeColumns() throws(FlightRecorderError) -> String {
+        let peaks = try keepsProcessMemory() ? "l.peak_footprint, l.peak_footprint_time, l.peak_footprint_measure" : "NULL, NULL, NULL"
+        return Self.lifetimeColumns + ", " + peaks
+    }
+
     // MARK: - Writing
 
     /// Saves a record's process history (`ProcessHistoryTracker`) in one transaction.
@@ -96,6 +101,7 @@ extension FlightRecorder {
             if unsafe sqlite3_bind_parameter_count(statement) > 0 { unsafe sqlite3_bind_double(statement, 1, cutoff) }
             guard unsafe sqlite3_step(statement) == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(database))) }
         }
+        try pruneProcessMemory(before: date)
     }
 
     // MARK: - Reading
@@ -163,15 +169,18 @@ extension FlightRecorder {
     /// letters), or whose PID it is, latest first, `limit` at most, each with
     /// its figures over the part of the range it ran.
     public func processLifetimes(matching query: String, from start: Date, to end: Date,
-                                 limit: Int = 100) throws(FlightRecorderError) -> [ProcessHistoryMatch] {
+                                 limit: Int = 100, sort: ProcessHistorySort = .latest) throws(FlightRecorderError) -> [ProcessHistoryMatch] {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         guard let query = ProcessHistorySearch.normalized(query) else { return [] }
+        let growth = try keepsProcessMemory() ? Self.memoryGrowthSQL : "NULL"
+        let order = sort == .grew ? "memory_growth DESC, " : ""
         let statement = unsafe try Self.prepare("""
-            SELECT \(Self.lifetimeColumns) FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
+            SELECT \(try selectedLifetimeColumns()), \(growth) AS memory_growth
+            FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
             WHERE (l.name LIKE ?1 ESCAPE '\\' OR l.path LIKE ?1 ESCAPE '\\' OR l.bundle LIKE ?1 ESCAPE '\\'
                 OR l.job LIKE ?1 ESCAPE '\\' OR l.pid = ?2)
                 AND l.first_seen <= ?4 AND \(Self.lastSeen) >= ?3
-            ORDER BY \(Self.lastSeen) DESC, l.first_seen DESC, l.id DESC LIMIT ?5
+            ORDER BY \(order)\(Self.lastSeen) DESC, l.first_seen DESC, l.id DESC LIMIT ?5
             """, on: unsafe database)
         defer { unsafe sqlite3_finalize(statement) }
         unsafe Self.bind(ProcessHistorySearch.likePattern(query), to: statement, at: 1)
@@ -183,11 +192,15 @@ extension FlightRecorder {
         unsafe sqlite3_bind_double(statement, 3, start.timeIntervalSince1970)
         unsafe sqlite3_bind_double(statement, 4, end.timeIntervalSince1970)
         unsafe sqlite3_bind_int64(statement, 5, Int64(max(limit, 0)))
-        var lifetimes: [ProcessLifetime] = []
-        while unsafe sqlite3_step(statement) == SQLITE_ROW { unsafe lifetimes.append(Self.lifetime(statement)) }
+        var lifetimes: [(lifetime: ProcessLifetime, growth: Int64?)] = []
+        while unsafe sqlite3_step(statement) == SQLITE_ROW {
+            let growth = unsafe sqlite3_column_type(statement, 15) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 15)
+            lifetimes.append((unsafe Self.lifetime(statement), growth))
+        }
         var matches: [ProcessHistoryMatch] = []
-        for lifetime in lifetimes {
-            matches.append(ProcessHistoryMatch(lifetime: lifetime, summary: try processSummary(lifetime, from: start, to: end)))
+        for entry in lifetimes {
+            matches.append(ProcessHistoryMatch(lifetime: entry.lifetime,
+                                               summary: try processSummary(entry.lifetime, from: start, to: end), memoryGrowth: entry.growth))
         }
         return matches
     }
@@ -196,7 +209,7 @@ extension FlightRecorder {
     public func processLifetime(_ identity: ProcessIdentity) throws(FlightRecorderError) -> ProcessLifetime? {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         let statement = unsafe try Self.prepare("""
-            SELECT \(Self.lifetimeColumns) FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
+            SELECT \(try selectedLifetimeColumns()) FROM process_lifetimes l LEFT JOIN process_watches w ON w.id = l.watch
             WHERE l.pid = ? AND l.start_time = ?
             """, on: unsafe database)
         defer { unsafe sqlite3_finalize(statement) }
@@ -407,7 +420,9 @@ extension FlightRecorder {
                                       startTime: start > 0 ? Date(timeIntervalSince1970: start) : nil),
             name: text(statement, 3) ?? "", path: text(statement, 4), user: text(statement, 5) ?? "",
             bundleID: text(statement, 6), jobLabel: text(statement, 7), isRestricted: sqlite3_column_int(statement, 8) != 0,
-            firstSeen: date(9) ?? .distantPast, lastSeen: date(10) ?? .distantPast, ended: date(11)
+            firstSeen: date(9) ?? .distantPast, lastSeen: date(10) ?? .distantPast, ended: date(11),
+            peakFootprint: sqlite3_column_type(statement, 12) == SQLITE_NULL ? nil : UInt64(clamping: sqlite3_column_int64(statement, 12)),
+            peakFootprintTime: date(13), peakFootprintMeasure: text(statement, 14).flatMap(ProcessMemoryMeasure.init(rawValue:))
         )
     }
 }
@@ -439,6 +454,7 @@ final class ProcessHistoryWriter {
         if !batch.started.isEmpty { unsafe try start(batch.started, watch: watch, on: handle) }
         if !batch.labels.isEmpty { unsafe try label(batch.labels, on: handle) }
         if !batch.samples.isEmpty { unsafe try keep(batch.samples, at: batch.time, on: handle) }
+        if !batch.memory.isEmpty { unsafe try memory(batch.memory, on: handle) }
         if !batch.ended.isEmpty { unsafe try end(batch.ended, watch: watch, on: handle) }
         if !batch.shortRuns.isEmpty { unsafe try count(batch.shortRuns, at: batch.time, on: handle) }
         let moved = unsafe try FlightRecorder.prepare("UPDATE process_watches SET last = MAX(last, ?) WHERE id = ?", on: handle)
@@ -450,7 +466,9 @@ final class ProcessHistoryWriter {
 
     private func newWatch(at time: Double, on handle: OpaquePointer) throws(FlightRecorderError) -> Int64 {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
-        let statement = unsafe try FlightRecorder.prepare("INSERT INTO process_watches (started, last) VALUES (?, ?)", on: handle)
+        let statement = unsafe try FlightRecorder.prepare(
+            "INSERT INTO process_watches (started, last, memory) VALUES (?, ?, 1)", on: handle
+        )
         defer { unsafe sqlite3_finalize(statement) }
         unsafe sqlite3_bind_double(statement, 1, time)
         unsafe sqlite3_bind_double(statement, 2, time)
@@ -581,7 +599,7 @@ final class ProcessHistoryWriter {
     }
 
     /// The lifetime's row: this run's, or one the database has.
-    private func row(for identity: ProcessIdentity, on handle: OpaquePointer) throws(FlightRecorderError) -> Int64? {
+    func row(for identity: ProcessIdentity, on handle: OpaquePointer) throws(FlightRecorderError) -> Int64? {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         if let row = rows[identity] { return row }
         let statement = unsafe try FlightRecorder.prepare("SELECT id FROM process_lifetimes WHERE pid = ? AND start_time = ?", on: handle)
@@ -609,7 +627,7 @@ final class ProcessHistoryWriter {
         if let text { unsafe FlightRecorder.bind(text, to: statement, at: index) } else { unsafe sqlite3_bind_null(statement, index) }
     }
 
-    private static func step(_ statement: OpaquePointer, on handle: OpaquePointer) throws(FlightRecorderError) {
+    static func step(_ statement: OpaquePointer, on handle: OpaquePointer) throws(FlightRecorderError) {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         guard unsafe sqlite3_step(statement) == SQLITE_DONE else { throw unsafe .sqlite(String(cString: sqlite3_errmsg(handle))) }
     }

@@ -24,10 +24,14 @@ public struct ProcessLifetime: Sendable, Equatable, Identifiable, Codable {
     /// When it was seen to end. Nil while it runs, and for one that ended
     /// while nothing was recording.
     public var ended: Date?
+    public var peakFootprint: UInt64?
+    public var peakFootprintTime: Date?
+    public var peakFootprintMeasure: ProcessMemoryMeasure?
 
     public init(id: Int64, identity: ProcessIdentity, name: String, path: String? = nil, user: String = "",
                 bundleID: String? = nil, jobLabel: String? = nil, isRestricted: Bool = false,
-                firstSeen: Date, lastSeen: Date, ended: Date? = nil) {
+                firstSeen: Date, lastSeen: Date, ended: Date? = nil, peakFootprint: UInt64? = nil,
+                peakFootprintTime: Date? = nil, peakFootprintMeasure: ProcessMemoryMeasure? = nil) {
         self.id = id
         self.identity = identity
         self.name = name
@@ -39,6 +43,9 @@ public struct ProcessLifetime: Sendable, Equatable, Identifiable, Codable {
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
         self.ended = ended
+        self.peakFootprint = peakFootprint
+        self.peakFootprintTime = peakFootprintTime
+        self.peakFootprintMeasure = peakFootprintMeasure
     }
 
     /// When it started: the kernel's start time, or when it was first seen.
@@ -203,15 +210,17 @@ public struct ProcessHistoryBatch: Sendable, Equatable {
     public var samples: [ProcessHistorySample]
     public var ended: [End]
     public var shortRuns: [ShortRuns]
+    public var memory: [ProcessMemoryUpdate]
 
     public init(time: Date, started: [Start] = [], labels: [ProcessIdentity: String] = [:], samples: [ProcessHistorySample] = [],
-                ended: [End] = [], shortRuns: [ShortRuns] = []) {
+                ended: [End] = [], shortRuns: [ShortRuns] = [], memory: [ProcessMemoryUpdate] = []) {
         self.time = time
         self.started = started
         self.labels = labels
         self.samples = samples
         self.ended = ended
         self.shortRuns = shortRuns
+        self.memory = memory
     }
 }
 
@@ -286,10 +295,13 @@ public struct ProcessHistoryMatch: Sendable, Equatable, Identifiable {
     public var id: Int64 { lifetime.id }
     public let lifetime: ProcessLifetime
     public let summary: ProcessHistorySummary
+    /// Last less first stored memory, read in SQL. Nil across different measures.
+    public let memoryGrowth: Int64?
 
-    public init(lifetime: ProcessLifetime, summary: ProcessHistorySummary) {
+    public init(lifetime: ProcessLifetime, summary: ProcessHistorySummary, memoryGrowth: Int64? = nil) {
         self.lifetime = lifetime
         self.summary = summary
+        self.memoryGrowth = memoryGrowth
     }
 }
 
