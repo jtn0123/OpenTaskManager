@@ -54,7 +54,7 @@ final class HistoryRecordingStore {
 
     /// Reads a recording file off the main actor and shows it on the History page.
     func open(_ url: URL) {
-        UserDefaults.standard.set(Page.history.rawValue, forKey: "page")
+        PageSelection.shared.page = .history
         Task {
             do {
                 opened = try await Task.detached(priority: .userInitiated) { try OpenedRecording.read(url) }.value

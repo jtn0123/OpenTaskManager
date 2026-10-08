@@ -62,7 +62,7 @@ struct TopAppsCard: View {
     private static let footerHeight = ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .callout))) + 2
 
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// The room kept for rows, worked out while the body is, like `AutoScaleBounds`.
     @State private var room = TopListRoomHolder(limit: TopAppsCard.limit)
     var title: String

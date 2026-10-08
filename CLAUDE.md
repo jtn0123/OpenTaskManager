@@ -346,11 +346,13 @@ results, `-openStorageList largest|changes` showing the largest files or
 what changed since the last saved scan of that folder, and
 `-openStorageReconcile YES` unfolding "Where the space is". Pick a
 scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
-Documents, Downloads and other apps' containers raise a privacy prompt. Don't pass
-`-page` itself: a launch argument pins that setting for the whole run, so the
-sidebar stops working in that instance. The exception is a capture while other
-instances run: `-openPage` saves the page, so every running instance follows
-the last launch, and `-page <name>` keeps a throwaway instance on its page. Get the
+Documents, Downloads and other apps' containers raise a privacy prompt.
+`-page <name>` works too. Each running copy keeps its own page
+(`PageSelection`): it reads the saved page, or the one these arguments name,
+once at launch, and saves each change for the next launch. It never follows
+another copy, so a capture's copy and the user's own don't move each other.
+Don't read the page through `@AppStorage("page")`: a launch argument would pin
+it for the whole run and the sidebar would stop switching pages. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
 

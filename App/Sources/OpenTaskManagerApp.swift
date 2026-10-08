@@ -8,15 +8,6 @@ struct OpenTaskManagerApp: App {
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
     @AppStorage("streamGraphs") private var streamGraphs = true
 
-    init() {
-        // `--args -openPage Processes` picks the starting page. It's copied into the
-        // saved value once, because passing `-page` itself would pin that setting
-        // for the whole run and the sidebar would stop switching pages.
-        if let start = UserDefaults.standard.string(forKey: "openPage"), Page(rawValue: start) != nil {
-            UserDefaults.standard.set(start, forKey: "page")
-        }
-    }
-
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
             ContentView()
@@ -103,7 +94,7 @@ enum Page: String, CaseIterable, Identifiable {
 /// first nine: a way between pages that doesn't need the sidebar, which a
 /// window under 900 points hides.
 private struct PageCommands: Commands {
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
@@ -161,7 +152,7 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// In a window under 900 points the sidebar steps aside, so the page gets
     /// the fifth of the width it took, and comes back when the window
     /// widens; the user's own show or hide wins (`SidebarVisibility` in OTMKit).
