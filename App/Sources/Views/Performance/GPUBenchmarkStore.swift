@@ -34,11 +34,18 @@ final class GPUBenchmarkStore {
     private init() {
         var device = GPUBenchmarkDevice.current()
         if Self.fixture == "nodevice" { device = nil }
+        if GuidedBenchmarkFixture.enabled {
+            let results = GuidedBenchmarkFixture.gpuResults()
+            self.device = results.first?.device
+            history = results
+            return
+        }
         self.device = device
         history = device.map { SpeedTestHistory.gpuBenchmark.results(for: $0.key) } ?? []
     }
 
     func start(session: BenchmarkSession? = nil, discard: Bool = false) {
+        guard !GuidedBenchmarkFixture.enabled else { return }
         guard !BenchmarkWorkspace.shared.guidedRunning || session != nil || discard else { return }
         completedAt = nil
         guard running == nil, let device else { return }

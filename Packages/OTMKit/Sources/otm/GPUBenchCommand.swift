@@ -55,20 +55,30 @@ func gpuBenchSummary(_ result: GPUBenchmarkResult) -> String {
     for workload in result.workloads {
         let measurement = workload.measurement
         // A figure whose GPU time looked short says so on its own row, not only in the note below.
-        let flag = measurement.gpuTimeLooksShort ? "   " + BenchmarkFigureCaveat.timingUnverified.title.lowercased() : ""
+        let flag = measurement.timingCaveat(for: workload.workload) != nil ? "   " + BenchmarkFigureCaveat.timingUnverified.title.lowercased() : ""
         lines.append(pad(workload.workload.title, 16) + pad(workload.workload.format(measurement.median), 18)
             + pad("±" + spread(measurement.spread / 2), 10) + pad(milliseconds(measurement.medianGPUSeconds), 12)
             + milliseconds(measurement.medianWallSeconds) + flag)
+        // The verdict alone: the note below defines the fill interval once.
+        let verdict: String = switch workload.workload == .fill ? measurement.fillTimingVerdict
+            : measurement.gpuTimeLooksShort ? .qualified(.gpuTimeShort) : nil {
+        case .verified: "verified"
+        case let .qualified(reason): "unverified: " + reason.reason
+        case nil: "not checked against counters"
+        }
+        lines.append("  Timing: " + measurement.timingSource + " · " + verdict)
     }
     lines += [
         "",
-        "Medians of \(result.configuration.repeats) timed repeats after a warm-up, each a command buffer timed by the GPU "
-            + "(gpuStartTime to gpuEndTime); ± is half the gap between the slowest and fastest. Commit to done adds "
-            + "scheduling and the wake-up. Every result was checked.",
+        "Medians of \(result.configuration.repeats) timed repeats after a warm-up; ± is half the gap between the slowest "
+            + "and fastest. GPU time is the command buffer's; for fill, where the GPU samples them, render-pass counters from the first "
+            + "pass's vertex start to the last pass's fragment end, verified against it. Commit to done adds scheduling and the wake-up. "
+            + "Every result was checked.",
     ]
     for workload in GPUWorkload.allCases {
         lines.append("\(workload.title): \(workload.summary).")
     }
+    if result.result(.fill)?.fillTimingVerdict.isVerified == false { lines.append(GPUTimingEvidence.fillExclusion) }
     if let note = result.timingNote { lines.append(note) }
     let thermal = result.thermalStateAtStart == result.thermalStateAtEnd
         ? "Thermal state \(result.thermalStateAtStart.rawValue) throughout"

@@ -67,7 +67,9 @@ struct GPUSection: View {
         BenchmarkSection(
             kind: .gpu, runs: BenchmarkHistories.runs(.gpu),
             method: "FP32 compute, memory and fill rate, timed by the GPU · about \(seconds) s",
-            target: store.device.map { "Runs on \($0.summary). Each figure is timed by the GPU's own clock and checked." },
+            target: store.device.map {
+                "Runs on \($0.summary). Each figure is timed by the GPU's own clock and checked. " + GPUTimingEvidence.fillInterval
+            },
             blocked: store.device == nil ? GPUBenchmarkError.noDevice.message : nil,
             run: store.running.map { run in
                 let progress = store.progress
@@ -197,6 +199,9 @@ private struct BenchmarkSection: View {
             if let latest {
                 LatestFigures(run: latest, tint: tint)
                     .equatable()
+                if kind == .gpu, latest.measurement("fill")?.caveat != nil {
+                    Text(GPUTimingEvidence.fillExclusion).font(.explanation).foregroundStyle(BenchmarkLook.caution)
+                }
                 if runs.count > 1 {
                     BenchmarkTrendView(kind: kind, runs: runs)
                         .equatable()
@@ -345,12 +350,14 @@ private struct FigureTile: View {
                             .monospacedDigit()
                             .lineLimit(1)
                     }
-                    .help(measurement.repeats.map { "Median of \($0) timed repeats; ± is half the gap between the slowest and fastest" }
-                        ?? "Measured once")
+                    .help((measurement.timingDetail.map { $0 + " " } ?? "") + (measurement.repeats.map {
+                        "Median of \($0) timed repeats; ± is half the gap between the slowest and fastest"
+                    }
+                        ?? "Measured once"))
                 }
             }
             if let caveat {
-                FigureCaveatLabel(caveat: caveat, detail: nil)
+                FigureCaveatLabel(caveat: caveat, detail: measurements.first(where: { $0.caveat != nil })?.timingDetail)
             }
         }
         .padding(.horizontal, 10)

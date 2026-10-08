@@ -2,7 +2,7 @@ import Foundation
 import Metal
 
 // The GPU benchmark's three workloads. Their shaders, inputs, sizes and
-// arithmetic are part of `GPUBenchmark.suiteVersion`: change any of them and
+// arithmetic and measured intervals are part of `GPUBenchmark.suiteVersion`: change any of them and
 // bump it, or results stop comparing with the ones already saved. A test
 // pins each workload's answers for the standard configuration to catch that.
 //
@@ -337,6 +337,15 @@ protocol GPUWorkloadRunner: AnyObject {
     func reset()
     func encode(units: Int, into buffer: any MTLCommandBuffer) throws(GPUBenchmarkError)
     func verify(units: Int) throws(GPUBenchmarkError) -> Bool
+    var timingUnavailableReason: GPUTimingEvidence.Qualification { get }
+    func beginTiming()
+    func endTiming() -> GPUTimingEvidence.Interval?
+}
+
+extension GPUWorkloadRunner {
+    var timingUnavailableReason: GPUTimingEvidence.Qualification { .noCounterSampling }
+    func beginTiming() {}
+    func endTiming() -> GPUTimingEvidence.Interval? { nil }
 }
 
 /// FP32 compute: `otm_fma` over every thread, once per unit.
@@ -470,10 +479,12 @@ final class GPUFillRunner: GPUWorkloadRunner {
     private let layers: Int
     private let target: any MTLTexture
     private let readback: any MTLBuffer
+    private let timing: GPUFillTiming
 
     init(context: GPUBenchmarkContext, configuration: GPUBenchmarkConfiguration) throws(GPUBenchmarkError) {
         self.context = context
         pipeline = try context.layers.get()
+        timing = GPUFillTiming(device: context.device)
         size = max(configuration.fillSize, 16)
         layers = max(configuration.fillLayers, 1)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: GPUBenchmarkContext.fillFormat, width: size, height: size,
@@ -492,6 +503,10 @@ final class GPUFillRunner: GPUWorkloadRunner {
 
     func reset() {}
 
+    var timingUnavailableReason: GPUTimingEvidence.Qualification { timing.unavailableReason }
+    func beginTiming() { timing.begin() }
+    func endTiming() -> GPUTimingEvidence.Interval? { timing.end() }
+
     func encode(units: Int, into buffer: any MTLCommandBuffer) throws(GPUBenchmarkError) {
         for unit in 0..<units {
             let pass = MTLRenderPassDescriptor()
@@ -499,6 +514,7 @@ final class GPUFillRunner: GPUWorkloadRunner {
             pass.colorAttachments[0].loadAction = unit == 0 ? .clear : .load
             pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
             pass.colorAttachments[0].storeAction = .store
+            timing.attach(to: pass, first: unit == 0, last: unit == units - 1)
             guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else {
                 throw .failed(workload, "it couldn't start a render pass")
             }

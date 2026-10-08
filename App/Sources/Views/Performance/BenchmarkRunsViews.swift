@@ -220,7 +220,7 @@ private struct RunRow: View {
                             FigureCaveatMark(caveat: caveat)
                             Text(number).foregroundStyle(.secondaryText).fontWeight(.regular)
                         }
-                        .help("\(caveat.title): \(caveat.explanation)" + (spread.isEmpty ? "" : " (\(spread))"))
+                        .help("\(caveat.title): \(measurement?.timingDetail ?? caveat.explanation)" + (spread.isEmpty ? "" : " (\(spread))"))
                     } else {
                         Text(number).help(spread)
                     }
@@ -376,8 +376,8 @@ private struct ChangeTable: View {
                         Text(change.title.replacingOccurrences(of: ", ", with: ",\n")).lineLimit(2)
                         Text(change.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
-                    figure(change.unit.format(change.baseline), caveat: change.baselineCaveat)
-                    figure(change.unit.format(change.compared), caveat: change.comparedCaveat)
+                    figure(change.unit.format(change.baseline), caveat: change.baselineCaveat, detail: change.baselineTimingDetail)
+                    figure(change.unit.format(change.compared), caveat: change.comparedCaveat, detail: change.comparedTimingDetail)
                     Text(change.change.map(BenchmarkChange.formatChange) ?? "—")
                         .fontWeight(change.caveat == nil ? .semibold : .regular)
                         .foregroundStyle(change.caveat == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
@@ -412,16 +412,16 @@ private struct ChangeTable: View {
     }
 
     @ViewBuilder
-    private func figure(_ text: String, caveat: BenchmarkFigureCaveat?) -> some View {
+    private func figure(_ text: String, caveat: BenchmarkFigureCaveat?, detail: String?) -> some View {
         if let caveat {
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 FigureCaveatMark(caveat: caveat)
                 Text(text).foregroundStyle(.secondaryText)
             }
             .fixedSize()
-            .help("\(caveat.title): \(caveat.explanation)")
+            .help(detail ?? "\(caveat.title): \(caveat.explanation)")
         } else {
-            Text(text).fixedSize()
+            Text(text).fixedSize().help(detail ?? "")
         }
     }
 }

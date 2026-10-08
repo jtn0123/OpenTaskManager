@@ -9,7 +9,7 @@ import SwiftUI
 /// not per tick. Without a Metal GPU, or when the GPU can't run or time the
 /// workloads (as a VM's might not), it says so in place of the figures. The
 /// figures come first and the workloads' description folds away under
-/// Methodology; a figure whose GPU time looked short says so at the figure.
+/// Methodology; a figure whose timing could not be verified says so at the figure.
 struct GPUBenchmarkCard: View, Equatable {
     var body: some View {
         let store = GPUBenchmarkStore.shared
@@ -31,6 +31,9 @@ struct GPUBenchmarkCard: View, Equatable {
                 }
                 if let latest = results.first {
                     tiles(result: latest, progress: nil)
+                    if latest.result(.fill)?.fillTimingVerdict.isVerified == false {
+                        Text(GPUTimingEvidence.fillExclusion).font(.explanation).foregroundStyle(BenchmarkLook.caution)
+                    }
                     Text(Self.tested(latest))
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
@@ -66,7 +69,8 @@ struct GPUBenchmarkCard: View, Equatable {
         return "Times three fixed Metal workloads (version \(GPUBenchmark.suiteVersion)) on \(target): chains of 32-bit fused "
             + "multiply–adds, reading a \(Format.wholeBytes(UInt64(standard.memoryBytes))) buffer, and blending full-screen layers "
             + "into an offscreen \(standard.fillSize) × \(standard.fillSize) image. Each warms up, then runs \(standard.repeats) "
-            + "repeats timed by the GPU itself, and every result is checked. It keeps the GPU busy for about \(Self.plannedSeconds) s."
+            + "repeats timed by the GPU itself, and every result is checked. It keeps the GPU busy for about \(Self.plannedSeconds) s. "
+            + GPUTimingEvidence.fillInterval
     }
 
     private func header(run: GPUBenchmarkStore.Run?, store: GPUBenchmarkStore, debugFigures: Bool) -> some View {
@@ -125,8 +129,8 @@ struct GPUBenchmarkCard: View, Equatable {
     }
 }
 
-/// One workload's median and spread. A figure whose GPU time looked short
-/// (as a VM's can) is drawn in the secondary colour with "Timing
+/// One workload's median and spread. A figure whose timing could not be verified
+/// (as a VM's may not be) is drawn in the secondary colour with "Timing
 /// unverified" under it, the reason and the timings in its tooltip.
 private struct GPUBenchmarkTile: View {
     let workload: GPUWorkload
@@ -134,7 +138,7 @@ private struct GPUBenchmarkTile: View {
     let measuring: Bool
 
     var body: some View {
-        let caveat: BenchmarkFigureCaveat? = measurement?.gpuTimeLooksShort == true ? .timingUnverified : nil
+        let caveat: BenchmarkFigureCaveat? = measurement?.timingCaveat(for: workload)
         VStack(alignment: .leading, spacing: 4) {
             Text(workload.title).font(.metadata).foregroundStyle(.secondaryText).lineLimit(1)
                 .help(workload.summary.prefix(1).uppercased() + workload.summary.dropFirst())
@@ -145,7 +149,7 @@ private struct GPUBenchmarkTile: View {
                 .foregroundStyle(measurement == nil || caveat != nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
                 .help(measurement.map(timing) ?? "")
             if let caveat, let measurement {
-                FigureCaveatLabel(caveat: caveat, detail: repeatTiming(measurement))
+                FigureCaveatLabel(caveat: caveat, detail: measurement.timingDescription(for: workload) + " " + repeatTiming(measurement))
             }
             Text(footer).font(.explanation).foregroundStyle(.secondaryText).monospacedDigit().lineLimit(1)
         }
@@ -167,7 +171,8 @@ private struct GPUBenchmarkTile: View {
     /// What a repeat held and how long it took, on the GPU and from commit to completion.
     private func timing(_ measurement: GPUBenchmarkMeasurement) -> String {
         let units = workload == .fill ? "render passes" : "dispatches"
-        return "Each repeat: \(measurement.unitsPerRepeat) \(units), \(repeatTiming(measurement))"
+        return measurement.timingDescription(for: workload)
+            + " Each repeat: \(measurement.unitsPerRepeat) \(units), \(repeatTiming(measurement))"
     }
 
     /// "449 ms on the GPU, 492 ms from commit to completion".

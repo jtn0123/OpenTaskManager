@@ -74,6 +74,8 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         /// Measured once in a run, so there's no spread to tell noise from change.
         case measuredOnce
         case unchanged
+        /// A figure whose timing cannot support a performance comparison.
+        case timingUnverified
     }
 
     public var id: String
@@ -92,6 +94,8 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     /// Why either run's figure may be off, as its measurement says.
     public var baselineCaveat: BenchmarkFigureCaveat?
     public var comparedCaveat: BenchmarkFigureCaveat?
+    public var baselineTimingDetail: String?
+    public var comparedTimingDetail: String?
 
     public init(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement, conditionSummary: String? = nil) {
         self.conditionSummary = conditionSummary
@@ -106,6 +110,8 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         verdict = Self.verdict(baseline: baseline, compared: compared)
         baselineCaveat = baseline.caveat
         comparedCaveat = compared.caveat
+        baselineTimingDetail = baseline.timingDetail
+        comparedTimingDetail = compared.timingDetail
     }
 
     /// The doubt over either run's figure, which hangs over the change too.
@@ -124,7 +130,7 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         case .better, .worse:
             let up = compared > baseline
             return unit.isSpeed ? (up ? "faster" : "slower") : (up ? "higher" : "lower")
-        case .withinSpread, .negligible, .measuredOnce, .unchanged:
+        case .withinSpread, .negligible, .measuredOnce, .unchanged, .timingUnverified:
             return verdict.title.lowercased()
         }
     }
@@ -149,6 +155,7 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
 
     /// Spread still matters, but a warned difference can't judge performance.
     public var verdictExplanation: String {
+        if id == "fill", verdict == .timingUnverified { return GPUTimingEvidence.fillExclusion }
         guard isQualified, let conditionSummary else { return verdict.explanation }
         // A session's summary is already whole sentences; a run's context is a clause.
         let sentence = conditionSummary.hasSuffix(".") ? conditionSummary : conditionSummary + "."
@@ -177,6 +184,7 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     /// fastest) don't overlap, so one run's noise can't explain it, and it
     /// moved at least `negligibleChange`.
     public static func verdict(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement) -> Verdict {
+        if baseline.caveat != nil || compared.caveat != nil { return .timingUnverified }
         if compared.value == baseline.value { return .unchanged }
         guard let baseLow = baseline.low, let baseHigh = baseline.high, let low = compared.low, let high = compared.high else {
             return .measuredOnce
@@ -284,7 +292,7 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     /// How many figures got each verdict, the moves first: "1 better · 5 within spread".
     public var verdictSummary: String {
         var labels: [String] = []
-        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .negligible, .measuredOnce, .unchanged]
+        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .negligible, .measuredOnce, .unchanged, .timingUnverified]
         for verdict in order {
             for change in changes where change.verdict == verdict {
                 let label = change.verdictTitle.lowercased()
@@ -299,6 +307,9 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     private static func caveats(_ baseline: BenchmarkRun, _ compared: BenchmarkRun, changes: [BenchmarkChange]) -> [String] {
         // Doubts about single figures first: they bear on those rows' verdicts.
         var caveats = changes.compactMap(\.caveatNote)
+        if changes.contains(where: { $0.id == "fill" && $0.verdict == .timingUnverified }) {
+            caveats.append(GPUTimingEvidence.fillExclusion)
+        }
         if !baseline.kind.measuresThisMac {
             var line = "Internet figures depend on the connection, the server and other traffic at the time, not on this Mac"
             if let one = baseline.target?.detail, let other = compared.target?.detail, one != other {
