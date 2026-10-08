@@ -11,6 +11,7 @@ public enum HistoryReplayLabels {
         let name = event.count > 1 ? "\(event.count) × \(event.name)" : event.name
         return switch event.kind {
         case .appLaunched: "\(name) launched"
+        case .endedByApp: "\(name): \(event.endAction?.words ?? "OpenTaskManager ending action")"
         case .appQuit: "\(name) quit"
         case .processStarted: "\(name) started"
         case .processExited: "\(name) exited"

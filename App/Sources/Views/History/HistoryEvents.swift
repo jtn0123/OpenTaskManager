@@ -6,6 +6,7 @@ enum HistoryEventStyle {
     static func symbol(_ kind: HistoryEvent.Kind) -> String {
         switch kind {
         case .appLaunched: "arrow.up.square.fill"
+        case .endedByApp: "xmark.octagon"
         case .appQuit: "xmark.square.fill"
         case .processStarted: "gearshape.fill"
         case .processExited: "gearshape"
@@ -25,6 +26,7 @@ enum HistoryEventStyle {
     /// a background process, that it was busy, and for a spike, what crossed.
     static func detail(_ event: HistoryEvent) -> String? {
         switch event.kind {
+        case .endedByApp: event.endAction.map { "PID \($0.identity.pid) · \($0.words)" }
         case .networkChanged: event.detail.isEmpty ? nil : event.detail
         case .spike: event.detail.isEmpty ? "Listed under Spikes in the toolbar" : "\(event.detail). Listed under Spikes in the toolbar"
         case .processStarted: "A background process that used at least \(Int(ProcessEventTracker.busyPercent))% of a core"
@@ -57,6 +59,7 @@ enum HistoryEventStyle {
         let parts = counts.filter { $0.count > 0 }.map { kind, count in
             let noun = switch kind {
             case .appLaunched: count == 1 ? "app launch" : "app launches"
+            case .endedByApp: count == 1 ? "app ending action" : "app ending actions"
             case .appQuit: count == 1 ? "app quit" : "apps quit"
             case .processStarted: count == 1 ? "process started" : "processes started"
             case .processExited: count == 1 ? "process exited" : "processes exited"

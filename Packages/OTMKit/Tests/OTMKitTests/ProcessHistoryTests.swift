@@ -132,7 +132,8 @@ struct ProcessHistoryTrackerTests {
             previous = now
         }
         let batch = tracker.close(at: date(1_010), samples: previous)
-        #expect(batch.ended == [ProcessHistoryBatch.End(identity: identity(12, 500), time: date(1_007), isEnded: true)])
+        #expect(batch.ended == [ProcessHistoryBatch.End(identity: identity(12, 500), time: date(1_007),
+                                                      isEnded: true, lastSeen: date(1_006))])
         #expect(batch.started.first { $0.identity.pid == 13 }?.firstSeen == date(1_005))
         let ended = batch.samples.first { $0.identity.pid == 12 }
         let born = batch.samples.first { $0.identity.pid == 13 }

@@ -38,12 +38,16 @@ func historyCommand(_ options: Options) async {
         match.lifetime.ended == nil && ProcessDetailReader.identity(of: match.lifetime.identity.pid) == match.lifetime.identity
     }.map(\.id))
     var memory: [Int64: [ProcessMemoryStep]] = [:]
+    var endings: [Int64: ProcessEnding] = [:]
     do {
-        for match in matches { memory[match.id] = try await recorder.processMemory(match.lifetime) }
+        for match in matches {
+            memory[match.id] = try await recorder.processMemory(match.lifetime)
+            if !running.contains(match.id) { endings[match.id] = try await recorder.processEnding(match.lifetime) }
+        }
     } catch {
-        fail("couldn't read memory history at \(url.path): \(error)")
+        fail("couldn't read process history at \(url.path): \(error)")
     }
-    let found = ProcessHistoryFound(matches: matches, shortRuns: shortRuns, running: running, memory: memory)
+    let found = ProcessHistoryFound(matches: matches, shortRuns: shortRuns, running: running, memory: memory, endings: endings)
     if options.json {
         printJSON(ProcessHistoryReport(query: query, from: start, to: end, found: found))
     } else {
@@ -74,6 +78,7 @@ struct ProcessHistoryFound {
     /// Lifetimes still running, by row.
     let running: Set<Int64>
     let memory: [Int64: [ProcessMemoryStep]]
+    let endings: [Int64: ProcessEnding]
 }
 
 /// `otm history processes --json`. CPU is percent of one core; a figure
@@ -95,6 +100,7 @@ struct ProcessHistoryReport: Encodable {
         let lastSeen: Date
         let ended: Date?
         let running: Bool
+        let ending: ProcessEnding?
         /// Records made while it ran within the range, and how many kept its figures.
         let records: Int
         let storedRecords: Int
@@ -129,7 +135,7 @@ struct ProcessHistoryReport: Encodable {
                 name: lifetime.name, pid: lifetime.identity.pid, startTime: lifetime.identity.startTime, path: lifetime.path,
                 user: lifetime.user, bundleID: lifetime.bundleID, launchdLabel: lifetime.jobLabel, restricted: lifetime.isRestricted,
                 firstSeen: lifetime.firstSeen, lastSeen: lifetime.lastSeen, ended: lifetime.ended,
-                running: found.running.contains(match.id),
+                running: found.running.contains(match.id), ending: found.endings[match.id],
                 records: summary.records, storedRecords: summary.stored, recordedSeconds: summary.recordedSeconds,
                 averageCPU: summary.averageCPU, peakCPU: summary.peakCPU, peakMemory: summary.peakMemory,
                 averageDiskRead: summary.averageDiskRead, averageDiskWrite: summary.averageDiskWrite,
@@ -150,7 +156,10 @@ func processHistoryList(_ found: ProcessHistoryFound, query: String, range: Hist
     // Latest first, lifetimes and short runs together.
     var blocks: [(time: Date, lines: [String])] = found.matches.map { match in
         let isRunning = found.running.contains(match.id)
-        let lines = list.lines(match, isRunning: isRunning, memory: found.memory[match.id] ?? [])
+        var lines = list.lines(match, isRunning: isRunning, memory: found.memory[match.id] ?? [])
+        if let ending = found.endings[match.id] {
+            lines += ending.words(clock: list.clock).map { "  ended: " + $0 }
+        }
         return (isRunning ? end : match.lifetime.ended ?? match.lifetime.lastSeen, lines)
     }
     blocks += found.shortRuns.map { ($0.to, list.lines($0)) }

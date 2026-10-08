@@ -48,7 +48,8 @@ extension FlightRecorder {
     /// last sighting and its watching run's last record.
     private static let lastSeen = "COALESCE(l.ended, MAX(l.last_seen, IFNULL(w.last, l.last_seen)))"
     private static let lifetimeColumns = """
-        l.id, l.pid, l.start_time, l.name, l.path, l.user_name, l.bundle, l.job, l.restricted, l.first_seen, \(lastSeen), l.ended
+        l.id, l.pid, l.start_time, l.name, l.path, l.user_name, l.bundle, l.job, l.restricted, l.first_seen,
+        CASE WHEN l.ended IS NOT NULL THEN l.last_seen ELSE \(lastSeen) END, l.ended
         """
     /// A record written while a run of a build keeping process history watched.
     private static let watchedRecord = "EXISTS (SELECT 1 FROM process_watches w WHERE w.started <= records.time AND w.last >= records.time)"
@@ -547,8 +548,11 @@ final class ProcessHistoryWriter {
     /// now and no longer this run's.
     private func end(_ ends: [ProcessHistoryBatch.End], watch: Int64, on handle: OpaquePointer) throws(FlightRecorderError) {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
-        let ended = unsafe try FlightRecorder.prepare("UPDATE process_lifetimes SET ended = ?1, last_seen = MAX(last_seen, ?1) WHERE id = ?2",
-                                               on: handle)
+        let ended = unsafe try FlightRecorder.prepare("""
+            UPDATE process_lifetimes SET ended = ?1,
+                last_seen = MAX(last_seen, MIN(?1, COALESCE(?3,
+                    (SELECT last FROM process_watches WHERE id = process_lifetimes.watch), last_seen))) WHERE id = ?2
+            """, on: handle)
         defer { unsafe sqlite3_finalize(ended) }
         let unwatched = unsafe try FlightRecorder.prepare("""
             UPDATE process_lifetimes SET last_seen = MAX(last_seen, ?1), watch = NULL WHERE id = ?2 AND watch = ?3
@@ -561,7 +565,15 @@ final class ProcessHistoryWriter {
             unsafe sqlite3_reset(statement)
             unsafe sqlite3_bind_double(statement, 1, end.time.timeIntervalSince1970)
             unsafe sqlite3_bind_int64(statement, 2, row)
-            if !end.isEnded { unsafe sqlite3_bind_int64(statement, 3, watch) }
+            if end.isEnded {
+                if let lastSeen = end.lastSeen {
+                    unsafe sqlite3_bind_double(statement, 3, lastSeen.timeIntervalSince1970)
+                } else {
+                    unsafe sqlite3_bind_null(statement, 3)
+                }
+            } else {
+                unsafe sqlite3_bind_int64(statement, 3, watch)
+            }
             unsafe try Self.step(statement, on: handle)
         }
     }

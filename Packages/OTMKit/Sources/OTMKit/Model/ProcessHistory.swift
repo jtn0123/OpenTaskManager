@@ -18,8 +18,8 @@ public struct ProcessLifetime: Sendable, Equatable, Identifiable, Codable {
     public var isRestricted: Bool
     /// When the recording first saw it running.
     public var firstSeen: Date
-    /// When the recording last saw it running: when it ended, if that was
-    /// seen, or else the last record of the app's run that watched it.
+    /// When the recording last saw it running. Older builds used the end
+    /// observation here instead of the last sighting for an ended process.
     public var lastSeen: Date
     /// When it was seen to end. Nil while it runs, and for one that ended
     /// while nothing was recording.
@@ -176,11 +176,13 @@ public struct ProcessHistoryBatch: Sendable, Equatable {
         /// False when it only stopped being watched (other users' and system
         /// processes, once they're no longer sampled): it may still run.
         public let isEnded: Bool
+        public let lastSeen: Date?
 
-        public init(identity: ProcessIdentity, time: Date, isEnded: Bool) {
+        public init(identity: ProcessIdentity, time: Date, isEnded: Bool, lastSeen: Date? = nil) {
             self.identity = identity
             self.time = time
             self.isEnded = isEnded
+            self.lastSeen = lastSeen
         }
     }
 

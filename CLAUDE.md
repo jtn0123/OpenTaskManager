@@ -141,7 +141,8 @@ Manager OG or any other proprietary task manager.
   and saved sessions beside them; `RecordingFile` in OTMKit is the versioned
   `.otmrecording` format, which `HistoryRecordingStore` opens into an in-memory
   recorder, and `-openRecording <path> -openPlayback 1|10|60` opens and plays one;
-  events, `HistoryEvent` (app launches and quits from NSWorkspace, busy background
+  events, `HistoryEvent` (app launches and quits from NSWorkspace, delivered
+  process-ending signals and accepted Quit requests from OpenTaskManager, busy background
   processes from `ProcessEventTracker`, network changes, sleep and wake), go in the
   same database, its schema migrated by `PRAGMA user_version`, and in a file's
   optional `events` key; hardware series (`HistoryHardwareSample`: core-type and
@@ -194,7 +195,33 @@ Manager OG or any other proprietary task manager.
   the process inspector's Show History opens it, `-openProcessHistory <query>`
   searches it and picks the latest match, and `otm history processes <query>`
   prints each lifetime's first, peak and last memory reading, with steps in
-  `--json`; recording files carry no process history yet, so their Processes
+  `--json`. The selected lifetime also shows How it ended (`ProcessEnding`):
+  independent diagnostic reports, app-ending actions and launchd exits, each
+  with its own time. `ProcessDiagnosticReports` lists each readable user and
+  system DiagnosticReports folder once, filters names and modification times,
+  reads at most 256 KB per candidate .ips, and decodes only the identity and
+  exception or termination fields. Jetsam lists need a matching PID and name
+  with a reported killing reason; merely being in the list proves no exit.
+  A known path must match when the report supplies it; absent paths use the
+  name. Report times must fall from the process start through 120 s after its
+  observed end or last sighting. Unknown bug types stay Diagnostic report;
+  hang reports never claim a crash. Show Report reveals the file in Finder.
+  Delivered signals and accepted Quit requests are `.endedByApp` events with
+  identity, executable path and signal in their JSON detail; schema 8's event
+  index keeps same-named group targets separately. Quit requests and SIGTERM
+  deliveries keep their wording, since neither proves that it caused an exit.
+  New observed launchd ends keep the exited identity; replacements never
+  attribute their code to a lifetime. Older job history needs a preceding
+  running PID in the same domain, with the exit observation near the end.
+  An ended lifetime keeps its actual last sighting separately from the end
+  observation; older rows remain readable with their former end-time sighting.
+  With no evidence it says Ended between the two times, with no crash report
+  or exit status found, never a cause inferred from disappearance. The CLI
+  prints the same evidence as `ended:` lines and an `ending` JSON object.
+  Report and ending lookups run on the recorder actor only on selection (or
+  in the CLI), cached across graph refreshes, never at record time or per tick.
+  Running processes show no ending block;
+  recording files carry no process history yet, so their Processes
   section is a compact notice with Search Live History, which closes the file
   and focuses the live search. Idle-only results with a memory track show a
   static step chart and "Memory only: changes of 10% or 16 MB, CPU and disk
