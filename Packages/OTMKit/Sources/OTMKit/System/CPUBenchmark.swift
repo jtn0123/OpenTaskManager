@@ -184,6 +184,9 @@ public struct CPUBenchmarkResult: SpeedTestRecord, Equatable, Identifiable {
     /// The whole run, setup included.
     public var seconds: Double
     public var workloads: [CPUWorkloadResult]
+    /// The Mac's state as the run started and ended; nil in runs saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
 
     public var historyKey: String { machine.key }
 
@@ -441,13 +444,18 @@ public enum CPUBenchmark {
 
         func kernel(_ workload: CPUWorkload) -> any BenchmarkKernel {
             if let kernel = made[workload] { return kernel }
-            let kernel: any BenchmarkKernel = switch workload {
-            case .integer: HashKernel(bytes: configuration.hashBytes, seed: configuration.seed)
-            case .floatingPoint: MatrixKernel(size: configuration.matrixSize, seed: configuration.seed)
-            case .memory: MemoryKernel(bytes: configuration.memoryBytes, chunkBytes: configuration.memoryChunkBytes, seed: configuration.seed)
-            }
+            let kernel = makeKernel(workload, configuration: configuration)
             made[workload] = kernel
             return kernel
+        }
+    }
+
+    /// A workload's inputs at `configuration`'s sizes, filled from its seed.
+    static func makeKernel(_ workload: CPUWorkload, configuration: CPUBenchmarkConfiguration) -> any BenchmarkKernel {
+        switch workload {
+        case .integer: HashKernel(bytes: configuration.hashBytes, seed: configuration.seed)
+        case .floatingPoint: MatrixKernel(size: configuration.matrixSize, seed: configuration.seed)
+        case .memory: MemoryKernel(bytes: configuration.memoryBytes, chunkBytes: configuration.memoryChunkBytes, seed: configuration.seed)
         }
     }
 }

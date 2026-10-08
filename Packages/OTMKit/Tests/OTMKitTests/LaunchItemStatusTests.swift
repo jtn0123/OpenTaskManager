@@ -127,6 +127,23 @@ struct LaunchItemStatusTests {
         ])
     }
 
+    /// A narrow Status column keeps what went wrong in a word where it can:
+    /// the exit code, the signal, the restarts. A PID isn't worth the room.
+    @Test func compactDetailsKeepTheCodeAndSignal() {
+        #expect(status(agent(lastExit: .code(1))).compactDetail == "exit 1")
+        #expect(status(agent(lastExit: .code(78))).compactDetail == "exit 78")
+        #expect(status(agent(lastExit: .code(-11))).compactDetail == "SEGV")
+        #expect(LaunchItemStatus(item: agent(pid: 9), health: .restarting(count: 4)).compactDetail == "4×")
+        #expect(LaunchItemStatus(execution: .crashed(signal: 30), registration: .init(isLoaded: true, isDisabled: false),
+                                 needsAttention: true).compactDetail == "signal 30")
+        #expect(status(agent(pid: 4673)).compactDetail == nil)
+        #expect(status(agent()).compactDetail == nil)
+        #expect(status(agent(disabled: true)).compactDetail == nil)
+        #expect(status(agent(loaded: false)).compactDetail == nil)
+        // The tooltip, where even that doesn't fit, still has the whole of it.
+        #expect(status(agent(lastExit: .code(1))).summary == "Failed · exit code 1")
+    }
+
     @Test func namesSignals() {
         #expect(LaunchExitStatus.signalName(11) == "SIGSEGV")
         #expect(LaunchExitStatus.signalName(6) == "SIGABRT")

@@ -204,4 +204,29 @@ public enum ProcessGroupEnding {
         }
         return (live, gone)
     }
+
+    /// The Group tab's End button, with how many processes its review lists
+    /// to end (`ProcessGroup.endingPlan`'s targets): "End 2 Processes…".
+    /// "End Processes…" while there are none, when it's disabled.
+    public static func endTitle(count: Int) -> String {
+        switch count {
+        case ...0: "End Processes…"
+        case 1: "End 1 Process…"
+        default: "End \(count) Processes…"
+        }
+    }
+
+    /// Force Quit's, kept short beside End's: "Force Quit 2…".
+    public static func forceQuitTitle(count: Int) -> String {
+        count > 0 ? "Force Quit \(count)…" : "Force Quit…"
+    }
+
+    /// Force Quit's in full, for VoiceOver: "Force Quit 2 Processes".
+    public static func forceQuitAccessibilityLabel(count: Int) -> String {
+        switch count {
+        case ...0: "Force Quit Processes"
+        case 1: "Force Quit 1 Process"
+        default: "Force Quit \(count) Processes"
+        }
+    }
 }

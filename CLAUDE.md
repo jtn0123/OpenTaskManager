@@ -23,10 +23,20 @@ Manager OG or any other proprietary task manager.
   Graphing/ for axis and curve maths and the squarified `Treemap`;
   System/LaunchItems, LaunchTriggers and Launchctl read launchd plists and
   parse `launchctl` output; System/DiskUsageScanner walks a folder for the
-  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules;
+  Storage page and `otm du`, with the category rules in Model/DiskCategoryRules,
+  keeping to its own volumes by volume and by mount point (`MountBoundary`, which
+  keeps a scan of /System out of the Data volume, from System/MountTable) and
+  counting hard links once by device and inode (`HardLinkLedger`), both in
+  Model/DiskScanRules;
   Model/DiskScanSummary (a scan's bounded, versioned summary), System/DiskScanHistory
   (the last 10 per scope) and Model/DiskScanComparison (interval diff maths) back
-  Storage's Changes mode and `otm du --changes`;
+  Storage's Changes mode and `otm du --changes`; Model/DiskReconciliation (the
+  remainder, the volume's used space less the scan's, for a whole volume or
+  home, a folder's share otherwise, and what could be in it, named with figures
+  only where known, never as space to free or wholly as snapshots),
+  Model/APFSList (`diskutil apfs list` and `listSnapshots` plists, neither
+  needing admin rights) and System/DiskReconciliationReader back Storage's
+  "Where the space is" and `otm du --reconcile`;
   System/InstalledApps, MachO and CodeSigning find and read app bundles for the
   Apps page and `otm apps`, and System/AppRemoval finds what an app keeps in
   your Library for its Move to Trash review (tests use a fake home, never
@@ -48,10 +58,23 @@ Manager OG or any other proprietary task manager.
   the GPU, every result checked, cancellable) backs the GPU detail's Benchmark card
   (`GPUBenchmarkStore`; debug `-gpuBenchmarkFixture nodevice|unsupported|notiming`)
   and `otm gpubench`, the last 10 per Mac in SpeedTests/gpu-benchmark.json;
-  Model/BenchmarkRun adapts those four histories on read to one envelope (never
+  System/CPUSustained (the floating-point workload on every worker for 2 or 5
+  min, timed in 10 s windows; Model/CPUSustainedSummary: first window, the last
+  third's median, "held 97% of its starting speed", the thermal states seen,
+  never a claim of throttling) backs the CPU card's sustained run
+  (`CPUSustainedStore`, `CPUSustainedViews`; one CPU run at a time) and `otm
+  cpubench --sustained [2|5]`, in SpeedTests/cpu-sustained.json, its own cohort;
+  each new result carries an optional, versioned `context` (Model/BenchmarkContext,
+  read by System/BenchmarkContextReader as the test starts: OS, app and build,
+  Mac and chip, IOPowerSources, Low Power Mode, thermal state at start and end,
+  the CPU's load over the few seconds before, from the app's sampler through
+  `BenchmarkContextFeed` or a 1 s tick probe, and memory available); older runs
+  read as "Context not recorded" and are never rewritten;
+  Model/BenchmarkRun adapts those histories on read to one envelope (never
   rewritten), Model/BenchmarkComparison holds the compatibility rules and change
-  against both runs' spread, and Format/BenchmarkExport the versioned JSON and
-  Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`,
+  against both runs' spread, with context differences as warnings that never
+  refuse, and Format/BenchmarkExport the versioned JSON (v2) and
+  Markdown, for Performance's Benchmarks workspace (`BenchmarksDetail`, `BenchmarkSections`,
   `BenchmarkWorkspace`: Run all through the tests' own stores, picks and ticks in
   UserDefaults, `-openBenchmarkCompare gpu:1,2`) and `otm bench`;
   Model/BenchmarkTrend splits a test's runs into lines only comparable runs
@@ -123,7 +146,10 @@ Manager OG or any other proprietary task manager.
   a job is doing (Running, Restarting, Crashed, Failed · exit code 1, Not
   running, Disabled, Not loaded) that the Status column, the details' header
   and the Apps page share, with launchd's Loaded or Not loaded on a line of
-  its own, never in its place; the CPU and Memory cells look launchd's PID up in the
+  its own, never in its place ("exit 1" where the column is narrow, the rest
+  in its tooltip); the details put Program right under it, and a notice
+  (`LaunchJobHealth.notice`) only where it adds something: what a known code
+  or a crash signal means, a failure before the run now, restarts seen; the CPU and Memory cells look launchd's PID up in the
   latest sample themselves, so a tick redraws them, not the table),
   Views/Apps (installed apps in a SwiftUI `Table`; `InstalledAppStore` scans off
   the main actor when the page opens and on Refresh, then streams bundle sizes in
@@ -156,7 +182,8 @@ Manager OG or any other proprietary task manager.
   picked there is named above the map, not in a tag over it (`PickedChangeBar`:
   its trail with the outlined folder underlined, why the map can only outline
   what holds it, `TreemapReach` in OTMKit, then Open, which keeps Changes, and
-  Reveal in Finder)),
+  Reveal in Finder); "Where the space is" (`StorageReconcilePanel`), folded at
+  first, reads the volume's figures once per finished scan, off the main actor),
   Components/Graphs (graphs, gauges, cards), and Support (icons, hot key, menu bar icon).
 
 ## Performance rules (the app must stay light)
@@ -283,8 +310,9 @@ searches the System page and `-openSystemCategory network` (or another group
 in its jump bar) scrolls it to that group, and
 `-openStorageScope <path>` scans that folder or volume when the Storage page
 opens, with `-openStorageFolder <path inside it>` opening a folder in the
-results and `-openStorageList largest|changes` showing the largest files or
-what changed since the last saved scan of that folder. Pick a
+results, `-openStorageList largest|changes` showing the largest files or
+what changed since the last saved scan of that folder, and
+`-openStorageReconcile YES` unfolding "Where the space is". Pick a
 scope without protected folders (`/Library`, `/usr`, a test folder): Desktop,
 Documents, Downloads and other apps' containers raise a privacy prompt. Don't pass
 `-page` itself: a launch argument pins that setting for the whole run, so the
@@ -298,6 +326,13 @@ A Mac or VM with no sensors can still show a full Thermals page: in a debug
 build, `-sensorFixture <file>` loads a recording from
 `otm sensors --extremes 20 --json` in place of the sensors (`SensorFixture`).
 Such a run records nothing to History, since the readings aren't that Mac's.
+
+`-openResource cpu -openSpeedTest sustained` starts a sustained CPU run when the
+CPU card first shows (2 min, or the length last picked). In a debug build,
+`-sustainedFixture YES` shows three made-up sustained runs on this Mac, never
+saved, with differing contexts (one on battery with the CPU busy, slowing as
+the thermal state turns fair), so `-openResource benchmarks
+-openBenchmarkCompare sustained:1,2` shows a comparison's context warnings.
 
 ## Conventions
 
@@ -324,9 +359,10 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   so the table keeps its height; a mouse-opened pane folds them a
   double-click later, so the second click still lands on the same row.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
-  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting):
-  Launches first, then Publisher, Kind, Memory and CPU, so Name and Status
-  keep their room; Kind says Agent or Daemon when narrow.
+  `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
+  `StartupColumn`'s order (OTMKit's Layout/): Launches first, then Publisher,
+  Memory, CPU and last Kind, so Name and Status keep their room and a narrow
+  table still says Agent or Daemon.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its
@@ -340,7 +376,9 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   switches, QoS; per field "Needs admin rights" for others' processes) and its
   ancestry (`ProcessAncestry`), each step selecting that process; its Threads
   tab reads the threads off the main actor once per tick, only while shown
-  (`ThreadActivityTracker`), as does `otm threads`. `-openProcessTab
+  (`ThreadActivityTracker`), as does `otm threads`; rows stay one line, and
+  a clicked thread's whole name, selectable, with Copy Thread Name, is pinned
+  under the list (`ThreadDetailLine`). `-openProcessTab
   threads|files` opens a tab with `-openProcess`.
 - The inspector's Group tab (`-openProcessTab group`) is offered only for a
   row with others nested under it, and the note's "See all N together" link
@@ -352,7 +390,8 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   count shared memory more than once; disk, GPU and power only where read).
   Its CPU graph is `AppModel.appGroupHistory` in Grouped; Tree keeps no group
   history, so it adds up the current members' own. A member's name selects it
-  in the table, expanding the rows above it. End All and Force Quit All first
+  in the table, expanding the rows above it. End and Force Quit, titled with
+  how many they'd end ("End 2 Processes…", "Force Quit 2…"), first
   list every target by name and PID, fixed when clicked, end the furthest from
   the root first, check each one's identity again just before
   (`ProcessGroupEnding`), and leave others', the system's and this app's
@@ -407,7 +446,10 @@ Such a run records nothing to History, since the readings aren't that Mac's.
   With it hidden, a page menu (`PageSwitcher`: one list glyph and a chevron,
   "Pages", whatever the page, out of the toolbar's glass so it sits with the
   title, not the live badge) sits before
-  the title, and in a narrow window Pause drops its word to make room; keep
+  the title, and in a narrow window Pause drops its word to make room, as do
+  the pages' own items (`compactToolbar`: Startup's, Apps' and Drivers' read
+  time loses "Read at" to its tooltip, Processes' Columns becomes a submenu
+  of its View menu); keep
   the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
   overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
   nothing, never the toolbar's toggle (`HiddenSidebarFocus`). The detail column

@@ -137,6 +137,13 @@ final class StorageStore {
     private(set) var history: [DiskScanSummary] = []
     /// `result` against the earlier scan picked, the newest by default.
     private(set) var comparison: DiskScanComparison?
+    /// How `result` relates to its volume: read once per scan, off the main actor.
+    private(set) var reconciliation: DiskReconciliation?
+    /// Set while `reconciliation` is being read.
+    private(set) var readingReconciliation = false
+    /// Whether "Where the space is" is unfolded. Folded at first; it stays
+    /// as the user leaves it for the session.
+    var showsReconciliation = false
     /// The folder the treemap and list show, as an item of `result`.
     var folder = 0
     var list: StorageList = .contents
@@ -192,12 +199,28 @@ final class StorageStore {
             scanning = nil
             progress = nil
             guard let usage else { return }
+            readReconciliation(of: usage, request: request)
             // Saved once per scan, off the main actor; the results show meanwhile.
             let saved = await Task.detached(priority: .utility) { StorageArchive.save(usage, request: request) }.value
             guard self.generation == generation else { return }
             summary = saved.summary
             history = saved.earlier
             comparison = saved.comparison
+        }
+    }
+
+    /// Reads the volume's figures for a finished scan, once, off the main
+    /// actor: `diskutil` takes a fraction of a second.
+    private func readReconciliation(of usage: DiskUsage, request: DiskScanRequest) {
+        reconciliation = nil
+        readingReconciliation = true
+        let home = NSHomeDirectory()
+        Task {
+            let read = await Task.detached(priority: .utility) { DiskReconciliationReader.read(usage, request: request, home: home) }.value
+            // A later scan's result has its own.
+            guard result?.usage.finishedAt == usage.finishedAt else { return }
+            reconciliation = read
+            readingReconciliation = false
         }
     }
 
@@ -255,10 +278,12 @@ final class StorageStore {
     /// when the page first opens; `-openStorageFolder Library/Caches` then
     /// opens that folder in the results, and `-openStorageList largest`
     /// shows the largest files (`changes`, what changed since the last
-    /// scan). For screenshots.
+    /// scan); `-openStorageReconcile YES` unfolds "Where the space is". For
+    /// screenshots.
     func handleLaunchArguments() {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
+        if LaunchArgument.string("openStorageReconcile") == "YES" { showsReconciliation = true }
         switch LaunchArgument.string("openStorageList") {
         case "largest": list = .largest
         case "changes": list = .changes
