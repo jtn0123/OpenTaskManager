@@ -10,6 +10,7 @@ struct BenchmarkGuidedSheet: View {
     @State private var repeatCount = BenchmarkSessionProtocol.repeats
     @State private var settling = BenchmarkSettling(started: Date())
     @State private var preflight = BenchmarkSettling(started: Date()).snapshot(now: Date())
+    @State private var progress = BenchmarkSettling(started: .distantPast).status(now: .distantPast).progress
     @State private var waitUntil = BenchmarkSettling.defaultWindow
 
     var body: some View {
@@ -33,7 +34,7 @@ struct BenchmarkGuidedSheet: View {
                 }
             }
             Text(preflight.verdict).font(.headline)
-            Text("\(Int(preflight.elapsed)) s watched · needs \(Int(settling.window)) s quiet · at most 2 min")
+            Text(progress)
                 .font(.metadata).monospacedDigit().foregroundStyle(.secondaryText)
             if let latest = preflight.readings.last {
                 Text("Latest sample: \(latest.date.formatted(date: .omitted, time: .standard))")
@@ -50,6 +51,7 @@ struct BenchmarkGuidedSheet: View {
                     .disabled(waitUntil >= BenchmarkSettling.maximumWait || preflight.elapsed < waitUntil)
                 Button(preflight.settled ? "Proceed" : "Proceed anyway") { proceed() }
                     .disabled(BenchmarkHistories.anyRunning || BenchmarkWorkspace.shared.suiteRunning || GuidedBenchmarkFixture.enabled)
+                    .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -58,12 +60,17 @@ struct BenchmarkGuidedSheet: View {
         .onAppear { selection = initialSelection }
         .task(id: waitUntil) {
             if GuidedBenchmarkFixture.enabled {
-                preflight = GuidedBenchmarkFixture.preflight(battery: true)
+                settling = GuidedBenchmarkFixture.watch(battery: true)
+                let now = settling.started.addingTimeInterval(30)
+                preflight = settling.snapshot(now: now)
+                progress = settling.status(now: now).progress
                 return
             }
             repeat {
                 if let reading = BenchmarkContextFeed.preflightReading(after: settling.readings.last?.date) { settling.append(reading) }
-                preflight = settling.snapshot(now: Date())
+                let now = Date()
+                preflight = settling.snapshot(now: now)
+                progress = settling.status(now: now).progress
                 if preflight.elapsed >= BenchmarkSettling.maximumWait { break }
                 do { try await Task.sleep(for: .seconds(1)) } catch { return }
             } while !Task.isCancelled

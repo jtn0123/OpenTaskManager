@@ -164,3 +164,36 @@ struct BenchmarkScrollAnchor: ViewModifier {
         }
     }
 }
+
+/// The qualification stays available once per card; each saved result keeps its build badge.
+struct DebugBuildHelp: View {
+    let kind: BenchmarkKind
+    @State private var isExpanded = false
+
+    var body: some View {
+        DetailDisclosure("About debug builds", preview: "", isExpanded: $isExpanded) {
+            Text(kind == .gpu
+                ? "The GPU runs the same shaders and times them itself in any build, so a debug build's GPU figures match a release "
+                    + "build's. The app still keeps build types separate when comparing saved runs."
+                : "Debug builds run the app's own CPU workloads many times slower than release builds. These figures describe this "
+                    + "build's performance; do not compare them with a release build's. Saved comparisons keep build types separate.")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+struct DebugBadge: View {
+    var body: some View {
+        Text("Debug build")
+            .font(.metadata.weight(.semibold))
+            .foregroundStyle(BenchmarkLook.debug)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background(BenchmarkLook.debug.fillShade.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(BenchmarkLook.debug.opacity(0.4)))
+            .fixedSize()
+            .help("Recorded in a debug build. About debug builds explains how to read its figures.")
+    }
+}

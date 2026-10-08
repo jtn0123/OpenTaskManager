@@ -77,22 +77,14 @@ private struct PageCommands: Commands {
     }
 }
 
-/// The toolbar's page menu, there only while the sidebar is hidden: one
-/// glyph of its own, a list, whatever the page, with a chevron, just before
-/// the title that names the page, and every page in its menu, the current
-/// one ticked, with its ⌘ shortcut. The page's own icon there changed with
-/// every page and, in a glass capsule beside the live badge's, read as one
-/// more monitoring control; out of the glass it sits with the title.
-/// A narrow window hides the sidebar, and with it every page that could be
-/// seen; the View menu's list has to be known about. A real toolbar item,
-/// since a menu on the title itself did nothing on macOS 26. The title keeps
-/// the name: taking it out of the toolbar for a menu that carried the name
-/// sent the sidebar's own toggle to the overflow menu, for good, once the
-/// sidebar was shown in a narrow window (macOS 26).
+/// The toolbar's page menu, there only while the sidebar is hidden: the word
+/// "Pages" with a chevron, so the hidden sidebar's replacement reads as one,
+/// opening every page with the current one ticked and its keyboard shortcut.
+/// Not the page's name: the title beside it already says that, and the two
+/// read "Processes ⌄ Processes". Keep the separate navigation title: removing
+/// it once sent the sidebar toggle to overflow permanently after showing the
+/// sidebar in a narrow window on macOS 26. A title menu also did nothing there.
 private struct PageSwitcher: View {
-    /// Not the sidebar's own glyph, which its toggle beside it has.
-    private static let symbol = "list.bullet"
-
     @Binding var page: Page
 
     var body: some View {
@@ -104,11 +96,10 @@ private struct PageSwitcher: View {
                 .keyboardShortcut(item.shortcut)
             }
         } label: {
-            Label("Pages", systemImage: Self.symbol)
-                .labelStyle(.iconOnly)
+            Text("Pages")
         }
         .fixedSize()
-        .help("Pages")
+        .help("Switch pages")
         .accessibilityLabel("Pages")
         .accessibilityValue(page.rawValue)
         .accessibilityHint("Shows the list of pages, which ⌘1 to ⌘9 also switch between")

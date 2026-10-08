@@ -13,13 +13,18 @@ enum GuidedBenchmarkFixture {
     }
 
     static func preflight(battery: Bool) -> BenchmarkPreflight {
+        let settling = watch(battery: battery)
+        return settling.snapshot(now: settling.started.addingTimeInterval(30))
+    }
+
+    static func watch(battery: Bool) -> BenchmarkSettling {
         let started = Date(timeIntervalSince1970: 1_000)
         var settling = BenchmarkSettling(started: started)
         for index in 1...30 {
             settling.append(BenchmarkPreflightReading(date: started.addingTimeInterval(Double(index)), interval: 1, cpuBusy: 0.03,
                 memoryPressure: .normal, thermal: battery ? .fair : .nominal, power: battery ? .battery : .ac, lowPowerMode: false))
         }
-        return settling.snapshot(now: started.addingTimeInterval(30))
+        return settling
     }
 
     static func runs(_ kind: BenchmarkKind) -> [BenchmarkRun]? {

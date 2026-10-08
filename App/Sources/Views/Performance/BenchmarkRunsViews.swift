@@ -69,6 +69,7 @@ struct SavedRuns: View, Equatable {
             if let caveat = runs.lazy.flatMap(\.measurements).compactMap(\.caveat).first {
                 FigureCaveatFootnote(caveat: caveat)
             }
+            if runs.contains(where: { $0.build?.optimized == false }) { DebugBuildHelp(kind: kind) }
             if picked.count == 2 {
                 ComparisonPanel(kind: kind, earlier: picked[0], later: picked[1])
                     .modifier(BenchmarkScrollAnchor(id: BenchmarkAnchor.comparison(kind)))
@@ -198,9 +199,11 @@ private struct RunRow: View {
             }
             Text(BenchmarkLook.when(run.date)).fixedSize()
             if showsBuild {
-                Text(run.build?.title ?? "—")
-                    .fontWeight(debug ? .semibold : .regular)
-                    .foregroundStyle(debug ? AnyShapeStyle(BenchmarkLook.debug) : AnyShapeStyle(.secondaryText))
+                if debug {
+                    DebugBadge()
+                } else {
+                    Text(run.build?.title ?? "—").foregroundStyle(.secondaryText)
+                }
             }
             if showsTarget {
                 // Room for a usual volume name ("Macintosh HD") before the wrapping headings take it.
@@ -285,7 +288,7 @@ private struct ComparisonPanel: View {
                 if !comparison.contextWarnings.isEmpty {
                     ContextWarnings(warnings: comparison.contextWarnings)
                 }
-                ForEach(comparison.caveats, id: \.self) { caveat in
+                ForEach(comparison.caveats.filter { $0 != BenchmarkComparison.debugBuildQualification }, id: \.self) { caveat in
                     Label(caveat, systemImage: "info.circle")
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)

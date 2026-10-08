@@ -124,6 +124,9 @@ private struct HistoryProcessChartCard: View {
                     HStack(spacing: 14) { legend }
                 }
             }
+            if chart.showsMemory, !track.memory.isEmpty {
+                HistoryProcessMemoryLegend(showsBusy: !track.match.summary.isIdle)
+            }
             plot(points, top: top)
                 .frame(height: 110)
                 .chartOverlay { proxy in
@@ -152,18 +155,9 @@ private struct HistoryProcessChartCard: View {
             .fixedSize()
             .help("Its figures over the part of the range it ran, counting recorded time only. Records that left it out as idle "
                 + "count as nothing in an average.")
-        if chart.showsMemory, !track.memory.isEmpty {
-            HStack(spacing: 5) {
-                HistoryLineSample(line: HistoryLine(name: "Memory track", color: Theme.memory, value: { _ in nil },
-                                                    fill: false, stroke: .dashed, meaning: "coarse memory readings"))
-                Text("Memory track").foregroundStyle(.secondaryText)
-            }
-            .font(.metadata)
-            .help("A step line of changes of at least 10% or 16 MB, or any change after 30 minutes. Gaps are not recorded.")
-        }
         ForEach(Array(chart.lines.enumerated()), id: \.element.id) { index, line in
             HStack(spacing: 5) {
-                HistoryLineSample(line: line)
+                if !chart.showsMemory || track.memory.isEmpty { HistoryLineSample(line: line) }
                 Text(line.legend ?? line.name).foregroundStyle(.secondaryText)
                 Text(index < chart.figures.count ? chart.figures[index] : "—").monospacedDigit()
             }
@@ -266,8 +260,8 @@ private struct HistoryProcessChartCard: View {
             RectangleMark(xStart: .value("Time", max(stretch.lowerBound, domain.lowerBound)), xEnd: .value("Time", stretch.upperBound))
                 .foregroundStyle(HistoryProcessStyle.idle(dark: dark))
                 .annotation(position: .overlay, alignment: .bottomLeading) {
-                    if stretch.upperBound.timeIntervalSince(stretch.lowerBound) > span / 6 {
-                        Text(chart.showsMemory ? "Memory track" : "Idle, not stored")
+                    if !chart.showsMemory, stretch.upperBound.timeIntervalSince(stretch.lowerBound) > span / 6 {
+                        Text("Idle, not stored")
                             .font(.metadata).foregroundStyle(.secondaryText).padding([.leading, .bottom], 6)
                     }
                 }
@@ -470,7 +464,7 @@ struct HistoryMomentProcess: View {
 
     static func moment(of track: HistoryProcessStore.Track, at time: Date) -> Moment {
         ProcessHistoryLabels.moment(of: track.lifetime, at: time, points: track.figures, bucket: track.bucket,
-                                    memory: track.memory, coverage: track.memoryCoverage, isGone: !track.isRunning)
+                                    memory: track.memory, coverage: track.memoryCoverage, isGone: !track.isRunning, recordSpan: track.recordSpan)
     }
 
     var body: some View {
@@ -487,6 +481,8 @@ struct HistoryMomentProcess: View {
                     figures(point, restricted: track.lifetime.isRestricted)
                 case .memory(let step):
                     note(ProcessHistoryLabels.memoryMoment(step)).monospacedDigit()
+                case .latestMemory(let step):
+                    note(ProcessHistoryLabels.latestMemoryMoment(step)).monospacedDigit()
                 case .idle:
                     note(ProcessHistoryLabels.idleMoment)
                         .help(HistoryProcessStyle.idleHelp)
@@ -575,6 +571,7 @@ struct HistoryMomentProcessLine: View {
             }
             return parts.compactMap { $0 }.joined(separator: " · ")
         case .memory(let step): return ProcessHistoryLabels.memoryMoment(step)
+        case .latestMemory(let step): return ProcessHistoryLabels.latestMemoryMoment(step)
         case .idle: return ProcessHistoryLabels.idleMoment
         case .notRunning: return "not running"
         case .notSeenAfter(let lastSeen): return "not seen after " + lastSeen.formatted(date: .omitted, time: .standard)

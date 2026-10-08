@@ -10,6 +10,11 @@ public enum ProcessHistoryLabels {
         "\(step.measure.title) about \(Format.bytes(step.footprint)) (from the memory track)"
     }
 
+    public static func latestMemoryMoment(_ step: ProcessMemoryStep) -> String {
+        "\(step.measure.title) about \(Format.bytes(step.footprint)) at "
+            + "\(step.time.formatted(date: .omitted, time: .standard)), the latest record"
+    }
+
     public static func growth(_ bytes: Int64) -> String {
         let sign = bytes >= 0 ? "+" : "−"
         return "\(sign)\(Format.bytes(bytes.magnitude)) since first seen"
@@ -22,6 +27,7 @@ public enum ProcessHistoryLabels {
         case figures(ProcessHistoryPoint)
         case idle
         case memory(ProcessMemoryStep)
+        case latestMemory(ProcessMemoryStep)
         case notRunning
         /// Gone by now, but it went while nothing watched, so its end is unknown.
         case notSeenAfter(Date)
@@ -36,7 +42,7 @@ public enum ProcessHistoryLabels {
 
     public static func moment(of lifetime: ProcessLifetime, at time: Date, points: [ProcessHistoryPoint],
                               bucket: TimeInterval, memory: [ProcessMemoryStep] = [], coverage: [ClosedRange<Date>] = [],
-                              isGone: Bool = false) -> Moment {
+                              isGone: Bool = false, recordSpan: TimeInterval = 10) -> Moment {
         if time < lifetime.started.addingTimeInterval(-bucket) { return .notRunning }
         if let ended = lifetime.ended, time > ended.addingTimeInterval(bucket) { return .notRunning }
         // `isGone`: not running now, though no record saw it end.
@@ -44,7 +50,17 @@ public enum ProcessHistoryLabels {
             return .notSeenAfter(lifetime.lastSeen)
         }
         // Memory coverage uses the actual records, not a coarse bucket's reach.
-        if !memory.isEmpty, !coverage.contains(where: { $0.contains(time) }) { return .notRecorded }
+        if !memory.isEmpty, !coverage.contains(where: { $0.contains(time) }) {
+            // Only the unfinished record at the live edge can show an older kept figure.
+            // A stopped watch or an internal gap cannot borrow one from earlier coverage.
+            if lifetime.ended == nil, !isGone, recordSpan.isFinite, recordSpan > 0,
+               let end = coverage.max(by: { $0.upperBound < $1.upperBound })?.upperBound,
+               time > end, time.timeIntervalSince(end) <= recordSpan,
+               let step = ProcessMemoryTrack.figure(at: end, steps: memory, coverage: coverage), step.edges & 2 == 0 {
+                return .latestMemory(step)
+            }
+            return .notRecorded
+        }
         guard let point = ProcessHistoryPoint.at(time, in: points, bucket: bucket) else { return .notRecorded }
         if point.state == .idle, !memory.isEmpty {
             guard let step = ProcessMemoryTrack.figure(at: time, steps: memory, coverage: coverage) else { return .notRecorded }

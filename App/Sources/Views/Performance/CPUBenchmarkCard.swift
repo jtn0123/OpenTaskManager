@@ -8,15 +8,11 @@ import SwiftUI
 /// workspace, which charts their trends. It has no inputs and reads only
 /// `CPUBenchmarkStore`, so it redraws with the run's progress, not per tick.
 /// Figures from a debug build, which runs the workloads many times slower,
-/// carry a badge by the title and a line just above them, so they're never
-/// read as this Mac's speed; a release build's carry nothing extra. The
+/// carry a badge by the title, with its explanation under About debug builds. The
 /// figures come first; what the workloads do and how they're timed fold away
 /// under Methodology. The sustained run (`CPUSustainedPanel`) follows, its
 /// own section; only one of the two runs goes at a time.
 struct CPUBenchmarkCard: View, Equatable {
-    /// Debug builds' figures, in the badge.
-    private static let debugColor = BenchmarkLook.debug
-
     var body: some View {
         let store = CPUBenchmarkStore.shared
         let run = store.running
@@ -29,7 +25,6 @@ struct CPUBenchmarkCard: View, Equatable {
                 let progress = store.progress
                 BenchmarkRunning(text: progress.map(Self.phaseText) ?? "Starting…", started: run.started,
                                  expected: "about \(Self.plannedSeconds) s", fraction: progress?.fraction ?? 0)
-                if debugFigures { debugQualification }
                 tiles(result: nil, progress: progress, workers: run.workers)
             } else {
                 if let failure = store.failure {
@@ -39,7 +34,6 @@ struct CPUBenchmarkCard: View, Equatable {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let latest = results.first {
-                    if debugFigures { debugQualification }
                     tiles(result: latest, progress: nil, workers: latest.workloads.first?.multi.workers ?? CPUBenchmark.defaultWorkers)
                     Text(Self.tested(latest))
                         .font(.explanation)
@@ -52,6 +46,7 @@ struct CPUBenchmarkCard: View, Equatable {
                 SavedRunsDisclosure(kind: .cpu, runs: results.map(BenchmarkRun.init), place: "on this Mac")
                     .equatable()
             }
+            if debugFigures || results.contains(where: { !$0.optimized }) { DebugBuildHelp(kind: .cpu) }
             MethodologyDisclosure(preview: "Integer, floating point and memory, on 1 and \(CPUBenchmark.defaultWorkers) workers · "
                 + "about \(Self.plannedSeconds) s") {
                 Text(caption)
@@ -63,14 +58,6 @@ struct CPUBenchmarkCard: View, Equatable {
                 .equatable()
         }
         .task { store.handleLaunchArgument() }
-    }
-
-    /// What the debug badge means, just above the figures it qualifies.
-    private var debugQualification: some View {
-        Label("Debug build, many times slower than a release build: don't compare these figures with one.", systemImage: "ant")
-            .font(.callout)
-            .foregroundStyle(.secondaryText)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     private static var plannedSeconds: Int {
@@ -90,19 +77,7 @@ struct CPUBenchmarkCard: View, Equatable {
             Label("Benchmark", systemImage: "stopwatch")
                 .font(.headline)
                 .foregroundStyle(Theme.cpu)
-            if debugFigures {
-                Text("Debug build")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Self.debugColor)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 1)
-                    .background(Self.debugColor.fillShade.opacity(0.16), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Self.debugColor.opacity(0.4)))
-                    .fixedSize()
-                    .help(run != nil || store.history.isEmpty
-                        ? "This is a debug build, which runs the workloads many times slower than a release build."
-                        : "These figures are from a debug build, which runs the workloads many times slower than a release build.")
-            }
+            if debugFigures { DebugBadge() }
             Spacer(minLength: 8)
             if run != nil {
                 Button("Cancel") { store.cancel() }
@@ -126,7 +101,6 @@ struct CPUBenchmarkCard: View, Equatable {
     private static func tested(_ result: CPUBenchmarkResult) -> String {
         var parts = [
             "Tested \(result.date.formatted(date: .abbreviated, time: .shortened))",
-            result.optimized ? "release build" : "debug build",
             "thermal state \(result.worstThermalState.rawValue)",
         ]
         if result.lowPowerMode { parts.append("Low Power Mode on") }
