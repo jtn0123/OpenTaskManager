@@ -362,6 +362,7 @@ private struct HistoryProcessSummary: View {
                 }
             }
             facts(lifetime)
+            if let ending = track.ending { HistoryProcessEnding(ending: ending) }
             Text(figures)
                 .font(.callout)
                 .monospacedDigit()

@@ -120,7 +120,7 @@ public struct ProcessHistoryTracker: Sendable {
         }
         for process in disappeared {
             ended.append(ProcessHistoryBatch.End(identity: process.identity, time: endTime,
-                                                 isEnded: watchesRestricted || !process.isRestricted))
+                                                 isEnded: watchesRestricted || !process.isRestricted, lastSeen: last))
         }
 
         if afterGap {

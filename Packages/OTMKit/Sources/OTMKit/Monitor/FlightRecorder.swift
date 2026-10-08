@@ -33,7 +33,8 @@ public enum FlightRecorderError: Error, Equatable, LocalizedError {
 /// (`launch_job_events`; see FlightRecorderLaunchJobs); 6 socket lifetimes and
 /// observation coverage (see FlightRecorderConnections); 7 coarse process memory
 /// steps and lifetime peaks (see FlightRecorderProcessMemory); 8 listener baselines
-/// and pending reviews (see FlightRecorderListeners). An older database is
+/// and pending reviews (see FlightRecorderListeners); 9 keeps separate app-ending
+/// events for processes with the same name. An older database is
 /// brought up to date when it opens, and an older build still opens a newer
 /// one: it never reads the tables and columns it doesn't know, and its
 /// records simply have no hardware figures or process history.
@@ -43,7 +44,7 @@ public actor FlightRecorder {
     /// Records older than this are deleted.
     public static let retention: TimeInterval = 7 * 24 * 60 * 60
     /// The schema this build writes (`user_version`).
-    static let schemaVersion: Int32 = 8
+    static let schemaVersion: Int32 = 9
 
     private static let columns = [
         "cpu", "cpu_peak", "memory", "pressure", "swap", "gpu", "system_watts", "cpu_watts", "gpu_watts",
@@ -156,6 +157,7 @@ public actor FlightRecorder {
 
     /// Saves events, in any order. One another copy of the app already
     /// saved (the same kind and name in the same second) is left out.
+    /// App-ending actions also compare their identity-bearing detail.
     public func append(_ events: [HistoryEvent]) throws(FlightRecorderError) {
         // The connection stays live; statements are finalized after use and column data is copied before the next step.
         unsafe try Self.insert(events, into: database)
@@ -574,6 +576,14 @@ public actor FlightRecorder {
             if version < 8 {
                 // Reviewed listener identities and unaccepted changes outlive socket history.
                 unsafe try execute(listenerTables, on: handle)
+            }
+            if version < 9 {
+                // The detail carries the identity, so a group end keeps every target.
+                unsafe try execute("""
+                    DROP INDEX IF EXISTS events_once;
+                    CREATE UNIQUE INDEX events_once ON events
+                        (kind, name, CAST(time AS INTEGER), CASE WHEN kind = 'endedByApp' THEN detail ELSE '' END);
+                    """, on: handle)
             }
             if version < schemaVersion { unsafe try execute("PRAGMA user_version = \(schemaVersion)", on: handle) }
             unsafe try execute("COMMIT", on: handle)

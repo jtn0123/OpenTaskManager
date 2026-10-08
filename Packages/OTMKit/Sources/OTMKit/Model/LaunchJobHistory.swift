@@ -42,19 +42,23 @@ public struct LaunchHistoryEvent: Sendable, Codable, Hashable, Identifiable {
     public let kind: Kind
     public let pid: Int32?
     public let exit: LaunchExitStatus?
+    /// Set only when a watched process ended, never for an ambiguous replacement.
+    public let exitedIdentity: ProcessIdentity?
     public let detail: String
     public let configuration: LaunchJobConfiguration?
 
     public var id: String { "\(key.domain)/\(key.label)/\(time.timeIntervalSince1970)/\(kind.rawValue)" }
 
     public init(key: LaunchHistoryKey, time: Date, since: Date? = nil, kind: Kind, pid: Int32? = nil,
-                exit: LaunchExitStatus? = nil, detail: String = "", configuration: LaunchJobConfiguration? = nil) {
+                exit: LaunchExitStatus? = nil, detail: String = "", configuration: LaunchJobConfiguration? = nil,
+                exitedIdentity: ProcessIdentity? = nil) {
         self.key = key
         self.time = time
         self.since = since
         self.kind = kind
         self.pid = pid
         self.exit = exit
+        self.exitedIdentity = exitedIdentity
         self.detail = detail
         self.configuration = configuration
     }
@@ -101,10 +105,11 @@ public struct LaunchHistorySnapshot: Sendable, Hashable {
 public enum LaunchHistoryDerivation {
     public static func events(from before: LaunchHistorySnapshot?, to after: LaunchHistorySnapshot, continuous: Bool = true)
         -> [LaunchHistoryEvent] {
-        func event(_ kind: LaunchHistoryEvent.Kind, exit: LaunchExitStatus? = nil, detail: String = "") -> LaunchHistoryEvent {
+        func event(_ kind: LaunchHistoryEvent.Kind, exit: LaunchExitStatus? = nil, detail: String = "",
+                   exitedIdentity: ProcessIdentity? = nil) -> LaunchHistoryEvent {
             LaunchHistoryEvent(key: after.key, time: after.time, since: before?.time, kind: kind,
                                pid: after.job?.pid, exit: exit, detail: detail,
-                               configuration: kind == .configuration ? after.configuration : nil)
+                               configuration: kind == .configuration ? after.configuration : nil, exitedIdentity: exitedIdentity)
         }
         guard let before else {
             let state = after.job?.pid.map { "First observed running · PID \($0)" }
@@ -139,7 +144,8 @@ public enum LaunchHistoryDerivation {
                 // For a replacement, a changed last-exit value is evidence of an
                 // exit somewhere in the interval, not necessarily the watched run.
                 let exit = ended || newExit ? after.job?.lastExit : nil
-                result.append(event(.exited, exit: exit))
+                let identity = ended ? before.instance.map { ProcessIdentity(pid: $0.pid, startTime: $0.started) } : nil
+                result.append(event(.exited, exit: exit, exitedIdentity: identity))
                 if exit?.isFailure == true { result.append(event(exit?.crashSignal == nil ? .failed : .crashed, exit: exit)) }
             }
             if after.instance != nil && (before.instance == nil || replaced) { result.append(event(.started)) }

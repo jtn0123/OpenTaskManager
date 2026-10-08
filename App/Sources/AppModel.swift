@@ -279,53 +279,6 @@ final class AppModel {
 
     // MARK: - Actions
 
-    /// Quits apps politely (like ⌘Q) and sends SIGTERM to everything else.
-    func endTask(_ pids: [Int32]) {
-        var signalled: [Int32] = []
-        for pid in pids {
-            if let app = regularApps[pid] {
-                app.terminate()
-            } else {
-                signalled.append(pid)
-            }
-        }
-        send(.terminate, to: signalled)
-    }
-
-    func forceQuit(_ pids: [Int32]) {
-        send(.kill, to: pids)
-    }
-
-    /// Ends each process and everything it started, children first.
-    func endProcessTree(_ pids: [Int32], force: Bool) {
-        guard let processes = snapshot?.processes else { return }
-        let children = Dictionary(grouping: processes, by: \.parentPID)
-        var ordered: [Int32] = []
-        func visit(_ pid: Int32) {
-            for child in children[pid] ?? [] where child.pid != pid { visit(child.pid) }
-            if !ordered.contains(pid) { ordered.append(pid) }
-        }
-        pids.forEach(visit)
-        send(force ? .kill : .terminate, to: ordered)
-    }
-
-    func send(_ signal: ProcessSignal, to pids: [Int32]) {
-        var denied: [Int32] = []
-        for pid in pids {
-            do {
-                try ProcessControl.send(signal, to: pid)
-            } catch .permissionDenied {
-                denied.append(pid)
-            } catch {
-                lastError = error.localizedDescription
-            }
-        }
-        if !denied.isEmpty {
-            runAsAdministrator(ProcessControl.shellCommand(for: signal, pids: denied))
-        }
-        refreshSoon()
-    }
-
     func setNice(_ value: Int32, for pid: Int32) {
         do {
             try ProcessControl.setNice(value, for: pid)
@@ -374,25 +327,30 @@ final class AppModel {
         }
     }
 
+    func reportError(_ error: any Error) { lastError = error.localizedDescription }
+
     func dismissError() {
         lastError = nil
     }
 
-    private func refreshSoon() {
+    func refreshSoon() {
         Task {
             try? await Task.sleep(for: .milliseconds(250))
             refreshNow()
         }
     }
 
-    private func runAsAdministrator(_ command: String) {
+    @discardableResult
+    func runAsAdministrator(_ command: String) -> Bool {
         let escaped = command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let script = NSAppleScript(source: "do shell script \"\(escaped)\" with administrator privileges")
+        guard let script else { return false }
         var error: NSDictionary?
-        script?.executeAndReturnError(&error)
+        script.executeAndReturnError(&error)
         if let error, (error[NSAppleScript.errorNumber] as? Int) != -128 {
             lastError = error[NSAppleScript.errorMessage] as? String ?? "The command failed."
         }
+        return error == nil
     }
 }
 

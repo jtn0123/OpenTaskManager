@@ -81,6 +81,7 @@ final class HistoryProcessStore {
         let unwatched: [ClosedRange<Date>]
         /// Whether it's the process running now with its PID.
         let isRunning: Bool
+        let ending: ProcessEnding?
         let bucket: TimeInterval
         let domain: ClosedRange<Date>
 
@@ -200,11 +201,23 @@ final class HistoryProcessStore {
         let memory = (try? await recorder.processMemory(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? []
         let coverage = (try? await recorder.processMemoryCoverage(lifetime, from: domain.lowerBound, to: domain.upperBound)) ?? []
         guard !Task.isCancelled, picked == identity else { return }
+        let running = isRunning(identity)
+        let ending: ProcessEnding?
+        if running {
+            ending = nil
+        } else if let track, track.lifetime.identity == identity,
+                  track.lifetime.ended == lifetime.ended, track.lifetime.lastSeen == lifetime.lastSeen, track.ending != nil {
+            // A new graph point reloads figures, not the same lifetime's reports.
+            ending = track.ending
+        } else {
+            ending = try? await recorder.processEnding(lifetime)
+        }
+        guard !Task.isCancelled, picked == identity else { return }
         let next = Track(match: ProcessHistoryMatch(lifetime: lifetime, summary: summary), points: figures.map(HistoryProcessKey.point),
                          figures: figures, memory: memory, memoryCoverage: coverage, recordSpan: recorder.recordSpan,
                          memoryPoints: ProcessMemoryTrack.points(steps: memory, coverage: coverage),
                          idle: ProcessHistoryPoint.idleStretches(figures, bucket: bucket), unwatched: unwatched,
-                         isRunning: isRunning(identity), bucket: bucket, domain: domain)
+                         isRunning: running, ending: ending, bucket: bucket, domain: domain)
         if track != next { track = next }
     }
 }

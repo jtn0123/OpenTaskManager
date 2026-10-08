@@ -15,6 +15,8 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable, Codable {
         case appLaunched
         case appQuit
+        /// OpenTaskManager delivered a signal or an app accepted its Quit request.
+        case endedByApp
         /// A background process that became busy (`ProcessEventTracker.busyPercent`).
         case processStarted
         /// A process that had been busy, gone.
@@ -28,7 +30,9 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
         case spike
     }
 
-    public var id: String { "\(time.timeIntervalSince1970) \(kind.rawValue) \(name)" }
+    public var id: String {
+        "\(time.timeIntervalSince1970) \(kind.rawValue) \(name)" + (kind == .endedByApp ? " " + detail : "")
+    }
     public let time: Date
     public let kind: Kind
     /// The app or process; for a network change, the network now in use
@@ -74,6 +78,7 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
         var open: [String: Int] = [:]
         for event in events {
             let key = event.kind.rawValue + "\u{1F}" + event.name
+                + (event.kind == .endedByApp ? event.detail : "")
             if let index = open[key], event.time.timeIntervalSince(merged[index].time) < window {
                 let first = merged[index]
                 merged[index] = HistoryEvent(time: first.time, kind: first.kind, name: first.name, detail: first.detail,
