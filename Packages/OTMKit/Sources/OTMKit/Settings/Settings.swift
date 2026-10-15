@@ -44,6 +44,10 @@ public enum Settings {
     public static let sidebarHidden = SettingKey<Bool, Bool>(
         "sidebarHidden", default: false, meaning: "Whether the user hid the sidebar in a wide window."
     )
+    public static let mainWindowFrame = SettingKey<String?, String?>(
+        "mainWindowFrame", default: nil,
+        meaning: "Main window's frame when last moved or resized, \"x y width height\" in screen points; absent opens at the default size."
+    )
     public static let globalHotKeyEnabled = SettingKey<Bool, Bool>(
         "globalHotKeyEnabled", default: true, meaning: "Whether the global hot key is enabled."
     )
@@ -245,6 +249,7 @@ public enum Settings {
         showMenuBarExtra.descriptor,
         streamGraphs.descriptor,
         sidebarHidden.descriptor,
+        mainWindowFrame.descriptor,
         globalHotKeyEnabled.descriptor,
         heatmap.descriptor,
         historyHardwareShown.descriptor,

@@ -155,6 +155,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var hotKey: GlobalHotKey?
 
+    /// Before any window opens: the main window's frame is the app's own
+    /// (`MainWindowFrame`), so neither AppKit's autosaved copy nor window
+    /// state macOS saved for an earlier run gets to place it.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainWindowFrame.ignoreSavedWindowState()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         updateHotKey()
         if !AppModel.usesIncidentFixture { StorageScheduler.shared.start() }

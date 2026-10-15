@@ -836,7 +836,11 @@ Storage.
 once at launch, and saves each change for the next launch. It never follows
 another copy, so a capture's copy and the user's own don't move each other.
 Don't read the page through `@Setting(Settings.page)` (or raw `@AppStorage`):
-a launch argument would pin it for the whole run and the sidebar would stop switching pages. Get the
+a launch argument would pin it for the whole run and the sidebar would stop switching pages.
+`-openWindowFrame "x y width height"` (screen points, origin bottom left) places
+the window for that run and saves nothing, so a narrow capture never sets the
+size the user's next window opens at. `-NSWindow Frame main` no longer places
+it. Get the
 window ID from `CGWindowListCopyWindowInfo`. Capture fails while the screen is
 locked or the window is on another Space.
 
@@ -920,9 +924,8 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   `Setting` wraps `AppStorage`, so SwiftUI still observes changes. The page
   deliberately uses direct reads and writes in `PageSelection`, never `@Setting`:
   it reads once at launch and never follows another copy's page.
-  AppKit's `NSWindow Frame main` and launch-only arguments (`openPage` and
-  `LaunchArgument`) stay outside this registry; window frames belong to AppKit,
-  and arguments are commands for a run, not preferences. Benchmark and speed-test
+  Launch-only arguments (`openPage` and `LaunchArgument`) stay outside this
+  registry: they are commands for a run, not preferences. Benchmark and speed-test
   result files belong to their history components; their disclosure, comparison
   and baseline preferences are settings and are registered.
 - Process CPU is stored as Activity Monitor-style percent (100 = one core) and
@@ -1033,6 +1036,23 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   or mount list changes), with disk images under a folding "Disk images"
   heading or chip. Below 760 points History moves its moment panel into
   a summary over the charts.
+- The app, not AppKit, keeps the main window's frame (`mainWindowFrame`, "x y
+  width height"). `MainWindowFrameKeeper` places the window before it shows,
+  then saves it on each move and at the end of a live resize, never during one
+  or in full screen, and puts the pre-full-screen frame back on leaving it
+  (SwiftUI put back its opening frame). AppKit's autosave wrote "NSWindow Frame
+  main" once, at opening, so a user's size never stuck while a narrow capture's
+  did, and macOS 26's window restoration (saved state in a daemon container)
+  reapplied the last killed window's frame after ours. So the window has no
+  autosave name, isn't restorable, and `MainWindowFrame.ignoreSavedWindowState`
+  registers `ApplePersistenceIgnoreState` and drops the old key before any
+  window opens. `WindowPlacement` in OTMKit holds the rules: a first window is
+  75% by 80% of the screen's usable area, within 1180×760 and 1440×940, never
+  past the screen or under the 820×480 minimum, centred with a third of the
+  spare height above; a saved frame goes back to the screen it mostly covers,
+  or the middle of the main one if that's gone, shrunk and moved only enough
+  to fit. Window > Return to Default Size applies the first-window size on the
+  window's screen. `SidebarVisibilityStore` starts from the opening width.
 - In a window under 900 points the sidebar hides itself and comes back when
   the window widens; a hide in a wide window is remembered (`sidebarHidden`)
   and a show in a narrow one lasts until the window crosses 900

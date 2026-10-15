@@ -8,12 +8,14 @@ final class SidebarVisibilityStore {
     @ObservationIgnored private let defaults: UserDefaults
     private var visibility: SidebarVisibility
 
-    init(defaults: UserDefaults = .standard) {
+    /// `openingWidth` is the width the window opens at (`MainWindowFrame.opening`).
+    init(defaults: UserDefaults = .standard, openingWidth: Double) {
         self.defaults = defaults
-        visibility = SidebarVisibility(
-            hiddenByUser: Settings.sidebarHidden.get(in: defaults),
-            windowWidth: SidebarVisibility.openingWidth(savedFrame: defaults.string(forKey: "NSWindow Frame main"))
-        )
+        visibility = SidebarVisibility(hiddenByUser: Settings.sidebarHidden.get(in: defaults), windowWidth: openingWidth)
+    }
+
+    convenience init(defaults: UserDefaults = .standard) {
+        self.init(defaults: defaults, openingWidth: MainWindowFrame.opening(defaults: defaults).width)
     }
 
     var isShown: Bool { visibility.isShown }

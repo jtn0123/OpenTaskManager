@@ -20,20 +20,11 @@ public struct SidebarVisibility: Equatable, Sendable {
     private var shownWhileNarrow = false
 
     /// `windowWidth` is the width the window opens at, when it's known
-    /// before the window is measured (`openingWidth(savedFrame:)`), so a
+    /// before the window is measured (`WindowPlacement.openingFrame`), so a
     /// window that opens narrow never shows the sidebar at all.
     public init(hiddenByUser: Bool = false, windowWidth: Double? = nil) {
         self.hiddenByUser = hiddenByUser
         isNarrow = windowWidth.map(Self.isNarrow(width:))
-    }
-
-    /// The width in a window's saved frame, as AppKit keeps it under
-    /// "NSWindow Frame <name>": "x y width height" and then the screen's
-    /// frame. Nil when there's none or it doesn't read.
-    public static func openingWidth(savedFrame: String?) -> Double? {
-        guard let fields = savedFrame?.split(separator: " "), fields.count >= 4,
-              let width = Double(fields[2]), width > 0 else { return nil }
-        return width
     }
 
     public var isShown: Bool {

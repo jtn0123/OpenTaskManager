@@ -19,6 +19,7 @@ struct SettingsTests {
         "showMenuBarExtra": .bool(true),
         "streamGraphs": .bool(true),
         "sidebarHidden": .bool(false),
+        "mainWindowFrame": .absent,
         "globalHotKeyEnabled": .bool(true),
         "heatmap": .bool(true),
         "historyHardwareShown": .bool(false),

@@ -15,10 +15,19 @@ struct OpenTaskManagerApp: App {
                 .environment(model)
                 .environment(\.sampleInterval, model.samplingInterval)
                 .environment(\.streamsGraphs, streamGraphs)
-                .frame(minWidth: 820, minHeight: 480)
+                .frame(minWidth: WindowPlacement.minimumSize.width, minHeight: WindowPlacement.minimumSize.height)
+                // Opens the window where it was left, or at a share of the
+                // screen the first time, and keeps it there (`MainWindowFrame`).
+                .background(MainWindowFrameKeeper())
         }
-        .defaultSize(width: 1180, height: 760)
+        // The size the keeper will give it, so SwiftUI's own idea of the
+        // window (which it goes back to after full screen) starts out right.
+        .defaultSize(MainWindowFrame.opening().size)
         .commands {
+            CommandGroup(after: .windowSize) {
+                Divider()
+                Button("Return to Default Size") { MainWindowFrame.returnToDefault() }
+            }
             CommandGroup(after: .newItem) {
                 Button("Open Recording…") { HistoryRecordingStore.shared.chooseRecording() }
                     .keyboardShortcut("o")
