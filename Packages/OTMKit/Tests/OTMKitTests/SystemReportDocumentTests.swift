@@ -24,9 +24,9 @@ struct SystemReportDocumentTests {
         disks: [DiskInfo(bsdName: "disk0", model: "APPLE SSD", isInternal: true, isSolidState: true, size: 2_000_000_000_000)],
         volumes: [
             VolumeInfo(name: "Macintosh HD", mountPoint: "/", fileSystem: "APFS", totalBytes: 1_994_000_000_000,
-                       availableBytes: 1_000_000_000_000, isInternal: true, isRemovable: false, isRoot: true, physicalDisk: "disk0"),
+                       availableBytes: 1_000_000_000_000, freeBytes: nil, isInternal: true, isRemovable: false, isRoot: true, physicalDisk: "disk0"),
             VolumeInfo(name: "Installer", mountPoint: "/Volumes/Installer", fileSystem: nil, totalBytes: 500_000_000,
-                       availableBytes: 1_000_000, isInternal: false, isRemovable: true, isRoot: false, physicalDisk: nil),
+                       availableBytes: 1_000_000, freeBytes: nil, isInternal: false, isRemovable: true, isRoot: false, physicalDisk: nil),
         ],
         network: [
             NetworkPortInfo(name: "en0", displayName: "Wi-Fi", kind: .wifi, isUp: true, addresses: ["192.168.1.9", "2001:db8::5"],

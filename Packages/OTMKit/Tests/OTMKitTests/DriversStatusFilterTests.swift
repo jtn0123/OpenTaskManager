@@ -43,6 +43,21 @@ struct DriversStatusFilterTests {
         #expect(items.filter(DriverSummaryFilter.notInUse.includes).count == summary.notInUse)
         #expect(items.filter(DriverSummaryFilter.attention.includes).count == summary.needsAttention)
         #expect(items.filter { $0.publisher == .apple && DriversStatusFilter.loaded.includes($0.status) } == [apple])
+        // A card's rows under the vendor it asks for, as the table filters
+        // them, are the ones its count counts.
+        let counts: [(DriverSummaryFilter, Int)] = [
+            (.system, summary.systemExtensions), (.thirdPartyKernel, summary.thirdPartyKernelExtensions),
+            (.kernel, summary.loadedKernelExtensions), (.notInUse, summary.notInUse), (.attention, summary.needsAttention),
+        ]
+        for (card, count) in counts {
+            let rows = items.filter { card.vendor.includes($0) && card.status.includes($0.status) && card.includes($0) }
+            #expect(rows.count == count, "\(card)")
+        }
+        #expect(!DriversFilter.thirdParty.covers(DriverSummaryFilter.kernel.vendor))
+        #expect(DriversFilter.thirdParty.covers(DriverSummaryFilter.thirdPartyKernel.vendor))
+        #expect(DriversFilter.all.covers(.apple))
+        #expect(DriversFilter.thirdParty.title(in: items) == "Third party (5)")
+        #expect(DriversFilter.all.title(in: items) == "All (6)")
         #expect(items.filter { $0.publisher == .thirdParty && DriversStatusFilter.notInUse.includes($0.status) } == [copy])
     }
 

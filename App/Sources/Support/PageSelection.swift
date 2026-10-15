@@ -26,7 +26,8 @@ final class PageSelection {
         self.defaults = defaults
         let storage = LaunchOptions.string("openStorageSchedule", in: arguments).map { _ in "Storage" }
         let owner = LaunchOptions.string("openFindOwner", in: arguments).map { _ in "Processes" }
-        let listeners = LaunchOptions.string("openListenerChanges", in: arguments) == "YES" ? "Connections" : nil
+        let listeners = LaunchOptions.string("openListenerChanges", in: arguments) == "YES"
+            || LaunchOptions.string("openHiddenSockets", in: arguments) == "YES" ? "Connections" : nil
         let incident = LaunchOptions.string("openIncident", in: arguments).map { _ in "History" }
         let named = incident ?? owner ?? listeners ?? storage ?? LaunchOptions.string("openBenchmarkGuided", in: arguments).map { _ in "Performance" }
             ?? LaunchOptions.string("openPage", in: arguments) ?? LaunchOptions.string(Settings.page.key, in: arguments)

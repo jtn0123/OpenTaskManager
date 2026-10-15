@@ -27,7 +27,7 @@ struct SettingsTests {
         "historyCompareDetails": .bool(false),
         "threadSortKey": .string("cpu"),
         "hiddenConnectionColumns": .string(""),
-        "driversFilter": .string("Third party"),
+        "driversFilter": .string("All"),
         "showDriversInspector": .bool(true),
         "groupMemberSort": .string("cpu"),
         "historyRange": .integer(3_600),

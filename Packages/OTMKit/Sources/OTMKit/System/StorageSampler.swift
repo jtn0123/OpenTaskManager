@@ -123,14 +123,17 @@ public enum VolumeReader {
             guard let values = try? url.resourceValues(forKeys: Set(keys)),
                   values.volumeIsBrowsable != false,
                   let total = values.volumeTotalCapacity, total > 0 else { return nil }
-            let available = values.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) }
-                ?? UInt64(max(values.volumeAvailableCapacity ?? 0, 0))
+            let free = values.volumeAvailableCapacity.map { UInt64(max($0, 0)) }
+            // A disk image reports 0 for important use while it has space free: not a figure.
+            let important = values.volumeAvailableCapacityForImportantUsage
+                .flatMap { $0 > 0 || (free ?? 0) == 0 ? UInt64(max($0, 0)) : nil }
             return VolumeInfo(
                 name: values.volumeName ?? url.lastPathComponent,
                 mountPoint: url.path,
                 fileSystem: values.volumeLocalizedFormatDescription,
                 totalBytes: UInt64(total),
-                availableBytes: available,
+                availableBytes: important ?? free ?? 0,
+                freeBytes: free,
                 isInternal: values.volumeIsInternal ?? false,
                 isRemovable: values.volumeIsRemovable ?? false,
                 isRoot: values.volumeIsRootFileSystem ?? false,

@@ -1,17 +1,7 @@
 import OTMKit
 import SwiftUI
 
-/// Which extensions the Drivers table shows. Third party comes first: on most
-/// Macs everything else is part of macOS.
 extension DriversFilter {
-    func includes(_ item: ExtensionItem) -> Bool {
-        switch self {
-        case .thirdParty: item.publisher == .thirdParty
-        case .apple: item.publisher == .apple
-        case .all: true
-        }
-    }
-
     /// Whether rows can differ in publisher. Under Apple or Third party the
     /// column would say the same thing on every row, so it gives its room to Name.
     var showsPublisher: Bool { self == .all }
@@ -34,6 +24,8 @@ struct DriversView: View {
     @State private var search = ""
     @State private var status: DriversStatusFilter = .all
     @State private var summaryFilter: DriverSummaryFilter?
+    /// The vendor a summary card widened, put back when the card is turned off.
+    @State private var vendorBeforeSummary: DriversFilter?
     @State private var selection: ExtensionItem.ID?
     @State private var openedRequest = false
     /// A row to bring into view once, for `-openDriver`.
@@ -88,11 +80,17 @@ struct DriversView: View {
             VStack(alignment: .leading, spacing: 12) {
                 DriverSummaryCards(scan: scan, selected: summaryFilter, apply: applySummary)
                 HStack(spacing: 16) {
-                    Picker("Vendor", selection: $filter) {
-                        ForEach(DriversFilter.allCases) { Text($0.rawValue).tag($0) }
+                    // Each with its count, so a narrowed table says how much it leaves out.
+                    Picker("Vendor", selection: Binding(get: { filter }, set: {
+                        summaryFilter = nil
+                        vendorBeforeSummary = nil
+                        filter = $0
+                    })) {
+                        ForEach(DriversFilter.allCases) { Text($0.title(in: scan.items)).tag($0) }
                     }
                     Picker("Status", selection: Binding(get: { status }, set: {
                         summaryFilter = nil
+                        vendorBeforeSummary = nil
                         status = $0
                     })) {
                         ForEach(DriversStatusFilter.allCases) { Text($0.rawValue).tag($0) }
@@ -194,13 +192,21 @@ struct DriversView: View {
         }.sorted(using: sortOrder)
     }
 
+    /// A card lists the rows its count counts, widening the vendor if it has
+    /// to (most count Apple's too); turning it off puts the vendor back.
     private func applySummary(_ summary: DriverSummaryFilter) {
         if summaryFilter == summary {
             summaryFilter = nil
             status = .all
+            if let before = vendorBeforeSummary { filter = before }
+            vendorBeforeSummary = nil
         } else {
             summaryFilter = summary
             status = summary.status
+            if !filter.covers(summary.vendor) {
+                vendorBeforeSummary = vendorBeforeSummary ?? filter
+                filter = summary.vendor
+            }
         }
     }
 

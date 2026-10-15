@@ -291,7 +291,15 @@ Manager OG or any other proprietary task manager.
   A `-sensorFixture` run captures nothing;
   `-captureSpikeNow cpu|memory|thermal|disk|network` (debug builds) forces one 15
   updates in, `-openSpikes YES` opens the list, `otm captures [--json]` lists them),
-  Views/Connections (socket table; `ConnectionStore` runs the walk),
+  Views/Connections (socket table; `ConnectionStore` runs the walk; Show
+  Hidden… beside the hidden-process count, and Show Hidden Sockets… in its
+  popover, read every process's sockets once as root: `PrivilegedSocketReader`
+  runs lsof through osascript's administrator prompt, off the main actor, and
+  `PrivilegedSocketRead` turns its fields into `Connection`s with their
+  account, for `HiddenSocketsSheet` (other accounts by default, or everyone,
+  with the page's counts). It is a snapshot: only Read Again reads again,
+  nothing is installed and nothing keeps running as root; a cancelled prompt
+  with nothing read closes the sheet),
   System/OwnerLookup and OwnerQuery reverse that lookup for a file (device and
   inode), folder or volume (open paths and current directories), or local TCP/UDP
   port. ProcessDescriptorReader shares the libproc buffers with ProcessInspector
@@ -428,11 +436,18 @@ Manager OG or any other proprietary task manager.
   copies one level into /Library/Extensions and the Applications folders, never
   /System, and Model/ExtensionMatching ties each to what's registered or loaded
   by identifier and version, the rest being rows "Installed, not in use" or,
-  when that can't be told, "Unknown"; vendor and Status (All, Loaded, Not in
-  use) filters combine, and summary cards toggle the rows behind their count
-  with an accent outline while selected (`DriversStatusFilter` and
-  `DriverSummaryFilter` in OTMKit); tests use fake bundles in a temp dir),
-  Views/Storage (disk space: `StorageStore` keeps the session's last scan and
+  when that can't be told, "Unknown"; vendor (All by default, each segment
+  with its count; third party sorts first either way) and Status (All, Loaded,
+  Not in use) filters combine, and summary cards toggle the rows behind their
+  count with an accent outline while selected. A card whose count takes in
+  Apple's too widens a narrower vendor to All, and deselecting it puts the
+  vendor back (`DriversStatusFilter` and `DriverSummaryFilter` in OTMKit);
+  tests use fake bundles in a temp dir),
+  Views/Storage (disk space: before a scan, `StorageCapacityPanel` shows each
+  local volume's used, purgeable and free space over the places to scan,
+  `VolumeCapacity` in OTMKit splitting `VolumeInfo`'s capacity by its
+  important-use and plain free figures, read when the page opens; purgeable
+  counts as available, as in Finder; `StorageStore` keeps the session's last scan and
   scans on Scan, a scope pick, or an opt-in schedule while the app is running,
   never per tick; the treemap
   is laid out once per scan, folder and size, drawn in a `Canvas`, and its hover
@@ -781,6 +796,8 @@ selects the first matching socket on the Connections page so its details show
 `-openListenerChanges YES` selects Connections and opens listener review;
 with debug `-listenerFixture YES` it shows made-up changes, never persisted,
 with Accept and notifications disabled;
+`-openHiddenSockets YES` selects Connections and opens Hidden Sockets, which
+asks for the administrator's password at once;
 `-openConnectionSearch <text>` opens History with a search),
 `-openStartupSource <name>` picks the Source filter (the CLI source names or visible titles),
 `-openStartupItem <text>` selects the first startup item whose label or name contains it,

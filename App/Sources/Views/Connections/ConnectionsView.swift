@@ -13,6 +13,7 @@ struct ConnectionsView: View {
     @State private var list: ConnectionList = .open
     @State private var search = ""
     @State private var showsListenerChanges = false
+    @State private var showsHiddenSockets = false
     /// Open or closed: a socket that closes while selected keeps its details.
     @State private var selection: ObservedConnection.ID?
     @State private var openedRequest = false
@@ -68,11 +69,15 @@ struct ConnectionsView: View {
         }
         .onAppear {
             if LaunchArgument.string("openListenerChanges") == "YES" { showsListenerChanges = true }
+            if LaunchArgument.string("openHiddenSockets") == "YES" { showsHiddenSockets = true }
             if LaunchArgument.string("openConnectionList") == "history" { list = .history }
             if let query = LaunchArgument.string("openConnectionSearch") { search = query; list = .history }
         }
         .sheet(isPresented: $showsListenerChanges) {
             ListenerReviewView(showProcess: showProcess)
+        }
+        .sheet(isPresented: $showsHiddenSockets) {
+            HiddenSocketsSheet()
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Process, address or port")
         .toolbar {
@@ -106,7 +111,7 @@ struct ConnectionsView: View {
         let covered = isNarrow && showsFullDetail
         return VStack(spacing: 0) {
             // Whose sockets the counts are, so a 0 doesn't read as the whole Mac's.
-            ScopeHeader(hidden: store.hiddenProcesses)
+            ScopeHeader(hidden: store.hiddenProcesses) { showsHiddenSockets = true }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
@@ -422,10 +427,12 @@ private struct FilterBarLayout: Layout {
 /// Over the counts: that they're of sockets open now, even while the table
 /// lists those seen closing, whose sockets they are, and how many processes
 /// macOS keeps out of them, so "0 connected sockets" reads as none of yours
-/// rather than none on the Mac. The hidden count opens why. One plain row,
+/// rather than none on the Mac. The hidden count opens why, and Show
+/// Hidden reads them once with an administrator's password. One plain row,
 /// no `ViewThatFits`: layout passes here come every tick (the traffic card).
 private struct ScopeHeader: View {
     var hidden: Int
+    var showHidden: () -> Void
     @State private var explains = false
 
     var body: some View {
@@ -467,10 +474,17 @@ private struct ScopeHeader: View {
                 .help("Why other processes' sockets aren't counted")
                 .accessibilityHint("Explains why")
                 .popover(isPresented: $explains, arrowEdge: .bottom) {
-                    HiddenProcessesNote(hidden: hidden)
-                        .padding(16)
-                        .frame(width: 330)
+                    HiddenProcessesNote(hidden: hidden) {
+                        explains = false
+                        showHidden()
+                    }
+                    .padding(16)
+                    .frame(width: 330)
                 }
+                Button("Show Hidden…", action: showHidden)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Read every process's sockets once, with an administrator's password")
             }
         }
     }
@@ -479,6 +493,7 @@ private struct ScopeHeader: View {
 /// Why some processes' sockets are missing, and what shows them.
 private struct HiddenProcessesNote: View {
     var hidden: Int
+    var showHidden: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -493,8 +508,14 @@ private struct HiddenProcessesNote: View {
             An administrator account doesn't change this: the apps you open still run as you, not as root. Running \
             OpenTaskManager itself as root isn't supported.
             """)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("To list every socket now, run this in Terminal:")
+            Text("""
+            To see them, read every process's sockets once with an administrator's password. They open in a list of \
+            their own that doesn't update, and nothing keeps running as root.
+            """)
+            Button("Show Hidden Sockets…", action: showHidden)
+                .buttonStyle(.borderedProminent)
+            HStack(spacing: 6) {
+                Text("Or in Terminal:").foregroundStyle(.secondaryText)
                 Text("sudo lsof -i -n -P")
                     .font(.body.monospaced())
                     .textSelection(.enabled)
@@ -502,8 +523,6 @@ private struct HiddenProcessesNote: View {
                     .padding(.vertical, 3)
                     .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
             }
-            Text("A privileged helper that adds them here is planned.")
-                .foregroundStyle(.secondaryText)
         }
         .font(.body)
         .fixedSize(horizontal: false, vertical: true)

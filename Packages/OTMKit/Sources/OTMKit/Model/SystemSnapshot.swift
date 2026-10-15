@@ -163,7 +163,11 @@ public struct VolumeInfo: Sendable, Codable, Identifiable, Hashable {
     public let mountPoint: String
     public let fileSystem: String?
     public let totalBytes: UInt64
+    /// Available for something the user asked for: the free space and what
+    /// macOS clears by itself when it's needed (purgeable), as Finder counts it.
     public let availableBytes: UInt64
+    /// Free right now, without the purgeable space. Nil where it wasn't read.
+    public let freeBytes: UInt64?
     public let isInternal: Bool
     public let isRemovable: Bool
     public let isRoot: Bool

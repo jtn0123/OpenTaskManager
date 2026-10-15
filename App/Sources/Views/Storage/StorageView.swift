@@ -158,7 +158,8 @@ struct StorageItemMenu: View {
 
 // MARK: - Before a scan
 
-/// A card per place to scan, since nothing is scanned until asked.
+/// How full each local volume is, then a card per place to scan, since
+/// nothing is scanned until asked.
 private struct StorageStartView: View {
     let store: StorageStore
     var focus: FocusState<StorageStage?>.Binding
@@ -181,25 +182,30 @@ private struct StorageStartView: View {
                     .foregroundStyle(LinearGradient(colors: [Theme.disk, Theme.cpu], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .accessibilityHidden(true)
                 Text("What's using your disk space?").font(.title2.weight(.semibold))
+            }
+            let volumes = store.scopes.compactMap(\.volume)
+            if !volumes.isEmpty {
+                StorageCapacityPanel(volumes: volumes).frame(maxWidth: 820)
+            }
+            VStack(spacing: 14) {
                 Text("Pick a place to scan. Nothing is read until you do. Cleanup needs a separate review before anything moves to the Trash.")
                     .foregroundStyle(.secondaryText)
                     .multilineTextAlignment(.center)
-            }
-            FillGrid(minimum: 220, spacing: 14) {
-                ForEach(store.scopes) { scope in
-                    ScopeCard(symbol: scope.symbol, title: scope.title, subtitle: scope.subtitle,
-                              detail: Self.detail(scope), volume: scope.volume) {
-                        store.scan(scope)
+                FillGrid(minimum: 220, spacing: 14) {
+                    ForEach(store.scopes) { scope in
+                        ScopeCard(symbol: scope.symbol, title: scope.title, subtitle: scope.subtitle, detail: Self.detail(scope)) {
+                            store.scan(scope)
+                        }
+                        .focused(focus, equals: .start)
+                    }
+                    ScopeCard(symbol: "folder.badge.plus", title: "Choose Folder…", subtitle: "Any folder, on any disk",
+                              detail: "Scan just the folder you pick.") {
+                        store.chooseFolder()
                     }
                     .focused(focus, equals: .start)
                 }
-                ScopeCard(symbol: "folder.badge.plus", title: "Choose Folder…", subtitle: "Any folder, on any disk",
-                          detail: "Scan just the folder you pick.", volume: nil) {
-                    store.chooseFolder()
-                }
-                .focused(focus, equals: .start)
+                .frame(maxWidth: 820)
             }
-            .frame(maxWidth: 820)
             Text("Folders macOS keeps private (Mail, Messages, other apps' data) are counted as unreadable "
                 + "unless OpenTaskManager has Full Disk Access.")
                 .font(.explanation)
@@ -230,7 +236,6 @@ private struct ScopeCard: View {
     let title: String
     let subtitle: String
     let detail: String
-    let volume: VolumeInfo?
     var action: () -> Void
     @State private var isHovering = false
 
@@ -245,16 +250,6 @@ private struct ScopeCard: View {
                     }
                 }
                 Text(detail).font(.explanation).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
-                if let volume, volume.totalBytes > 0 {
-                    let used = Double(volume.usedBytes) / Double(volume.totalBytes)
-                    VStack(alignment: .leading, spacing: 4) {
-                        ShareBar(segments: [(Theme.disk, used), (Color.secondary.opacity(0.25), 1 - used)]).frame(height: 6)
-                        Text("\(Format.bytes(volume.usedBytes)) used of \(Format.bytes(volume.totalBytes))")
-                            .font(.explanation)
-                            .foregroundStyle(.secondaryText)
-                            .monospacedDigit()
-                    }
-                }
                 Spacer(minLength: 0)
                 Label("Scan", systemImage: "magnifyingglass").font(.callout.weight(.medium)).foregroundStyle(Theme.disk)
             }

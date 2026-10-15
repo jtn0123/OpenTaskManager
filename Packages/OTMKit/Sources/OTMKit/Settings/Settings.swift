@@ -70,7 +70,7 @@ public enum Settings {
         "hiddenConnectionColumns", default: HiddenConnectionColumns(), meaning: "Connection columns hidden by the user."
     )
     public static let driversFilter = SettingKey<DriversFilter, String>(
-        "driversFilter", default: .thirdParty, meaning: "Extensions shown in the Drivers table."
+        "driversFilter", default: .all, meaning: "Extensions shown in the Drivers table."
     )
     public static let showDriversInspector = SettingKey<Bool, Bool>(
         "showDriversInspector", default: true, meaning: "Whether the Drivers inspector is enabled."
