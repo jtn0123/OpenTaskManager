@@ -61,6 +61,8 @@ struct AppsView: View {
     @State private var showsFullDetail = false
     /// The app whose removal review is open.
     @State private var removing: InstalledApp?
+    /// The columns' widths for the store's last read of the apps.
+    @State private var widthMemo = ColumnWidthMemo<AppsTable.Widths>()
     @FocusState private var tableFocused: Bool
 
     var body: some View {
@@ -118,15 +120,22 @@ struct AppsView: View {
     private func page(_ apps: [InstalledApp]) -> some View {
         let all = apps.map { AppRow(app: $0, size: store.sizes[$0.id], pids: store.running[$0.id] ?? []) }
         let rows = visibleRows(all)
+        let widths = widthMemo.widths(readAt: store.scannedAt) { AppsTable.Widths(apps) }
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 AppsSummary(rows: all, sizesLeft: store.sizesLeft)
-                Picker("Show", selection: $filter) {
-                    ForEach(AppsFilter.allCases) { Text($0.rawValue).tag($0) }
+                FlowRow(spacing: 12, lineSpacing: 8, spreads: false, centresRows: true, balancesRows: false) {
+                    Picker("Show", selection: $filter) {
+                        ForEach(AppsFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    FilteredCount(shown: rows.count, total: all.count, noun: "apps") {
+                        filter = .all
+                        search = ""
+                    }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -142,10 +151,16 @@ struct AppsView: View {
                 widthKey: Settings.appsInspectorWidth,
                 backTitle: "Apps"
             ) {
-                AppsTable(rows: rows, isMeasuring: store.sizesLeft > 0, selection: $selection, sortOrder: $sortOrder,
-                          scrollTarget: $scrollTarget, focus: $tableFocused, showInStartup: showInStartup,
-                          moveToTrash: { removing = $0 }, open: openDetails)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 0) {
+                    // Only as tall as its rows, so a short list (Running, Intel
+                    // only) isn't followed by empty stripes.
+                    AppsTable(rows: rows, widths: widths, isMeasuring: store.sizesLeft > 0, selection: $selection,
+                              sortOrder: $sortOrder, scrollTarget: $scrollTarget, focus: $tableFocused,
+                              showInStartup: showInStartup, moveToTrash: { removing = $0 }, open: openDetails)
+                        .fitsTableToRows(rows.count)
+                        .layoutPriority(1)
+                    Spacer(minLength: 0)
+                }
             } detail: {
                 if let row = all.first(where: { $0.id == selection }) {
                     AppDetail(app: row.app, size: row.size, isMeasuring: store.sizesLeft > 0, pids: row.pids,
@@ -158,8 +173,7 @@ struct AppsView: View {
                 }
             }
             Divider()
-            AppsStatusBar(shown: rows.count, total: all.count, scannedAt: store.scannedAt, isScanning: store.isScanning,
-                          sizesLeft: store.sizesLeft)
+            AppsStatusBar(total: all.count, scannedAt: store.scannedAt, isScanning: store.isScanning, sizesLeft: store.sizesLeft)
         }
     }
 
@@ -317,7 +331,37 @@ private struct AppsTable: View {
     private static let kindID = "kind"
     private static let architectureID = "architecture"
 
+    /// Widths from the apps read: each column stops where its values (or its
+    /// title) end, so Kind and Architecture don't spread "Apple" and
+    /// "Universal" down the table, and room left over goes after the last
+    /// column, not into a gap after the names.
+    struct Widths {
+        var name: CGFloat
+        var version: CGFloat
+        var kind: CGFloat
+        var architecture: CGFloat
+        var lastOpened: CGFloat
+
+        @MainActor init(_ apps: [InstalledApp]) {
+            // The icon and its gap, and a running dot; a sunrise on apps that start by themselves.
+            let starting = apps.filter(\.startsItself).map(\.name)
+            name = max(ColumnContent.fitting(apps.map(\.name), title: "Name", floor: Minimum.name, extra: 34),
+                       ColumnContent.fitting(starting, title: "Name", floor: Minimum.name, extra: 54))
+            version = ColumnContent.fitting(apps.map { $0.version ?? $0.build ?? "—" }, title: "Version",
+                                            floor: Minimum.version, cap: 100)
+            kind = ColumnContent.fitting(apps.map(\.kind.title), title: "Kind", floor: Minimum.kind, cap: 110)
+            // Intel only has a warning symbol before it.
+            let intel = apps.filter { $0.architecture == .intel }.map(\.architecture.title)
+            architecture = max(ColumnContent.fitting(apps.map(\.architecture.title), title: "Architecture",
+                                                     floor: Minimum.architecture, cap: 130),
+                               ColumnContent.fitting(intel, title: "Architecture", floor: Minimum.architecture, cap: 130, extra: 18))
+            lastOpened = ColumnContent.fitting(apps.map { AppText.lastOpened($0.lastOpened) }, title: "Last opened",
+                                               floor: Minimum.lastOpened, cap: 110)
+        }
+    }
+
     var rows: [AppRow]
+    var widths: Widths
     var isMeasuring: Bool
     @Binding var selection: InstalledApp.ID?
     @Binding var sortOrder: [KeyPathComparator<AppRow>]
@@ -388,7 +432,8 @@ private struct AppsTable: View {
         TableColumn("Name", value: \.name) { row in
             AppNameCell(row: row, tagsArchitecture: isCompact)
         }
-        .width(min: Minimum.name, ideal: Self.nameIdeal)
+        // While Architecture is hidden, Name takes the rest: it tags the apps that need Rosetta.
+        .width(min: Minimum.name, ideal: min(Self.nameIdeal, widths.name), max: isCompact ? nil : widths.name)
     }
 
     private var versionColumn: some Column {
@@ -397,7 +442,7 @@ private struct AppsTable: View {
                 .lineLimit(1)
                 .help(row.app.versionText)
         }
-        .width(min: Minimum.version, ideal: 55, max: 100)
+        .width(min: Minimum.version, ideal: min(55, widths.version), max: widths.version)
     }
 
     private var kindColumn: some Column {
@@ -405,7 +450,7 @@ private struct AppsTable: View {
             Text(row.app.kind.title)
                 .foregroundStyle(row.app.kind == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
-        .width(min: Minimum.kind, ideal: 80, max: 110)
+        .width(min: Minimum.kind, ideal: min(80, widths.kind), max: widths.kind)
         .customizationID(Self.kindID)
         // Shown and hidden with the table's width, not from the header's menu.
         .disabledCustomizationBehavior(.visibility)
@@ -415,7 +460,7 @@ private struct AppsTable: View {
         TableColumn("Architecture", value: \.architecture) { row in
             ArchitectureLabel(app: row.app)
         }
-        .width(min: Minimum.architecture, ideal: 95, max: 130)
+        .width(min: Minimum.architecture, ideal: min(95, widths.architecture), max: widths.architecture)
         .customizationID(Self.architectureID)
         .disabledCustomizationBehavior(.visibility)
     }
@@ -436,7 +481,7 @@ private struct AppsTable: View {
                 .foregroundStyle(row.app.lastOpened == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
                 .help(row.app.lastOpened.map { $0.formatted(date: .complete, time: .shortened) } ?? "Spotlight has no record of it being opened")
         }
-        .width(min: Minimum.lastOpened, ideal: 75, max: 110)
+        .width(min: Minimum.lastOpened, ideal: min(75, widths.lastOpened), max: widths.lastOpened)
     }
 }
 
@@ -539,8 +584,8 @@ struct ArchitectureLabel: View {
 
 // MARK: - Status bar
 
+/// All the apps read; how many the filter and search leave is over the table (`FilteredCount`).
 private struct AppsStatusBar: View {
-    var shown: Int
     var total: Int
     var scannedAt: Date?
     var isScanning: Bool
@@ -548,7 +593,7 @@ private struct AppsStatusBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(shown == total ? "\(total) apps" : "\(shown) of \(total) apps")
+            Text("\(total) apps")
             if isScanning {
                 Text("Reading…")
             } else if let scannedAt {

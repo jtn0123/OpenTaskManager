@@ -70,7 +70,7 @@ struct StartupColumnTests {
     }
 
     @Test func memoryAndCPUGiveWayBeforeKind() {
-        #expect(StartupColumn.hidingOrder == [.source, .launches, .publisher, .memory, .cpu, .kind])
+        #expect(StartupColumn.hidingOrder == [.publisher, .source, .launches, .memory, .cpu, .kind])
         #expect(StartupColumn.name.priority == nil)
         #expect(StartupColumn.status.priority == nil)
     }
@@ -84,9 +84,11 @@ struct StartupColumnTests {
         #expect(hidden(tableWidth: 200, userHidden: [.publisher]) == [.source, .launches, .memory, .cpu, .kind])
     }
 
-    /// The 820-point window without the details: Source and Launches give way.
-    @Test func theNarrowestWindowAloneDropsSourceAndLaunches() {
-        #expect(hidden(tableWidth: 800) == [.source, .launches])
+    /// The 820-point window without the details: Publisher, which a badge
+    /// in Name stands in for, and Source give way; Launches stays.
+    @Test func theNarrowestWindowAloneDropsPublisherAndSource() {
+        #expect(hidden(tableWidth: 800) == [.publisher, .source])
+        #expect(hidden(tableWidth: 880) == [.publisher])
         #expect(hidden(tableWidth: 1200).isEmpty)
     }
 }

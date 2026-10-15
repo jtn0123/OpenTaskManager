@@ -10,7 +10,7 @@ public enum StartupColumn: String, CaseIterable, Sendable {
     /// forms (Kind's "Agent" or "Daemon", Status's "Failed exit 1" without a
     /// PID). Name's is room to read nearly every name whole ("Accessibility
     /// Live Transcription Agent"): the others give way before it goes under
-    /// that, so in the narrowest window Launches hides rather than names being cut.
+    /// that, so in the narrowest window Source hides rather than names being cut.
     public var minWidth: CGFloat {
         switch self {
         case .name: 250
@@ -39,23 +39,23 @@ public enum StartupColumn: String, CaseIterable, Sendable {
     }
 
     /// When the table runs short of room, columns give way lowest priority
-    /// first, so Name and Status keep theirs. Source goes first: the Source filter
-    /// and details still give it. Launches goes next: its few
-    /// values repeat down the table and the details spell them out. Publisher
-    /// next, as third-party rows keep a mark in Name. Then the job's memory
-    /// and its CPU, which most jobs, waiting between runs, leave blank or
-    /// near 0%, and which the details give for the one selected. Kind goes
-    /// last: whether a job is an agent, in someone's login session, or a
-    /// daemon, outside any, says what it is, in one short word.
+    /// first, so Name and Status keep theirs. Publisher goes first, as
+    /// third-party rows keep a mark in Name, so nothing is lost. Source next:
+    /// the Source filter and details still give it. Then Launches: its few
+    /// values repeat down the table and the details spell them out. Then the
+    /// job's memory and its CPU, which most jobs, waiting between runs, leave
+    /// blank or near 0%, and which the details give for the one selected.
+    /// Kind goes last: whether a job is an agent, in someone's login session,
+    /// or a daemon, outside any, says what it is, in one short word.
     public var priority: Int? {
         switch self {
         case .name, .status: nil
-        case .source: 0
-        case .kind: 5
-        case .cpu: 4
+        case .publisher: 0
+        case .source: 1
+        case .launches: 2
         case .memory: 3
-        case .publisher: 2
-        case .launches: 1
+        case .cpu: 4
+        case .kind: 5
         }
     }
 

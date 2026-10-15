@@ -21,6 +21,8 @@ struct DriversView: View {
     @State private var scan: ExtensionScan?
     @State private var scannedAt: Date?
     @State private var isScanning = false
+    /// The columns' widths from what the last scan found, measured once per scan.
+    @State private var columnWidths: DriverTable.Widths?
     @State private var search = ""
     @State private var status: DriversStatusFilter = .all
     @State private var summaryFilter: DriverSummaryFilter?
@@ -79,7 +81,7 @@ struct DriversView: View {
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
                 DriverSummaryCards(scan: scan, selected: summaryFilter, apply: applySummary)
-                HStack(spacing: 16) {
+                FlowRow(spacing: 16, lineSpacing: 8, spreads: false, centresRows: true, balancesRows: false) {
                     // Each with its count, so a narrowed table says how much it leaves out.
                     Picker("Vendor", selection: Binding(get: { filter }, set: {
                         summaryFilter = nil
@@ -88,6 +90,7 @@ struct DriversView: View {
                     })) {
                         ForEach(DriversFilter.allCases) { Text($0.title(in: scan.items)).tag($0) }
                     }
+                    .fixedSize()
                     Picker("Status", selection: Binding(get: { status }, set: {
                         summaryFilter = nil
                         vendorBeforeSummary = nil
@@ -95,9 +98,10 @@ struct DriversView: View {
                     })) {
                         ForEach(DriversStatusFilter.allCases) { Text($0.rawValue).tag($0) }
                     }
+                    .fixedSize()
+                    FilteredCount(shown: rows.count, total: scan.items.count, noun: "extensions", showAll: showAll)
                 }
                 .pickerStyle(.segmented)
-                .fixedSize()
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -114,7 +118,7 @@ struct DriversView: View {
                 content(rows, scan: scan)
             }
             Divider()
-            DriversStatusBar(shown: rows.count, scan: scan, scannedAt: scannedAt, isScanning: isScanning)
+            DriversStatusBar(scan: scan, scannedAt: scannedAt, isScanning: isScanning)
         }
     }
 
@@ -130,9 +134,16 @@ struct DriversView: View {
             widthKey: Settings.driversInspectorWidth,
             backTitle: "Drivers"
         ) {
-            DriverTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,
-                        scrollTarget: $scrollTarget, focus: $tableFocused, open: openDetails)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                // Only as tall as its rows, so a short list (the third-party
+                // ones, those not in use) isn't followed by empty stripes.
+                DriverTable(rows: rows, widths: columnWidths ?? DriverTable.Widths(scan.items), showsPublisher: filter.showsPublisher,
+                            selection: $selection, sortOrder: $sortOrder, scrollTarget: $scrollTarget, focus: $tableFocused,
+                            open: openDetails)
+                    .fitsTableToRows(rows.count)
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
+            }
         } detail: {
             if let selected {
                 DriverDetail(item: selected, scan: scan)
@@ -192,6 +203,15 @@ struct DriversView: View {
         }.sorted(using: sortOrder)
     }
 
+    /// Every extension again: the cards, filters and search cleared.
+    private func showAll() {
+        summaryFilter = nil
+        vendorBeforeSummary = nil
+        filter = .all
+        status = .all
+        search = ""
+    }
+
     /// A card lists the rows its count counts, widening the vendor if it has
     /// to (most count Apple's too); turning it off puts the vendor back.
     private func applySummary(_ summary: DriverSummaryFilter) {
@@ -213,6 +233,8 @@ struct DriversView: View {
     private func rescan() async {
         isScanning = true
         let scanned = await Task.detached(priority: .userInitiated) { Extensions.scan() }.value
+        // Before the rows, so a first table starts at these widths.
+        columnWidths = DriverTable.Widths(scanned.items)
         scan = scanned
         scannedAt = .now
         isScanning = false
@@ -406,7 +428,27 @@ private struct EmptyNote<Actions: View>: View {
 private struct DriverTable: View {
     typealias Column = TableColumnContent<ExtensionItem, KeyPathComparator<ExtensionItem>>
 
+    /// Widths from what a scan found: each column stops where its values (or
+    /// its title) end, so room left over goes after the last column, not
+    /// into a gap after the names.
+    struct Widths: Equatable {
+        var name: CGFloat
+        var kind: CGFloat
+        var publisher: CGFloat
+        var version: CGFloat
+
+        @MainActor init(_ items: [ExtensionItem]) {
+            // The icon and its gap.
+            name = ColumnContent.fitting(items.map(\.name), title: "Name", floor: Minimum.name, extra: 22)
+            kind = ColumnContent.fitting(items.map(\.kind), title: "Kind", floor: Minimum.kind, cap: 140)
+            publisher = ColumnContent.fitting(items.map(\.publisher.title), title: "Publisher", floor: Minimum.publisher, cap: 100)
+            version = ColumnContent.fitting(items.map { $0.version.isEmpty ? "—" : $0.version }, title: "Version",
+                                            floor: Minimum.version, cap: 120)
+        }
+    }
+
     var rows: [ExtensionItem]
+    var widths: Widths
     /// Off while the filter leaves one publisher, as every row would say it.
     var showsPublisher: Bool
     @Binding var selection: ExtensionItem.ID?
@@ -502,14 +544,14 @@ private struct DriverTable: View {
             .help([item.name, item.bundleID, item.status.isDiskCopy ? item.diskPath ?? "" : ""]
                 .filter { !$0.isEmpty }.joined(separator: "\n"))
         }
-        .width(min: Minimum.name, ideal: 260)
+        .width(min: Minimum.name, ideal: min(260, widths.name), max: widths.name)
     }
 
     private var kindColumn: some Column {
         TableColumn("Kind", value: \.category) { item in
             Text(item.kind).lineLimit(1).help(item.kind)
         }
-        .width(min: Minimum.kind, ideal: 120, max: 140)
+        .width(min: Minimum.kind, ideal: min(120, widths.kind), max: widths.kind)
     }
 
     /// Wide enough for "Installed, not in use", which says "Not in use"
@@ -527,7 +569,7 @@ private struct DriverTable: View {
             Text(item.publisher.title)
                 .foregroundStyle(item.publisher == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
-        .width(min: Minimum.publisher, ideal: 75, max: 100)
+        .width(min: Minimum.publisher, ideal: min(75, widths.publisher), max: widths.publisher)
     }
 
     private var versionColumn: some Column {
@@ -537,7 +579,7 @@ private struct DriverTable: View {
                 .lineLimit(1)
                 .help(item.version)
         }
-        .width(min: Minimum.version, ideal: 90, max: 120)
+        .width(min: Minimum.version, ideal: min(90, widths.version), max: widths.version)
     }
 }
 
@@ -545,6 +587,7 @@ private struct DriverTable: View {
 struct ExtensionIcon: View {
     var item: ExtensionItem
     var size: CGFloat
+    @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         // An extension can outlive its app until the next restart.
@@ -555,7 +598,10 @@ struct ExtensionIcon: View {
         } else {
             Image(systemName: item.category.symbol)
                 .font(.system(size: size * 0.75))
-                .foregroundStyle(item.isKernelInterface ? Theme.other : item.category.tint)
+                // On a selected row it turns white like the row's text: the tint
+                // all but vanished into the selection's blue.
+                .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(item.isKernelInterface ? Theme.other : item.category.tint))
                 .frame(width: size, height: size)
         }
     }
@@ -637,8 +683,8 @@ extension ExtensionCategory {
 
 // MARK: - Status bar
 
+/// All the extensions read; how many the filters leave is over the table (`FilteredCount`).
 private struct DriversStatusBar: View {
-    var shown: Int
     var scan: ExtensionScan
     var scannedAt: Date?
     var isScanning: Bool
@@ -646,7 +692,7 @@ private struct DriversStatusBar: View {
     var body: some View {
         let total = scan.items.count
         HStack(spacing: 12) {
-            Text(shown == total ? "\(total) extensions" : "\(shown) of \(total) extensions")
+            Text("\(total) extensions")
             if isScanning {
                 Text("Reading…")
             } else if let scannedAt {

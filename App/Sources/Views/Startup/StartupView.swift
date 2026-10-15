@@ -60,6 +60,8 @@ struct StartupView: View {
     @State private var items: [LaunchItem]?
     @State private var scannedAt: Date?
     @State private var isScanning = false
+    /// The columns' widths from what the last scan found, measured once per scan.
+    @State private var columnWidths = ColumnWidths<StartupColumn>()
     @State private var search = ""
     @State private var selection: LaunchItem.ID?
     /// A row to bring into view, once: the selection's, when it comes from a
@@ -154,7 +156,7 @@ struct StartupView: View {
             VStack(alignment: .leading, spacing: 10) {
                 summary(items, watch: watch)
                     .padding(.bottom, 2)
-                FlowRow(spacing: 12, lineSpacing: 8, spreads: false) {
+                FlowRow(spacing: 12, lineSpacing: 8, spreads: false, centresRows: true, balancesRows: false) {
                     Picker("Show", selection: $filter) {
                         ForEach(StartupFilter.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -167,6 +169,7 @@ struct StartupView: View {
                     }
                     .pickerStyle(.menu)
                     .fixedSize()
+                    FilteredCount(shown: rows.count, total: items.count, noun: "items", showAll: showAll)
                 }
                 LoginItemsNote()
             }
@@ -185,8 +188,8 @@ struct StartupView: View {
                 VStack(spacing: 0) {
                     // Only as tall as its rows, so a short list, as Problems
                     // usually is, isn't followed by empty stripes.
-                    StartupTable(model: model, rows: rows, showsPublisher: filter.showsPublisher && !besideTable,
-                                 filterShowsPublisher: filter.showsPublisher,
+                    StartupTable(model: model, rows: rows, widths: columnWidths, showsPublisher: filter.showsPublisher && !besideTable,
+                                 filterShowsPublisher: filter.showsPublisher, showsSource: source == nil,
                                  selection: $selection, sortOrder: $sortOrder, scrollTarget: $scrollTarget,
                                  focus: $tableFocused, toggle: toggle, open: openDetails)
                         .fitsTableToRows(rows.count)
@@ -212,8 +215,7 @@ struct StartupView: View {
                 }
             }
             Divider()
-            StartupStatusBar(shown: rows.count, total: items.count, scannedAt: scannedAt, isScanning: isScanning,
-                             watchedSince: watch.since)
+            StartupStatusBar(total: items.count, scannedAt: scannedAt, isScanning: isScanning, watchedSince: watch.since)
         }
     }
 
@@ -281,6 +283,13 @@ struct StartupView: View {
         return sortOrder.first.map { usage.contains($0.keyPath) } ?? false
     }
 
+    /// Every item again: the filter, source and search cleared.
+    private func showAll() {
+        filter = .all
+        source = nil
+        search = ""
+    }
+
     /// Brings the selected row into view, once, if the list shows it.
     private func revealSelection() {
         if let selection { scrollTarget = selection }
@@ -331,6 +340,8 @@ struct StartupView: View {
         isScanning = true
         let inventory = await Task.detached(priority: .userInitiated) { LaunchItems.inventory() }.value
         let scanned = inventory.items
+        // Before the rows, so a first table starts at these widths.
+        columnWidths = StartupTable.widths(for: scanned)
         apply(inventory, configurationsRead: true)
         scannedAt = .now
         isScanning = false
@@ -427,7 +438,7 @@ private struct SummaryCard: View {
 // MARK: - Table
 
 /// The columns, their widths and the order they give way in are
-/// `StartupColumn` in OTMKit: Source, Launches, Publisher, Memory, CPU, then Kind.
+/// `StartupColumn` in OTMKit: Publisher, Source, Launches, Memory, CPU, then Kind.
 extension StartupColumn: FittingColumn {}
 
 private struct StartupTable: View {
@@ -436,12 +447,15 @@ private struct StartupTable: View {
     /// For the CPU and Memory cells, which read the latest sample.
     let model: AppModel
     var rows: [StartupRow]
+    var widths: ColumnWidths<StartupColumn>
     /// Off while the filter leaves one publisher, as every row would say it,
     /// and while the details sit beside the table, which say it once.
     var showsPublisher: Bool
     /// Whether rows can differ in publisher, so a third-party mark in Name
     /// says something once Publisher is off.
     var filterShowsPublisher: Bool
+    /// Off while the Source filter picks one, which says it for every row.
+    var showsSource: Bool
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<StartupRow>]
     /// A row to scroll into view, cleared once it's done.
@@ -456,10 +470,20 @@ private struct StartupTable: View {
     @State private var columns = TableColumnCustomization<StartupRow>()
     /// Columns too wide for the table now, lowest priority first.
     @State private var hiddenToFit = StartupColumn.givingWay
+    /// The columns with room for their long forms ("System agent",
+    /// "Running PID 501") without costing a column.
+    @State private var widened: Set<StartupColumn> = []
     /// Where the asked-for row is in `rows`, until it's been brought into view.
     @State private var revealRow: Int?
 
-    private var userHidden: Set<StartupColumn> { showsPublisher ? [] : [.publisher] }
+    private var userHidden: Set<StartupColumn> {
+        var hidden: Set<StartupColumn> = []
+        if !showsPublisher { hidden.insert(.publisher) }
+        if !showsSource { hidden.insert(.source) }
+        return hidden
+    }
+    /// The columns' widths as the table's room has them.
+    private var fittedWidths: ColumnWidths<StartupColumn> { widths.widened(widened) }
 
     var body: some View {
         table
@@ -504,7 +528,7 @@ private struct StartupTable: View {
         .frame(minWidth: 0, maxWidth: .infinity)
         // In views of their own, so resizing the window re-runs those, not
         // the rows, and the columns change only when one has to give way.
-        .background(TableColumnFitter(userHidden: userHidden, hiddenToFit: $hiddenToFit))
+        .background(TableColumnFitter(userHidden: userHidden, widths: widths, hiddenToFit: $hiddenToFit, widened: $widened))
         .background(TableColumnSqueeze(columns: StartupColumn.allCases.count, shown: shownCount))
         .background(TableRowReveal(row: $revealRow, rows: rows.count))
         .onChange(of: hidden, initial: true, showColumns)
@@ -513,6 +537,35 @@ private struct StartupTable: View {
         // hiding for the narrower table brought back a column that should
         // have stayed hidden. So any write is checked against what should show.
         .onChange(of: columns, showColumns)
+    }
+
+    /// Widths from what a scan found. Source and Launches start at their
+    /// widest value (within their caps), so they give way whole rather than
+    /// cut "Your LaunchAgents folder" short; Name and Kind stop where theirs
+    /// end, so spare room goes after the last column, not into a gap after
+    /// the names; Kind keeps room for "System agent", then Status for a
+    /// running job's PID, while that costs no column, and they say "Agent"
+    /// and "Running" in a table too narrow; Publisher keeps its title whole.
+    static func widths(for items: [LaunchItem]) -> ColumnWidths<StartupColumn> {
+        // The icon and its gap; third-party rows can carry a badge too.
+        let thirdParty = items.filter { $0.publisher == .thirdParty }.map(\.name)
+        let name = Swift.max(ColumnContent.fitting(items.map(\.name), title: "Name", floor: StartupColumn.name.minWidth, extra: 22),
+                             ColumnContent.fitting(thirdParty, title: "Name", floor: StartupColumn.name.minWidth, extra: 22 + 86))
+        let kind = ColumnContent.fitting(items.map(\.scope.title), title: "Kind", floor: StartupColumn.kind.minWidth,
+                                         cap: StartupColumn.kind.maxWidth)
+        // "Running PID 501", with the dot and the gaps either side of the title.
+        let status = ColumnContent.fitting(items.compactMap(\.pid).map { "Running PID \($0)" }, title: "Status",
+                                           floor: StartupColumn.status.minWidth, cap: StartupColumn.status.maxWidth,
+                                           extra: 16)
+        let source = ColumnContent.fitting(items.map(\.source.title), title: "Source", floor: StartupColumn.source.minWidth,
+                                           cap: StartupColumn.source.maxWidth)
+        let launches = ColumnContent.fitting(items.map(\.launchSummary), title: "Launches", floor: StartupColumn.launches.minWidth,
+                                             cap: StartupColumn.launches.maxWidth)
+        let publisher = ColumnContent.fitting(items.map(\.publisher.title), title: "Publisher",
+                                              floor: StartupColumn.publisher.minWidth, cap: StartupColumn.publisher.maxWidth)
+        return ColumnWidths(minimums: [.source: source, .launches: launches, .publisher: publisher],
+                            maximums: [.name: name, .kind: kind, .source: source, .launches: launches, .publisher: publisher],
+                            longForms: [.init(column: .kind, width: kind), .init(column: .status, width: status)])
     }
 
     /// How many columns the table has been told to show.
@@ -554,7 +607,7 @@ private struct StartupTable: View {
             // The whole name, for when the column cuts it short.
             .help("\(item.name)\n\(item.label)")
         }
-        .fitted(StartupColumn.name)
+        .fitted(StartupColumn.name, widths: fittedWidths)
     }
 
     private var kindColumn: some Column {
@@ -567,14 +620,14 @@ private struct StartupTable: View {
             .lineLimit(1)
             .help(row.item.scope.title)
         }
-        .fitted(StartupColumn.kind)
+        .fitted(StartupColumn.kind, widths: fittedWidths)
     }
 
     private var sourceColumn: some Column {
         TableColumn("Source", value: \.item.source.rawValue) { row in
             Text(row.item.source.title).lineLimit(1).help(row.item.sourceDescription)
         }
-        .fitted(StartupColumn.source)
+        .fitted(StartupColumn.source, widths: fittedWidths)
     }
 
     /// "Failed exit code 1", "Failed exit 1" in a narrow column, and the
@@ -587,7 +640,7 @@ private struct StartupTable: View {
             LaunchStateLabel(status: row.status)
                 .help("\(row.status.summary)\n\(explanation)\nlaunchd: \(row.status.registration.title)")
         }
-        .fitted(StartupColumn.status)
+        .fitted(StartupColumn.status, widths: fittedWidths)
     }
 
     /// Highest first on the first click, as on the Processes table.
@@ -595,21 +648,21 @@ private struct StartupTable: View {
         TableColumn("CPU", sortUsing: KeyPathComparator(\StartupRow.cpu, order: .reverse)) { row in
             JobUsage(model: model, pid: row.item.pid, figure: .cpu)
         }
-        .fitted(StartupColumn.cpu)
+        .fitted(StartupColumn.cpu, widths: fittedWidths)
     }
 
     private var memoryColumn: some Column {
         TableColumn("Memory", sortUsing: KeyPathComparator(\StartupRow.memory, order: .reverse)) { row in
             JobUsage(model: model, pid: row.item.pid, figure: .memory)
         }
-        .fitted(StartupColumn.memory)
+        .fitted(StartupColumn.memory, widths: fittedWidths)
     }
 
     private var launchesColumn: some Column {
         TableColumn("Launches", value: \.item.timing) { row in
             Text(row.item.launchSummary).lineLimit(1).help(row.item.launchSummary)
         }
-        .fitted(StartupColumn.launches)
+        .fitted(StartupColumn.launches, widths: fittedWidths)
     }
 
     private var publisherColumn: some Column {
@@ -618,7 +671,7 @@ private struct StartupTable: View {
                 .lineLimit(1)
                 .foregroundStyle(row.item.publisher == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
-        .fitted(StartupColumn.publisher)
+        .fitted(StartupColumn.publisher, widths: fittedWidths)
     }
 }
 
@@ -747,8 +800,8 @@ extension LaunchJobHealth {
 
 // MARK: - Status bar
 
+/// All the items read; how many the filters leave is over the table (`FilteredCount`).
 private struct StartupStatusBar: View {
-    var shown: Int
     var total: Int
     var scannedAt: Date?
     var isScanning: Bool
@@ -757,7 +810,7 @@ private struct StartupStatusBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(shown == total ? "\(total) items" : "\(shown) of \(total) items")
+            Text("\(total) items")
             if isScanning {
                 Text("Reading…")
             } else if let scannedAt {

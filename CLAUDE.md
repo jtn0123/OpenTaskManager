@@ -991,9 +991,29 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   separate sockets, and the details header keeps the descriptor and family.
   The Startup table hides columns to fit too, through the shared `FittingColumn`,
   `TableColumnFitter` and `TableColumnSqueeze` (Components/ColumnFitting), in
-  `StartupColumn`'s order (OTMKit's Layout/): Source first, then Launches and Publisher,
-  Memory, CPU and last Kind, so Name and Status keep their room and a narrow
-  table still says Agent or Daemon.
+  `StartupColumn`'s order (OTMKit's Layout/): Publisher first (a Third party
+  badge in Name takes its place), then Source, Launches, Memory, CPU and last
+  Kind, so Name and Status keep their room and a narrow table still says Agent
+  or Daemon. Publisher is off while the filter leaves one publisher, and
+  Source while the Source filter picks one, as every row would repeat it. The squeeze measures the room inside the
+  scroll view's content insets (the sidebar floats over the page on macOS 26,
+  and the scroll view runs on under it), and also refits when the table widens
+  its own columns as SwiftUI hides one, leaving a column the user drags alone.
+- Startup, Apps and Drivers size columns by what they hold
+  (`ContentColumnWidth` in OTMKit's Layout/; `ColumnContent` measures values
+  and titles in the table's fonts once per read of the rows, never per tick,
+  through `ColumnWidths` or each page's `Widths`): a column of short values
+  that repeat ("Universal", "Agent") stops where they end, so spare room goes
+  after the last column, not into a gap; Startup's Source and Launches start
+  at their widest value and give way whole rather than cut "Your LaunchAgents
+  folder" short; Kind keeps room for "System agent", then Status for "Running
+  PID 501" (`ColumnWidths.longForms`), each while that costs no column, so
+  "Agent" and a bare "Running" appear only in a table too narrow. Beside each page's filters, `FilteredCount` says "Showing 2
+  of 127 extensions" with Show All, which clears the filters and search, only
+  while they hide rows; the status bar gives the total. Rows of filters wrap
+  through `FlowRow`, with `centresRows` lining a short count up with the
+  segmented controls beside it and `balancesRows: false` wrapping only what
+  doesn't fit, so the count never takes a menu down with it.
 - The process inspector shows one process. When the selected row has others
   nested under it, whose sum the collapsed row shows, a note under its header
   says so with the row's figures and a Show Helpers button that expands it. Its
@@ -1181,5 +1201,8 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   Search finds are marked in primary ink, bold, over `TextTone.highlight`,
   which keeps 4.5:1 on every card in both appearances.
   A SwiftUI `Table` that may hold only a few rows takes `.fitsTableToRows(_:)`
-  (`TableFit.swift`), so no empty striped rows follow the last one.
+  (`TableFit.swift`), so no empty striped rows follow the last one (Apps and
+  Drivers, in a `VStack` over a `Spacer`, so a short table stops at its last row).
+  It trims only while every row fits and no legacy horizontal scroller shows
+  under them, judging an already-trimmed table by the room it was offered.
 - Commits end with the Co-Authored-By trailer. Only push to github.com/jtn0123.

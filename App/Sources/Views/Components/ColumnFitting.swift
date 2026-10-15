@@ -28,16 +28,17 @@ extension FittingColumn {
         2 * 10 + (NSScroller.preferredScrollerStyle == .legacy ? 16 : 0)
     }
 
-    /// The columns that are on, in order, with the room each needs.
-    private static func wanted(userHidden: Set<Self>) -> [ColumnFit.Column<Self>] {
+    /// The columns that are on, in order, with the room each needs: its
+    /// content's where that's been measured (`ColumnWidths`), else its own.
+    private static func wanted(userHidden: Set<Self>, widths: ColumnWidths<Self> = .init()) -> [ColumnFit.Column<Self>] {
         allCases.filter { !userHidden.contains($0) }.map {
-            ColumnFit.Column(id: $0, width: Double($0.minWidth + spacing), priority: $0.priority)
+            ColumnFit.Column(id: $0, width: Double(widths.min($0) + spacing), priority: $0.priority)
         }
     }
 
     /// Columns that are on but don't fit a table `width` points wide.
-    @MainActor static func hiddenToFit(width: CGFloat, userHidden: Set<Self>) -> Set<Self> {
-        ColumnFit.hidden(wanted(userHidden: userHidden), available: Double(width - chrome))
+    @MainActor static func hiddenToFit(width: CGFloat, userHidden: Set<Self>, widths: ColumnWidths<Self> = .init()) -> Set<Self> {
+        ColumnFit.hidden(wanted(userHidden: userHidden, widths: widths), available: Double(width - chrome))
     }
 
     /// Narrowest the table goes without scrolling sideways, once every
@@ -55,27 +56,82 @@ extension TableColumn where Label == Text {
     /// A table with column customization keeps its starting widths when they
     /// add up to more than its room, and scrolls sideways for good, so
     /// starting any wider can push the last columns out of a narrow window.
-    @MainActor func fitted<Column: FittingColumn>(_ column: Column) -> some TableColumnContent<RowValue, Sort> {
-        width(min: column.minWidth, ideal: column.minWidth, max: column.maxWidth)
+    ///
+    /// With `widths`, a column whose values shouldn't be cut starts at their
+    /// width, and gives way whole rather than cut them; one of short values
+    /// stops growing where they end.
+    @MainActor func fitted<Column: FittingColumn>(_ column: Column, widths: ColumnWidths<Column> = .init())
+        -> some TableColumnContent<RowValue, Sort> {
+        width(min: widths.min(column), ideal: widths.min(column), max: widths.max(column))
             .customizationID(column.rawValue)
             .disabledCustomizationBehavior(.visibility)
     }
 }
 
-/// Watches a table's width and reports the columns that don't fit it. Put
-/// it in the table's background, so resizing the window re-runs this, not
-/// the rows, and the columns change only when one has to give way.
+/// Widths measured from a table's content (`ColumnContent`), in place of
+/// its columns' own: a narrowest for the columns whose values shouldn't be
+/// cut, and a widest for those that should stop where their values do.
+struct ColumnWidths<Column: FittingColumn>: Equatable {
+    var minimums: [Column: CGFloat] = [:]
+    var maximums: [Column: CGFloat] = [:]
+    /// Room for the long forms of columns that have short ones for when
+    /// they're narrow ("System agent" for "Agent", "Running PID 501" for
+    /// "Running"), in the order they get it: `TableColumnFitter` makes each
+    /// its column's narrowest while that costs no column its place.
+    var longForms: [LongForm] = []
+
+    struct LongForm: Equatable {
+        var column: Column
+        var width: CGFloat
+    }
+
+    func min(_ column: Column) -> CGFloat { minimums[column] ?? column.minWidth }
+
+    /// Never under the column's narrowest.
+    func max(_ column: Column) -> CGFloat? {
+        (maximums[column] ?? column.maxWidth).map { Swift.max($0, min(column)) }
+    }
+
+    /// With `columns` kept wide enough for their long forms.
+    func widened(_ columns: Set<Column>) -> Self {
+        var widths = self
+        for form in longForms where columns.contains(form.column) {
+            widths.minimums[form.column] = Swift.max(form.width, min(form.column))
+        }
+        return widths
+    }
+}
+
+/// Watches a table's width and reports the columns that don't fit it, and
+/// those with long forms (`ColumnWidths.longForms`) that have room for them
+/// without another column giving way. Put it in the table's background, so
+/// resizing the window re-runs this, not the rows, and the columns change
+/// only when one has to give way or a long form comes or goes.
 struct TableColumnFitter<Column: FittingColumn>: View {
     var userHidden: Set<Column>
+    var widths = ColumnWidths<Column>()
     @Binding var hiddenToFit: Set<Column>
+    var widened: Binding<Set<Column>> = .constant([])
     @State private var width: CGFloat?
 
     var body: some View {
-        let fitted = width.map { Column.hiddenToFit(width: $0, userHidden: userHidden) }
+        let fitted = width.map { Column.hiddenToFit(width: $0, userHidden: userHidden, widths: widths) }
+        // Each in turn, kept if the same columns still fit with it.
+        let roomy = width.map { width in
+            widths.longForms.reduce(into: Set<Column>()) { roomy, form in
+                let tried = roomy.union([form.column])
+                if Column.hiddenToFit(width: width, userHidden: userHidden, widths: widths.widened(tried)) == fitted {
+                    roomy = tried
+                }
+            }
+        }
         Color.clear
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onChange(of: fitted, initial: true) {
                 if let fitted, fitted != hiddenToFit { hiddenToFit = fitted }
+            }
+            .onChange(of: roomy, initial: true) {
+                if let roomy, roomy != widened.wrappedValue { widened.wrappedValue = roomy }
             }
     }
 }
@@ -111,6 +167,8 @@ final class TableColumnSqueezeView: NSView {
     /// How many columns its table has in all.
     var columns = 0
     private weak var table: NSTableView?
+    /// The table's width when last seen, so rows coming and going leave it be.
+    private var tableWidth: CGFloat = 0
     private var isScheduled = false
     /// Tries left to find the table showing `shown` columns: SwiftUI makes
     /// it, and hides its columns, an update or two after this view's.
@@ -125,6 +183,15 @@ final class TableColumnSqueezeView: NSView {
         scheduleFit()
     }
 
+    /// The table widened its columns itself: it hands a column's room to the
+    /// others as SwiftUI hides it, up to their widest, after the fit that
+    /// left the room.
+    @objc private func tableResized(_ notification: Notification) {
+        guard let table, table.frame.width != tableWidth else { return }
+        tableWidth = table.frame.width
+        scheduleFit()
+    }
+
     private func scheduleFit() {
         triesLeft = 10
         guard !isScheduled else { return }
@@ -134,7 +201,8 @@ final class TableColumnSqueezeView: NSView {
 
     private func fit() {
         isScheduled = false
-        guard window != nil else { return }
+        // A column the user is dragging is theirs to size.
+        guard window != nil, table?.headerView?.resizedColumn ?? -1 < 0 else { return }
         guard let table = table ?? nearestTable(),
               let scrollView = table.enclosingScrollView,
               table.tableColumns.filter({ !$0.isHidden }).count == shown
@@ -149,13 +217,21 @@ final class TableColumnSqueezeView: NSView {
             scrollView.contentView.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(scrollViewResized),
                                                    name: NSView.frameDidChangeNotification, object: scrollView.contentView)
+            table.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(tableResized),
+                                                   name: NSView.frameDidChangeNotification, object: table)
         }
-        let excess = table.frame.width - scrollView.contentView.bounds.width
-        guard excess > 0.5 else { return }
+        // Less the insets: in a window whose sidebar floats over the page,
+        // the scroll view runs on under it and insets its content past it.
+        let insets = scrollView.contentView.contentInsets
+        let excess = table.frame.width - (scrollView.contentView.bounds.width - insets.left - insets.right)
+        guard excess > 0 else { return }
         let columns = table.tableColumns.filter { !$0.isHidden }
+        // By whole points: widths land on half points, and half a point
+        // over is enough for a scroller.
         let widths = ColumnFit.narrowed(widths: columns.map { Double($0.width) },
                                         minimums: columns.map { Double($0.minWidth) },
-                                        by: Double(excess))
+                                        by: Double(excess.rounded(.up)))
         for (column, width) in zip(columns, widths) {
             column.width = CGFloat(width)
         }
