@@ -608,7 +608,8 @@ The incident sheet queries only on a window change, never on a timer or tick.
 - The process table updates rows in place: `OrderedDiff` moves, inserts and
   removes rows, and visible cells are restyled. Don't go back to calling
   `reloadData()` every tick. It sorts by each figure as shown (`ShownFigure`),
-  so rows that read the same keep PID order rather than swapping every tick.
+  so rows that read the same don't swap every tick: they go by memory as shown,
+  then PID.
 - The Thermals table (`SensorTableView`) is AppKit rows made only when the set
   of rows changes; a tick sets just the figures that changed. Its rows and
   ranges are `SensorTable` and `SensorExtremes` in OTMKit. Its header (the
@@ -943,6 +944,24 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   idle GPU still reports (0%); a VM's paravirtual GPU does too. ANE memory is
   `rusage_info_v6`'s neural footprint (macOS 15+, read in the same rusage
   call): memory held for the Neural Engine, never shown as how busy it is.
+- Grouped sorted by a figure (CPU, Memory and the rest) is one ranked list:
+  `ProcessTreeBuilder.arrange` lifts the Apps, Background and System sections'
+  rows into one level, each app's helpers still under it, since sections each
+  sorted on their own put the busiest system processes under hundreds of idle
+  ones. Name, PID and User keep the sections (`ProcessSortKey.ranksAcrossSections`);
+  Flat is the one list without nesting. Name takes its preferred width
+  (`processNameWidth`, 300 by default, set by dragging its edge, up to 900)
+  where there's room, and less, down to its minimum, where there isn't; room
+  left over goes after the last column, as in Activity Monitor, not into a
+  gap between the names and their figures. Columns keep their widths under
+  the autosave name "ProcessColumns" (renamed when the defaults change).
+- Processes' toolbar End Task is a labelled split button: a click asks the
+  selection to quit (as Delete does), its menu holds Force Quit…, which first
+  confirms with the targets named (as Option-Delete does). Every Force Quit
+  (toolbar, inspector, a row's menu) asks in `ForceQuitPrompt`'s words in
+  OTMKit, with names read once as it opens, never per tick. Columns is always
+  a submenu of the Grouped/Tree/Flat menu, which keeps the toolbar's search
+  field whole at 1200 points.
 - The Connections table hides columns to fit the same way (`ConnectionColumn`,
   Protocol first, then PID, then Seen for, then Scope; Process, Local, Remote and State
   always stay), and endpoints cut the address in the middle, never the port.
@@ -1064,8 +1083,7 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   and removing the separate title sent the sidebar toggle to overflow. In a narrow window Pause
   drops its word to make room, as do
   the pages' own items (`compactToolbar`: Startup's, Apps' and Drivers' read
-  time loses "Read at" to its tooltip, Processes' Columns becomes a submenu
-  of its View menu); keep
+  time loses "Read at" to its tooltip, Processes' End Task its word); keep
   the title visible, since hiding it (macOS 26) sent the sidebar toggle to the
   overflow menu for good once the sidebar was shown narrow. `PageFocus` gives the focus to the page's main table, or to
   nothing, never the toolbar's toggle (`HiddenSidebarFocus`). The detail column

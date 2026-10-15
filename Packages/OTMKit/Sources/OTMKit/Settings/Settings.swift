@@ -177,6 +177,10 @@ public enum Settings {
     public static let processInspectorWidth = SettingKey<Double, Double>(
         "processInspectorWidth", default: 320, meaning: "Preferred width of the process inspector in points."
     )
+    public static let processNameWidth = SettingKey<Double, Double>(
+        "processNameWidth", default: 300,
+        meaning: "Width of the process table's Name column in points, where the table has room; dragging its edge sets it."
+    )
     public static let connectionInspectorWidth = SettingKey<Double, Double>(
         "connectionInspectorWidth", default: 320, meaning: "Preferred width of the connection inspector in points."
     )
@@ -293,6 +297,7 @@ public enum Settings {
         startupInspectorWidth.descriptor,
         driversInspectorWidth.descriptor,
         processInspectorWidth.descriptor,
+        processNameWidth.descriptor,
         connectionInspectorWidth.descriptor,
         benchmarkCardShowsRunsCpu.descriptor,
         benchmarkCardShowsRunsSustained.descriptor,

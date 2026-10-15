@@ -13,6 +13,8 @@ struct ProcessTableConfiguration {
     var cpuScale: CPUScale
     var heatmap: Bool
     var fastTierName: String
+    /// Name's width where there's room (`Settings.processNameWidth`).
+    var nameWidth: CGFloat
 }
 
 /// Lets the page act on the table directly: the inspector's Show Helpers
@@ -44,7 +46,11 @@ struct ProcessOutlineView: NSViewRepresentable {
     @Binding var ascending: Bool
     var model: AppModel
     var onShowInspector: () -> Void
+    /// Option-Delete: force quit the selection, once confirmed.
+    var onForceQuit: () -> Void
     var onToggleColumn: (ProcessColumn) -> Void
+    /// Called with Name's width once the user has dragged its edge.
+    var onNameWidthChange: (CGFloat) -> Void
     /// Called when the width the columns that always stay need (Name at its
     /// narrowest) changes, so the page knows when the inspector fits beside.
     var onMinimumWidthChange: (CGFloat) -> Void
@@ -66,7 +72,7 @@ struct ProcessOutlineView: NSViewRepresentable {
         outline.allowsMultipleSelection = true
         outline.allowsColumnReordering = true
         outline.allowsColumnResizing = true
-        // Name takes up the slack instead: see `ProcessOutline.fitNameColumn`.
+        // Name is sized by hand instead: see `ProcessOutline.fitNameColumn`.
         outline.columnAutoresizingStyle = .noColumnAutoresizing
         outline.intercellSpacing = NSSize(width: ProcessColumn.spacing, height: 0)
         outline.headerView = NSTableHeaderView(frame: NSRect(x: 0, y: 0, width: 0, height: ProcessHeaderCell.headerHeight))
@@ -83,8 +89,7 @@ struct ProcessOutlineView: NSViewRepresentable {
             tableColumn.headerToolTip = column.headerHelp
             tableColumn.width = column.width
             tableColumn.minWidth = column.minWidth
-            // Name fills whatever the others leave, so it isn't dragged.
-            tableColumn.resizingMask = column == .name ? [] : .userResizingMask
+            tableColumn.resizingMask = .userResizingMask
             if let key = column.sortKey {
                 // Numbers default to descending: biggest consumers first.
                 tableColumn.sortDescriptorPrototype = NSSortDescriptor(key: key.rawValue, ascending: !column.isNumeric)
@@ -94,8 +99,9 @@ struct ProcessOutlineView: NSViewRepresentable {
             if column == .name { outline.outlineTableColumn = tableColumn }
         }
         // Renamed from "ProcessOutline" when the columns got their minimum
-        // widths, so saved layouts from before start from the new defaults.
-        outline.autosaveName = "ProcessTable"
+        // widths, and from "ProcessTable" when User widened to fit service
+        // accounts' names, so saved layouts from before start from the new defaults.
+        outline.autosaveName = "ProcessColumns"
         outline.autosaveTableColumns = true
 
         let coordinator = context.coordinator
@@ -104,6 +110,11 @@ struct ProcessOutlineView: NSViewRepresentable {
         outline.target = coordinator
         outline.doubleAction = #selector(Coordinator.doubleClicked(_:))
         outline.onDelete = { [weak coordinator] in coordinator?.endSelected() }
+        outline.onForceQuit = { [weak coordinator] in coordinator?.parent.onForceQuit() }
+        outline.onNameWidthChange = { [weak coordinator] width in
+            // The table fits its columns during SwiftUI's update too.
+            DispatchQueue.main.async { coordinator?.parent.onNameWidthChange(width) }
+        }
         outline.onHiddenToFitChange = { [weak coordinator] in coordinator?.reportHiddenToFit($0) }
         let columnMenu = NSMenu()
         columnMenu.delegate = coordinator
@@ -275,6 +286,7 @@ struct ProcessOutlineView: NSViewRepresentable {
             // Shows and hides columns only when the choice or what this Mac
             // reports changed, or a column was resized while the pointer was down.
             outline.unreported = configuration.unreportedColumns
+            outline.preferredNameWidth = configuration.nameWidth
             outline.userHidden = configuration.hiddenColumns.hidden(unreported: configuration.unreportedColumns)
             if outline.needsColumnFit { outline.fitColumns() }
             for (index, tableColumn) in outline.tableColumns.enumerated() {
@@ -469,7 +481,7 @@ struct ProcessOutlineView: NSViewRepresentable {
             (item as? Item)?.node.section == nil
         }
 
-        /// Name stays first: it holds the disclosure triangles and takes up the slack.
+        /// Name stays first: it holds the disclosure triangles.
         func outlineView(_ outlineView: NSOutlineView, shouldReorderColumn columnIndex: Int, toColumn newColumnIndex: Int) -> Bool {
             columnIndex != 0 && newColumnIndex != 0
         }
@@ -498,10 +510,15 @@ struct ProcessOutlineView: NSViewRepresentable {
 
         func outlineViewColumnDidResize(_ notification: Notification) {
             // A column the user dragged wider or narrower takes its room from
-            // Name, and from the columns that give way once Name is at its narrowest.
+            // any to spare, then Name, then the columns that give way once
+            // Name is at its narrowest. Name's own edge sets its width.
             guard let column = notification.userInfo?["NSTableColumn"] as? NSTableColumn,
-                  column.identifier.rawValue != ProcessColumn.name.rawValue else { return }
-            (outline as? ProcessOutline)?.columnWasResized()
+                  let outline = outline as? ProcessOutline else { return }
+            if column.identifier.rawValue == ProcessColumn.name.rawValue {
+                outline.nameWasResized()
+            } else {
+                outline.columnWasResized()
+            }
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -644,12 +661,14 @@ extension ProcessOutlineView.Coordinator {
         let single = pids.count == 1 ? model.process(pids[0]) : nil
 
         menu.addItem(ActionItem("End Task") { model.endTask(pids) })
-        menu.addItem(ActionItem("Force Quit") { [weak self] in
-            self?.confirm("Force quit \(pids.count == 1 ? (single?.name ?? "this process") : "\(pids.count) processes")?",
-                          detail: "Unsaved data will be lost.") { model.forceQuit(pids) }
+        menu.addItem(ActionItem("Force Quit…") { [weak self] in
+            let names = pids.map { pid in model.process(pid).map(model.displayName(for:)) ?? "PID \(pid)" }
+            self?.confirm(ForceQuitPrompt.title(names: names), detail: ForceQuitPrompt.message(names: names),
+                          button: "Force Quit", destructive: true) { model.forceQuit(pids) }
         })
-        menu.addItem(ActionItem("End Process Tree") { [weak self] in
-            self?.confirm("End the selected process tree?", detail: "Every process it started will be asked to quit.") {
+        menu.addItem(ActionItem("End Process Tree…") { [weak self] in
+            self?.confirm("End the selected process tree?", detail: "Every process it started will be asked to quit.",
+                          button: "End Process Tree") {
                 model.endProcessTree(pids, force: false)
             }
         })
@@ -708,12 +727,14 @@ extension ProcessOutlineView.Coordinator {
         return item
     }
 
-    private func confirm(_ message: String, detail: String, action: @escaping () -> Void) {
+    /// Asks first, with a button that names what it does.
+    private func confirm(_ message: String, detail: String, button: String, destructive: Bool = false,
+                         action: @escaping () -> Void) {
         let alert = NSAlert()
         alert.messageText = message
         alert.informativeText = detail
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: button).hasDestructiveAction = destructive
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn { action() }
     }

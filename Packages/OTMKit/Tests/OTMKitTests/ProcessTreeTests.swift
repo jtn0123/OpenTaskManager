@@ -112,6 +112,30 @@ struct ProcessTreeTests {
         #expect(byName[0].children.map(\.id) == [200, 100])
     }
 
+    /// Sorted by a figure, Grouped ranks every group in one list, so a busy
+    /// system process isn't buried under idle background ones; sorted by
+    /// name, PID or user it keeps its sections.
+    @Test func groupedRanksAcrossSectionsWhenSortedByAFigure() {
+        let nodes = ProcessTreeBuilder.build(sample, mode: .grouped, appPIDs: [100, 200], currentUID: Self.me)
+        let byCPU = ProcessTreeBuilder.arrange(nodes, by: .cpu, ascending: false)
+        #expect(byCPU.allSatisfy { $0.section == nil })
+        // Mail and the agent both read 2%: Mail has the larger memory.
+        #expect(byCPU.map(\.id) == [100, 400, 200, 300, 1])
+        #expect(byCPU[0].children.map(\.id) == [101, 102], "helpers stay under their app, sorted too")
+        #expect(ProcessTreeBuilder.arrange(nodes, by: .cpu, ascending: true).map(\.id) == [1, 300, 200, 400, 100])
+
+        for key in [ProcessSortKey.name, .pid, .user] {
+            #expect(!key.ranksAcrossSections)
+            #expect(ProcessTreeBuilder.arrange(nodes, by: key, ascending: true).map(\.section) == [.apps, .background, .system])
+        }
+        #expect(ProcessTreeBuilder.arrange(nodes, by: .name, ascending: true)[0].children.map(\.id) == [200, 100])
+
+        // Tree and Flat have no sections: arranging is sorting.
+        let flat = ProcessTreeBuilder.build(sample, mode: .flat, appPIDs: [100, 200])
+        #expect(ProcessTreeBuilder.arrange(flat, by: .cpu, ascending: false).map(\.id)
+            == ProcessTreeBuilder.sort(flat, by: .cpu, ascending: false).map(\.id))
+    }
+
     @Test func groupTotalsKnowWhetherPowerWasMeasured() {
         var measured = sample
         measured[1].powerWatts = 1.5

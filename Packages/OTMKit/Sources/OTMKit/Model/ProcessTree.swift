@@ -95,6 +95,17 @@ public struct ProcessNode: Sendable, Identifiable {
 
 public enum ProcessSortKey: String, Sendable, CaseIterable {
     case name, pid, cpu, memory, power, gpu, neuralMemory, disk, threads, user, topTier, wakeups
+
+    /// Whether Grouped ranks every group in one list for this key rather
+    /// than within each section. Sorted by a figure, sections buried the
+    /// busiest processes: a busy system process sat below every idle
+    /// background one. Name, PID and user keep the sections.
+    public var ranksAcrossSections: Bool {
+        switch self {
+        case .name, .pid, .user: false
+        case .cpu, .memory, .power, .gpu, .neuralMemory, .disk, .threads, .topTier, .wakeups: true
+        }
+    }
 }
 
 public enum ProcessTreeBuilder {
@@ -234,14 +245,29 @@ public enum ProcessTreeBuilder {
 
     // MARK: Sorting
 
+    /// The rows as the table lists them: `sort`ed, with the sections' rows
+    /// ranked in one list for a key that `ranksAcrossSections`, so the
+    /// busiest groups come first whichever section they'd be in.
+    public static func arrange(_ nodes: [ProcessNode], by key: ProcessSortKey, ascending: Bool,
+                               cpuStep: Double = 0) -> [ProcessNode] {
+        guard key.ranksAcrossSections, nodes.contains(where: { $0.section != nil }) else {
+            return sort(nodes, by: key, ascending: ascending, cpuStep: cpuStep)
+        }
+        let rows = nodes.flatMap { $0.section == nil ? [$0] : $0.children }
+        return sort(rows, by: key, ascending: ascending, cpuStep: cpuStep)
+    }
+
     /// Sorts siblings at every level. Sections keep their fixed order; rows
     /// inside them sort by their group totals so busy apps rise together.
     ///
     /// Figures compare as the table shows them (`ShownFigure`), with
     /// `cpuStep` the smallest CPU difference it shows (0 compares exactly),
-    /// so rows that read the same keep a steady order, by PID, rather than
-    /// trading places every tick over differences too small to see. Moving
-    /// rows is most of what a tick costs the table.
+    /// so rows that read the same keep a steady order rather than trading
+    /// places every tick over differences too small to see. Moving rows is
+    /// most of what a tick costs the table. Ties go by memory as shown (for
+    /// every figure but memory itself), which changes seldom, then by PID:
+    /// sorted by CPU, the idle rows run largest first, not in PID order,
+    /// which read as no sort at all.
     public static func sort(_ nodes: [ProcessNode], by key: ProcessSortKey, ascending: Bool, cpuStep: Double = 0) -> [ProcessNode] {
         let sortedChildren = nodes.map { node -> ProcessNode in
             // Most rows have nothing under them to sort.
@@ -256,10 +282,12 @@ public enum ProcessTreeBuilder {
         let figures = sortedChildren.map { figure($0, by: key, cpuStep: cpuStep) }
         let ids = sortedChildren.map(\.id)
         let figuresOnly = comparesFiguresOnly(key)
+        let ties = figuresOnly && key != .memory ? sortedChildren.map { ShownFigure.bytes(Double($0.totals.memory)) } : []
         return sortedChildren.indices.sorted { lhs, rhs in
-            let order = figuresOnly
+            var order = figuresOnly
                 ? order(figures[lhs], figures[rhs])
                 : compare(sortedChildren[lhs], sortedChildren[rhs], figures[lhs], figures[rhs], by: key)
+            if order == .orderedSame, !ties.isEmpty { order = self.order(ties[lhs], ties[rhs]) }
             if order == .orderedSame { return ids[lhs] < ids[rhs] }
             return ascending ? order == .orderedAscending : order == .orderedDescending
         }

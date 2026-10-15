@@ -244,6 +244,23 @@ struct ProcessDiagnosisTests {
         #expect(exact.map(\.id) == [400, 200, 300, 100])
     }
 
+    /// Rows whose figure reads the same go by memory as shown, then PID, so
+    /// the idle rows under a CPU sort read largest first.
+    @Test func rowsThatReadTheSameGoByMemoryThenPID() {
+        var processes = [process(300), process(100), process(200), process(400)]
+        processes[0].memory = 50_000_000
+        processes[1].memory = 50_010_000
+        processes[2].memory = 200_000_000
+        processes[3].cpuPercent = 25
+        let nodes = ProcessTreeBuilder.build(processes, mode: .flat, appPIDs: [])
+        #expect(ProcessTreeBuilder.sort(nodes, by: .cpu, ascending: false, cpuStep: 1).map(\.id) == [400, 200, 100, 300],
+                "100 and 300 both read 47.7 MB")
+        #expect(ProcessTreeBuilder.sort(nodes, by: .cpu, ascending: true, cpuStep: 1).map(\.id) == [100, 300, 200, 400])
+        #expect(ProcessTreeBuilder.sort(nodes, by: .disk, ascending: false).map(\.id) == [200, 100, 300, 400])
+        // Memory itself breaks its ties by PID alone: a CPU tie-break would swap them every tick.
+        #expect(ProcessTreeBuilder.sort(nodes, by: .memory, ascending: false).map(\.id) == [200, 100, 300, 400])
+    }
+
     // MARK: This machine
 
     @Test func readsThisProcessesCountersAndThreads() throws {

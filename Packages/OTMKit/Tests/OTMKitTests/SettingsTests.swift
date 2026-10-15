@@ -63,6 +63,7 @@ struct SettingsTests {
         "startupInspectorWidth": .double(320),
         "driversInspectorWidth": .double(320),
         "processInspectorWidth": .double(320),
+        "processNameWidth": .double(300),
         "connectionInspectorWidth": .double(320),
         "benchmarkCardShowsRuns.cpu": .bool(false),
         "benchmarkCardShowsRuns.sustained": .bool(false),

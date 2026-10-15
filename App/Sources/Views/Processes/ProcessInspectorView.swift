@@ -60,6 +60,8 @@ struct ProcessInspectorView: View {
     @State private var tab: Tab = .requestedAtLaunch
     @State private var socketsOnly = false
     @State private var confirmingForceQuit = false
+    /// Force Quit's target as its confirmation opened.
+    @State private var forceQuitName = ""
     @State private var showsCommandLine = false
     @State private var showsEnvironment = false
     /// The thread clicked in the Threads tab, shown whole under its list.
@@ -381,16 +383,18 @@ struct ProcessInspectorView: View {
             Spacer()
             // Kept apart from End Task, and confirmed, because it can't be undone.
             Button(role: .destructive) {
+                forceQuitName = model.displayName(for: process)
                 confirmingForceQuit = true
             } label: {
                 Label("Force Quit", systemImage: "xmark.octagon")
             }
             .foregroundStyle(.red)
             .help("Stop \(process.name) at once, without letting it save")
-            .confirmationDialog("Force quit \(process.name)?", isPresented: $confirmingForceQuit) {
+            .confirmationDialog(ForceQuitPrompt.title(names: [forceQuitName]), isPresented: $confirmingForceQuit,
+                                titleVisibility: .visible) {
                 Button("Force Quit", role: .destructive) { model.forceQuit([pid]) }
             } message: {
-                Text("It stops immediately, and any unsaved work in it is lost.")
+                Text(ForceQuitPrompt.message(names: [forceQuitName]))
             }
         }
     }

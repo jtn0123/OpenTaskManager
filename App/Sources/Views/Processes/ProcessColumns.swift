@@ -25,10 +25,11 @@ extension ProcessColumn {
 
     /// Starting width: room for the longest usual value ("1023 KB/s",
     /// "100.0%") and for the header's name in bold beside the sort chevron.
-    /// Name takes whatever the others leave.
+    /// Name's is its width where there's room, until the user drags it
+    /// (`Settings.processNameWidth`).
     var width: CGFloat {
         switch self {
-        case .name: 240
+        case .name: CGFloat(Settings.processNameWidth.defaultValue)
         case .pid: 54
         case .cpu: 68
         case .memory, .threads: 72
@@ -38,7 +39,8 @@ extension ProcessColumn {
         case .disk: 80
         case .topTier: 70
         case .wakeups: 76
-        case .user: 76
+        // Service accounts' names whole: "_windowserver", "_softwareupdate".
+        case .user: 116
         case .kind: 56
         }
     }
