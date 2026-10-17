@@ -53,6 +53,7 @@ struct OpenTaskManagerApp: App {
                 .samplingDemand(.window)
                 .environment(model)
         }
+        .defaultSize(width: 460, height: 720)
 
         MenuBarExtra(isInserted: $showMenuBarExtra) {
             MenuBarView()
@@ -481,7 +482,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        // The form scrolls in a window of a usual height (the scene's default
+        // size): sized to its whole length, it ran past the foot of a laptop's screen.
         .frame(width: 460)
-        .fixedSize()
+        .frame(minHeight: 360, maxHeight: .infinity)
     }
 }
