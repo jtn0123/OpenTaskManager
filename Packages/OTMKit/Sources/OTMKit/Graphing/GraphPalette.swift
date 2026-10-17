@@ -109,7 +109,7 @@ public struct GraphPalette: Sendable, Hashable {
     /// The colours "by app" graphs give their apps, in turn.
     public let series: [Swatch]
     /// How much the lines outweigh the grid and fills around them.
-    public let emphasis: GraphEmphasis
+    public internal(set) var emphasis: GraphEmphasis
 
     public subscript(role: Role) -> Swatch {
         swatches[role] ?? Swatch(tone: RGB(0x808080), lightContrast: 4.5, darkContrast: 3)
@@ -125,6 +125,28 @@ public struct GraphPalette: Sendable, Hashable {
         }
         return palette
     }
+
+    /// This palette with each colour as vivid as sRGB allows in its own hue,
+    /// a little deeper than it was (`vividDepth`) where that leaves it purer: the
+    /// retro look's Color tint, lines glowing on a near-black panel. Greys
+    /// stay grey; the contrast floors stay the preset's.
+    public func vivid() -> GraphPalette {
+        func vivid(_ swatch: Swatch) -> Swatch {
+            var swatch = swatch
+            let lab = PerceptualColor.lab(swatch.tone)
+            let deeper = PerceptualColor.mostVivid(swatch.tone, atLightness: lab.lightness - Self.vividDepth)
+            // A pale yellow or cyan has less room deeper down than where it
+            // is, so it takes its full chroma at its own lightness instead.
+            swatch.tone = PerceptualColor.lab(deeper).chroma >= lab.chroma ? deeper
+                : PerceptualColor.mostVivid(swatch.tone, atLightness: lab.lightness)
+            return swatch
+        }
+        return GraphPalette(swatches: swatches.mapValues(vivid), series: series.map(vivid), emphasis: emphasis)
+    }
+
+    /// How much deeper, in OKLab lightness, `vivid` draws a colour: room for
+    /// more chroma, while every standard colour still clears 3:1 on the dark window.
+    static let vividDepth = 0.05
 
     public static func preset(_ preset: Preset) -> GraphPalette {
         switch preset {

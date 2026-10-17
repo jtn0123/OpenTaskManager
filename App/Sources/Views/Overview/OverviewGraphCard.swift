@@ -44,7 +44,9 @@ struct OverviewGraphCard<Chart: View>: View {
                     let font = Self.headlineFont
                     // Negative: the glyphs' baseline sits this far above the view's foot.
                     let descender = font.descender
-                    AnimatedNumber(value: headline.value, format: headline.format, font: font)
+                    // On a Color display a card's figure lights up in its resource's colour.
+                    AnimatedNumber(value: headline.value, format: headline.format, font: font,
+                                   color: GraphColors.shared.retro.tint.isMulticolor && GraphColors.shared.retro.isOn ? tint : nil)
                         .frame(width: ceil(GlyphCache.width(of: headline.widest, font: font, look: GlyphCache.look)) + 1, alignment: .leading)
                         .alignmentGuide(.firstTextBaseline) { $0.height + descender }
                 }

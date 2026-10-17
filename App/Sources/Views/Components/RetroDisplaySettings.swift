@@ -28,8 +28,10 @@ struct RetroDisplaySettings: View {
                 Text(retro.isOn
                     ? "Live graphs are display panels, dark in either appearance, and figures are lit "
                         + (retro.style == .dotMatrix ? "dots. " : "bars. ")
-                        + "Graphs use the display's color in place of the palette; your own colors come back when it's off."
-                    : "Draws live graphs on dark display panels in one color, and figures as lit dots or bars. "
+                        + (retro.tint.isMulticolor ? "Each resource keeps its color from the palette above, made as vivid as it goes."
+                            : "Graphs use the display's color in place of the palette; your own colors come back when it's off.")
+                    : "Draws live graphs on dark display panels, each resource in its own vivid color or all in one, "
+                        + "and figures as lit dots or bars. "
                         + "Off, graphs and figures look as usual.")
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
@@ -54,8 +56,24 @@ struct RetroDisplaySettings: View {
     /// A dot of the tint, for its menu item; not a template, so it keeps its colour.
     private static func swatch(_ tint: RetroDisplay.Tint) -> NSImage {
         let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
-            GraphColors.nsColor(tint.tone).setFill()
-            NSBezierPath(ovalIn: rect.insetBy(dx: 1.5, dy: 1.5)).fill()
+            let dot = rect.insetBy(dx: 1.5, dy: 1.5)
+            guard tint.isMulticolor else {
+                GraphColors.nsColor(tint.tone).setFill()
+                NSBezierPath(ovalIn: dot).fill()
+                return true
+            }
+            // Color: the dot in quarters, a resource's colour each.
+            let palette = GraphPalette.retro(.color)
+            NSBezierPath(ovalIn: dot).addClip()
+            for (index, role) in [GraphPalette.Role.cpu, .memory, .disk, .network].enumerated() {
+                GraphColors.nsColor(palette[role].dark).setFill()
+                let wedge = NSBezierPath()
+                wedge.move(to: NSPoint(x: dot.midX, y: dot.midY))
+                wedge.appendArc(withCenter: NSPoint(x: dot.midX, y: dot.midY), radius: dot.width,
+                                startAngle: CGFloat(index) * 90, endAngle: CGFloat(index + 1) * 90)
+                wedge.close()
+                wedge.fill()
+            }
             return true
         }
         image.isTemplate = false
@@ -111,9 +129,12 @@ struct RetroDisplayPreview: View {
 
     /// The panel, its grid, and three lines over it with their bloom.
     private func draw(in context: inout GraphicsContext, size: CGSize) {
-        let tint = Color(nsColor: GraphColors.nsColor(retro.tint.tone))
+        let palette = GraphPalette.retro(retro.tint, base: GraphColors.shared.basePalette)
+        // Under Color the panel takes its first line's light, as a graph's does.
+        let light = retro.tint.isMulticolor ? palette[.cpu].dark : retro.tint.tone
+        let tint = Color(nsColor: GraphColors.nsColor(light))
         let shape = RoundedRectangle(cornerRadius: 6).path(in: CGRect(origin: .zero, size: size))
-        context.fill(shape, with: .color(Color(nsColor: GraphColors.nsColor(retro.panel))))
+        context.fill(shape, with: .color(Color(nsColor: GraphColors.nsColor(RetroDisplay.panel(lit: light)))))
         let grid = Path { path in
             for fraction in [0.25, 0.5, 0.75] {
                 path.move(to: CGPoint(x: 0, y: size.height * fraction))
@@ -126,7 +147,6 @@ struct RetroDisplayPreview: View {
         }
         context.stroke(grid, with: .color(tint.opacity(RetroDisplay.gridOpacity)), lineWidth: 0.5)
 
-        let palette = GraphPalette.retro(retro.tint)
         let solid = StrokeStyle(lineWidth: 1.75 * GraphEmphasis.traceWidth, lineCap: .round, lineJoin: .round)
         let lines = [
             GraphColorPreview.PreviewLine(role: .cpu, values: GraphColorPreview.wave(base: 0.32, swing: 0.16, phase: 0),

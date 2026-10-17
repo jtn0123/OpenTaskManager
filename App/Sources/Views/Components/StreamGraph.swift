@@ -205,6 +205,10 @@ final class StreamGraphView: NSView {
     private var configuration: Configuration?
     /// The retro display look drawn, from `GraphColors`.
     private var retro = RetroDisplay(style: .off, tint: .green, glow: .soft)
+    /// What lights the retro panel: its tint, or under Color its first line's colour.
+    private var light = RetroDisplay.Tint.green.tone
+    /// The first line's colour `light` was last resolved from, so a tick doesn't resolve it again.
+    private var lead: NSColor?
     private var lastValues: [[Double]] = []
     private var lastSize: CGSize = .zero
     /// The step the paths were last laid out with, which a scroll under way moves by.
@@ -285,21 +289,24 @@ final class StreamGraphView: NSView {
         let previous = self.configuration
         self.configuration = configuration
         let retro = GraphColors.shared.retro
+        if !retro.tint.isMulticolor { lead = nil }
+        let light = retro.tint.isMulticolor ? light(of: configuration) : retro.tint.tone
         // A page redrawn between samples (Performance's details and some of
         // Overview's cards redraw a few milliseconds after each one) hands
         // its graphs what they already show. Drawing them again cut short
         // the scroll under way, so they jumped a step a sample; now there's
         // nothing to draw and the scroll runs on.
         if !changed, let previous, configuration.drawsLike(previous), interval == self.interval, streams == self.streams,
-           retro == self.retro {
+           retro == self.retro, light == self.light {
             return
         }
-        if retro != self.retro {
+        if retro != self.retro || light != self.light {
             self.retro = retro
+            self.light = light
             // The panel is dark in either appearance, so its colours resolve as dark mode's.
             appearance = retro.isOn ? NSAppearance(named: .darkAqua) : nil
             // Its glass and edge: the layer's background, and its border, which draws over the plot.
-            layer?.backgroundColor = retro.isOn ? GraphColors.nsColor(retro.panel).cgColor : nil
+            layer?.backgroundColor = retro.isOn ? GraphColors.nsColor(RetroDisplay.panel(lit: light)).cgColor : nil
             layer?.borderWidth = retro.isOn ? 1 : 0
             layer?.borderColor = retro.isOn ? tint(RetroDisplay.edgeOpacity) : nil
         }
@@ -441,9 +448,25 @@ final class StreamGraphView: NSView {
         retro.isOn ? retro.glow.bloom : configuration.glows ? 0.18 : 0
     }
 
-    /// The retro display's tint at `opacity`.
+    /// The retro panel's light at `opacity`.
     private func tint(_ opacity: Double) -> CGColor {
-        GraphColors.nsColor(retro.tint.tone).withAlphaComponent(opacity).cgColor
+        GraphColors.nsColor(light).withAlphaComponent(opacity).cgColor
+    }
+
+    /// A graph's first line's colour as a dark panel shows it, for a Color
+    /// display's panel to take; grey if it has none.
+    private func light(of configuration: Configuration) -> ColorContrast.RGB {
+        let lead = configuration.lines.first?.color
+        if let lead, lead === self.lead { return self.light }
+        self.lead = lead
+        var light = RetroDisplay.Tint.color.tone
+        guard let lead, let dark = NSAppearance(named: .darkAqua) else { return light }
+        dark.performAsCurrentDrawingAppearance {
+            if let srgb = lead.usingColorSpace(.sRGB) {
+                light = ColorContrast.RGB(red: srgb.redComponent, green: srgb.greenComponent, blue: srgb.blueComponent)
+            }
+        }
+        return light
     }
 
     private func syncSeriesLayers(count: Int) {
@@ -636,7 +659,7 @@ final class StreamGraphView: NSView {
             if label === topLabel, let note = configuration.axisNote {
                 // The note in the accent colour, so a scale that isn't fixed
                 // isn't read as one that is.
-                let accent = retro.isOn ? GraphColors.nsColor(retro.tint.tone)
+                let accent = retro.isOn ? GraphColors.nsColor(light)
                     : NSColor(cgColor: NSColor.controlAccentColor.cgColor) ?? .controlAccentColor
                 text.append(NSAttributedString(string: "  ·  \(note)", attributes: [.font: Self.noteFont, .foregroundColor: accent]))
             }
@@ -647,7 +670,7 @@ final class StreamGraphView: NSView {
                 label.add(fade, forKey: "fade")
             }
             label.string = text
-            label.shadowColor = retro.isOn ? GraphColors.nsColor(retro.panel).cgColor : NSColor.windowBackgroundColor.cgColor
+            label.shadowColor = retro.isOn ? GraphColors.nsColor(RetroDisplay.panel(lit: light)).cgColor : NSColor.windowBackgroundColor.cgColor
             label.frame = CGRect(x: 5, y: y - Self.labelHeight, width: max(plotRect.width - 10, 0), height: Self.labelHeight)
             let ink = CGRect(x: 0, y: 0, width: min(text.size().width, label.bounds.width), height: Self.labelHeight)
             label.shadowPath = CGPath(rect: ink, transform: nil)
@@ -786,7 +809,7 @@ extension StreamGraphView {
         guard let text else { return }
 
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let key = text + (isDark ? " dark" : " light") + (retro.isOn ? " \(retro.tint)" : "")
+        let key = text + (isDark ? " dark" : " light") + (retro.isOn ? " \(light)" : "")
         let width = captionWidth(text)
         if key != shownCaption {
             shownCaption = key
@@ -796,7 +819,7 @@ extension StreamGraphView {
             let secondary = NSColor(cgColor: NSColor.secondaryText.cgColor) ?? .secondaryText
             let color = retro.isOn ? NSColor(cgColor: tint(RetroDisplay.labelOpacity)) ?? secondary : secondary
             captionLabel.string = NSAttributedString(string: text, attributes: [.font: Self.captionFont, .foregroundColor: color])
-            captionBadge.backgroundColor = retro.isOn ? GraphColors.nsColor(retro.panel).withAlphaComponent(0.85).cgColor
+            captionBadge.backgroundColor = retro.isOn ? GraphColors.nsColor(RetroDisplay.panel(lit: light)).withAlphaComponent(0.85).cgColor
                 : NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.7 : 0.8).cgColor
         }
         captionBadge.frame = CGRect(x: inset, y: bottom, width: width + 8, height: height)

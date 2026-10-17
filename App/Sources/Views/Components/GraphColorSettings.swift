@@ -11,8 +11,9 @@ struct GraphColorSettings: View {
     @State private var showsResources = !GraphColors.shared.overrides.isEmpty
 
     var body: some View {
-        // The retro display draws in its own colours while it's on; these wait, kept.
-        let retro = colors.retro.isOn
+        // A one-colour retro display draws in its own colour while it's on;
+        // these wait, kept. Its Color tint draws them, made vivid.
+        let retro = colors.retro.isOn && !colors.retro.tint.isMulticolor
         Section("Graph colors") {
             Picker("Palette", selection: Binding(get: { colors.preset }, set: { colors.select($0) })) {
                 ForEach(GraphPalette.Preset.allCases) { Text($0.name).tag($0) }

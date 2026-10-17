@@ -28,14 +28,19 @@ public struct RetroDisplay: Sendable, Hashable {
         }
     }
 
-    /// The colour the panels light up in.
+    /// The colour the panels light up in: each resource in its own, or
+    /// all in one.
     public enum Tint: String, CaseIterable, Sendable, Identifiable {
+        /// Each resource lit in its own colour, made as vivid as it goes
+        /// (`GraphPalette.vivid`), on a panel tinted by its graph's first line.
+        case color
         case green, amber, cyan, red, yellow, white
 
         public var id: String { rawValue }
 
         public var name: String {
             switch self {
+            case .color: "Color"
             case .green: "Green"
             case .amber: "Amber"
             case .cyan: "Cyan"
@@ -45,9 +50,14 @@ public struct RetroDisplay: Sendable, Hashable {
             }
         }
 
-        /// The lit colour, as the dark panel shows it.
+        /// Whether each resource keeps a colour of its own.
+        public var isMulticolor: Bool { self == .color }
+
+        /// The lit colour, as the dark panel shows it. Under `color`, the
+        /// cool white of figures and panels that have no colour of their own.
         public var tone: RGB {
             switch self {
+            case .color: RGB(red: 0.90, green: 0.94, blue: 0.96)
             case .green: RGB(red: 0.33, green: 1.00, blue: 0.48)
             case .amber: RGB(red: 1.00, green: 0.69, blue: 0.16)
             case .cyan: RGB(red: 0.30, green: 0.93, blue: 0.90)
@@ -112,7 +122,12 @@ public struct RetroDisplay: Sendable, Hashable {
 
     /// The panel graphs draw on.
     public var panel: RGB {
-        ColorContrast.composite(tint.tone, opacity: 0.05, over: Self.glass)
+        Self.panel(lit: tint.tone)
+    }
+
+    /// The panel under lines lit in `tone`: the glass with a trace of it.
+    public static func panel(lit tone: RGB) -> RGB {
+        ColorContrast.composite(tone, opacity: 0.05, over: glass)
     }
 
     /// The panel's edge: the tint, faint.
@@ -144,7 +159,14 @@ extension GraphPalette {
     /// display shows it: lines that share a chart differ by brightness, from
     /// near white down to the tint dimmed, as well as by the dashes and
     /// fills the graphs already give a pair's second line.
-    public static func retro(_ tint: RetroDisplay.Tint) -> GraphPalette {
+    /// Under `color`, `base` (the preset and the user's own colours) made
+    /// vivid instead.
+    public static func retro(_ tint: RetroDisplay.Tint, base: GraphPalette = .preset(.standard)) -> GraphPalette {
+        guard !tint.isMulticolor else {
+            var vivid = base.vivid()
+            vivid.emphasis = .retro
+            return vivid
+        }
         let tone = tint.tone
         let levels = RetroDisplay.levels(of: tone)
         // Each resource's own page draws it in the tint. Where lines share a
@@ -204,19 +226,10 @@ extension GraphEmphasis {
 }
 
 extension ColorContrast.RGB {
-    /// How light this colour looks, 0 for black to 1 for white: Björn
-    /// Ottosson's OKLab lightness, which steps evenly to the eye.
+    /// How light this colour looks, 0 for black to 1 for white: OKLab
+    /// lightness, which steps evenly to the eye.
     var lightness: Double {
-        func linear(_ component: Double) -> Double {
-            let value = min(max(component, 0), 1)
-            return value <= 0.040_45 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-        }
-        let (red, green, blue) = (linear(red), linear(green), linear(blue))
-        // The cone responses, long, medium and short, compressed.
-        let long = cbrt(0.412_221_470_8 * red + 0.536_332_536_3 * green + 0.051_445_992_9 * blue)
-        let medium = cbrt(0.211_903_498_2 * red + 0.680_699_545_1 * green + 0.107_396_956_6 * blue)
-        let short = cbrt(0.088_302_461_9 * red + 0.281_718_837_6 * green + 0.629_978_700_5 * blue)
-        return 0.210_454_255_3 * long + 0.793_617_785_0 * medium - 0.004_072_046_8 * short
+        PerceptualColor.lab(self).lightness
     }
 
     /// This colour at `target` lightness, its hue kept: scaled down to

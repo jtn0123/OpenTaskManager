@@ -79,11 +79,19 @@ final class GraphColors: Observable, Sendable {
         resolved.withLock { $0.readout }
     }
 
-    /// What controls, links and titles light up in under the retro look,
-    /// or nil for the system's.
+    /// What controls, links and titles light up in under a one-colour
+    /// retro look, or nil for the system's (and under Color, whose
+    /// resources each keep their own).
     var retroAccent: Color? {
         registrar.access(self, keyPath: \.revision)
-        return resolved.withLock { $0.retro.isOn ? Color(nsColor: $0.readout) : nil }
+        return resolved.withLock { $0.retro.isOn && !$0.retro.tint.isMulticolor ? Color(nsColor: $0.readout) : nil }
+    }
+
+    /// The preset with the user's own colours: what graphs draw in with the
+    /// retro look off, and what its Color tint makes vivid.
+    var basePalette: GraphPalette {
+        registrar.access(self, keyPath: \.revision)
+        return resolved.withLock { GraphPalette.preset($0.preset).overriding($0.overrides) }
     }
 
     /// A trace of the retro tint over the window behind the pages, so it
@@ -91,7 +99,7 @@ final class GraphColors: Observable, Sendable {
     var retroWash: Color {
         registrar.access(self, keyPath: \.revision)
         let retro = resolved.withLock { $0.retro }
-        guard retro.isOn else { return .clear }
+        guard retro.isOn, !retro.tint.isMulticolor else { return .clear }
         let tone = Self.nsColor(retro.tint.tone)
         return Color(nsColor: NSColor(name: nil) { appearance in
             tone.withAlphaComponent(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? 0.06 : 0.04)
@@ -171,9 +179,10 @@ final class GraphColors: Observable, Sendable {
         let current = resolved.withLock { (preset: $0.preset, overrides: $0.overrides, retro: $0.retro, made: !$0.colors.isEmpty) }
         guard !current.made || current.preset != preset || current.overrides != overrides || current.retro != retro else { return }
 
-        // The retro palette is one colour throughout, so a user's own
-        // colours wait, kept, until it's off.
-        let palette = retro.isOn ? GraphPalette.retro(retro.tint) : GraphPalette.preset(preset).overriding(overrides)
+        // A one-colour retro palette leaves no room for a user's own colours,
+        // which wait, kept, until it's off; its Color tint makes them vivid.
+        let base = GraphPalette.preset(preset).overriding(overrides)
+        let palette = retro.isOn ? GraphPalette.retro(retro.tint, base: base) : base
         var next = Resolved(preset: preset, overrides: overrides, retro: retro, palette: palette,
                             readout: retro.isOn ? Self.color(retro.readout) : .labelColor)
         for role in Role.allCases {

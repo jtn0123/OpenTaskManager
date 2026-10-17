@@ -1182,15 +1182,20 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   contrast keep their shades, already at their limits), grid and fills
   fainter; the unrecorded look keeps its weight. The retro display look
   (`RetroDisplay` in OTMKit, Settings' Retro display, `-retroDisplayStyle
-  dotMatrix|segments`, `-retroDisplayTint`, `-retroDisplayGlow`), off by
-  default, puts its one-colour palette (`GraphPalette.retro`) in place of the
-  preset and the user's colours while on; live graphs draw as dark panels
-  in either appearance (the view's layer background and border, forced dark,
-  grid and labels in the tint), and `AnimatedNumber` draws figures as
+  dotMatrix|segments`, `-retroDisplayTint`, `-retroDisplayGlow`), on by
+  default as Dot matrix in Color. Color keeps the preset and the user's
+  colours, made vivid (`GraphPalette.vivid`: each tone at the sRGB gamut edge
+  in its own OKLCh hue, 0.05 deeper, via `PerceptualColor`), and each graph's
+  panel, grid and labels take its first line's colour; the one-colour tints
+  put their palette (`GraphPalette.retro`) in place of the preset and the
+  user's colours while on. Live graphs draw as dark panels in either
+  appearance (the view's layer background and border, forced dark, grid and
+  labels in the panel's light, `RetroDisplay.panel(lit:)`), and `AnimatedNumber` draws figures as
   `ReadoutGlyphs`' dots or bars (`RetroFigures`) into the same cached glyph
   bitmaps, glow baked in and only in dark mode, so ticks cost what they did.
-  The palette is the tint's hue only, lines that share a chart told apart by
-  brightness (`RetroDisplay.levels`, even OKLab steps). The window follows:
+  A one-colour palette is the tint's hue only, lines that share a chart told apart by
+  brightness (`RetroDisplay.levels`, even OKLab steps). Under a one-colour tint the window follows
+  (Color leaves it be; card figures take their card's colour):
   `.tint(GraphColors.retroAccent)` on controls, card titles in the accent, a
   faint wash behind pages (`retroWash`), and link buttons take
   `.linkButtonStyle()`, not `.buttonStyle(.link)`, whose colour ignores tint.

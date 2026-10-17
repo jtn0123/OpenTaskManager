@@ -43,7 +43,9 @@ struct RetroDisplayTests {
         #expect(palette.emphasis == .retro)
     }
 
-    @Test(arguments: RetroDisplay.Tint.allCases)
+    static let oneColor = RetroDisplay.Tint.allCases.filter { !$0.isMulticolor }
+
+    @Test(arguments: oneColor)
     func theMainLinesAreTheTint(_ tint: RetroDisplay.Tint) {
         let palette = GraphPalette.retro(tint)
         #expect(palette[.cpu].tone == tint.tone)
@@ -96,7 +98,7 @@ struct RetroDisplayTests {
         return sector * 60
     }
 
-    @Test(arguments: RetroDisplay.Tint.allCases)
+    @Test(arguments: oneColor)
     func everyShadeIsTheTintsHue(_ tint: RetroDisplay.Tint) throws {
         let palette = GraphPalette.retro(tint)
         let hue = try #require(Self.hue(tint.tone))
@@ -126,6 +128,58 @@ struct RetroDisplayTests {
             #expect(abs(amber.atLightness(target).lightness - target) < 0.001)
         }
         #expect(abs(RGB.white.lightness - 1) < 0.001 && abs(RGB.black.lightness) < 0.001)
+    }
+
+    // MARK: Color
+
+    @Test func colorKeepsEachResourcesOwnColourMadeVivid() {
+        let palette = GraphPalette.retro(.color)
+        let standard = GraphPalette.preset(.standard)
+        #expect(palette.emphasis == .retro)
+        for role in Role.allCases {
+            let vivid = PerceptualColor.lab(palette[role].tone), plain = PerceptualColor.lab(standard[role].tone)
+            guard plain.chroma > 0.04 else {
+                #expect(palette[role].tone == standard[role].tone, "\(role) stays grey")
+                continue
+            }
+            let depth = plain.lightness - vivid.lightness
+            #expect(abs(depth - GraphPalette.vividDepth) < 0.001 || abs(depth) < 0.001, "\(role) deeper, or as light")
+            #expect(vivid.chroma >= plain.chroma - 0.001, "\(role) as vivid or more")
+            #expect(abs(atan2(vivid.b, vivid.a) - atan2(plain.b, plain.a)) < 0.02, "\(role) keeps its hue")
+            // Already 3:1 on the dark window, so drawn as it is there.
+            #expect(palette[role].dark == palette[role].tone, "\(role)")
+        }
+    }
+
+    @Test func colorChartsStayApartAndSoDoTheResources() {
+        let palette = GraphPalette.retro(.color)
+        let closest = GraphPaletteTests.closest(palette, vision: .typical, dark: true)
+        #expect(closest.distance >= GraphPaletteTests.apart, "\(closest.pair) \(closest.distance)")
+    }
+
+    @Test func colorFollowsTheUsersOwnColours() {
+        let mine = RGB(0xFF00AA)
+        let palette = GraphPalette.retro(.color, base: GraphPalette.preset(.standard).overriding([.cpu: mine]))
+        let lab = PerceptualColor.lab(palette[.cpu].tone), own = PerceptualColor.lab(mine)
+        #expect(abs(atan2(lab.b, lab.a) - atan2(own.b, own.a)) < 0.02)
+    }
+
+    @Test func aPanelTakesATraceOfItsLight() {
+        let green = RetroDisplay.panel(lit: RetroDisplay.Tint.green.tone)
+        #expect(green.green > green.red && ColorContrast.luminance(green) < 0.01)
+        #expect(RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft).panel == RetroDisplay.panel(lit: RetroDisplay.Tint.color.tone))
+    }
+
+    @Test func theMostVividColourStaysInsideSRGB() throws {
+        for tone in [RGB(0x3D8FFF), RGB(0x33BD70), RGB(0xA36BF5)] {
+            let lab = PerceptualColor.lab(tone)
+            let vivid = PerceptualColor.mostVivid(tone, atLightness: lab.lightness)
+            let back = try #require(PerceptualColor.rgb(PerceptualColor.lab(vivid)))
+            #expect(abs(back.red - vivid.red) < 1e-4 && abs(back.green - vivid.green) < 1e-4 && abs(back.blue - vivid.blue) < 1e-4)
+            #expect([vivid.red, vivid.green, vivid.blue].contains { $0 < 0.01 || $0 > 0.99 }, "at the gamut's edge")
+        }
+        let grey = RGB(red: 0.5, green: 0.5, blue: 0.5)
+        #expect(PerceptualColor.mostVivid(grey, atLightness: 0.4) == grey)
     }
 
     // MARK: Figures
