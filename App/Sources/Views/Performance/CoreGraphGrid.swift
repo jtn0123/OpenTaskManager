@@ -131,6 +131,10 @@ final class CoreGraphGridView: NSView {
     private let backdrop = LayerHostView()
     /// Hosts the borders and labels, over the graphs.
     private let overlay = LayerHostView()
+    /// The tiles' tooltips, kept while they're registered: AppKit doesn't
+    /// retain a tooltip's owner, and a released one crashed the app when a
+    /// pointer rested on a tile.
+    private var toolTips: [NSString] = []
     private var chrome: [Chrome] = []
     private var tiles: [Tile] = []
     private var groups: [Int] = []
@@ -210,6 +214,7 @@ final class CoreGraphGridView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         overlay.removeAllToolTips()
+        toolTips.removeAll(keepingCapacity: true)
         for (index, item) in chrome.enumerated() {
             let column = index % layout.columns
             let row = index / layout.columns
@@ -222,8 +227,9 @@ final class CoreGraphGridView: NSView {
             if tiles.indices.contains(index) {
                 let tile = tiles[index]
                 let kind = tile.kindName.isEmpty ? "" : " (\(tile.kindName))"
-                overlay.addToolTip(rect, owner: "CPU \(tile.cpu)\(kind): busy time filled, kernel time as a line" as NSString,
-                                   userData: nil)
+                let text = "CPU \(tile.cpu)\(kind): busy time filled, kernel time as a line" as NSString
+                toolTips.append(text)
+                overlay.addToolTip(rect, owner: text, userData: nil)
             }
         }
         CATransaction.commit()
