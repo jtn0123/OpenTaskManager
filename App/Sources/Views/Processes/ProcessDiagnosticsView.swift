@@ -305,7 +305,7 @@ struct ProcessAncestryList: View {
             Text("Responsible:").foregroundStyle(.secondaryText)
             if let owner {
                 Button(model.displayName(for: owner)) { onSelect(owner.identity) }
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .help("Select \(model.displayName(for: owner)) (PID \(String(pid))) in the table")
                 Text("PID \(String(pid))").monospacedDigit().foregroundStyle(.secondaryText)
             } else {

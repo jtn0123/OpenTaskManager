@@ -18,7 +18,7 @@ struct FilteredCount: View {
                     .foregroundStyle(.secondaryText)
                     .monospacedDigit()
                 Button("Show All", action: showAll)
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .help("Clear the filters and the search")
             }
             .font(.metadata)

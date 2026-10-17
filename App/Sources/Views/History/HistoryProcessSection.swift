@@ -178,7 +178,7 @@ struct HistoryProcessSection: View {
             }
             if results.entries.count > shown.count {
                 Button("Show all \(results.entries.count)") { showsAll = true }
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .font(.callout)
             }
         }

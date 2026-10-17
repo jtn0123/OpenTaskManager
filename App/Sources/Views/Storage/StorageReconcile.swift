@@ -301,7 +301,7 @@ private struct ScanSection: View {
                 Spacer(minLength: 8)
                 if scan.unreadableFolders > 0 {
                     Button("Show…") { showsUnreadable = true }
-                        .buttonStyle(.link)
+                        .linkButtonStyle()
                         .popover(isPresented: $showsUnreadable, arrowEdge: .bottom) {
                             UnreadableList(store: store, scan: scan)
                         }

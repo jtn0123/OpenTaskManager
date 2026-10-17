@@ -79,6 +79,25 @@ final class GraphColors: Observable, Sendable {
         resolved.withLock { $0.readout }
     }
 
+    /// What controls, links and titles light up in under the retro look,
+    /// or nil for the system's.
+    var retroAccent: Color? {
+        registrar.access(self, keyPath: \.revision)
+        return resolved.withLock { $0.retro.isOn ? Color(nsColor: $0.readout) : nil }
+    }
+
+    /// A trace of the retro tint over the window behind the pages, so it
+    /// reads as the display's glass; clear with the look off.
+    var retroWash: Color {
+        registrar.access(self, keyPath: \.revision)
+        let retro = resolved.withLock { $0.retro }
+        guard retro.isOn else { return .clear }
+        let tone = Self.nsColor(retro.tint.tone)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            tone.withAlphaComponent(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? 0.06 : 0.04)
+        })
+    }
+
     /// How much the lines outweigh the grid and fills, for the palette in use.
     var emphasis: GraphEmphasis {
         registrar.access(self, keyPath: \.revision)
@@ -234,4 +253,22 @@ extension Theme {
 private enum AppSeriesSlots {
     static var homes = SeriesHomes<Int64>()
     static var graphs: [String: SeriesSlots<Int64>] = [:]
+}
+
+extension View {
+    /// A link-style button: the system's link, or under the retro look,
+    /// plain text in its tint, which a link's own colour would ignore.
+    func linkButtonStyle() -> some View {
+        modifier(LinkButtonStyle())
+    }
+}
+
+private struct LinkButtonStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        if let accent = GraphColors.shared.retroAccent {
+            content.buttonStyle(.plain).foregroundStyle(accent)
+        } else {
+            content.buttonStyle(.link)
+        }
+    }
 }

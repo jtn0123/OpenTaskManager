@@ -37,6 +37,7 @@ struct OverviewGraphCard<Chart: View>: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Label(title, systemImage: symbol)
                     .font(.title3.weight(.semibold))
+                    .foregroundStyle(GraphColors.shared.retroAccent ?? .primary)
                     .lineLimit(1)
                     .fixedSize()
                 if let headline {

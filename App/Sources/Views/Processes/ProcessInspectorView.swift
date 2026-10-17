@@ -505,7 +505,7 @@ private struct RowGroupNote: View {
             }
             Text(text).font(.explanation).foregroundStyle(.secondaryText)
             Button(count == 2 ? "See both together" : "See all \(count) together", action: openGroup)
-                .buttonStyle(.link)
+                .linkButtonStyle()
                 .font(.explanation)
                 .help("Open the Group tab: their CPU over time, their figures added up, and each of them with why it's in the group")
         }
@@ -535,7 +535,7 @@ private struct ProcessHistoryLink: View {
             } label: {
                 Label("Show History", systemImage: "clock.arrow.circlepath")
             }
-            .buttonStyle(.link)
+            .linkButtonStyle()
             .help("Open the History page searched for \(name), to see this process over the hours and days History keeps")
         }
         .font(.explanation)

@@ -140,34 +140,60 @@ public struct RetroDisplay: Sendable, Hashable {
 // MARK: - Palette
 
 extension GraphPalette {
-    /// Every role in the retro tint, so graphs read as one display's. Lines
-    /// that share a chart differ by depth or by a turn of the tint's hue
-    /// toward warm or cool (`warmed`), as well as by dashes and fills, which
-    /// the graphs already give a pair's second line. "Everything else" is
-    /// the tint dimmed.
+    /// Every role in the retro tint and nothing else, as a one-colour
+    /// display shows it: lines that share a chart differ by brightness, from
+    /// near white down to the tint dimmed, as well as by the dashes and
+    /// fills the graphs already give a pair's second line.
     public static func retro(_ tint: RetroDisplay.Tint) -> GraphPalette {
         let tone = tint.tone
-        let deep = tone.scaled(0.62)
-        let dim = tone.scaled(0.4)
-        let warmer = tone.warmed(true)
-        let cooler = tone.warmed(false)
-        let deepWarm = warmer.scaled(0.66)
-        let deepCool = cooler.scaled(0.66)
-        // Each resource's own page draws it in the tint; where lines share a
-        // chart (a pair, a stack, the power parts) they take the warmer,
-        // cooler or deeper shades, heat warmer, "the rest" dim.
+        let levels = RetroDisplay.levels(of: tone)
+        // Each resource's own page draws it in the tint. Where lines share a
+        // chart, heat and what's pinned take the brightest level, a pair's
+        // second line and the parts beside the main one the middle levels,
+        // what's kept back (cached, swap, DRAM) the deep one and "the rest"
+        // the dimmest.
+        let brightest = levels[0], second = levels[1], middle = levels[2], deep = levels[4], dimmest = levels[5]
         let tones: [Role: RGB] = [
-            .cpu: tone, .memory: cooler, .gpu: warmer, .disk: tone, .network: tone, .power: cooler,
-            .diskSecondary: warmer, .networkSecondary: warmer, .thermal: warmer, .fan: cooler, .slowerTier: cooler, .other: dim,
-            .wired: warmer, .compressed: tone, .cached: deep, .swap: deep, .pageIn: warmer, .pageOut: cooler,
-            .neuralEngine: cooler, .dram: deep, .restOfSystem: dim, .charging: tone, .discharging: warmer,
-            .gpuRenderer: tone, .gpuTiler: cooler, .gpuClock: tone, .storageSensor: cooler, .batterySensor: tone,
+            .cpu: tone, .memory: tone, .disk: tone, .network: tone, .charging: tone, .gpuRenderer: tone, .gpuClock: tone,
+            .batterySensor: tone,
+            .gpu: brightest, .wired: brightest, .pageIn: brightest, .thermal: brightest, .discharging: brightest,
+            .diskSecondary: second, .networkSecondary: second, .pageOut: second,
+            .compressed: middle, .slowerTier: middle, .power: middle, .neuralEngine: middle, .gpuTiler: middle,
+            .storageSensor: middle, .fan: middle,
+            .cached: deep, .swap: deep, .dram: deep, .other: dimmest, .restOfSystem: dimmest,
         ]
-        // Neighbours in a stack alternate bright and deep.
-        let series = [tone, deepCool, warmer, deep, cooler, deepWarm]
+        // Neighbours in a stack alternate bright and deep; "other" is the dimmest.
+        let series = [tone, levels[3], brightest, deep, second, middle]
         return GraphPalette(swatches: tones.mapValues { Swatch(tone: $0, lightContrast: 4.5, darkContrast: 3) },
                             series: series.map { Swatch(tone: $0, lightContrast: 4.5, darkContrast: 3) },
                             emphasis: .retro)
+    }
+}
+
+extension RetroDisplay {
+    /// The brightest and dimmest a shade gets, as OKLab lightness: just
+    /// short of white, and just above where a line would need lightening
+    /// to read on a dark window (which would squeeze the dim levels together).
+    static let lightnessRange = (top: 0.95, bottom: 0.54)
+
+    /// Six shades of `tone` besides itself, brightest first, spread evenly
+    /// in lightness over `lightnessRange` with `tone` in its place among
+    /// them. Lighter ones are `tone` mixed toward white, darker ones `tone`
+    /// scaled down, so all keep its hue.
+    static func levels(of tone: RGB) -> [RGB] {
+        let (top, bottom) = lightnessRange
+        let lightness = tone.lightness
+        let step = (top - bottom) / 6
+        var above = Int(((top - lightness) / step).rounded())
+        // A tone nearly as light as the top (yellow) is the top itself, so
+        // no level crowds it from above.
+        while above > 0, (top - lightness) / Double(above) < step * 0.75 {
+            above -= 1
+        }
+        let below = 6 - above
+        let lighter = (0..<above).map { top - (top - lightness) * Double($0) / Double(above) }
+        let darker = (0..<below).map { lightness - (lightness - bottom) * Double($0 + 1) / Double(below) }
+        return (lighter + darker).map { tone.atLightness($0) }
     }
 }
 
@@ -178,51 +204,34 @@ extension GraphEmphasis {
 }
 
 extension ColorContrast.RGB {
-    /// This colour moved `amount` (0...1) of the way to `other`.
-    func mixed(with other: Self, by amount: Double) -> Self {
-        Self(red: red + (other.red - red) * amount, green: green + (other.green - green) * amount,
-             blue: blue + (other.blue - blue) * amount)
+    /// How light this colour looks, 0 for black to 1 for white: Björn
+    /// Ottosson's OKLab lightness, which steps evenly to the eye.
+    var lightness: Double {
+        func linear(_ component: Double) -> Double {
+            let value = min(max(component, 0), 1)
+            return value <= 0.040_45 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        let (red, green, blue) = (linear(red), linear(green), linear(blue))
+        // The cone responses, long, medium and short, compressed.
+        let long = cbrt(0.412_221_470_8 * red + 0.536_332_536_3 * green + 0.051_445_992_9 * blue)
+        let medium = cbrt(0.211_903_498_2 * red + 0.680_699_545_1 * green + 0.107_396_956_6 * blue)
+        let short = cbrt(0.088_302_461_9 * red + 0.281_718_837_6 * green + 0.629_978_700_5 * blue)
+        return 0.210_454_255_3 * long + 0.793_617_785_0 * medium - 0.004_072_046_8 * short
     }
 
-    /// The tint's warmer or cooler neighbour: its hue turned 45° toward red
-    /// or toward blue, or for a near grey, mixed most of the way to a warm or
-    /// a cool white, since a grey has no hue to turn.
-    func warmed(_ warmer: Bool) -> Self {
-        let chroma = max(red, green, blue) - min(red, green, blue)
-        guard chroma > 0.15 else {
-            return mixed(with: warmer ? Self(red: 1, green: 0.78, blue: 0.5) : Self(red: 0.55, green: 0.78, blue: 1), by: 0.65)
+    /// This colour at `target` lightness, its hue kept: scaled down to
+    /// darken it, mixed toward white to lighten it.
+    func atLightness(_ target: Double) -> Self {
+        let lighter = target > lightness
+        func shade(_ amount: Double) -> Self {
+            lighter ? ColorContrast.composite(.white, opacity: amount, over: self) : scaled(amount)
         }
-        return turned(by: warmer ? -45 : 45)
-    }
-
-    /// This colour with its hue turned `degrees` round the colour wheel, its
-    /// lightness and saturation kept. A grey stays grey.
-    func turned(by degrees: Double) -> Self {
-        let high = max(red, green, blue), low = min(red, green, blue)
-        let chroma = high - low
-        guard chroma > 0.0001 else { return self }
-        var hue: Double
-        if high == red {
-            hue = ((green - blue) / chroma).truncatingRemainder(dividingBy: 6)
-        } else if high == green {
-            hue = (blue - red) / chroma + 2
-        } else {
-            hue = (red - green) / chroma + 4
+        // Lightness rises steadily with either amount, so bisect for it.
+        var low = 0.0, high = 1.0
+        for _ in 0..<30 {
+            let amount = (low + high) / 2
+            if shade(amount).lightness < target { low = amount } else { high = amount }
         }
-        hue = (hue * 60 + degrees).truncatingRemainder(dividingBy: 360)
-        if hue < 0 { hue += 360 }
-        let sector = hue / 60
-        let second = chroma * (1 - abs(sector.truncatingRemainder(dividingBy: 2) - 1))
-        func lifted(_ red: Double, _ green: Double, _ blue: Double) -> Self {
-            Self(red: red + low, green: green + low, blue: blue + low)
-        }
-        return switch Int(sector) {
-        case 0: lifted(chroma, second, 0)
-        case 1: lifted(second, chroma, 0)
-        case 2: lifted(0, chroma, second)
-        case 3: lifted(0, second, chroma)
-        case 4: lifted(second, 0, chroma)
-        default: lifted(chroma, 0, second)
-        }
+        return shade(high)
     }
 }

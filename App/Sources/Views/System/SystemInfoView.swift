@@ -460,7 +460,7 @@ private struct InfoCard: View {
             }
             if let showExposedSockets {
                 Button("Show exposed sockets", action: showExposedSockets)
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .font(.explanation)
                     .help("Open the Connections page on the sockets listening on addresses other devices could try to reach")
             }
@@ -522,7 +522,7 @@ private struct InfoCard: View {
                 if let links, let interface = row.interface, links.interfaces.contains(interface) {
                     Spacer(minLength: 8)
                     Button("Show traffic") { links.showTraffic(interface) }
-                        .buttonStyle(.link)
+                        .linkButtonStyle()
                         .font(.explanation)
                         .help("Open \(interface)'s traffic graph on the Performance page")
                 }

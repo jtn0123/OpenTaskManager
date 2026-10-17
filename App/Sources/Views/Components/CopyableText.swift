@@ -79,7 +79,7 @@ struct CopyableText: View {
                     // Only a folder the preview cut has more to show.
                     if preview != folder {
                         Button(showsFullPath ? "Hide full path" : "Show full path") { showsFullPath.toggle() }
-                            .buttonStyle(.link)
+                            .linkButtonStyle()
                             .font(.metadata)
                     }
                 }

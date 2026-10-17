@@ -687,7 +687,7 @@ private struct StorageFooter: View {
                         + Text("Give OpenTaskManager Full Disk Access to count them.").foregroundStyle(.secondaryText))
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Open Full Disk Access Settings") { store.openFullDiskAccessSettings() }
-                        .buttonStyle(.link)
+                        .linkButtonStyle()
                         .fixedSize()
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { warningHeight = $0 }

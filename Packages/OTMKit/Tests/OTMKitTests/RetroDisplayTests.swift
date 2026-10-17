@@ -10,7 +10,7 @@ struct RetroDisplayTests {
 
     /// Live graphs draw on the dark panel whatever the appearance, so it's
     /// the dark shades that share a chart there; lines that share one still
-    /// differ by depth and a turn of hue, not only by dashes. One display
+    /// differ by brightness, not only by dashes. One display
     /// colour can't give seven resources seven colours, and needn't: each
     /// has graphs of its own, so only charts that mix lines are checked.
     @Test(arguments: RetroDisplay.Tint.allCases)
@@ -84,27 +84,48 @@ struct RetroDisplayTests {
         #expect(glows.allSatisfy { $0.readoutBlur < 1 })
     }
 
-    // MARK: Hue
+    // MARK: Levels
 
-    @Test func turningMovesTheHueAndKeepsTheRest() {
-        let red = RGB(red: 1, green: 0, blue: 0)
-        let green = red.turned(by: 120)
-        #expect(abs(green.red) < 1e-9 && abs(green.green - 1) < 1e-9 && abs(green.blue) < 1e-9)
-        let amber = RetroDisplay.Tint.amber.tone
-        let round = amber.turned(by: 360)
-        #expect(abs(round.red - amber.red) < 1e-9 && abs(round.green - amber.green) < 1e-9 && abs(round.blue - amber.blue) < 1e-9)
-        let back = amber.turned(by: 40).turned(by: -40)
-        #expect(abs(back.red - amber.red) < 1e-9 && abs(back.green - amber.green) < 1e-9 && abs(back.blue - amber.blue) < 1e-9)
-        let grey = RGB(red: 0.5, green: 0.5, blue: 0.5)
-        #expect(grey.turned(by: 90) == grey)
+    /// A colour's hue in degrees, or nil for a grey.
+    static func hue(_ color: RGB) -> Double? {
+        let high = max(color.red, color.green, color.blue), low = min(color.red, color.green, color.blue)
+        guard high - low > 0.0001 else { return nil }
+        let chroma = high - low
+        let sector = high == color.red ? ((color.green - color.blue) / chroma + 6).truncatingRemainder(dividingBy: 6)
+            : high == color.green ? (color.blue - color.red) / chroma + 2 : (color.red - color.green) / chroma + 4
+        return sector * 60
     }
 
-    @Test func aGreyWarmsAndCoolsByMixing() {
-        let white = RetroDisplay.Tint.white.tone
-        let warm = white.warmed(true), cool = white.warmed(false)
-        #expect(warm.red > warm.blue)
-        #expect(cool.blue > cool.red)
-        #expect(OKLab.distance(warm, cool) > 0.05)
+    @Test(arguments: RetroDisplay.Tint.allCases)
+    func everyShadeIsTheTintsHue(_ tint: RetroDisplay.Tint) throws {
+        let palette = GraphPalette.retro(tint)
+        let hue = try #require(Self.hue(tint.tone))
+        for swatch in Role.allCases.map({ palette[$0] }) + palette.series {
+            let shade = try #require(Self.hue(swatch.tone))
+            #expect(abs(shade - hue) < 0.01, "\(tint) \(swatch.tone.hex)")
+        }
+    }
+
+    @Test(arguments: RetroDisplay.Tint.allCases)
+    func levelsStepEvenlyFromNearWhiteToDim(_ tint: RetroDisplay.Tint) {
+        let levels = RetroDisplay.levels(of: tint.tone)
+        let lightness = ([tint.tone] + levels).map(\.lightness).sorted(by: >)
+        #expect(levels.count == 6)
+        #expect(abs((lightness.first ?? 0) - RetroDisplay.lightnessRange.top) < 0.001 || tint.tone.lightness > 0.9)
+        #expect(abs((lightness.last ?? 0) - RetroDisplay.lightnessRange.bottom) < 0.001)
+        // No two levels nearer than a step and a half of the even spread would be.
+        let even = (RetroDisplay.lightnessRange.top - RetroDisplay.lightnessRange.bottom) / 6
+        for (brighter, dimmer) in zip(lightness, lightness.dropFirst()) {
+            #expect(brighter - dimmer > even / 1.5, "\(tint)")
+        }
+    }
+
+    @Test func aShadeLandsOnItsLightness() {
+        let amber = RetroDisplay.Tint.amber.tone
+        for target in [0.55, 0.7, 0.9, 0.97] {
+            #expect(abs(amber.atLightness(target).lightness - target) < 0.001)
+        }
+        #expect(abs(RGB.white.lightness - 1) < 0.001 && abs(RGB.black.lightness) < 0.001)
     }
 
     // MARK: Figures

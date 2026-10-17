@@ -1189,6 +1189,11 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   grid and labels in the tint), and `AnimatedNumber` draws figures as
   `ReadoutGlyphs`' dots or bars (`RetroFigures`) into the same cached glyph
   bitmaps, glow baked in and only in dark mode, so ticks cost what they did.
+  The palette is the tint's hue only, lines that share a chart told apart by
+  brightness (`RetroDisplay.levels`, even OKLab steps). The window follows:
+  `.tint(GraphColors.retroAccent)` on controls, card titles in the accent, a
+  faint wash behind pages (`retroWash`), and link buttons take
+  `.linkButtonStyle()`, not `.buttonStyle(.link)`, whose colour ignores tint.
   On History a run of readings
   under about 8 points wide (`HistoryPoint.unfilled`) gets no fill, only its
   line and end dots, so it never reads as a bar.

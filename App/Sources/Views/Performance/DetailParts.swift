@@ -138,7 +138,7 @@ struct TopAppsCard: View {
             Spacer(minLength: 8)
             if unavailable == nil {
                 Button("Show all", action: showAll)
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .font(.explanation)
                     .help("Every app in Processes, sorted by \(title)")
             }

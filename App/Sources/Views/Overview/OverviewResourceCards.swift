@@ -65,7 +65,10 @@ struct MemoryGraphCard: View {
             case .critical: .red
             }
             let pressure = model.memoryDetail.pressure
-            let pressureColor = Self.pressureColors[memory.pressure] ?? Theme.memory
+            // A retro display keeps to its one colour while all's well: the
+            // brightest shade, the memory charts' second line there.
+            let pressureColor = memory.pressure == .normal && GraphColors.shared.retro.isOn ? Theme.wired
+                : Self.pressureColors[memory.pressure] ?? Theme.memory
             OverviewGraphCard(
                 title: "Memory", symbol: "memorychip", tint: color, glow: memory.usedFraction,
                 headline: .init(value: memory.usedFraction, format: { Format.percent($0) }, widest: "100%"),

@@ -173,7 +173,7 @@ private struct ChipTile<Static: View, Now: View>: View {
                 Spacer(minLength: 4)
                 if let link {
                     Button(link.title, action: link.action)
-                        .buttonStyle(.link)
+                        .linkButtonStyle()
                         .font(.callout)
                         .lineLimit(1)
                 }
@@ -334,7 +334,7 @@ private struct CoreTypeActivity: View {
                 Text(load.map { "\(Format.percent($0)) load" } ?? "Load —").font(.callout).monospacedDigit().lineLimit(1)
                 Spacer(minLength: 4)
                 Button(single ? "Every core's graph" : "Graph by core type", action: showGraphs)
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .font(.callout)
                     .lineLimit(1)
                     .help(single ? "Show each core's load on the CPU graph" : "Show the CPU graph for each kind of core")

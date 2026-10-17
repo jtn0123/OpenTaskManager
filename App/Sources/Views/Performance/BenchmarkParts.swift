@@ -116,7 +116,7 @@ struct SavedRunsDisclosure: View, Equatable {
                 .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
                 Spacer(minLength: 8)
                 Button("Compare in Benchmarks") { BenchmarkWorkspace.shared.compareInWorkspace(runs) }
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .font(.explanation)
                     .lineLimit(1)
                     .help(pair.map { "Open the Benchmarks workspace with the runs of \(BenchmarkLook.span($0.earlier.date, $0.later.date)) "

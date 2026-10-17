@@ -238,7 +238,7 @@ struct StartupItemDetail: View {
                     VStack(alignment: .leading, spacing: 3) {
                         JobUsageNow(model: model, pid: pid)
                         Button("Show in Processes") { showProcess(pid) }
-                            .buttonStyle(.link)
+                            .linkButtonStyle()
                             .help("Select PID \(String(pid)) on the Processes page")
                     }
                 }
@@ -257,7 +257,7 @@ struct StartupItemDetail: View {
                     Text("Last exit").foregroundStyle(.secondaryText)
                     FlowRow(spacing: 8, lineSpacing: 3, spreads: false) {
                         Text(lastExit).textSelection(.enabled)
-                        Button("View history", action: viewHistory).buttonStyle(.link)
+                        Button("View history", action: viewHistory).linkButtonStyle()
                     }
                 }
                 .font(.callout)

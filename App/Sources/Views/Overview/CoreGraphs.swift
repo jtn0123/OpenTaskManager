@@ -73,7 +73,7 @@ struct CoreGraphsCard: View {
                 .foregroundStyle(.secondaryText)
                 .rotationEffect(.degrees(isOpen ? 90 : 0))
                 .accessibilityHidden(true)
-            Text("Cores").font(.headline)
+            Text("Cores").font(.headline).foregroundStyle(GraphColors.shared.retroAccent ?? .primary)
             Spacer(minLength: 8)
             if isOpen {
                 // The tiles have no axis, so the heading gives their shared scale.

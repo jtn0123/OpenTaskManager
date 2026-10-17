@@ -97,7 +97,7 @@ struct StorageCleanupSheet: View {
                 Button("Reveal in Finder") { store.reveal(value) }
                 Button("Copy Path") { store.copyPath(value) }
             }
-            .buttonStyle(.link).font(.explanation)
+            .linkButtonStyle().font(.explanation)
         }
     }
 

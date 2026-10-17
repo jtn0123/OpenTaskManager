@@ -163,7 +163,7 @@ struct AppDetail: View {
                             Button { showInStartup(item) } label: {
                                 Text(item.name).lineLimit(1).truncationMode(.middle)
                             }
-                            .buttonStyle(.link)
+                            .linkButtonStyle()
                             .font(.callout)
                             .help("Show \(item.label) on the Startup page")
                             // What it is to this app: one it ships says so, not just its domain.

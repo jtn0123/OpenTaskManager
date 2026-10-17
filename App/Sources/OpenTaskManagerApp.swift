@@ -171,12 +171,16 @@ struct ContentView: View {
             // overflows inside the column instead (the window's minimum
             // height never followed the pages either).
             .frame(minHeight: 0, maxHeight: .infinity)
+            .background(GraphColors.shared.retroWash)
             .environment(\.compactToolbar, sidebar.isNarrow == true)
         }
         // Only crossing the breakpoint matters, not every step of a resize.
         .onGeometryChange(for: Bool.self) { SidebarVisibility.isNarrow(width: $0.size.width) } action: { narrow in
             sidebar.window(isNarrow: narrow)
         }
+        // The retro look lights controls and selections in its tint too, so
+        // the window reads as one display's, not only its graphs.
+        .tint(GraphColors.shared.retroAccent)
         // With the sidebar hidden, the focus goes to the page's main table
         // or nowhere, not to the toolbar's sidebar button.
         .background(PageFocus(page: page, sidebarShown: sidebar.isShown))
