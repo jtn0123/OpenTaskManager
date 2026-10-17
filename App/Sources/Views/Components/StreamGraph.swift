@@ -34,6 +34,12 @@ struct GraphSeries {
 /// where recording started, and a graph with an axis says at its foot how
 /// much of its window it has ("40 s collected · 5 min window"), so the gap
 /// isn't read as zero without outweighing the little data there is.
+///
+/// With the retro display look on (`RetroDisplay`), the graph is a dark
+/// panel in either appearance: its grid, labels and edge in the display's
+/// tint, its lines glowing as far as the look's Glow says. That's the
+/// view's background, border and colours, set when the look changes, so
+/// samples cost what they did.
 struct GraphView: NSViewRepresentable {
     var series: [GraphSeries]
     /// Fixed top of the scale; nil auto-scales to the visible data.
@@ -197,6 +203,8 @@ final class StreamGraphView: NSView {
     private var series: [SeriesLayers] = []
 
     private var configuration: Configuration?
+    /// The retro display look drawn, from `GraphColors`.
+    private var retro = RetroDisplay(style: .off, tint: .green, glow: .soft)
     private var lastValues: [[Double]] = []
     private var lastSize: CGSize = .zero
     /// The step the paths were last laid out with, which a scroll under way moves by.
@@ -276,13 +284,24 @@ final class StreamGraphView: NSView {
         let changed = values != lastValues
         let previous = self.configuration
         self.configuration = configuration
+        let retro = GraphColors.shared.retro
         // A page redrawn between samples (Performance's details and some of
         // Overview's cards redraw a few milliseconds after each one) hands
         // its graphs what they already show. Drawing them again cut short
         // the scroll under way, so they jumped a step a sample; now there's
         // nothing to draw and the scroll runs on.
-        if !changed, let previous, configuration.drawsLike(previous), interval == self.interval, streams == self.streams {
+        if !changed, let previous, configuration.drawsLike(previous), interval == self.interval, streams == self.streams,
+           retro == self.retro {
             return
+        }
+        if retro != self.retro {
+            self.retro = retro
+            // The panel is dark in either appearance, so its colours resolve as dark mode's.
+            appearance = retro.isOn ? NSAppearance(named: .darkAqua) : nil
+            // Its glass and edge: the layer's background, and its border, which draws over the plot.
+            layer?.backgroundColor = retro.isOn ? GraphColors.nsColor(retro.panel).cgColor : nil
+            layer?.borderWidth = retro.isOn ? 1 : 0
+            layer?.borderColor = retro.isOn ? tint(RetroDisplay.edgeOpacity) : nil
         }
         // A new sample scrolls the graph a step, one that adds or drops a
         // line too (an app joining a by-app graph) as long as a line it
@@ -362,8 +381,10 @@ final class StreamGraphView: NSView {
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        layer?.cornerRadius = configuration.cornerRadius
-        layer?.masksToBounds = configuration.cornerRadius > 0
+        // A retro panel keeps a display's rounded corners even where the graph has none.
+        let radius = retro.isOn ? max(configuration.cornerRadius, 4) : configuration.cornerRadius
+        layer?.cornerRadius = radius
+        layer?.masksToBounds = radius > 0
         plot.frame = plotRect
         scroller.frame = CGRect(x: 0, y: 0, width: plotRect.width + 2 * step + 16, height: plotRect.height)
         scroller.rasterizationScale = window?.backingScaleFactor ?? 2
@@ -373,6 +394,7 @@ final class StreamGraphView: NSView {
 
         var rescaleAnimations: [(CAShapeLayer, CGPath)] = []
         let emphasis = GraphColors.shared.emphasis
+        let bloom = bloom(configuration)
         // Colours resolve for this view's appearance: the data colours are
         // deeper in light mode, and re-render when it changes.
         effectiveAppearance.performAsCurrentDrawingAppearance {
@@ -393,7 +415,7 @@ final class StreamGraphView: NSView {
                     let oldBelow = below == nil ? nil : makeTrace(shown[index - 1], ceiling: previousCeiling, height: plotRect.height)
                     let old = makePaths(oldTrace, below: oldBelow, firstX: firstX, step: step)
                     rescaleAnimations.append((layers.line, old.line))
-                    if configuration.glows { rescaleAnimations.append((layers.glow, old.line)) }
+                    if bloom > 0 { rescaleAnimations.append((layers.glow, old.line)) }
                     rescaleAnimations.append((layers.fillMask, old.area))
                 }
                 style(layers, line: line, configuration: configuration, emphasis: emphasis, paths: paths)
@@ -411,6 +433,17 @@ final class StreamGraphView: NSView {
             shape.add(morph, forKey: "rescale")
         }
         hasDrawn = !shown.isEmpty
+    }
+
+    /// The opacity of the wide translucent stroke under each line: a glowing
+    /// graph's, or on a retro panel every line's, as far as its Glow goes.
+    private func bloom(_ configuration: Configuration) -> Double {
+        retro.isOn ? retro.glow.bloom : configuration.glows ? 0.18 : 0
+    }
+
+    /// The retro display's tint at `opacity`.
+    private func tint(_ opacity: Double) -> CGColor {
+        GraphColors.nsColor(retro.tint.tone).withAlphaComponent(opacity).cgColor
     }
 
     private func syncSeriesLayers(count: Int) {
@@ -516,10 +549,12 @@ final class StreamGraphView: NSView {
         layers.line.lineDashPattern = line.dashed ? [4, 3] : nil
         // A wide translucent stroke gives the bloom without an offscreen
         // shadow pass. It shares the line's path, rebuilt once per sample.
-        layers.glow.isHidden = !configuration.glows
+        let bloom = bloom(configuration)
+        layers.glow.isHidden = bloom == 0
         layers.glow.path = paths.line
-        layers.glow.strokeColor = bright.withAlphaComponent(0.18).cgColor
-        layers.glow.lineWidth = layers.line.lineWidth + 8
+        layers.glow.strokeColor = bright.withAlphaComponent(bloom).cgColor
+        // Narrower on a retro panel, where the dark round it shows the whole width.
+        layers.glow.lineWidth = layers.line.lineWidth + (retro.isOn ? 6 : 8)
         layers.glow.lineDashPattern = layers.line.lineDashPattern
 
         let filled = configuration.stacked || line.fill
@@ -565,13 +600,17 @@ final class StreamGraphView: NSView {
         // Light mode needs a firmer grid to hold up on a pale plot. Both stay
         // faint enough that a trace near the floor isn't lost among them,
         // fainter still by the palette's emphasis.
+        // A retro panel's grid and labels are its tint, faint.
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let lineColor = NSColor.labelColor.withAlphaComponent((isDark ? 0.065 : 0.11) * CGFloat(emphasis.grid)).cgColor
-        let labelColor = NSColor.secondaryText.cgColor
+        let lineColor = retro.isOn ? tint(RetroDisplay.gridOpacity)
+            : NSColor.labelColor.withAlphaComponent((isDark ? 0.065 : 0.11) * CGFloat(emphasis.grid)).cgColor
+        let labelColor = retro.isOn ? tint(RetroDisplay.labelOpacity) : NSColor.secondaryText.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
         if configuration.showsGrid, let fineRows = configuration.fineRows {
-            drawFineGrid(rows: fineRows, in: plotRect, step: step, colors: FineGridLines.colors(dark: isDark, emphasis: emphasis))
+            let colors = retro.isOn ? (minor: lineColor, major: tint(RetroDisplay.majorGridOpacity))
+                : FineGridLines.colors(dark: isDark, emphasis: emphasis)
+            drawFineGrid(rows: fineRows, in: plotRect, step: step, colors: colors)
         } else if configuration.showsGrid {
             let rows = CGMutablePath()
             for fraction in [0.25, 0.5, 0.75] as [CGFloat] {
@@ -597,7 +636,8 @@ final class StreamGraphView: NSView {
             if label === topLabel, let note = configuration.axisNote {
                 // The note in the accent colour, so a scale that isn't fixed
                 // isn't read as one that is.
-                let accent = NSColor(cgColor: NSColor.controlAccentColor.cgColor) ?? .controlAccentColor
+                let accent = retro.isOn ? GraphColors.nsColor(retro.tint.tone)
+                    : NSColor(cgColor: NSColor.controlAccentColor.cgColor) ?? .controlAccentColor
                 text.append(NSAttributedString(string: "  ·  \(note)", attributes: [.font: Self.noteFont, .foregroundColor: accent]))
             }
             if (label.string as? NSAttributedString)?.string != text.string, hasDrawn {
@@ -607,7 +647,7 @@ final class StreamGraphView: NSView {
                 label.add(fade, forKey: "fade")
             }
             label.string = text
-            label.shadowColor = NSColor.windowBackgroundColor.cgColor
+            label.shadowColor = retro.isOn ? GraphColors.nsColor(retro.panel).cgColor : NSColor.windowBackgroundColor.cgColor
             label.frame = CGRect(x: 5, y: y - Self.labelHeight, width: max(plotRect.width - 10, 0), height: Self.labelHeight)
             let ink = CGRect(x: 0, y: 0, width: min(text.size().width, label.bounds.width), height: Self.labelHeight)
             label.shadowPath = CGPath(rect: ink, transform: nil)
@@ -746,15 +786,18 @@ extension StreamGraphView {
         guard let text else { return }
 
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let key = text + (isDark ? " dark" : " light")
+        let key = text + (isDark ? " dark" : " light") + (retro.isOn ? " \(retro.tint)" : "")
         let width = captionWidth(text)
         if key != shownCaption {
             shownCaption = key
             // Resolved now, for this appearance: the layer draws it later. The
-            // app's secondary tone, as the system's falls under 4.5:1 here.
-            let color = NSColor(cgColor: NSColor.secondaryText.cgColor) ?? .secondaryText
+            // app's secondary tone, as the system's falls under 4.5:1 here,
+            // or on a retro panel the panel's labels'.
+            let secondary = NSColor(cgColor: NSColor.secondaryText.cgColor) ?? .secondaryText
+            let color = retro.isOn ? NSColor(cgColor: tint(RetroDisplay.labelOpacity)) ?? secondary : secondary
             captionLabel.string = NSAttributedString(string: text, attributes: [.font: Self.captionFont, .foregroundColor: color])
-            captionBadge.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.7 : 0.8).cgColor
+            captionBadge.backgroundColor = retro.isOn ? GraphColors.nsColor(retro.panel).withAlphaComponent(0.85).cgColor
+                : NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.7 : 0.8).cgColor
         }
         captionBadge.frame = CGRect(x: inset, y: bottom, width: width + 8, height: height)
         captionLabel.frame = CGRect(x: 4, y: 0, width: width + 1, height: height)

@@ -59,7 +59,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |
 | Widgets | ⬜ | WidgetKit gauges |
-| Themes | ⬜ | Including a retro green-on-black skin |
+| Retro display look | ✅ | Settings → Retro display: live graphs on dark display panels in one colour (green, amber, cyan, red, yellow or white), figures as lit dots or seven-segment bars, with an adjustable glow. Off by default |
 | Signed, notarized releases with auto-update | ⬜ | Needs an Apple Developer account; Sparkle for updates; Homebrew cask |
 
 ## Release plan

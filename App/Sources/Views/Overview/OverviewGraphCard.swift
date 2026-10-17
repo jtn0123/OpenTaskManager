@@ -44,7 +44,7 @@ struct OverviewGraphCard<Chart: View>: View {
                     // Negative: the glyphs' baseline sits this far above the view's foot.
                     let descender = font.descender
                     AnimatedNumber(value: headline.value, format: headline.format, font: font)
-                        .frame(width: ceil(GlyphCache.width(of: headline.widest, font: font)) + 1, alignment: .leading)
+                        .frame(width: ceil(GlyphCache.width(of: headline.widest, font: font, look: GlyphCache.look)) + 1, alignment: .leading)
                         .alignmentGuide(.firstTextBaseline) { $0.height + descender }
                 }
                 if !facts.isEmpty {

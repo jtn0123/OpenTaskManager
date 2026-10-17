@@ -10,7 +10,9 @@ import SwiftUI
 /// Settings redraws the graphs at once, without a relaunch; a tick only
 /// looks colours up. Kept in UserDefaults under `graphPalette` and
 /// `graphColor.<resource>` (a hex string), so `-graphPalette colorBlind` on
-/// the command line picks a preset for one run.
+/// the command line picks a preset for one run. The retro display look
+/// (`RetroDisplay`, `-retroDisplayStyle dotMatrix`) puts its own one-colour
+/// palette in place of the preset while it's on.
 ///
 /// Not tied to the main actor, since `Theme`'s colours are read from views'
 /// helpers that aren't either; a lock guards the resolved colours.
@@ -24,7 +26,9 @@ final class GraphColors: Observable, Sendable {
     private struct Resolved: Sendable {
         var preset = GraphPalette.Preset.standard
         var overrides: [Role: RGB] = [:]
+        var retro = RetroDisplay(style: .off, tint: .green, glow: .soft)
         var palette = GraphPalette.preset(.standard)
+        var readout = NSColor.labelColor
         var colors: [Role: Color] = [:]
         var fills: [Role: NSColor] = [:]
         var series: [Color] = []
@@ -60,6 +64,19 @@ final class GraphColors: Observable, Sendable {
     var palette: GraphPalette {
         registrar.access(self, keyPath: \.revision)
         return resolved.withLock { $0.palette }
+    }
+
+    /// The retro display look; its style is `.off` for the usual graphs.
+    var retro: RetroDisplay {
+        registrar.access(self, keyPath: \.revision)
+        return resolved.withLock { $0.retro }
+    }
+
+    /// What a retro display's figures light up in when they have no colour
+    /// of their own, for whichever appearance draws them. Not observed:
+    /// numbers restyle when `retro` changes.
+    var readoutColor: NSColor {
+        resolved.withLock { $0.readout }
     }
 
     /// How much the lines outweigh the grid and fills, for the palette in use.
@@ -104,6 +121,13 @@ final class GraphColors: Observable, Sendable {
         reload()
     }
 
+    @MainActor func setRetro(_ retro: RetroDisplay) {
+        Settings.retroDisplayStyle.set(retro.style)
+        Settings.retroDisplayTint.set(retro.tint)
+        Settings.retroDisplayGlow.set(retro.glow)
+        reload()
+    }
+
     /// The standard preset, with no colours of the user's own.
     @MainActor func reset() {
         Settings.graphPalette.remove()
@@ -123,11 +147,16 @@ final class GraphColors: Observable, Sendable {
                 overrides[role] = tone
             }
         }
-        let current = resolved.withLock { (preset: $0.preset, overrides: $0.overrides, made: !$0.colors.isEmpty) }
-        guard !current.made || current.preset != preset || current.overrides != overrides else { return }
+        let retro = RetroDisplay(style: Settings.retroDisplayStyle.get(), tint: Settings.retroDisplayTint.get(),
+                                 glow: Settings.retroDisplayGlow.get())
+        let current = resolved.withLock { (preset: $0.preset, overrides: $0.overrides, retro: $0.retro, made: !$0.colors.isEmpty) }
+        guard !current.made || current.preset != preset || current.overrides != overrides || current.retro != retro else { return }
 
-        let palette = GraphPalette.preset(preset).overriding(overrides)
-        var next = Resolved(preset: preset, overrides: overrides, palette: palette)
+        // The retro palette is one colour throughout, so a user's own
+        // colours wait, kept, until it's off.
+        let palette = retro.isOn ? GraphPalette.retro(retro.tint) : GraphPalette.preset(preset).overriding(overrides)
+        var next = Resolved(preset: preset, overrides: overrides, retro: retro, palette: palette,
+                            readout: retro.isOn ? Self.color(retro.readout) : .labelColor)
         for role in Role.allCases {
             let swatch = palette[role]
             next.colors[role] = Color(nsColor: Self.color(swatch))

@@ -11,12 +11,16 @@ struct GraphColorSettings: View {
     @State private var showsResources = !GraphColors.shared.overrides.isEmpty
 
     var body: some View {
+        // The retro display draws in its own colours while it's on; these wait, kept.
+        let retro = colors.retro.isOn
         Section("Graph colors") {
             Picker("Palette", selection: Binding(get: { colors.preset }, set: { colors.select($0) })) {
                 ForEach(GraphPalette.Preset.allCases) { Text($0.name).tag($0) }
             }
+            .disabled(retro)
             VStack(alignment: .leading, spacing: 10) {
-                Text(colors.preset.summary)
+                Text(retro ? "The retro display below is on, so graphs are in its color. Turn it off to use a palette."
+                    : colors.preset.summary)
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -31,6 +35,7 @@ struct GraphColorSettings: View {
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .disabled(retro)
             HStack {
                 Spacer()
                 Button("Reset Graph Colors") { colors.reset() }
@@ -121,7 +126,7 @@ struct GraphColorPreview: View {
         Color(nsColor: GraphColors.nsColor(dark ? swatch.dark : swatch.light))
     }
 
-    private struct PreviewLine {
+    struct PreviewLine {
         var role: GraphPalette.Role
         var values: [Double]
         var style: StrokeStyle
@@ -170,7 +175,7 @@ struct GraphColorPreview: View {
 
     /// The monotone curve the live graphs draw (`GraphMath.monotoneTangents`),
     /// through `ys` spread evenly across `width`.
-    private static func curve(_ ys: [Double], width: CGFloat) -> Path {
+    static func curve(_ ys: [Double], width: CGFloat) -> Path {
         Path { path in
             guard ys.count > 1 else { return }
             let step = width / CGFloat(ys.count - 1)
@@ -186,7 +191,7 @@ struct GraphColorPreview: View {
     }
 
     /// A still, smooth-looking trace: 25 points between 0 and 1.
-    private static func wave(base: Double, swing: Double, phase: Double) -> [Double] {
+    static func wave(base: Double, swing: Double, phase: Double) -> [Double] {
         (0..<25).map { index in
             let x = Double(index) / 4
             return min(max(base + swing * (sin(x + phase) * 0.7 + sin(2.3 * x + phase * 1.7) * 0.3), 0.04), 0.96)

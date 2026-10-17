@@ -153,6 +153,15 @@ public enum Settings {
     public static let graphPalette = SettingKey<GraphPalette.Preset, String>(
         "graphPalette", default: .standard, meaning: "Graph color preset."
     )
+    public static let retroDisplayStyle = SettingKey<RetroDisplay.Style, String>(
+        "retroDisplayStyle", default: .off, meaning: "Retro display look: off, or how its figures are drawn."
+    )
+    public static let retroDisplayTint = SettingKey<RetroDisplay.Tint, String>(
+        "retroDisplayTint", default: .green, meaning: "Color the retro display lights up in."
+    )
+    public static let retroDisplayGlow = SettingKey<RetroDisplay.Glow, String>(
+        "retroDisplayGlow", default: .soft, meaning: "How far the retro display's figures and lines glow."
+    )
     public static let benchmarkComparePicks = SettingKey<[String: [String]], [String: [String]]>(
         "benchmarkComparePicks", default: [:], meaning: "Run IDs picked for comparison, by benchmark kind."
     )
@@ -289,6 +298,9 @@ public enum Settings {
         spikesSeen.descriptor,
         systemReportFormat.descriptor,
         graphPalette.descriptor,
+        retroDisplayStyle.descriptor,
+        retroDisplayTint.descriptor,
+        retroDisplayGlow.descriptor,
         benchmarkComparePicks.descriptor,
         benchmarkTrendBaselines.descriptor,
         benchmarkSuiteIncludesDisk.descriptor,

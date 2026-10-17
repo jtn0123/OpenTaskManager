@@ -142,14 +142,16 @@ extension GraphPalette {
     /// given its own light-mode depth.
     private init(tones: [Role: RGB], series: [RGB], light: Double, dark: Double, depths: [Role: Double] = [:],
                  seriesDepths: [Double] = [], brighter: [Role: Double] = [:], emphasis: GraphEmphasis = .standard) {
-        swatches = tones.reduce(into: [:]) { result, entry in
-            result[entry.key] = Swatch(tone: entry.value, lightContrast: depths[entry.key] ?? light,
-                                       darkContrast: brighter[entry.key] ?? dark)
-        }
-        self.series = series.enumerated().map { index, tone in
-            Swatch(tone: tone, lightContrast: seriesDepths.indices.contains(index) ? seriesDepths[index] : light, darkContrast: dark)
-        }
-        self.emphasis = emphasis
+        self.init(
+            swatches: tones.reduce(into: [:]) { result, entry in
+                result[entry.key] = Swatch(tone: entry.value, lightContrast: depths[entry.key] ?? light,
+                                           darkContrast: brighter[entry.key] ?? dark)
+            },
+            series: series.enumerated().map { index, tone in
+                Swatch(tone: tone, lightContrast: seriesDepths.indices.contains(index) ? seriesDepths[index] : light, darkContrast: dark)
+            },
+            emphasis: emphasis
+        )
     }
 
     /// The app's colours since its first release. Every tone already clears

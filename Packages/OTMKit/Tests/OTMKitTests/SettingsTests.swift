@@ -55,6 +55,9 @@ struct SettingsTests {
         "spikesSeen": .date(.distantPast),
         "systemReportFormat": .string("markdown"),
         "graphPalette": .string("standard"),
+        "retroDisplayStyle": .string("off"),
+        "retroDisplayTint": .string("green"),
+        "retroDisplayGlow": .string("soft"),
         "benchmarkComparePicks": .stringLists([:]),
         "benchmarkTrendBaselines": .strings([:]),
         "benchmarkSuiteIncludesDisk": .bool(false),
@@ -112,6 +115,9 @@ struct SettingsTests {
             checkChoices(Settings.updateSpeed, in: defaults)
             checkChoices(Settings.systemReportFormat, in: defaults)
             checkChoices(Settings.graphPalette, in: defaults)
+            checkChoices(Settings.retroDisplayStyle, in: defaults)
+            checkChoices(Settings.retroDisplayTint, in: defaults)
+            checkChoices(Settings.retroDisplayGlow, in: defaults)
         }
     }
 

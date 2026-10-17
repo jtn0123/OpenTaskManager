@@ -6,7 +6,9 @@ import SwiftUI
 ///
 /// SwiftUI's own numeric transitions re-run layout for the whole window on
 /// every frame. This view instead composes pre-rendered glyph bitmaps, and
-/// only touches them while a change is in flight and the text differs.
+/// only touches them while a change is in flight and the text differs. With
+/// the retro display look on, those bitmaps are its dots or bars
+/// (`RetroFigures`), in the display's colour unless the number has its own.
 struct AnimatedNumber: NSViewRepresentable {
     var value: Double
     var format: (Double) -> String
@@ -23,12 +25,13 @@ struct AnimatedNumber: NSViewRepresentable {
     }
 
     func updateNSView(_ view: AnimatedNumberView, context: Context) {
-        view.configure(format: format, font: font, color: color.map(NSColor.init), centered: alignment == .center)
+        view.configure(format: format, font: font, color: color.map(NSColor.init), centered: alignment == .center,
+                       look: GlyphCache.look)
         view.set(value)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: AnimatedNumberView, context: Context) -> CGSize? {
-        CGSize(width: ceil(GlyphCache.width(of: format(value), font: font)) + 1, height: GlyphCache.lineHeight(font))
+        CGSize(width: ceil(GlyphCache.width(of: format(value), font: font, look: GlyphCache.look)) + 1, height: GlyphCache.lineHeight(font))
     }
 }
 
@@ -42,6 +45,7 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
     private var font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
     private var color: NSColor?
     private var centered = false
+    private var look: GlyphCache.Look?
     private var pieces: [CALayer] = []
     private var shown: Double?
     private var target = 0.0
@@ -63,12 +67,13 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(format: @escaping (Double) -> String, font: NSFont, color: NSColor?, centered: Bool) {
+    func configure(format: @escaping (Double) -> String, font: NSFont, color: NSColor?, centered: Bool, look: GlyphCache.Look?) {
         self.format = format
-        let restyle = font != self.font || color != self.color || centered != self.centered
+        let restyle = font != self.font || color != self.color || centered != self.centered || look != self.look
         self.font = font
         self.color = color
         self.centered = centered
+        self.look = look
         if restyle { draw(shown ?? target, force: true) }
     }
 
@@ -157,11 +162,16 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
         guard bounds.width > 0 else { return }
 
         var resolved = NSColor.labelColor
+        let plain = look == nil ? NSColor.labelColor : GraphColors.shared.readoutColor
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            resolved = NSColor(cgColor: (color ?? .labelColor).cgColor) ?? .labelColor
+            resolved = NSColor(cgColor: (color ?? plain).cgColor) ?? .labelColor
         }
+        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let look = look.map { GlyphCache.Look(style: $0.style, glow: $0.glow, dark: isDark) }
         let scale = window?.backingScaleFactor ?? 2
-        let glyphs = GlyphCache.pieces(of: string).compactMap { GlyphCache.glyph($0, font: font, color: resolved, scale: scale) }
+        let glyphs = GlyphCache.pieces(of: string).compactMap {
+            GlyphCache.glyph($0, font: font, color: resolved, scale: scale, look: look)
+        }
         let total = glyphs.reduce(0) { $0 + $1.advance }
         let height = GlyphCache.lineHeight(font)
         var x = centered ? (bounds.width - total) / 2 : 0
@@ -185,7 +195,9 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
             piece.isHidden = false
             piece.contents = glyph.image
             piece.contentsScale = scale
-            piece.frame = CGRect(x: x, y: y, width: CGFloat(glyph.image.width) / scale, height: height)
+            // A glowing figure's bitmap has room for the glow round it.
+            piece.frame = CGRect(x: x - glyph.inset, y: y - glyph.inset, width: CGFloat(glyph.image.width) / scale,
+                                 height: CGFloat(glyph.image.height) / scale)
             x += glyph.advance
         }
         setAccessibilityValue(string)
@@ -193,13 +205,29 @@ final class AnimatedNumberView: NSView, WindowAnimationClient {
 }
 
 /// Bitmaps of the characters animated numbers are built from, rendered once
-/// per font, colour and scale. Digits and separators are cached one by one;
-/// a unit suffix like " MB/s" is cached whole so its kerning survives.
+/// per font, colour, scale and look. Digits and separators are cached one by
+/// one; a unit suffix like " MB/s" is cached whole so its kerning survives.
 @MainActor
 enum GlyphCache {
     struct Glyph {
         let image: CGImage
         let advance: CGFloat
+        /// Room left round the character for its glow, on every side.
+        var inset: CGFloat = 0
+    }
+
+    /// The retro display look figures are drawn in; nil for type. `dark`
+    /// is the window's appearance, which their glow and unlit parts follow.
+    struct Look: Hashable {
+        let style: RetroDisplay.Style
+        let glow: RetroDisplay.Glow
+        var dark = true
+    }
+
+    /// The look in use, from `GraphColors`.
+    static var look: Look? {
+        let retro = GraphColors.shared.retro
+        return retro.isOn ? Look(style: retro.style, glow: retro.glow) : nil
     }
 
     private struct Key: Hashable {
@@ -207,10 +235,12 @@ enum GlyphCache {
         let font: NSFont
         let color: [CGFloat]
         let scale: CGFloat
+        let look: Look?
     }
 
     private static var glyphs: [Key: Glyph] = [:]
-    private static let numeric = Set("0123456789.,-+−%")
+    /// What's split off one character at a time: what a retro display draws.
+    private static let numeric = ReadoutGlyphs.drawn
 
     /// Splits "312.5 MB/s" into "3", "1", "2", ".", "5" and " MB/s".
     static func pieces(of string: String) -> [String] {
@@ -231,6 +261,7 @@ enum GlyphCache {
     private struct WidthKey: Hashable {
         let text: String
         let font: NSFont
+        let look: Look?
     }
 
     private static var widths: [WidthKey: CGFloat] = [:]
@@ -238,23 +269,32 @@ enum GlyphCache {
     /// `text`'s width in `font`, typeset once. SwiftUI asks every number on a
     /// page for its size on each layout pass, and setting the text each time
     /// cost about 3% of a core on Overview.
-    static func width(of text: String, font: NSFont) -> CGFloat {
-        let key = WidthKey(text: text, font: font)
+    static func width(of text: String, font: NSFont, look: Look?) -> CGFloat {
+        let key = WidthKey(text: text, font: font, look: look)
         if let width = widths[key] { return width }
         // Figures come and go; a cap keeps the cache to recent ones.
         if widths.count >= 4_096 { widths.removeAll(keepingCapacity: true) }
-        let width = (text as NSString).size(withAttributes: [.font: font]).width
+        let width = if let look {
+            pieces(of: text).reduce(0) { $0 + RetroFigures.advance(of: $1, font: font, style: look.style) }
+        } else {
+            (text as NSString).size(withAttributes: [.font: font]).width
+        }
         widths[key] = width
         return width
     }
 
-    static func glyph(_ text: String, font: NSFont, color: NSColor, scale: CGFloat) -> Glyph? {
+    static func glyph(_ text: String, font: NSFont, color: NSColor, scale: CGFloat, look: Look?) -> Glyph? {
         let rgba = color.usingColorSpace(.sRGB)
         let components = [rgba?.redComponent ?? 1, rgba?.greenComponent ?? 1, rgba?.blueComponent ?? 1, rgba?.alphaComponent ?? 1]
-        let key = Key(text: text, font: font, color: components, scale: scale)
+        let key = Key(text: text, font: font, color: components, scale: scale, look: look)
         if let cached = glyphs[key] { return cached }
         // Values and units vary, but not without bound; start over rather than grow forever.
         if glyphs.count > 2_000 { glyphs.removeAll() }
+        if let look {
+            let glyph = retroGlyph(text, font: font, color: rgba ?? color, scale: scale, look: look)
+            glyphs[key] = glyph
+            return glyph
+        }
 
         let string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
         let advance = string.size().width
@@ -275,6 +315,51 @@ enum GlyphCache {
         let glyph = Glyph(image: image, advance: advance)
         glyphs[key] = glyph
         return glyph
+    }
+
+    /// `text` laid out as `AnimatedNumberView` lays out its pieces, in one
+    /// bitmap: for a still preview.
+    static func image(of text: String, font: NSFont, color: NSColor, scale: CGFloat, look: Look?) -> CGImage? {
+        let glyphs = pieces(of: text).compactMap { glyph($0, font: font, color: color, scale: scale, look: look) }
+        let inset = glyphs.map(\.inset).max() ?? 0
+        let advance = glyphs.reduce(0) { $0 + $1.advance }
+        let width = Int(ceil((advance + 1 + 2 * inset) * scale))
+        let height = Int(ceil((lineHeight(font) + 2 * inset) * scale))
+        guard width > 0, height > 0,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        var x = inset
+        for glyph in glyphs {
+            context.draw(glyph.image, in: CGRect(x: (x - glyph.inset) * scale, y: (inset - glyph.inset) * scale,
+                                                 width: CGFloat(glyph.image.width), height: CGFloat(glyph.image.height)))
+            x += glyph.advance
+        }
+        return context.makeImage()
+    }
+
+    /// A character, or a unit, as a retro display draws it, with room round
+    /// it for its glow.
+    private static func retroGlyph(_ text: String, font: NSFont, color: NSColor, scale: CGFloat, look: Look) -> Glyph? {
+        let advance = RetroFigures.advance(of: text, font: font, style: look.style)
+        // Lit figures glow on a dark window; on a pale one a glow only blurs them.
+        let blur = look.dark ? look.glow.readoutBlur * RetroFigures.cell(font: font, style: look.style) : 0
+        let inset = blur > 0 ? ceil(blur * 1.5) + 1 : 0
+        let width = Int(ceil((advance + 1 + 2 * inset) * scale))
+        let height = Int(ceil((lineHeight(font) + 2 * inset) * scale))
+        guard width > 0, height > 0,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: inset, y: inset)
+        let ink = RetroFigures.Ink(font: font, style: look.style, color: color, unlit: RetroDisplay.unlitOpacity(dark: look.dark),
+                                   blur: blur, scale: scale)
+        RetroFigures.draw(text, in: context, with: ink)
+        guard let image = context.makeImage() else { return nil }
+        return Glyph(image: image, advance: advance, inset: inset)
     }
 }
 

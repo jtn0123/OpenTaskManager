@@ -1180,7 +1180,16 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   `GraphEmphasis` (live graphs, History, the Settings preview): solid traces
   wider, light-mode traces deeper (`traceShade`; Color-blind friendly and High
   contrast keep their shades, already at their limits), grid and fills
-  fainter; the unrecorded look keeps its weight. On History a run of readings
+  fainter; the unrecorded look keeps its weight. The retro display look
+  (`RetroDisplay` in OTMKit, Settings' Retro display, `-retroDisplayStyle
+  dotMatrix|segments`, `-retroDisplayTint`, `-retroDisplayGlow`), off by
+  default, puts its one-colour palette (`GraphPalette.retro`) in place of the
+  preset and the user's colours while on; live graphs draw as dark panels
+  in either appearance (the view's layer background and border, forced dark,
+  grid and labels in the tint), and `AnimatedNumber` draws figures as
+  `ReadoutGlyphs`' dots or bars (`RetroFigures`) into the same cached glyph
+  bitmaps, glow baked in and only in dark mode, so ticks cost what they did.
+  On History a run of readings
   under about 8 points wide (`HistoryPoint.unfilled`) gets no fill, only its
   line and end dots, so it never reads as a bar.
 - Secondary text (labels, captions, units, footnotes) takes

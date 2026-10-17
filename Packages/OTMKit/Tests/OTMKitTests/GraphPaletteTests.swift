@@ -23,6 +23,9 @@ struct GraphPaletteTests {
         "GPU engines": ["gpu", "gpuRenderer", "gpuTiler"],
         "GPU clock": ["gpuClock", "gpu", "power"],
         "core types": ["cpu", "slowerTier"],
+        // Busy time with kernel time as a line, per core and per core type.
+        "kernel time": ["cpu", "wired"],
+        "slower tier's kernel time": ["slowerTier", "wired"],
         "sensors": ["thermal", "storageSensor", "batterySensor"],
         "by app": ["s0", "s1", "s2", "s3", "s4", "s5", "other"],
         "resources": ["cpu", "memory", "gpu", "disk", "network", "power", "thermal"],
