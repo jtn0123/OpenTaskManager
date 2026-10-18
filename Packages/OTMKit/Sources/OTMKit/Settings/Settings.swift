@@ -42,6 +42,9 @@ public enum Settings {
     public static let showMenuBarExtra = SettingKey<Bool, Bool>(
         "showMenuBarExtra", default: true, meaning: "Whether the menu bar item is shown."
     )
+    public static let dockGraphMode = SettingKey<DockGraphMode, String>(
+        "dockGraphMode", default: .off, meaning: "Optional CPU or memory history in the Dock icon."
+    )
     public static let miniMonitorShown = SettingKey<Bool, Bool>(
         "miniMonitorShown", default: false, meaning: "Whether the floating mini monitor is shown."
     )
@@ -290,6 +293,7 @@ public enum Settings {
         cpuGraphMode.descriptor,
         cpuLargerGraphs.descriptor,
         showMenuBarExtra.descriptor,
+        dockGraphMode.descriptor,
         miniMonitorShown.descriptor,
         miniMonitorLevel.descriptor,
         miniMonitorCorner.descriptor,

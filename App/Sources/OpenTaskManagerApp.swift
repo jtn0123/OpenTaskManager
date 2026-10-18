@@ -484,6 +484,7 @@ struct SettingsView: View {
     @Setting(Settings.globalHotKeyEnabled) private var globalHotKeyEnabled: Bool
     @Setting(Settings.heatmap) private var heatmap: Bool
     @Setting(Settings.streamGraphs) private var streamGraphs: Bool
+    @Setting(Settings.dockGraphMode) private var dockGraphMode: DockGraphMode
 
     var body: some View {
         @Bindable var model = model
@@ -494,7 +495,14 @@ struct SettingsView: View {
                 }
                 Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
-            // High enough that the mini monitor's own Settings… item opens on it.
+            Section("Dock icon") {
+                Picker("Show", selection: $dockGraphMode) {
+                    ForEach(DockGraphMode.allCases) { Text($0.title).tag($0) }
+                }
+                Text("Two minutes of whole-CPU use or used physical memory. Updates at most every two seconds, "
+                     + "or at your slower update speed. Keeps running when the main window closes.")
+                    .font(.explanation).foregroundStyle(.secondaryText)
+            }
             MiniMonitorSettings()
             GraphColorSettings()
             RetroDisplaySettings()

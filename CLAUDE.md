@@ -552,6 +552,13 @@ The incident sheet queries only on a window change, never on a timer or tick.
   monitor. Application
   hiding, display sleep and screen lock override the count; showing a window
   interrupts the sampler's wait and takes a fresh sample.
+- The optional Dock graph (`DockIconController`, `Settings.dockGraphMode`) uses
+  the same `record()` system samples while hidden, with no timer or window demand.
+  `DockGraphFeed` keeps sixty two-second slots, including gaps after pauses and
+  slower sampling, and quantizes into bitmap pixels. It draws at most every 2 s,
+  skips identical images and display sleep, and marks paused readings. Off
+  restores the normal Dock icon. A live Dock graph keeps the app running after
+  its main window closes; the Dock reopens that window.
 - The floating mini monitor (`MiniMonitorController`, `Settings.miniMonitor*`)
   is a nonactivating `NSPanel` above windows, among them or on the desktop. Its
   demand is `SamplingDemand.miniMonitor`, so shown on its own it keeps the

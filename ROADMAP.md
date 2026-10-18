@@ -60,7 +60,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Floating mini monitor | ✅ | A minute of each meter above other windows, among them or on the desktop, in a corner of any display; opacity, full strength under the pointer, and the meters it shows in Settings |
 | Why is my Mac slow? | ✅ | Observations on Overview and in the menu bar popup, with a details sheet: high whole-CPU load, one busy core, GPU activity and named macOS memory/thermal pressure; relevant process rankings show usage, without a health score or causal claims |
-| Dock tile live graph | ⬜ | Optional, like Activity Monitor |
+| Dock tile live graph | ✅ | Optional CPU or memory history, two minutes at up to one update every two seconds; current percentage, pause marker and normal icon restored when off |
 | Widgets | ⬜ | WidgetKit gauges |
 | Retro display look | ✅ | Settings → Retro display: live graphs on dark display panels, each resource in its own vivid colour (Color, the default) or all in one (green, amber, cyan, red, yellow or white), figures as lit dots or seven-segment bars, with an adjustable glow. On by default as Dot matrix in Color |
 | Signed, notarized releases with auto-update | ⬜ | Needs an Apple Developer account; Sparkle for updates; Homebrew cask |

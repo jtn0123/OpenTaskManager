@@ -18,6 +18,7 @@ struct SettingsTests {
         "cpuGraphMode": .string("cores"),
         "cpuLargerGraphs": .bool(false),
         "showMenuBarExtra": .bool(true),
+        "dockGraphMode": .string("off"),
         "miniMonitorShown": .bool(false),
         "miniMonitorLevel": .string("aboveWindows"),
         "miniMonitorCorner": .string("topRight"),
@@ -110,6 +111,7 @@ struct SettingsTests {
 
     @Test func choicesKeepTheirRawPropertyListEncoding() throws {
         try withDefaults { defaults in
+            checkChoices(Settings.dockGraphMode, in: defaults)
             checkChoices(Settings.appsFilter, in: defaults)
             checkChoices(Settings.startupFilter, in: defaults)
             checkChoices(Settings.driversFilter, in: defaults)

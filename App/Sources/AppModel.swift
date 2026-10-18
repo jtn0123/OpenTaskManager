@@ -24,6 +24,7 @@ final class AppModel {
     let samplingDemand = SamplingDemandStore()
     @ObservationIgnored let backgroundSampling = BackgroundSamplingState()
     let menuBarIcon = MenuBarIconStore()
+    @ObservationIgnored var dockIcon: DockIconController?
     let miniMonitor = MiniMonitorStore()
     /// The floating mini monitor's panel, made once the app is running.
     @ObservationIgnored var miniMonitorController: MiniMonitorController?
@@ -161,7 +162,10 @@ final class AppModel {
     )
 
     var isPaused = false {
-        didSet { isPaused ? stop() : start() }
+        didSet {
+            dockIcon?.setPaused(isPaused)
+            if isPaused { stop() } else { start() }
+        }
     }
 
     var updateSpeed: UpdateSpeed {
@@ -224,6 +228,7 @@ final class AppModel {
         Task { @MainActor [weak self] in
             guard let self else { return }
             miniMonitorController = MiniMonitorController(model: self)
+            dockIcon = DockIconController(paused: isPaused)
         }
     }
 
