@@ -26,6 +26,7 @@ struct OverviewView: View {
             if let snapshot = model.snapshot {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        SystemPressureSummary()
                         resources(snapshot)
                         // A GPU that doesn't say how busy it is (a virtual
                         // machine's) would only get an empty graph, so it
@@ -256,6 +257,7 @@ struct NetworkTrafficCard: View {
                         GraphMath.tailSum(ids.map { model.networkOutHistory[$0]?.values ?? [] })),
             format: Format.bitsPerSecond, minimumScale: 125_000, units: .bits, compact: compact, chartHeight: chartHeight
         )
+        .help("Network rates use bits per second (bps, Kbps, Mbps). Disk rates use bytes per second (B/s, KB/s, MB/s). One byte is eight bits.")
     }
 }
 

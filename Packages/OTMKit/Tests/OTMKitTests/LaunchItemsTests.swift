@@ -66,6 +66,17 @@ struct LaunchPlistTests {
         #expect(item(body, scope: .daemon).launchSummary == "At boot")
     }
 
+    @Test func loginViewKeepsDisabledItemsAndExcludesBootAndOnDemandJobs() {
+        let body = "<key>Label</key><string>org.example.test</string><key>RunAtLoad</key><true/>"
+        var agent = item(body, scope: .userAgent)
+        #expect(agent.isLoginRegistration)
+        agent.disabledOverride = true
+        #expect(agent.isLoginRegistration && !agent.startsAtLogin)
+        #expect(!item(body, scope: .daemon).isLoginRegistration)
+        #expect(!item("<key>Label</key><string>org.example.demand</string>").isLoginRegistration)
+        #expect(!item(body, path: "/System/Library/LaunchAgents/test.plist").isLoginRegistration)
+    }
+
     @Test func describesSchedules() {
         let daily = item("""
             <key>Label</key><string>com.user.refresh</string>

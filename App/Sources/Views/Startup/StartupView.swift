@@ -56,6 +56,7 @@ struct StartupView: View {
     @CurrentPage private var page
     @Setting(Settings.startupFilter) private var filter: StartupFilter
     @Setting(Settings.showStartupInspector) private var showInspector: Bool
+    @State private var showsInventory = LaunchArgument.string("openStartupView") == "inventory"
     @State private var source: LaunchItemSource?
     @State private var items: [LaunchItem]?
     @State private var scannedAt: Date?
@@ -112,10 +113,16 @@ struct StartupView: View {
             if let query = model.requestedStartupSearch {
                 model.requestedStartupSearch = nil
                 search = query
+                showsInventory = true
                 filter = .all
             }
             source = LaunchArgument.string("openStartupSource").flatMap { LaunchItemSource(name: $0) }
-            if source != nil { filter = .all }
+            if source != nil || model.requestedStartupItem != nil || IncidentNavigation.shared.job != nil
+                || LaunchArgument.string("openStartupItem") != nil {
+                showsInventory = true
+                filter = .all
+            }
+            if !showsInventory, ![StartupFilter.all, .running, .problems].contains(filter) { filter = .all }
             requestedItem = model.requestedStartupItem
             model.requestedStartupItem = nil
             if items == nil || IncidentNavigation.shared.job != nil { await scan() }
@@ -146,7 +153,8 @@ struct StartupView: View {
 
     private func page(_ items: [LaunchItem]) -> some View {
         let watch = model.launchJobs.watch
-        let rows = visibleRows(items, watch: watch)
+        let scopedItems = showsInventory ? items : items.filter(\.isLoginRegistration)
+        let rows = visibleRows(scopedItems, watch: watch)
         // Like the Processes inspector, the details take room only once
         // something is selected. Beside the table, Publisher gives its room
         // to Name and a badge marks the third-party rows instead.
@@ -154,11 +162,18 @@ struct StartupView: View {
         let besideTable = wantsInspector && !isNarrow
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                summary(items, watch: watch)
+                scopePicker
+                Text(showsInventory ? "All launchd registrations, including macOS services and boot daemons."
+                     : "Third-party agents and app helpers configured to start at login, including disabled registrations.")
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                summary(scopedItems, watch: watch)
                     .padding(.bottom, 2)
                 FlowRow(spacing: 12, lineSpacing: 8, spreads: false, centresRows: true, balancesRows: false) {
                     Picker("Show", selection: $filter) {
-                        ForEach(StartupFilter.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach(StartupFilter.allCases.filter { showsInventory || ![.apple, .agents, .daemons, .thirdParty].contains($0) }) {
+                            Text($0.rawValue).tag($0)
+                        }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -169,7 +184,7 @@ struct StartupView: View {
                     }
                     .pickerStyle(.menu)
                     .fixedSize()
-                    FilteredCount(shown: rows.count, total: items.count, noun: "items", showAll: showAll)
+                    FilteredCount(shown: rows.count, total: scopedItems.count, noun: "items", showAll: showAll)
                 }
                 LoginItemsNote()
             }
@@ -188,8 +203,9 @@ struct StartupView: View {
                 VStack(spacing: 0) {
                     // Only as tall as its rows, so a short list, as Problems
                     // usually is, isn't followed by empty stripes.
-                    StartupTable(model: model, rows: rows, widths: columnWidths, showsPublisher: filter.showsPublisher && !besideTable,
-                                 filterShowsPublisher: filter.showsPublisher, showsSource: source == nil,
+                    StartupTable(model: model, rows: rows, widths: columnWidths,
+                                 showsPublisher: showsInventory && filter.showsPublisher && !besideTable,
+                                 filterShowsPublisher: showsInventory && filter.showsPublisher, showsSource: source == nil,
                                  selection: $selection, sortOrder: $sortOrder, scrollTarget: $scrollTarget,
                                  focus: $tableFocused, toggle: toggle, open: openDetails)
                         .fitsTableToRows(rows.count)
@@ -215,8 +231,26 @@ struct StartupView: View {
                 }
             }
             Divider()
-            StartupStatusBar(total: items.count, scannedAt: scannedAt, isScanning: isScanning, watchedSince: watch.since)
+            StartupStatusBar(total: scopedItems.count, scannedAt: scannedAt, isScanning: isScanning, watchedSince: watch.since)
         }
+    }
+
+    private var scopePicker: some View {
+        Picker("Startup view", selection: Binding(get: { showsInventory }, set: {
+            showsInventory = $0
+            filter = .all
+            source = nil
+            search = ""
+            selection = nil
+            if let items {
+                columnWidths = StartupTable.widths(for: showsInventory ? items : items.filter(\.isLoginRegistration))
+            }
+        })) {
+            Text("Login items").tag(false)
+            Text("All launchd jobs").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 360)
     }
 
     /// Double-click: the pane in a wide window, the full-width details in a narrow one.
@@ -236,12 +270,17 @@ struct StartupView: View {
     private func summary(_ items: [LaunchItem], watch: LaunchJobWatch) -> some View {
         let problems = items.filter { watch.health(of: $0).needsAttention }.count
         return FillGrid(minimum: 140, spacing: 12) {
-            SummaryCard(title: "Total", value: items.count, tint: Theme.cpu,
+            SummaryCard(title: showsInventory ? "Total" : "Login registrations", value: items.count, tint: Theme.cpu,
                         help: "Launchd folders, app-bundled registrations and loaded jobs without a file")
             SummaryCard(title: "Running", value: items.filter { $0.pid != nil }.count, tint: Theme.disk,
                         help: "Jobs with a process running right now")
-            SummaryCard(title: "Third party", value: items.filter { $0.publisher == .thirdParty }.count, tint: Theme.network,
-                        help: "Installed by something other than macOS")
+            if showsInventory {
+                SummaryCard(title: "Third party", value: items.filter { $0.publisher == .thirdParty }.count, tint: Theme.network,
+                            help: "Installed by something other than macOS")
+            } else {
+                SummaryCard(title: "Disabled", value: items.filter(\.isDisabled).count, tint: Theme.other,
+                            help: "Disabled registrations stay in this list. Select one to see how to enable it.")
+            }
             // Boot daemons and unregistered helpers are not login starts.
             SummaryCard(title: "Start at login", value: items.filter(\.startsAtLogin).count, tint: Theme.memory,
                         caption: "Agents and loaded app login helpers",
@@ -300,6 +339,7 @@ struct StartupView: View {
     /// gives way, and in a narrow window the list comes back over the details.
     private func showInList() {
         guard let selection, let item = items?.first(where: { $0.id == selection }) else { return }
+        if !showsInventory && !item.isLoginRegistration { showsInventory = true }
         if source != nil, source != item.source { source = nil }
         if !filter.includes(item, health: model.launchJobs.watch.health(of: item)) { filter = .all }
         if !Self.matches(item, search.trimmingCharacters(in: .whitespaces)) { search = "" }
@@ -341,7 +381,7 @@ struct StartupView: View {
         let inventory = await Task.detached(priority: .userInitiated) { LaunchItems.inventory() }.value
         let scanned = inventory.items
         // Before the rows, so a first table starts at these widths.
-        columnWidths = StartupTable.widths(for: scanned)
+        columnWidths = StartupTable.widths(for: showsInventory ? scanned : scanned.filter(\.isLoginRegistration))
         apply(inventory, configurationsRead: true)
         scannedAt = .now
         isScanning = false
@@ -810,7 +850,7 @@ private struct StartupStatusBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("\(total) items")
+            Text("\(total) \(total == 1 ? "item" : "items")")
             if isScanning {
                 Text("Reading…")
             } else if let scannedAt {
@@ -844,54 +884,5 @@ private struct NoProblemsNote: View {
             .font(.explanation)
             .foregroundStyle(.secondaryText)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// The app bundles reveal shipped registrations, but not macOS approval switches.
-private struct LoginItemsNote: View {
-    static let settings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Label("Items apps ship inside their bundles are listed. Apps set to open at login, and whether macOS "
-                + "allows each background item, are kept where other apps can't read them.", systemImage: "info.circle")
-                .font(.explanation)
-                .foregroundStyle(.secondaryText)
-                .help("An item inside an app may not be registered or allowed: launchd's list confirms the ones loaded, "
-                    + "but macOS keeps its list of allowed items and Open at Login apps private. Login Items Settings "
-                    + "shows both. Apple's own jobs without a file, services macOS starts on demand, are left out.")
-            Spacer(minLength: 0)
-            Button("Open Login Items Settings") {
-                if let url = Self.settings { NSWorkspace.shared.open(url) }
-            }
-            .controlSize(.small)
-            .fixedSize()
-        }
-    }
-}
-
-/// Shared by the context menu and the detail pane.
-@MainActor
-enum StartupActions {
-    static func reveal(_ item: LaunchItem) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.plistPath)])
-    }
-
-    static func openPlist(_ item: LaunchItem) {
-        NSWorkspace.shared.open(URL(fileURLWithPath: item.plistPath))
-    }
-
-    static func copyLabel(_ item: LaunchItem) {
-        copy(item.label)
-    }
-
-    /// The property list's path, the file Reveal in Finder shows.
-    static func copyPath(_ item: LaunchItem) {
-        copy(item.plistPath)
-    }
-
-    private static func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 }

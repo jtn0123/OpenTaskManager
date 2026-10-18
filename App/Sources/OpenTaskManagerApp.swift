@@ -423,6 +423,8 @@ struct MenuBarView: View {
                 }
 
                 Divider()
+                SystemPressureSummary(compact: true)
+                Divider()
                 Text("Top processes").font(.subheadline).foregroundStyle(.secondary)
                 ForEach(snapshot.processes.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(5), id: \.pid) { process in
                     HStack(spacing: 6) {

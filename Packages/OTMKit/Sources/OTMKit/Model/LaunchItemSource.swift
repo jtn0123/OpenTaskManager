@@ -46,6 +46,14 @@ public extension LaunchItem {
     /// A helper shipped in an app is only known to be registered when launchd lists it.
     var startsAtLogin: Bool { scope.isAgent && startsAutomatically }
 
+    /// Third-party login registrations, including disabled entries and app
+    /// helpers whose registration/approval state macOS doesn't publish.
+    /// Boot daemons and agents that only run on demand belong in the inventory.
+    var isLoginRegistration: Bool {
+        publisher == .thirdParty && scope.isAgent
+            && (source == .loginItem || hasPlist && triggers.startsWhenLoaded)
+    }
+
     var sourceDescription: String {
         if source.isAppBundled, let appBundlePath {
             return "Inside \((appBundlePath as NSString).lastPathComponent) · registered with macOS by the app"

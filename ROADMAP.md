@@ -18,7 +18,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Status bar summary | ✅ | |
 | Always-available shortcut (⌃⇧⎋) | ✅ | |
 | App history (resource use per app over days) | 🚧 | The flight recorder keeps each stretch's five busiest apps by CPU and memory; full per-app graphs over days are planned |
-| Startup apps | 🚧 | LaunchAgents and LaunchDaemons with status, PID, triggers and publisher are done. Login Items and the background items apps register need root to read, so they wait for the privileged helper; for now the page opens their System Settings pane |
+| Startup apps | 🚧 | Opens on third-party login registrations, including disabled agents and app-bundled login helpers; the full launchd inventory is a second view. Status, PID, triggers and publisher are shown. macOS keeps background approval switches and Open at Login apps private; the page links to their System Settings pane |
 | Enable and disable startup items | 🚧 | Third-party agents switch in your own session with `launchctl disable`/`enable` plus `bootout`/`bootstrap`, after a confirmation, and Enable undoes it. Daemons wait for an administrator prompt; Apple's agents are left alone |
 | Users tab | 🚧 | Per-user totals, history, sessions and top processes are done; logging off other sessions is planned |
 | Services tab | 🚧 | The Startup page's details show each job's state, run count, start reason, priority and last exit reason (`launchctl print`), and start, restart and stop third-party agents. A separate tab for on-demand services, and controls for daemons (privileged helper), remain |
@@ -58,6 +58,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, fan speeds, clocks and DC input in one table with lowest and highest since a reset |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Floating mini monitor | ✅ | A minute of each meter above other windows, among them or on the desktop, in a corner of any display; opacity, full strength under the pointer, and the meters it shows in Settings |
+| Why is my Mac slow? | ✅ | Observations on Overview and in the menu bar popup, with a details sheet: high whole-CPU load, one busy core, GPU activity and named macOS memory/thermal pressure; relevant process rankings show usage, without a health score or causal claims |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |
 | Widgets | ⬜ | WidgetKit gauges |
 | Retro display look | ✅ | Settings → Retro display: live graphs on dark display panels, each resource in its own vivid colour (Color, the default) or all in one (green, amber, cyan, red, yellow or white), figures as lit dots or seven-segment bars, with an adjustable glow. On by default as Dot matrix in Color |

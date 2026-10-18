@@ -75,7 +75,7 @@ struct AppDetail: View {
             FactRow(label: "Version", value: app.versionText)
             FactRow(label: "Kind", value: app.isiOSApp ? "\(app.kind.title), iPhone and iPad app" : app.kind.title)
             FactRow(label: "Architecture", value: architecture)
-            FactRow(label: "Size", value: size.map(Format.bytes) ?? (isMeasuring ? "Measuring…" : "—"))
+            FactRow(label: "Disk space", value: size.map(Format.bytes) ?? (isMeasuring ? "Measuring…" : "—"))
             FactRow(label: "Last opened", value: app.lastOpened.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "—")
             if let added = app.added {
                 FactRow(label: "Added", value: added.formatted(date: .abbreviated, time: .shortened))

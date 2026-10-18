@@ -279,20 +279,20 @@ private struct DriverSummaryCards: View {
                               explanation: "Network filters and VPNs, DriverKit drivers and security tools that apps installed "
                                   + "and macOS allowed. They run outside the kernel.",
                               isSelected: selected == .system, action: { apply(.system) })
-            DriverSummaryCard(title: "Third-party kexts", value: summary.thirdPartyKernelExtensions, symbol: "shippingbox",
+            DriverSummaryCard(title: "Third-party kernel extensions", value: summary.thirdPartyKernelExtensions, symbol: "shippingbox",
                               tint: Theme.memory,
                               detail: summary.thirdPartyKernelExtensions == 0 ? "None loaded" : "In the kernel now",
                               explanation: "Kernel extensions from developers other than Apple, loaded now. They run inside the "
                                   + "kernel with full access to the Mac.",
                               isSelected: selected == .thirdPartyKernel, action: { apply(.thirdPartyKernel) })
-            DriverSummaryCard(title: "Loaded kexts", value: summary.loadedKernelExtensions, symbol: "cpu",
+            DriverSummaryCard(title: "Loaded kernel extensions", value: summary.loadedKernelExtensions, symbol: "cpu",
                               tint: Theme.cpu, detail: wiredDetail,
                               explanation: "Every kernel extension loaded now, Apple's included, and the memory their code keeps wired.",
                               isSelected: selected == .kernel, action: { apply(.kernel) })
             // Neutral and never glowing: a copy that doesn't run isn't a problem.
             DriverSummaryCard(title: "Not in use", value: summary.notInUse, symbol: "archivebox", tint: Theme.other,
                               detail: notInUseDetail,
-                              explanation: "Extensions on disk that macOS hasn't registered or loaded, so they don't run: kexts "
+                              explanation: "Extensions on disk that macOS hasn't registered or loaded, so they don't run: kernel extensions (kexts) "
                                   + "in /Library/Extensions or an app, and system extensions an app carries. Often they're left "
                                   + "from an old install or wait for hardware; that alone isn't a problem. Copies whose use "
                                   + "couldn't be told are listed as Unknown and not counted.",

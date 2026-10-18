@@ -256,7 +256,7 @@ private struct AppsSummary: View {
             AppsCard(tint: Theme.memory,
                      detail: sizesLeft > 0 ? "Measuring, \(sizesLeft) to go" : largest.map { "Largest: \($0.app.name)" } ?? "Nothing measured",
                      help: "Space the bundles take on disk. Documents, caches and settings each app keeps in your Library aren't counted.") {
-                Stat(label: "Total size", number: total, color: Theme.memory, format: Format.bytes)
+                Stat(label: "Disk space", number: total, color: Theme.memory, format: Format.bytes)
             }
             AppsCard(tint: Theme.network, detail: AppText.intelDetail(intel: intel, unknown: unknown.count),
                      help: AppText.intelHelp(unknown: unknown.map(\.app.name))) {
@@ -466,13 +466,13 @@ private struct AppsTable: View {
     }
 
     private var sizeColumn: some Column {
-        TableColumn("Size", value: \.sizeOrder) { row in
+        TableColumn("Disk space", value: \.sizeOrder) { row in
             Text(row.size.map(Format.bytes) ?? (isMeasuring ? "…" : "—"))
                 .monospacedDigit()
                 .foregroundStyle(row.size == nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .width(min: Minimum.size, ideal: 65, max: 90)
+        .width(min: max(Minimum.size, 80), ideal: 85, max: 100)
     }
 
     private var lastOpenedColumn: some Column {
@@ -529,7 +529,8 @@ private struct ArchitectureTag: View {
     init?(_ architecture: AppArchitecture) {
         switch architecture {
         case .intel:
-            (title, color, help) = ("Intel only", Theme.network, "Built only for Intel processors: runs under Rosetta")
+            (title, color, help) = ("Intel only", Theme.network,
+                                    "Built only for Intel processors. On Apple silicon, Rosetta translates the app so it can run.")
         case .unsupported:
             (title, color, help) = ("Can't run", .red, "Built only for 32-bit or PowerPC processors, which current macOS can't run")
         case .unknown:
@@ -566,7 +567,7 @@ struct ArchitectureLabel: View {
                 Text(app.architecture.title)
             }
             .foregroundStyle(Theme.network)
-            .help("Built only for Intel processors: runs under Rosetta")
+            .help("Built only for Intel processors. On Apple silicon, Rosetta translates the app so it can run.")
         case .unsupported:
             Text(app.architecture.title)
                 .foregroundStyle(.red)
