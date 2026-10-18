@@ -1186,7 +1186,11 @@ Comparison refusals and figure-specific timing warnings remain explicit beside t
   default as Dot matrix in Color. Color keeps the preset and the user's
   colours, made vivid (`GraphPalette.vivid`: each tone at the sRGB gamut edge
   in its own OKLCh hue, 0.05 deeper, via `PerceptualColor`), and each graph's
-  panel, grid and labels take its first line's colour; the one-colour tints
+  panel takes its first line's colour: smoked glass (`RetroDisplay.smokedGlass`)
+  with a trace of it, a near-white grid, edge and labels lit
+  (`RetroDisplay.Ruling`), a tighter, brighter bloom (`RetroDisplay.bloom`), a
+  faint fill (`GraphEmphasis.vivid`), plain cards under it and key names in
+  their lines' colours; the one-colour tints
   put their palette (`GraphPalette.retro`) in place of the preset and the
   user's colours while on. Live graphs draw as dark panels in either
   appearance (the view's layer background and border, forced dark, grid and

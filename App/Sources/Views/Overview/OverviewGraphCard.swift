@@ -110,11 +110,13 @@ struct ChartKeyRow: View {
     var keys: [ChartKey]
 
     var body: some View {
+        // On a Color display each name is lit in its line's colour, as the panel's labels are.
+        let lit = GraphColors.shared.retro.isOn && GraphColors.shared.retro.tint.isMulticolor
         FlowRow(spacing: 16, lineSpacing: 4, spreads: false) {
             ForEach(keys) { key in
                 HStack(alignment: .center, spacing: 6) {
                     KeyMark(color: key.color, mark: key.mark)
-                    Text(key.name).foregroundStyle(.secondaryText)
+                    Text(key.name).foregroundStyle(lit ? AnyShapeStyle(key.color) : AnyShapeStyle(.secondaryText))
                     if let figure = key.figure {
                         // Room for a typical rate, so the next key doesn't shift with each digit.
                         AnimatedNumber(value: figure.value, format: figure.format, font: Self.figureFont)

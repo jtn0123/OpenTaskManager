@@ -40,7 +40,7 @@ struct RetroDisplayTests {
         for swatch in palette.series {
             #expect(ColorContrast.ratio(swatch.dark, panel) >= 3)
         }
-        #expect(palette.emphasis == .retro)
+        #expect(palette.emphasis == (tint.isMulticolor ? .vivid : .retro))
     }
 
     static let oneColor = RetroDisplay.Tint.allCases.filter { !$0.isMulticolor }
@@ -60,10 +60,44 @@ struct RetroDisplayTests {
         #expect(ColorContrast.ratio(tint.tone, display.panel) >= 6, "lit on unlit glass")
     }
 
-    @Test func thePanelIsNearlyBlack() {
-        for tint in RetroDisplay.Tint.allCases {
+    @Test func aOneColourPanelIsNearlyBlack() {
+        for tint in Self.oneColor {
             let panel = RetroDisplay(style: .dotMatrix, tint: tint, glow: .soft).panel
             #expect(ColorContrast.luminance(panel) < 0.01)
+        }
+    }
+
+    @Test func aColorPanelIsSmokedGlassTintedByItsLight() {
+        let display = RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft)
+        for role in [Role.cpu, .memory, .disk, .network] {
+            let light = GraphPalette.retro(.color)[role].dark
+            let panel = display.panel(lit: light)
+            // A shade under a dark window, its light still well clear of it.
+            #expect(ColorContrast.luminance(panel) < ColorContrast.luminance(GraphPalette.darkBackground) * 1.25)
+            #expect(ColorContrast.luminance(panel) > ColorContrast.luminance(RetroDisplay.glass))
+            #expect(ColorContrast.ratio(light, panel) >= 3, "\(role)")
+            #expect(PerceptualColor.lab(panel).chroma > PerceptualColor.lab(RetroDisplay.smokedGlass).chroma)
+        }
+    }
+
+    @Test func aColorPanelsRulingReadsWhateverItsColour() {
+        let color = RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft)
+        let blue = color.ruling(lit: RGB(0x067CFF)), green = color.ruling(lit: RGB(0x30D058))
+        // Near white either way, so a blue panel's grid shows as a green one's does.
+        #expect(abs(ColorContrast.luminance(blue.ink) - ColorContrast.luminance(green.ink)) < 0.12)
+        #expect(blue.minorGrid < blue.grid && blue.grid <= blue.majorGrid)
+        #expect(blue.edge > RetroDisplay(style: .dotMatrix, tint: .green, glow: .soft).ruling(lit: RGB(0x30D058)).edge)
+        // One colour's grid stays its tint.
+        let amber = RetroDisplay(style: .dotMatrix, tint: .amber, glow: .soft)
+        #expect(amber.ruling(lit: RetroDisplay.Tint.amber.tone).ink == RetroDisplay.Tint.amber.tone)
+    }
+
+    @Test func aColorDisplaysGlowIsTighterAndBrighter() {
+        for glow in RetroDisplay.Glow.allCases {
+            let color = RetroDisplay(style: .dotMatrix, tint: .color, glow: glow).bloom
+            let green = RetroDisplay(style: .dotMatrix, tint: .green, glow: glow).bloom
+            #expect(color.opacity >= green.opacity && color.spread < green.spread)
+            #expect(color.opacity < 0.5)
         }
     }
 
@@ -135,7 +169,7 @@ struct RetroDisplayTests {
     @Test func colorKeepsEachResourcesOwnColourMadeVivid() {
         let palette = GraphPalette.retro(.color)
         let standard = GraphPalette.preset(.standard)
-        #expect(palette.emphasis == .retro)
+        #expect(palette.emphasis == .vivid)
         for role in Role.allCases {
             let vivid = PerceptualColor.lab(palette[role].tone), plain = PerceptualColor.lab(standard[role].tone)
             guard plain.chroma > 0.04 else {
@@ -165,9 +199,11 @@ struct RetroDisplayTests {
     }
 
     @Test func aPanelTakesATraceOfItsLight() {
-        let green = RetroDisplay.panel(lit: RetroDisplay.Tint.green.tone)
+        let display = RetroDisplay(style: .dotMatrix, tint: .green, glow: .soft)
+        let green = display.panel(lit: RetroDisplay.Tint.green.tone)
         #expect(green.green > green.red && ColorContrast.luminance(green) < 0.01)
-        #expect(RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft).panel == RetroDisplay.panel(lit: RetroDisplay.Tint.color.tone))
+        let color = RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft)
+        #expect(color.panel == color.panel(lit: RetroDisplay.Tint.color.tone))
     }
 
     @Test func theMostVividColourStaysInsideSRGB() throws {

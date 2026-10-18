@@ -438,8 +438,11 @@ struct CardSurface: NSViewRepresentable {
     }
 
     func updateNSView(_ view: CardSurfaceView, context: Context) {
-        // Washes stay pastel in light mode: only lines and text deepen.
-        view.update(tint: tint.map { NSColor($0).fillShade }, glow: glow)
+        // Washes stay pastel in light mode: only lines and text deepen. On a
+        // Color display the colour is the graphs' panels', so the card under
+        // them is plain, its edge and halo still in the colour.
+        let retro = GraphColors.shared.retro
+        view.update(tint: tint.map { NSColor($0).fillShade }, glow: glow, washed: !(retro.isOn && retro.tint.isMulticolor))
     }
 }
 
@@ -453,6 +456,7 @@ final class CardSurfaceView: NSView {
     private let sheen = CAGradientLayer()
     private var tint: NSColor?
     private var glow: Double = 0
+    private var washed = true
     private var hasStyled = false
 
     override init(frame: NSRect) {
@@ -480,12 +484,13 @@ final class CardSurfaceView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func update(tint: NSColor?, glow: Double) {
-        let restyle = !hasStyled || tint != self.tint
+    func update(tint: NSColor?, glow: Double, washed: Bool) {
+        let restyle = !hasStyled || tint != self.tint || washed != self.washed
         let glow = min(max(glow.isFinite ? glow : 0, 0), 1)
         guard restyle || glow != self.glow else { return }
         self.tint = tint
         self.glow = glow
+        self.washed = washed
         hasStyled = true
         if restyle { applyColors() }
         CATransaction.begin()
@@ -533,7 +538,8 @@ final class CardSurfaceView: NSView {
         CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let base = tint ?? .secondaryLabelColor
-            surface.colors = [base.withAlphaComponent(tint == nil ? 0.10 : 0.16).cgColor, base.withAlphaComponent(0.03).cgColor]
+            let wash = washed ? base : .secondaryLabelColor
+            surface.colors = [wash.withAlphaComponent(tint == nil || !washed ? 0.10 : 0.16).cgColor, wash.withAlphaComponent(0.03).cgColor]
             surface.borderColor = borderColor.cgColor
             halo.shadowColor = base.cgColor
             let light = NSColor.white.withAlphaComponent(0.16).cgColor

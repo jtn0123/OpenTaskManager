@@ -134,7 +134,8 @@ struct RetroDisplayPreview: View {
         let light = retro.tint.isMulticolor ? palette[.cpu].dark : retro.tint.tone
         let tint = Color(nsColor: GraphColors.nsColor(light))
         let shape = RoundedRectangle(cornerRadius: 6).path(in: CGRect(origin: .zero, size: size))
-        context.fill(shape, with: .color(Color(nsColor: GraphColors.nsColor(RetroDisplay.panel(lit: light)))))
+        let ruling = retro.ruling(lit: light)
+        context.fill(shape, with: .color(Color(nsColor: GraphColors.nsColor(retro.panel(lit: light)))))
         let grid = Path { path in
             for fraction in [0.25, 0.5, 0.75] {
                 path.move(to: CGPoint(x: 0, y: size.height * fraction))
@@ -145,7 +146,7 @@ struct RetroDisplayPreview: View {
                 path.addLine(to: CGPoint(x: size.width * fraction, y: size.height))
             }
         }
-        context.stroke(grid, with: .color(tint.opacity(RetroDisplay.gridOpacity)), lineWidth: 0.5)
+        context.stroke(grid, with: .color(Color(nsColor: GraphColors.nsColor(ruling.ink)).opacity(ruling.grid)), lineWidth: 0.5)
 
         let solid = StrokeStyle(lineWidth: 1.75 * GraphEmphasis.traceWidth, lineCap: .round, lineJoin: .round)
         let lines = [
@@ -169,13 +170,13 @@ struct RetroDisplayPreview: View {
                 context.fill(area, with: .linearGradient(Gradient(colors: [color.opacity(0.45 * fade), color.opacity(0)]),
                                                          startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
             }
-            if retro.glow.bloom > 0 {
+            if retro.bloom.opacity > 0 {
                 var bloom = style
-                bloom.lineWidth += 6
-                context.stroke(trace, with: .color(color.opacity(retro.glow.bloom)), style: bloom)
+                bloom.lineWidth += retro.bloom.spread
+                context.stroke(trace, with: .color(color.opacity(retro.bloom.opacity)), style: bloom)
             }
             context.stroke(trace, with: .color(color), style: style)
         }
-        context.stroke(shape, with: .color(tint.opacity(RetroDisplay.edgeOpacity)), lineWidth: 1)
+        context.stroke(shape, with: .color(tint.opacity(ruling.edge)), lineWidth: 1)
     }
 }
