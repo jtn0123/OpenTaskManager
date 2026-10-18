@@ -24,6 +24,7 @@ final class AppModel {
     let samplingDemand = SamplingDemandStore()
     @ObservationIgnored let backgroundSampling = BackgroundSamplingState()
     let menuBarIcon = MenuBarIconStore()
+    let diskLights = DiskActivityStore()
     @ObservationIgnored var dockIcon: DockIconController?
     let miniMonitor = MiniMonitorStore()
     /// The floating mini monitor's panel, made once the app is running.
@@ -164,6 +165,7 @@ final class AppModel {
     var isPaused = false {
         didSet {
             dockIcon?.setPaused(isPaused)
+            diskLights.setPaused(isPaused)
             if isPaused { stop() } else { start() }
         }
     }

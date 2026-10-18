@@ -37,6 +37,7 @@ struct OpenTaskManagerApp: App {
             SidebarCommands()
             PageCommands()
             MiniMonitorCommands()
+            SoftwareUpdateCommands()
             CommandGroup(after: .toolbar) {
                 Button(UpdateControlLabels.liveMenuTitle(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil)) {
                     model.isPaused.toggle()
@@ -48,6 +49,11 @@ struct OpenTaskManagerApp: App {
                     .keyboardShortcut("r")
             }
         }
+
+        Window("Software Updates", id: "software-updates") {
+            SoftwareUpdateWindow()
+        }
+        .windowResizability(.contentSize)
 
         Settings {
             SettingsView()
@@ -67,6 +73,15 @@ struct OpenTaskManagerApp: App {
                 .environment(model)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+private struct SoftwareUpdateCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { openWindow(id: "software-updates") }
+        }
     }
 }
 
@@ -387,10 +402,20 @@ struct MenuBarLabel: View {
 
     @State private var tracksIcon = false
 
+    private var diskDescription: String {
+        guard model.diskLights.enabled else { return "" }
+        let lights = model.diskLights.lights
+        if model.diskLights.paused { return "; disk activity paused" }
+        if lights.isEmpty { return "; no selected physical disks connected" }
+        return "; read \(lights.contains(where: \.reading) ? "active" : "idle"), "
+            + "write \(lights.contains(where: \.writing) ? "active" : "idle") during the last sample · "
+            + lights.map(\.name).joined(separator: ", ")
+    }
+
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(model.menuBarIcon.drawing))
-            .accessibilityLabel("CPU \(model.menuBarIcon.drawing.text)")
-            .help("CPU · latest sample, icon refreshed every 2 s or at the chosen slower update speed")
+        Image(nsImage: MenuBarIcon.image(model.menuBarIcon.drawing, disks: model.diskLights.enabled ? model.diskLights.lights : nil))
+            .accessibilityLabel("CPU \(model.menuBarIcon.drawing.text)" + diskDescription)
+            .help("CPU · latest sample, icon refreshed every 2 s or at the chosen slower update speed" + diskDescription)
             .onAppear {
                 WindowOpener.openMainWindow = { openWindow(id: "main") }
                 if !tracksIcon { model.samplingDemand.add(.menuBarIcon) }
@@ -410,6 +435,10 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if model.diskLights.enabled {
+                DiskActivityMenuRows(store: model.diskLights)
+                Divider()
+            }
             if let snapshot = model.snapshot {
                 meter("CPU", Format.percent(snapshot.cpu.usage), model.cpuHistory.values, Theme.cpu, 1)
                 meter("Memory", "\(Format.bytes(snapshot.memory.used)) · \(snapshot.memory.pressure.rawValue)",
@@ -495,6 +524,7 @@ struct SettingsView: View {
                 }
                 Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
+            PercentageGraphSettings()
             Section("Dock icon") {
                 Picker("Show", selection: $dockGraphMode) {
                     ForEach(DockGraphMode.allCases) { Text($0.title).tag($0) }
@@ -503,6 +533,8 @@ struct SettingsView: View {
                      + "or at your slower update speed. Keeps running when the main window closes.")
                     .font(.explanation).foregroundStyle(.secondaryText)
             }
+            DiskActivitySettings()
+            SoftwareUpdateSettings()
             MiniMonitorSettings()
             GraphColorSettings()
             RetroDisplaySettings()

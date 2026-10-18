@@ -8,6 +8,7 @@ struct SettingsTests {
         "appsFilter": .string("All"),
         "showAppsInspector": .bool(true),
         "overviewShowsCores": .bool(true),
+        "gpuTimeGraphScale": .string("auto"),
         "cpuGraphScale": .string("auto"),
         "startupFilter": .string("All"),
         "showStartupInspector": .bool(true),
@@ -18,6 +19,9 @@ struct SettingsTests {
         "cpuGraphMode": .string("cores"),
         "cpuLargerGraphs": .bool(false),
         "showMenuBarExtra": .bool(true),
+        "diskActivityLights": .bool(false),
+        "diskLightSelection": .string("all"),
+        "automaticUpdateChecks": .bool(false),
         "dockGraphMode": .string("off"),
         "miniMonitorShown": .bool(false),
         "miniMonitorLevel": .string("aboveWindows"),
@@ -112,6 +116,7 @@ struct SettingsTests {
     @Test func choicesKeepTheirRawPropertyListEncoding() throws {
         try withDefaults { defaults in
             checkChoices(Settings.dockGraphMode, in: defaults)
+            checkChoices(Settings.gpuTimeGraphScale, in: defaults)
             checkChoices(Settings.appsFilter, in: defaults)
             checkChoices(Settings.startupFilter, in: defaults)
             checkChoices(Settings.driversFilter, in: defaults)

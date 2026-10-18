@@ -42,6 +42,18 @@ public enum Settings {
     public static let showMenuBarExtra = SettingKey<Bool, Bool>(
         "showMenuBarExtra", default: true, meaning: "Whether the menu bar item is shown."
     )
+    public static let gpuTimeGraphScale = SettingKey<CPUGraphScale, String>(
+        "gpuTimeGraphScale", default: .auto, meaning: "Auto or fixed 100-percent axes for GPU time by app and process."
+    )
+    public static let diskActivityLights = SettingKey<Bool, Bool>(
+        "diskActivityLights", default: false, meaning: "Show physical disk read/write lights in the menu bar."
+    )
+    public static let diskLightSelection = SettingKey<DiskLightSelection, String>(
+        "diskLightSelection", default: .all, meaning: "Selected physical disk names, or all current physical disks."
+    )
+    public static let automaticUpdateChecks = SettingKey<Bool, Bool>(
+        "automaticUpdateChecks", default: false, meaning: "Check public GitHub releases at most daily when opening or returning to the app."
+    )
     public static let dockGraphMode = SettingKey<DockGraphMode, String>(
         "dockGraphMode", default: .off, meaning: "Optional CPU or memory history in the Dock icon."
     )
@@ -284,6 +296,7 @@ public enum Settings {
         showAppsInspector.descriptor,
         overviewShowsCores.descriptor,
         cpuGraphScale.descriptor,
+        gpuTimeGraphScale.descriptor,
         startupFilter.descriptor,
         showStartupInspector.descriptor,
         performanceShowsDiskImages.descriptor,
@@ -293,6 +306,9 @@ public enum Settings {
         cpuGraphMode.descriptor,
         cpuLargerGraphs.descriptor,
         showMenuBarExtra.descriptor,
+        automaticUpdateChecks.descriptor,
+        diskActivityLights.descriptor,
+        diskLightSelection.descriptor,
         dockGraphMode.descriptor,
         miniMonitorShown.descriptor,
         miniMonitorLevel.descriptor,

@@ -36,6 +36,9 @@ public enum DriversFilter: String, CaseIterable, Sendable, Identifiable {
 public enum CPUGraphScale: String, CaseIterable, Sendable {
     case auto
     case full
+
+    /// For bounded percentage charts; nil leaves their normal auto-scaler in charge.
+    public var fixedMaximum: Double? { self == .full ? 1 : nil }
 }
 
 public enum GroupMemberSort: String, CaseIterable, Sendable {

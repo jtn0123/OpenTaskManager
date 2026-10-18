@@ -290,6 +290,7 @@ extension AppModel {
         let state = backgroundSampling
         if snapshot.interval > 0 {
             state.iconHistory.append(snapshot.cpu.usage)
+            diskLights.update(snapshot.disks, visible: samplingDemand.contains(.menuBarIcon) && samplingDemand.displayIsAwake)
             dockIcon?.update(cpu: snapshot.cpu.usage, memory: snapshot.memory.usedFraction,
                              at: ProcessInfo.processInfo.systemUptime, visible: samplingDemand.displayIsAwake)
             if samplingDemand.contains(.menuBarIcon) && samplingDemand.displayIsAwake {

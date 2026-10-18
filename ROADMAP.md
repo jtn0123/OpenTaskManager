@@ -64,6 +64,9 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Dock tile live graph | ✅ | Optional CPU or memory history, two minutes at up to one update every two seconds; current percentage, pause marker and normal icon restored when off |
 | Widgets | ⬜ | WidgetKit gauges |
 | Retro display look | ✅ | Settings → Retro display: live graphs on dark display panels, each resource in its own vivid colour (Color, the default) or all in one (green, amber, cyan, red, yellow or white), figures as lit dots or seven-segment bars, with an adjustable glow. On by default as Dot matrix in Color |
+| Manual and optional daily update checks | ✅ | Off by default; unauthenticated stable GitHub Releases metadata, manual download/install; universal ZIP and draft-release packaging |
+| Selected disk activity lights | ✅ | Menu bar R/W lights and per-disk popup from existing samples; all physical disks or selected BSD names |
+| Fixed percentage graph scales | ✅ | CPU and GPU-time Auto / 100% controls; utilization and pressure already fixed at 100% |
 | Signed, notarized releases with auto-update | ⬜ | Needs an Apple Developer account; Sparkle for updates; Homebrew cask |
 
 ## Release plan

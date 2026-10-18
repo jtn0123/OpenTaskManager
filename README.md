@@ -209,6 +209,50 @@ Builds are ad-hoc signed, so they run on the machine that built them. Signed
 and notarized downloads need an Apple Developer account; they're on the
 [roadmap](ROADMAP.md).
 
+## Update checks and release archives
+
+Automatic update checks are **off by default**. Use OpenTaskManager → Check for
+Updates… or Check Now in Settings at any time. The optional automatic setting
+checks on launch or return to the app, at most once per 24 hours, including
+failed attempts. There is no background timer. Checks use GitHub's
+[latest stable release endpoint](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)
+without authentication, cookies or system readings. Drafts and prereleases are
+excluded. A private repository or missing release reports “No public release”.
+A newer version opens its release page; downloading and installing are manual.
+
+From a clean, committed checkout:
+
+```sh
+make package VERSION=0.1.0
+```
+
+This builds an ad-hoc signed **Intel + Apple Silicon** app, verifies its signature
+and architectures, and writes a ZIP and SHA-256 checksum under `dist/`. The ZIP
+includes the GPL license, installation notes and source commit. Existing outputs
+are never overwritten. Set `RELEASE_OUTPUT_DIR` to write elsewhere.
+
+The Prepare release workflow validates and packages a stable version. A tag push
+prepares a **draft** GitHub release; a manual run uploads an artifact and optionally
+attaches a draft to an existing tag. It never creates tags or publishes releases.
+Developer ID signing, notarization and automatic installation remain planned.
+
+## Disk lights and percentage scales
+
+Settings → Disk activity lights enables separate R/W indicators beside the menu
+bar CPU meter. Choose all physical disks or individual BSD device names; disk
+images are excluded. The popup shows each disk separately. Lights describe the
+last sampled interval, go idle when metrics pause, and reuse the existing sampler.
+Show in menu bar must be enabled; with both settings on, closing the main window
+keeps the app running. Reconnecting a device under a different BSD name requires
+selecting it again, unless All physical disks is enabled.
+
+Settings → Graph scales offers Auto or Fixed at 100% for CPU graphs and GPU-time
+graphs. CPU includes cores, apps and History; GPU time includes the GPU page's apps
+and the process inspector. The GPU page also has an Auto / 100% control. Utilization
+and pressure percentages already use 100% bounds; rates, clocks and memory sizes
+retain their own units and scaling. GPU time is GPU seconds per elapsed second,
+not a hardware utilization reading.
+
 ## How it reads the system
 
 Root isn't needed. Most figures come from public kernel and IOKit

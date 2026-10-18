@@ -48,6 +48,7 @@ struct ProcessRowGroup {
 /// One process, by PID and start time: a PID macOS gives to a later process
 /// never shows here as this one.
 struct ProcessInspectorView: View {
+    @Setting(Settings.gpuTimeGraphScale) private var gpuTimeScale: CPUGraphScale
     @Environment(AppModel.self) private var model
     let identity: ProcessIdentity
     /// Set when the selected row has processes nested under it.
@@ -226,6 +227,7 @@ struct ProcessInspectorView: View {
             title: "GPU",
             trailing: Format.percent(process.gpuFraction ?? 0, digits: 1),
             series: [GraphSeries(values: history.map(\.gpuFraction), color: Theme.gpu)],
+            maxValue: gpuTimeScale.fixedMaximum,
             height: 60,
             minimumCeiling: 0.05,
             maximumCeiling: 1,

@@ -18,9 +18,10 @@ APP_DEBUG := $(DERIVED)/Build/Products/Debug/OpenTaskManager.app
 APP_REL   := $(DERIVED)/Build/Products/Release/OpenTaskManager.app
 KIT       := Packages/OTMKit
 
-.PHONY: help generate build release run test test-app coverage cli install-cli icon lint clean
+.PHONY: help generate build release run test test-app coverage cli install-cli icon lint clean package
 
 help:
+	@echo "make package VERSION=x.y.z  Build a signed universal ZIP and checksum locally"
 	@echo "make generate     Generate $(PROJECT) from project.yml (needs xcodegen)"
 	@echo "make build        Debug build of the app"
 	@echo "make run          Build and launch the app"
@@ -78,3 +79,7 @@ lint:
 
 clean:
 	rm -rf .build $(KIT)/.build $(PROJECT)
+
+# Requires a clean checkout; only creates local artifacts.
+package:
+	bash scripts/package-release.sh "$(VERSION)"

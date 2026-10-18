@@ -3,6 +3,7 @@ import SwiftUI
 
 struct GPUDetail: View {
     @Environment(AppModel.self) private var model
+    @Setting(Settings.gpuTimeGraphScale) private var timeScale: CPUGraphScale
     var gpu: GPUSample
     var snapshot: SystemSnapshot
 
@@ -41,9 +42,13 @@ struct GPUDetail: View {
         // hero above holds the Fit toggle, whether or not utilization is reported.
         return ChartCard(title: "GPU time by app", trailing: GPUTimeFigure.label, trailingHelp: GPUTimeFigure.help,
                          tint: Theme.gpu, legend: legend, note: gpu.deviceUtilization == nil ? GPUTimeFigure.withoutUtilization : nil) {
-            GraphView(series: series, glows: true, stacked: true,
-                      minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) }, cornerRadius: 8)
-                .chartFrame(height: DetailGraph.secondary, tint: Theme.gpu)
+            VStack(alignment: .trailing, spacing: 8) {
+                GPUTimeScalePicker()
+                GraphView(series: series, maxValue: timeScale.fixedMaximum, glows: true, stacked: true,
+                          minimumCeiling: 0.05, maximumCeiling: 1, axis: { Format.percent($0) },
+                          axisNote: timeScale == .auto ? CPUGraphScale.autoNote : nil, cornerRadius: 8)
+                    .chartFrame(height: DetailGraph.secondary, tint: Theme.gpu)
+            }
         }
     }
 

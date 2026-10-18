@@ -1,0 +1,81 @@
+name: Prepare release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Stable version, e.g. 0.2.0 (no tag is created)'
+        required: true
+        type: string
+      draft_release:
+        description: 'Attach to an existing vVERSION tag as a draft release'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository == 'jtn0123/OpenTaskManager'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select Xcode
+        run: |
+          xcode=$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+      - name: Install build tools
+        run: brew install xcodegen swiftlint
+      - name: Validate
+        run: |
+          make lint
+          make coverage
+          make test-app
+      - name: Package universal app
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          version=$TAG_VERSION
+          if [[ $EVENT_NAME == workflow_dispatch ]]; then version=$INPUT_VERSION; fi
+          make package VERSION="$version"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+      - name: Prepare draft release for owner review
+        if: github.event_name == 'push' || inputs.draft_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG_VERSION: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          version=$TAG_VERSION
+          if [[ $EVENT_NAME == workflow_dispatch ]]; then version=$INPUT_VERSION; fi
+          tag="v${version#v}"
+          cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
+          Ad-hoc signed universal build for macOS 14 or later.
+          This build is not Developer ID signed or notarized. Installation is manual.
+          SHA-256 checksums are attached. Review the archive and validation results before publishing.
+          EOF
+          gh release create "$tag" dist/*.zip dist/*.sha256 --verify-tag --draft \
+            --title "OpenTaskManager $tag" --notes-file "$RUNNER_TEMP/release-notes.md"
