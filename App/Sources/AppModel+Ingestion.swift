@@ -28,7 +28,7 @@ extension AppModel {
         let held = fixture(or: sensors) ?? backgroundSampling.sensors
         backgroundSampling.sensors = held
         backgroundSampling.readings = SensorTable.readings(sensors: held, power: snapshot.power,
-                                                          gpus: snapshot.gpus, ordered: false)
+                                                          gpus: snapshot.gpus, ordered: false, freshMediaOnly: true)
         backgroundSampling.extremes.record(backgroundSampling.readings, thermalState: snapshot.power.thermalState)
         refreshRegularApps(publish: visible)
         backgroundSampling.power.add(snapshot.power, interval: snapshot.interval)

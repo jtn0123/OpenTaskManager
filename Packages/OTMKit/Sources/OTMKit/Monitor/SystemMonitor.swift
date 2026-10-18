@@ -50,14 +50,14 @@ public actor SystemMonitor {
     }
 
     public func sample(restrictedProcessesLive: Bool = true, processFigures: Bool = true,
-                       processDetails: Bool = true, processGPU: Bool = true) -> SystemSnapshot {
+                       processDetails: Bool = true, processGPU: Bool = true, mediaActivityLive: Bool = false) -> SystemSnapshot {
         let now = ContinuousClock.now
         let interval = lastSample.map { Self.seconds(now - $0) } ?? 0
         lastSample = now
 
         let readsProcesses = options.includeProcesses && processFigures
         let gpuResult = gpu.sample(includeProcesses: readsProcesses && options.includeProcessGPU && processGPU)
-        let powerResult = power.sample(includeComponents: options.includeComponentPower)
+        let powerResult = power.sample(includeComponents: options.includeComponentPower, mediaActivityLive: mediaActivityLive)
         processes.includeRestricted = options.includeRestrictedProcesses
         let processInterval = lastProcessSample.map { Self.seconds(now - $0) } ?? 0
         let processList = readsProcesses

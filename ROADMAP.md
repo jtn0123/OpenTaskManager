@@ -56,6 +56,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. Your own processes only until the privileged helper |
 | "Who is using…" | 🚧 | Port to process is done (the Connections page and `otm ports`). File and volume to process, and the "can't eject" helper, are planned |
 | Graph colour presets | ✅ | Standard, colour-blind friendly (deuteranopia and protanopia) and high contrast in Settings, with a colour of your own per resource; apps keep their colour in "by app" graphs |
+| Media-engine activity | ✅ | GPU detail and recorded History show time above the minimum power state for reporting video, ProRes, scaler and codec blocks; unavailable counters stay absent |
 | Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, fan speeds, clocks and DC input in one table with lowest and highest since a reset |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
 | Floating mini monitor | ✅ | A minute of each meter above other windows, among them or on the desktop, in a corner of any display; opacity, full strength under the pointer, and the meters it shows in Settings |

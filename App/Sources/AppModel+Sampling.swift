@@ -39,7 +39,8 @@ extension AppModel {
                 async let readings = sensorMonitor.sample(live: policy.sensorsLive)
                 let snapshot = await monitor.sample(restrictedProcessesLive: policy.restrictedProcessesLive,
                                                     processFigures: policy.processFigures, processDetails: policy.processDetails,
-                                                    processGPU: policy.processGPU)
+                                                    processGPU: policy.processGPU,
+                                                    mediaActivityLive: demand.hasVisibleWindow && demand.contains(.mediaEngines))
                 let sensors = await readings
                 guard !Task.isCancelled else { return }
                 ingest(snapshot, sensors: sensors, processesRead: policy.processFigures)

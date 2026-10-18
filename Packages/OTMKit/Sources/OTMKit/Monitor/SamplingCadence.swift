@@ -28,6 +28,8 @@ public struct SamplingCadence: Sendable {
 /// slow the source while another still shows it.
 public struct SamplingDemand: Sendable {
     public enum Source: Sendable, Hashable {
+        /// Visible media card; isolated IOReport subscription, at most every 2 s.
+        case mediaEngines
         /// The mini monitor counts as an icon, not a window: shown on its
         /// own it keeps sampling at the background pace.
         case sensors, restrictedProcesses, users, sensorTable, menuBarIcon, miniMonitor, window

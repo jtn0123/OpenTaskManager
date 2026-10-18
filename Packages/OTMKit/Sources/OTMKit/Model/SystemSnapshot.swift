@@ -384,4 +384,9 @@ public struct PowerSample: Sendable, Codable {
     /// Per-component power. nil when IOReport is unavailable and on the first
     /// sample, which has no interval to measure over.
     public var components: PowerComponents?
+    /// Latest media-block power-state residency. nil before an IOReport baseline,
+    /// empty when no media channel has a usable counter.
+    public var mediaEngines: [MediaEngineSample]?
+    /// false when the UI repeats the last reading between media polls.
+    public var mediaEnginesFresh: Bool?
 }

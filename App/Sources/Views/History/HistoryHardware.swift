@@ -10,6 +10,7 @@ extension HistoryHardwareChart {
         case .cores: "Core types"
         case .eachCore: "Each core"
         case .clocks: "Clocks"
+        case .media: "Media engines"
         case .temperatures: "Temperatures"
         case .fans: "Fans"
         case .power: "Power rails"
@@ -21,6 +22,7 @@ extension HistoryHardwareChart {
         case .cores: .load
         case .eachCore: nil
         case .clocks: .clock
+        case .media: .media
         case .temperatures: .temperature
         case .fans: .fan
         case .power: .power
@@ -59,6 +61,9 @@ extension HistoryHardwareChart {
         case .cores, .eachCore:
             HistoryChartSpec(title: "Core types", symbol: "cpu", tint: Theme.cpu, lines: lines, format: { Format.percent($0) },
                              ceiling: 1, followsCPUScale: true)
+        case .media:
+            HistoryChartSpec(title: "Media-engine active time", symbol: "film", tint: Theme.gpu, lines: lines,
+                             format: { Format.percent($0, digits: 1) }, ceiling: 1)
         case .clocks:
             HistoryChartSpec(title: "Clocks", symbol: "speedometer", tint: Theme.cpu, lines: lines,
                              format: { Format.frequency(megahertz: $0) }, floor: 1_000)
@@ -79,6 +84,7 @@ extension HistoryHardwareChart {
         case .load:
             series.id == HistoryHardwareSeries.busiestCore
                 ? "the load of whichever logical CPU was busiest at each update" : "the average load across the \(series.label.lowercased())"
+        case .media: "time above the block’s minimum power state, not throughput or utilization"
         case .clock:
             series.id == "gpu.clock" ? "the GPU's clock while it ran, idle time left out"
                 : "the cluster's clock while it ran, idle time left out; an idle cluster has none"
@@ -164,7 +170,7 @@ struct HistoryHardwareSection: View {
                 .foregroundStyle(.secondaryText)
                 .fixedSize()
             // Wraps in a narrow window rather than cut off.
-            Text("Core loads, clocks, temperatures, fans and power rails")
+            Text("Core loads, clocks, media activity, temperatures, fans and power rails")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

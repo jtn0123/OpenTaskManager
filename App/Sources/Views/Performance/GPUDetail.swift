@@ -13,6 +13,7 @@ struct GPUDetail: View {
             // Its title, level bar and main graph: utilization, or memory in use
             // where a paravirtual GPU reports nothing else, never a flat 0%.
             GPUHero(gpu: gpu, snapshot: snapshot)
+            MediaEngineCard(engines: snapshot.power.mediaEngines ?? [])
             byApp()
             FillGrid(minimum: 280) {
                 if gpu.frequencyMHz != nil || gpu.activeResidency != nil { clock() }

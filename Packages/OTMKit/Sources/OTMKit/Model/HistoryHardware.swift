@@ -13,6 +13,8 @@ public struct HistoryHardwareSeries: Sendable, Hashable, Identifiable, Comparabl
         case load
         /// Each CPU cluster's clock while it runs, and the GPU's.
         case clock
+        /// Media-block time above its minimum power state.
+        case media
         case temperature
         case fan
         case power
@@ -76,6 +78,13 @@ public struct HistoryHardwareSample: Sendable, Equatable {
         let fresh = sensorsRead ? readings : readings.filter { !Self.comesFromSensors($0) }
         let usable = fresh.filter { $0.value?.isFinite == true }
         addClocks(usable)
+        for reading in usable where reading.id.hasPrefix("media/") && reading.unit == .fraction {
+            let parts = reading.id.split(separator: "/")
+            guard parts.count == 3, let value = reading.value, (0...1).contains(value) else { continue }
+            add(HistoryHardwareSeries(id: "media.active.\(parts[1])", kind: .media, unit: .fraction,
+                                      label: String(reading.label.dropLast(" active time".count)),
+                                      source: Self.describe(reading), rank: reading.rank), value)
+        }
         addTemperatures(usable)
         for reading in usable where reading.group == .fans && reading.unit == .rpm {
             guard let number = reading.id.split(separator: "/").last.flatMap({ Int($0) }), let rpm = reading.value, rpm >= 0 else { continue }

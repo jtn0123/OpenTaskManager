@@ -55,6 +55,7 @@ public enum HistoryHardwareChart: String, CaseIterable, Sendable, Identifiable {
     case cores
     case eachCore
     case clocks
+    case media
     case temperatures
     case fans
     case power

@@ -283,6 +283,8 @@ struct GPUActivity: Equatable {
 
 struct SoCPowerResult {
     var components: PowerComponents?
+    var mediaEngines: [MediaEngineSample] = []
+    var mediaEnginesFresh = false
     /// Keyed by the GPU driver's registry ID.
     var gpus: [UInt64: GPUActivity] = [:]
 }
@@ -293,6 +295,8 @@ struct SoCPowerAnalyzer {
     static let energyGroup = "Energy Model"
     static let cpuStatesGroup = "CPU Stats"
     static let cpuStatesSubgroup = "CPU Complex Performance States"
+    static let mediaGroup = "PMP0"
+    static let mediaSubgroup = "SOC Floor"
     static let gpuStatesGroup = "GPU Stats"
     static let gpuStatesSubgroup = "GPU Performance States"
 
@@ -318,6 +322,7 @@ struct SoCPowerAnalyzer {
         case energyGroup: EnergyChannelRole(channel: channel) != nil
         case cpuStatesGroup: CPUClusterChannel(channel) != nil
         case gpuStatesGroup: true
+        case mediaGroup: MediaEngineChannel(channel) != nil
         default: false
         }
     }
@@ -333,10 +338,13 @@ struct SoCPowerAnalyzer {
     ) -> SoCPowerResult {
         guard interval > 0 else { return SoCPowerResult() }
         var energy = EnergySums()
+        var mediaEngines: [String: MediaEngineSample] = [:]
         var clusterStates: [String: [IOReportChannel.State]] = [:]
         var gpuStates: [UInt64: [IOReportChannel.State]] = [:]
         for channel in channels {
             switch (channel.group, channel.value) {
+            case (Self.mediaGroup, .states):
+                if let sample = MediaEngineChannel.sample(channel) { mediaEngines[channel.name] = sample }
             case (Self.energyGroup, .integer(let count)):
                 guard let role = EnergyChannelRole(channel: channel.name),
                       let perUnit = EnergyUnit.joulesPerUnit(channel.unit) else { continue }
@@ -409,7 +417,8 @@ struct SoCPowerAnalyzer {
             ? nil
             : PowerComponents(cpu: cpu, gpu: gpu, ane: ane, dram: dram, clusters: clusters, sources: sources,
                               energyCountersStalled: energyModel.isStalled)
-        return SoCPowerResult(components: components, gpus: gpus)
+        return SoCPowerResult(components: components,
+                              mediaEngines: mediaEngines.values.sorted { ($0.rank, $0.channel) < ($1.rank, $1.channel) }, gpus: gpus)
     }
 
     /// The cluster's clock table, decoded once its number of voltage steps is known.

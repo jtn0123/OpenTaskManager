@@ -143,6 +143,7 @@ public struct HistoryMetric: Sendable, Hashable, Identifiable, CaseIterable {
     /// "SSD temperature", "Neural Engine power".
     static func name(of series: HistoryHardwareSeries) -> String {
         switch series.kind {
+        case .media: "\(series.label) active time"
         case .load: series.label
         case .clock: "\(series.label) clock"
         case .temperature: series.label.hasSuffix(" die") ? series.label : "\(series.label) temperature"

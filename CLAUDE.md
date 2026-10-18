@@ -552,6 +552,19 @@ The incident sheet queries only on a window change, never on a timer or tick.
   monitor. Application
   hiding, display sleep and screen lock override the count; showing a window
   interrupts the sampler's wait and takes a fresh sample.
+- Media-engine active time (`MediaEngineSample`, GPU detail and History's Media
+  engines chart) comes from PMP0 / SOC Floor: VMIN is the minimum state; VNOM,
+  VMAX and VOVD count above it. This is power-state residency, never utilization
+  or throughput. Only known media domains and valid advancing counters become
+  readings; the M5 Pro's PRORES channel stayed all-zero even during a hardware
+  ProRes encode, so it is omitted. A separate IOReport subscription polls at
+  most every 2 s while `.mediaEngines` demand is visible, otherwise 5 s, from
+  the existing sampling loop. Cached values feed the card, while
+  `mediaEnginesFresh` / `freshMediaOnly` keep held values out of History and
+  sensor ranges. History stores `.media` series using its existing metadata
+  and hardware blob. Debug `-mediaEngineReplay <small JSON array>` replays
+  captured samples in the GPU card only, labeled Recorded example; it changes
+  no recorder data.
 - The optional Dock graph (`DockIconController`, `Settings.dockGraphMode`) uses
   the same `record()` system samples while hidden, with no timer or window demand.
   `DockGraphFeed` keeps sixty two-second slots, including gaps after pauses and

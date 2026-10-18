@@ -6,6 +6,9 @@ import IOKit
 final class SoCPowerSampler {
     private let subscription: IOReportSubscription
     private var analyzer: SoCPowerAnalyzer
+    private let media: IOReportSubscription?
+    private var mediaCadence = MediaEngineCadence()
+    private var heldMedia: [MediaEngineSample] = []
 
     /// nil where IOReport or its power channels are missing (Intel Macs, most VMs).
     init?(topology: CPUTopology, levelForClusterType: [String: Int]) {
@@ -20,6 +23,8 @@ final class SoCPowerSampler {
                   keep: SoCPowerAnalyzer.wants
               ) else { return nil }
         self.subscription = subscription
+        media = IOReportSubscription(library: library, groups: [(SoCPowerAnalyzer.mediaGroup, SoCPowerAnalyzer.mediaSubgroup)],
+                                     keep: SoCPowerAnalyzer.wants)
         analyzer = SoCPowerAnalyzer(
             tiers: topology.tiers,
             levelForClusterType: levelForClusterType,
@@ -32,9 +37,17 @@ final class SoCPowerSampler {
     var isEnergyModelBatched: Bool { analyzer.energyModel.isBatched }
 
     /// nil on the first call, which only sets the baseline.
-    func sample(systemWatts: Double?, smcCPUWatts: () -> Double?) -> SoCPowerResult? {
+    func sample(systemWatts: Double?, mediaActivityLive: Bool = false, smcCPUWatts: () -> Double?) -> SoCPowerResult? {
         guard let reading = subscription.sample() else { return nil }
-        return analyzer.analyze(reading.channels, interval: reading.interval, systemWatts: systemWatts, smcCPUWatts: smcCPUWatts)
+        var result = analyzer.analyze(reading.channels, interval: reading.interval, systemWatts: systemWatts, smcCPUWatts: smcCPUWatts)
+        if mediaCadence.shouldRead(at: ProcessInfo.processInfo.systemUptime, live: mediaActivityLive) {
+            if let reading = media?.sample() {
+                heldMedia = reading.channels.compactMap(MediaEngineChannel.sample).sorted { ($0.rank, $0.channel) < ($1.rank, $1.channel) }
+                result.mediaEnginesFresh = true
+            }
+        }
+        result.mediaEngines = heldMedia
+        return result
     }
 
     /// The pmgr node's clock tables for each CPU cluster domain: the plain
