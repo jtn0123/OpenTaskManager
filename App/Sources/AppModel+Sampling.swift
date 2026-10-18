@@ -13,6 +13,7 @@ extension AppModel {
 
     func start() {
         guard samplingTask == nil, !isPaused else { return }
+        recentProcesses.resetBaseline()
         samplingTask = Task { [weak self, monitor, sensorMonitor] in
             let clock = ContinuousClock()
             var deadline = clock.now
@@ -41,7 +42,7 @@ extension AppModel {
                                                     processGPU: policy.processGPU)
                 let sensors = await readings
                 guard !Task.isCancelled else { return }
-                ingest(snapshot, sensors: sensors)
+                ingest(snapshot, sensors: sensors, processesRead: policy.processFigures)
                 sampleLaunchHistory(processes: snapshot.processes)
                 sampleConnectionHistory(processes: snapshot.processes)
                 deadline = max(deadline.advanced(by: .seconds(policy.interval)), clock.now)

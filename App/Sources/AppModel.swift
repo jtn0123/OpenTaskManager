@@ -98,6 +98,7 @@ final class AppModel {
     /// By PID and start time, so a PID macOS gives to a later process starts
     /// a graph of its own rather than carrying on the ended one's.
     var processHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
+    let recentProcesses = RecentProcessStore()
     /// Each process's history added up, kept with `processHistory`, which
     /// is what views observe.
     @ObservationIgnored var processTotals: [ProcessIdentity: ProcessTotal] = [:]

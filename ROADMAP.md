@@ -10,6 +10,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Processes grouped as Apps / Background / System | ✅ | Grouped by macOS "responsible process", so helpers sit under their app |
 | Tree and flat views | ✅ | |
 | Collapsed groups show totals | ✅ | |
+| Recently ended processes | ✅ | Processes → Ended recently keeps the last observed readings for 60 seconds, up to 200 identities. Read-only details load ending evidence on selection; PID reuse, sampling gaps and scope changes are handled separately from observed exits |
 | End task, end process tree, force quit | ✅ | Apps quit politely first |
 | Column chooser, sorting, saved column layout | ✅ | Right-click the header |
 | Heat shading of busy values | ✅ | Meter bars, coloured per resource |

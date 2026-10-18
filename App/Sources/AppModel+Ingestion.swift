@@ -19,8 +19,12 @@ extension AppModel {
         if publish, apps != regularApps { regularApps = apps }
     }
 
-    func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
+    func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?, processesRead: Bool = true) {
         let visible = samplingDemand.hasVisibleWindow
+        recentProcesses.update(processesRead ? snapshot.processes : nil,
+                               at: .init(date: snapshot.timestamp, uptime: ProcessInfo.processInfo.systemUptime),
+                               step: backgroundSampling.interval,
+                               userID: includeSystemProcesses ? nil : UInt32(getuid()), publishes: visible)
         let held = fixture(or: sensors) ?? backgroundSampling.sensors
         backgroundSampling.sensors = held
         backgroundSampling.readings = SensorTable.readings(sensors: held, power: snapshot.power,

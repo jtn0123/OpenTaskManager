@@ -12,6 +12,7 @@ struct ProcessesView: View {
     @Setting(Settings.processNameWidth) private var nameWidth: Double
     @State private var search = ""
     @State private var showsFindOwner = false
+    @State private var showsRecentlyEnded = LaunchArgument.string("openRecentlyEnded") == "YES"
     @State private var didOpenFindOwner = false
     @State private var ownerInitialQuery = ""
     /// By PID and start time, so a selected process that ends never hands
@@ -69,14 +70,34 @@ struct ProcessesView: View {
                     inspector(group: selectedRowGroup(in: table?.nodes, snapshot: snapshot))
                 }
                 Divider()
-                StatusBar(snapshot: snapshot)
-                    .onAppear(perform: selectRequestedProcess)
+                HStack(spacing: 0) {
+                    StatusBar(snapshot: snapshot)
+                    Button("Ended recently (\(model.recentProcesses.entries.count))…") { showsRecentlyEnded = true }
+                        .font(.explanation)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .buttonStyle(.borderless)
+                        .help("See the last readings of processes no longer observed, retained for about a minute")
+                        .padding(.trailing, 12)
+                }
+                .onAppear(perform: selectRequestedProcess)
             } else {
                 ProgressView("Reading processes…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .samplingDemand(.restrictedProcesses)
+        .sheet(isPresented: $showsRecentlyEnded) { RecentProcessesSheet() }
+        .task(id: model.isPaused) {
+            // Active samples expire entries themselves. While paused, only a
+            // visible page needs a timer; hidden windows create no wakeups.
+            guard model.isPaused else { return }
+            while !Task.isCancelled {
+                await model.samplingDemand.waitUntilVisible()
+                guard !Task.isCancelled else { return }
+                model.recentProcesses.expire(at: ProcessInfo.processInfo.systemUptime, publishes: true)
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
         .sheet(isPresented: $showsFindOwner, onDismiss: { ownerInitialQuery = "" }, content: {
             FindOwnerSheet(initialQuery: ownerInitialQuery) { identity in
                 guard model.process(identity) != nil else { return false }
@@ -143,7 +164,7 @@ struct ProcessesView: View {
             model.endTask(model.livePIDs(selection))
         }
         .fixedSize()
-        .disabled(selection.isEmpty)
+        .disabled(model.livePIDs(selection).isEmpty)
         .help(endTaskHelp)
     }
 
@@ -200,6 +221,7 @@ struct ProcessesView: View {
             .pickerStyle(.inline)
             .labelsHidden()
             Divider()
+            Button("Ended recently (\(model.recentProcesses.entries.count))…") { showsRecentlyEnded = true }
             Button("Find Owner…") { showsFindOwner = true }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Divider()
