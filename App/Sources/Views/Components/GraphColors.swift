@@ -11,8 +11,9 @@ import SwiftUI
 /// looks colours up. Kept in UserDefaults under `graphPalette` and
 /// `graphColor.<resource>` (a hex string), so `-graphPalette colorBlind` on
 /// the command line picks a preset for one run. The retro display look
-/// (`RetroDisplay`, `-retroDisplayStyle dotMatrix`) puts its own one-colour
-/// palette in place of the preset while it's on.
+/// (`RetroDisplay`, `-retroDisplayStyle dotMatrix`, `-retroDisplayInstrument
+/// YES` for Color's instrument panels) puts its own one-colour palette in
+/// place of the preset while it's on.
 ///
 /// Not tied to the main actor, since `Theme`'s colours are read from views'
 /// helpers that aren't either; a lock guards the resolved colours.
@@ -152,6 +153,7 @@ final class GraphColors: Observable, Sendable {
         Settings.retroDisplayStyle.set(retro.style)
         Settings.retroDisplayTint.set(retro.tint)
         Settings.retroDisplayGlow.set(retro.glow)
+        Settings.retroDisplayInstrument.set(retro.instrument)
         reload()
     }
 
@@ -175,14 +177,14 @@ final class GraphColors: Observable, Sendable {
             }
         }
         let retro = RetroDisplay(style: Settings.retroDisplayStyle.get(), tint: Settings.retroDisplayTint.get(),
-                                 glow: Settings.retroDisplayGlow.get())
+                                 glow: Settings.retroDisplayGlow.get(), instrument: Settings.retroDisplayInstrument.get())
         let current = resolved.withLock { (preset: $0.preset, overrides: $0.overrides, retro: $0.retro, made: !$0.colors.isEmpty) }
         guard !current.made || current.preset != preset || current.overrides != overrides || current.retro != retro else { return }
 
         // A one-colour retro palette leaves no room for a user's own colours,
         // which wait, kept, until it's off; its Color tint makes them vivid.
         let base = GraphPalette.preset(preset).overriding(overrides)
-        let palette = retro.isOn ? GraphPalette.retro(retro.tint, base: base) : base
+        let palette = retro.isOn ? GraphPalette.retro(retro.tint, instrument: retro.instrument, base: base) : base
         var next = Resolved(preset: preset, overrides: overrides, retro: retro, palette: palette,
                             readout: retro.isOn ? Self.color(retro.readout) : .labelColor)
         for role in Role.allCases {

@@ -58,6 +58,7 @@ struct SettingsTests {
         "retroDisplayStyle": .string("dotMatrix"),
         "retroDisplayTint": .string("color"),
         "retroDisplayGlow": .string("soft"),
+        "retroDisplayInstrument": .bool(false),
         "benchmarkComparePicks": .stringLists([:]),
         "benchmarkTrendBaselines": .strings([:]),
         "benchmarkSuiteIncludesDisk": .bool(false),

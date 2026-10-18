@@ -3,8 +3,10 @@ import Foundation
 /// The retro display look Settings offers: live graphs on dark display
 /// panels, each resource lit in its own colour or all in one, and figures
 /// drawn as lit dots or bars, the way instrument panels and old terminals
-/// showed them, instead of as type. On by default, in Color. This is the data and the maths; the app draws it
-/// (`GraphColors`, `StreamGraphView`, `GlyphCache`).
+/// showed them, instead of as type. On by default, in Color, which can
+/// also flood each panel with its colour as an instrument's (`instrument`).
+/// This is the data and the maths; the app draws it (`GraphColors`,
+/// `StreamGraphView`, `GlyphCache`).
 public struct RetroDisplay: Sendable, Hashable {
     public typealias RGB = ColorContrast.RGB
 
@@ -107,14 +109,25 @@ public struct RetroDisplay: Sendable, Hashable {
     public var style: Style
     public var tint: Tint
     public var glow: Glow
+    /// Instrument panels, in Color: each panel and card flooded with its
+    /// colour and finely ruled in it, and Overview's graphs headed by lit
+    /// dot-matrix strips. One colour's panels keep their look.
+    public var instrument: Bool
 
-    public init(style: Style, tint: Tint, glow: Glow) {
+    public init(style: Style, tint: Tint, glow: Glow, instrument: Bool = false) {
         self.style = style
         self.tint = tint
         self.glow = glow
+        self.instrument = instrument
     }
 
     public var isOn: Bool { style != .off }
+
+    /// Whether instrument panels are drawn: on, in Color, and asked for.
+    public var isInstrument: Bool { isOn && floods }
+
+    /// Whether panels are flooded with their colour when the look is on.
+    private var floods: Bool { tint.isMulticolor && instrument }
 
     /// What lit dots and bars sit on, unlit: black with a trace of the tint,
     /// as a display's glass is.
@@ -124,6 +137,10 @@ public struct RetroDisplay: Sendable, Hashable {
     /// panel's does. One colour's stays black, where lines that step down
     /// to the tint dimmed still read.
     public static let smokedGlass = RGB(0x181818)
+    /// An instrument panel's glass: near black, so the colour flooding it
+    /// (`instrumentFlood` of it) reads as its own and not as grey.
+    public static let instrumentGlass = RGB(0x060606)
+    public static let instrumentFlood = 0.17
 
     /// The panel graphs draw on.
     public var panel: RGB {
@@ -131,8 +148,10 @@ public struct RetroDisplay: Sendable, Hashable {
     }
 
     /// The panel under lines lit in `tone`: the glass with a trace of it.
+    /// An instrument panel's glass is flooded with it.
     public func panel(lit tone: RGB) -> RGB {
-        tint.isMulticolor ? ColorContrast.composite(tone, opacity: 0.06, over: Self.smokedGlass)
+        if floods { return ColorContrast.composite(tone, opacity: Self.instrumentFlood, over: Self.instrumentGlass) }
+        return tint.isMulticolor ? ColorContrast.composite(tone, opacity: 0.06, over: Self.smokedGlass)
             : ColorContrast.composite(tone, opacity: 0.05, over: Self.glass)
     }
 
@@ -153,10 +172,15 @@ public struct RetroDisplay: Sendable, Hashable {
     /// labels a little dimmed so the data comes first. Color's grid is
     /// near white with a trace of the light, so every panel's reads alike
     /// whatever its colour (in the tint, a blue one's barely showed), its
-    /// edge lit nearly as its line is, and its labels at full strength.
+    /// edge lit nearly as its line is, and its labels at full strength. An
+    /// instrument panel is ruled in its own colour, firmer on the flood,
+    /// a fine grid's many rows fainter than its quarters.
     public func ruling(lit tone: RGB) -> Ruling {
         guard tint.isMulticolor else {
             return Ruling(ink: tone, grid: 0.13, minorGrid: 0.13, majorGrid: 0.22, edge: 0.28, label: 0.72)
+        }
+        if floods {
+            return Ruling(ink: tone, grid: 0.2, minorGrid: 0.085, majorGrid: 0.26, edge: 0.85, label: 1)
         }
         return Ruling(ink: ColorContrast.composite(tone, opacity: 0.2, over: .white),
                       grid: 0.12, minorGrid: 0.045, majorGrid: 0.13, edge: 0.65, label: 0.95)
@@ -165,10 +189,13 @@ public struct RetroDisplay: Sendable, Hashable {
     /// The opacity of the wide stroke under each graph line, and how far
     /// past the line it spreads, in points: on a Color display tighter and
     /// brighter, as a neon tube's light is, on one colour's softer, as a
-    /// phosphor's.
+    /// phosphor's; on an instrument panel brighter again and a little
+    /// wider, so a line holds its own on the flood.
     public var bloom: (opacity: Double, spread: Double) {
-        tint.isMulticolor ? (glow.bloom * 1.6, 4) : (glow.bloom, 6)
+        if floods { return (glow.bloom * 1.92, 5) }
+        return tint.isMulticolor ? (glow.bloom * 1.6, 4) : (glow.bloom, 6)
     }
+
     /// Dots and bars that aren't lit, so a figure reads as a display's:
     /// fainter on a pale window, where they stand out more and could turn
     /// a small 6 into an 8.
@@ -191,11 +218,12 @@ extension GraphPalette {
     /// near white down to the tint dimmed, as well as by the dashes and
     /// fills the graphs already give a pair's second line.
     /// Under `color`, `base` (the preset and the user's own colours) made
-    /// vivid instead.
-    public static func retro(_ tint: RetroDisplay.Tint, base: GraphPalette = .preset(.standard)) -> GraphPalette {
+    /// vivid instead, filled deep on `instrument` panels.
+    public static func retro(_ tint: RetroDisplay.Tint, instrument: Bool = false,
+                             base: GraphPalette = .preset(.standard)) -> GraphPalette {
         guard !tint.isMulticolor else {
             var vivid = base.vivid()
-            vivid.emphasis = .vivid
+            vivid.emphasis = instrument ? .instrument : .vivid
             return vivid
         }
         let tone = tint.tone
@@ -257,6 +285,9 @@ extension GraphEmphasis {
     /// A Color display's: its lines carry the colour, lit, so the area
     /// under one is a faint wash.
     public static let vivid = GraphEmphasis(lightTrace: 1, grid: 1, fill: 0.4, bands: 0.9)
+    /// An instrument panel's (`RetroDisplay.instrument`): the area under a
+    /// line filled deep, as lit as the flood round it.
+    public static let instrument = GraphEmphasis(lightTrace: 1, grid: 1, fill: 1.1, bands: 0.9)
 }
 
 extension ColorContrast.RGB {

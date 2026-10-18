@@ -3,9 +3,9 @@ import OTMKit
 import SwiftUI
 
 /// Settings' retro display look: off, or live graphs on dark panels in one
-/// colour with figures as lit dots or bars; its colour and glow; and a still
-/// preview. Every change goes through `GraphColors`, which saves it and
-/// redraws the graphs and figures at once.
+/// colour with figures as lit dots or bars; its colour and glow; Color's
+/// instrument panels; and a still preview. Every change goes through
+/// `GraphColors`, which saves it and redraws the graphs and figures at once.
 struct RetroDisplaySettings: View {
     private let colors = GraphColors.shared
 
@@ -24,11 +24,21 @@ struct RetroDisplaySettings: View {
             Picker("Glow", selection: binding(\.glow)) {
                 ForEach(RetroDisplay.Glow.allCases) { Text($0.name).tag($0) }
             }
+            // Off and greyed under one colour, which keeps its panels; the
+            // choice waits for Color.
+            Toggle("Instrument panels", isOn: Binding {
+                colors.retro.instrument && colors.retro.tint.isMulticolor
+            } set: { binding(\.instrument).wrappedValue = $0 })
+                .disabled(!retro.tint.isMulticolor)
+                .help(retro.tint.isMulticolor ? "Floods each graph and card with its color, and heads Overview's graphs with lit titles"
+                    : "Instrument panels are drawn in Color only")
             VStack(alignment: .leading, spacing: 10) {
                 Text(retro.isOn
                     ? "Live graphs are display panels, dark in either appearance, and figures are lit "
                         + (retro.style == .dotMatrix ? "dots. " : "bars. ")
                         + (retro.tint.isMulticolor ? "Each resource keeps its color from the palette above, made as vivid as it goes."
+                            + (retro.instrument ? " Instrument panels flood each graph and card with its color, rule it finely, "
+                                + "and head Overview's graphs with lit dot-matrix titles." : "")
                             : "Graphs use the display's color in place of the palette; your own colors come back when it's off.")
                     : "Draws live graphs on dark display panels, each resource in its own vivid color or all in one, "
                         + "and figures as lit dots or bars. "
@@ -37,7 +47,8 @@ struct RetroDisplaySettings: View {
                     .foregroundStyle(.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 // Off, the preview shows what Dot matrix would look like.
-                RetroDisplayPreview(retro: retro.isOn ? retro : RetroDisplay(style: .dotMatrix, tint: retro.tint, glow: retro.glow))
+                RetroDisplayPreview(retro: retro.isOn ? retro
+                    : RetroDisplay(style: .dotMatrix, tint: retro.tint, glow: retro.glow, instrument: retro.instrument))
                     .opacity(retro.isOn ? 1 : 0.55)
             }
         }
@@ -129,24 +140,29 @@ struct RetroDisplayPreview: View {
 
     /// The panel, its grid, and three lines over it with their bloom.
     private func draw(in context: inout GraphicsContext, size: CGSize) {
-        let palette = GraphPalette.retro(retro.tint, base: GraphColors.shared.basePalette)
+        let palette = GraphPalette.retro(retro.tint, instrument: retro.instrument, base: GraphColors.shared.basePalette)
         // Under Color the panel takes its first line's light, as a graph's does.
         let light = retro.tint.isMulticolor ? palette[.cpu].dark : retro.tint.tone
         let tint = Color(nsColor: GraphColors.nsColor(light))
         let shape = RoundedRectangle(cornerRadius: 6).path(in: CGRect(origin: .zero, size: size))
         let ruling = retro.ruling(lit: light)
         context.fill(shape, with: .color(Color(nsColor: GraphColors.nsColor(retro.panel(lit: light)))))
-        let grid = Path { path in
-            for fraction in [0.25, 0.5, 0.75] {
-                path.move(to: CGPoint(x: 0, y: size.height * fraction))
-                path.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
-            }
-            for fraction in stride(from: 0.125, to: 1, by: 0.125) {
-                path.move(to: CGPoint(x: size.width * fraction, y: 0))
-                path.addLine(to: CGPoint(x: size.width * fraction, y: size.height))
-            }
+        let ink = Color(nsColor: GraphColors.nsColor(ruling.ink))
+        // An instrument panel's grid is fine: eighths, firmer at the quarters.
+        let rows = retro.isInstrument ? 8 : 4, columns = retro.isInstrument ? 16 : 8
+        var minor = Path(), major = Path()
+        for row in 1..<rows {
+            let y = size.height * CGFloat(row) / CGFloat(rows)
+            let line = [CGPoint(x: 0, y: y), CGPoint(x: size.width, y: y)]
+            if !retro.isInstrument || row.isMultiple(of: rows / 4) { major.addLines(line) } else { minor.addLines(line) }
         }
-        context.stroke(grid, with: .color(Color(nsColor: GraphColors.nsColor(ruling.ink)).opacity(ruling.grid)), lineWidth: 0.5)
+        for column in 1..<columns {
+            let x = size.width * CGFloat(column) / CGFloat(columns)
+            let line = [CGPoint(x: x, y: 0), CGPoint(x: x, y: size.height)]
+            if retro.isInstrument { minor.addLines(line) } else { major.addLines(line) }
+        }
+        context.stroke(minor, with: .color(ink.opacity(ruling.minorGrid)), lineWidth: 0.5)
+        context.stroke(major, with: .color(ink.opacity(retro.isInstrument ? ruling.majorGrid : ruling.grid)), lineWidth: 0.5)
 
         let solid = StrokeStyle(lineWidth: 1.75 * GraphEmphasis.traceWidth, lineCap: .round, lineJoin: .round)
         let lines = [

@@ -32,44 +32,77 @@ struct OverviewGraphCard<Chart: View>: View {
         var widest: String
     }
 
+    /// Rows of an instrument panel's fine grid (`RetroDisplay.isInstrument`):
+    /// a firmer line at each quarter, three fainter between.
+    static var instrumentGridRows: Int { 16 }
+
     var body: some View {
+        let instrument = GraphColors.shared.retro.isInstrument
         Card(tint: tint, glow: glow) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Label(title, systemImage: symbol)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(GraphColors.shared.retroAccent ?? .primary)
-                    .lineLimit(1)
-                    .fixedSize()
-                if let headline {
-                    let font = Self.headlineFont
-                    // Negative: the glyphs' baseline sits this far above the view's foot.
-                    let descender = font.descender
-                    // On a Color display a card's figure lights up in its resource's colour.
-                    AnimatedNumber(value: headline.value, format: headline.format, font: font,
-                                   color: GraphColors.shared.retro.tint.isMulticolor && GraphColors.shared.retro.isOn ? tint : nil)
-                        .frame(width: ceil(GlyphCache.width(of: headline.widest, font: font, look: GlyphCache.look)) + 1, alignment: .leading)
-                        .alignmentGuide(.firstTextBaseline) { $0.height + descender }
-                }
-                if !facts.isEmpty {
-                    Text(facts)
-                        .font(.explanation)
-                        .foregroundStyle(.secondaryText)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(facts)
-                }
-                Spacer(minLength: 0)
+            if instrument {
+                instrumentHeading
+            } else {
+                heading
             }
             if !keys.isEmpty { ChartKeyRow(keys: keys) }
             VStack(spacing: 3) {
                 chart
                     .frame(maxWidth: .infinity, minHeight: chartHeight, maxHeight: .infinity)
+                    .environment(\.fineGridRows, instrument ? Self.instrumentGridRows : 0)
                     .plotFrame(tint: tint, wash: (0.08, 0.02), border: 0.22)
                 TimeAxis()
             }
             .frame(maxHeight: .infinity)
         }
+    }
+
+    private var heading: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Label(title, systemImage: symbol)
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(GraphColors.shared.retroAccent ?? .primary)
+                .lineLimit(1)
+                .fixedSize()
+            if let headline {
+                let font = Self.headlineFont
+                // Negative: the glyphs' baseline sits this far above the view's foot.
+                let descender = font.descender
+                // On a Color display a card's figure lights up in its resource's colour.
+                AnimatedNumber(value: headline.value, format: headline.format, font: font,
+                               color: GraphColors.shared.retro.tint.isMulticolor && GraphColors.shared.retro.isOn ? tint : nil)
+                    .frame(width: ceil(GlyphCache.width(of: headline.widest, font: font, look: GlyphCache.look)) + 1, alignment: .leading)
+                    .alignmentGuide(.firstTextBaseline) { $0.height + descender }
+            }
+            if !facts.isEmpty { factsText }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// An instrument panel's heading: the title and headline figure in a
+    /// lit strip, the facts under it beside the card's symbol.
+    private var instrumentHeading: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            InstrumentStrip(title: title, tint: tint, font: Self.headlineFont,
+                            figure: headline.map { .init(value: $0.value, format: $0.format, widest: $0.widest) })
+            if !facts.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: symbol)
+                        .foregroundStyle(tint)
+                        .accessibilityHidden(true)
+                    factsText
+                }
+            }
+        }
+    }
+
+    private var factsText: some View {
+        Text(facts)
+            .font(.explanation)
+            .foregroundStyle(.secondaryText)
+            .monospacedDigit()
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .help(facts)
     }
 }
 

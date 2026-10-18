@@ -101,6 +101,43 @@ struct RetroDisplayTests {
         }
     }
 
+    @Test func anInstrumentPanelIsFloodedWithItsLight() {
+        let plain = RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft)
+        let instrument = RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft, instrument: true)
+        for role in [Role.cpu, .memory, .disk, .network] {
+            let light = GraphPalette.retro(.color, instrument: true)[role].dark
+            let panel = instrument.panel(lit: light)
+            // Far more of its colour than smoked glass takes, still dark enough that its line reads.
+            #expect(PerceptualColor.lab(panel).chroma > PerceptualColor.lab(plain.panel(lit: light)).chroma * 2, "\(role)")
+            #expect(ColorContrast.luminance(panel) < ColorContrast.luminance(GraphPalette.darkBackground) * 1.5, "\(role)")
+            #expect(ColorContrast.ratio(light, panel) >= 3, "\(role)")
+            // Ruled in its own colour, the many rows of a fine grid fainter than its quarters.
+            let ruling = instrument.ruling(lit: light)
+            #expect(ruling.ink == light)
+            #expect(ruling.minorGrid < ruling.grid && ruling.grid < ruling.majorGrid)
+            #expect(ruling.edge > plain.ruling(lit: light).edge)
+        }
+        #expect(instrument.bloom.opacity > plain.bloom.opacity && instrument.bloom.opacity < 0.6)
+        #expect(GraphPalette.retro(.color, instrument: true).emphasis == .instrument)
+        #expect(GraphEmphasis.instrument.fill > GraphEmphasis.vivid.fill)
+    }
+
+    @Test func instrumentPanelsAreColorsAlone() {
+        #expect(RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft, instrument: true).isInstrument)
+        #expect(RetroDisplay(style: .segments, tint: .color, glow: .off, instrument: true).isInstrument)
+        #expect(!RetroDisplay(style: .dotMatrix, tint: .color, glow: .soft).isInstrument)
+        #expect(!RetroDisplay(style: .off, tint: .color, glow: .soft, instrument: true).isInstrument)
+        // One colour's panels keep their look, asked or not.
+        for tint in Self.oneColor {
+            let asked = RetroDisplay(style: .dotMatrix, tint: tint, glow: .soft, instrument: true)
+            let plain = RetroDisplay(style: .dotMatrix, tint: tint, glow: .soft)
+            #expect(!asked.isInstrument, "\(tint)")
+            #expect(asked.panel == plain.panel && asked.ruling(lit: tint.tone) == plain.ruling(lit: tint.tone), "\(tint)")
+            #expect(asked.bloom == plain.bloom, "\(tint)")
+            #expect(GraphPalette.retro(tint, instrument: true) == GraphPalette.retro(tint), "\(tint)")
+        }
+    }
+
     @Test func onlyOffIsOff() {
         #expect(!RetroDisplay(style: .off, tint: .amber, glow: .strong).isOn)
         #expect(RetroDisplay(style: .dotMatrix, tint: .amber, glow: .off).isOn)
@@ -246,6 +283,23 @@ struct RetroDisplayTests {
         for character in ReadoutGlyphs.drawn {
             #expect(ReadoutGlyphs.segmentForm(for: character) != nil, "\(character)")
         }
+    }
+
+    @Test func titlesSpellInCapitalsAndFigures() throws {
+        for character in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" {
+            let rows = try #require(ReadoutGlyphs.titleDots(for: character), "\(character)")
+            #expect(rows.count == ReadoutGlyphs.rows && rows.allSatisfy { $0.count == 5 }, "\(character)")
+            #expect(rows.allSatisfy { $0.allSatisfy { $0 == "#" || $0 == "." } }, "\(character)")
+        }
+        let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ").compactMap { ReadoutGlyphs.titleDots(for: $0) }
+        // All different, though O and the figure 0 share a shape, as a plain display's do.
+        #expect(Set(letters).count == 26)
+        // A space, lower case and narrow marks leave a cell unlit.
+        for character in " a.," as String {
+            #expect(ReadoutGlyphs.titleDots(for: character) == nil, "\(character)")
+        }
+        // Figures' units stay type.
+        #expect(!ReadoutGlyphs.drawn.contains("B"))
     }
 
     @Test func dotsAreReadByRowAndColumn() {

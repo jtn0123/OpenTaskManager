@@ -162,6 +162,9 @@ public enum Settings {
     public static let retroDisplayGlow = SettingKey<RetroDisplay.Glow, String>(
         "retroDisplayGlow", default: .soft, meaning: "How far the retro display's figures and lines glow."
     )
+    public static let retroDisplayInstrument = SettingKey<Bool, Bool>(
+        "retroDisplayInstrument", default: false, meaning: "Whether a Color retro display draws instrument panels."
+    )
     public static let benchmarkComparePicks = SettingKey<[String: [String]], [String: [String]]>(
         "benchmarkComparePicks", default: [:], meaning: "Run IDs picked for comparison, by benchmark kind."
     )
@@ -301,6 +304,7 @@ public enum Settings {
         retroDisplayStyle.descriptor,
         retroDisplayTint.descriptor,
         retroDisplayGlow.descriptor,
+        retroDisplayInstrument.descriptor,
         benchmarkComparePicks.descriptor,
         benchmarkTrendBaselines.descriptor,
         benchmarkSuiteIncludesDisk.descriptor,

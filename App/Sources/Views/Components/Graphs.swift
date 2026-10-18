@@ -440,13 +440,35 @@ struct CardSurface: NSViewRepresentable {
     func updateNSView(_ view: CardSurfaceView, context: Context) {
         // Washes stay pastel in light mode: only lines and text deepen. On a
         // Color display the colour is the graphs' panels', so the card under
-        // them is plain, its edge and halo still in the colour.
+        // them is plain, its edge and halo still in the colour, unless the
+        // panels are an instrument's, whose case is flooded as they are.
         let retro = GraphColors.shared.retro
-        view.update(tint: tint.map { NSColor($0).fillShade }, glow: glow, washed: !(retro.isOn && retro.tint.isMulticolor))
+        let wash: CardSurfaceView.Wash = retro.isInstrument ? .flooded
+            : retro.isOn && retro.tint.isMulticolor ? .plain : .tinted
+        view.update(tint: tint.map { NSColor($0).fillShade }, glow: glow, wash: wash)
     }
 }
 
 final class CardSurfaceView: NSView {
+    /// How much of its colour a card takes.
+    enum Wash {
+        /// None: grey, as under Color, whose graphs' panels carry the colour.
+        case plain
+        /// A pastel wash.
+        case tinted
+        /// Flooded, as an instrument panel's case (`RetroDisplay.isInstrument`).
+        case flooded
+
+        /// The wash's opacity at the card's top and foot.
+        var strength: (top: CGFloat, bottom: CGFloat) {
+            switch self {
+            case .plain: (0.10, 0.03)
+            case .tinted: (0.16, 0.03)
+            case .flooded: (0.34, 0.10)
+            }
+        }
+    }
+
     private static let radius: CGFloat = 12
 
     private let halo = CALayer()
@@ -456,7 +478,7 @@ final class CardSurfaceView: NSView {
     private let sheen = CAGradientLayer()
     private var tint: NSColor?
     private var glow: Double = 0
-    private var washed = true
+    private var wash = Wash.tinted
     private var hasStyled = false
 
     override init(frame: NSRect) {
@@ -484,13 +506,13 @@ final class CardSurfaceView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    func update(tint: NSColor?, glow: Double, washed: Bool) {
-        let restyle = !hasStyled || tint != self.tint || washed != self.washed
+    func update(tint: NSColor?, glow: Double, wash: Wash) {
+        let restyle = !hasStyled || tint != self.tint || wash != self.wash
         let glow = min(max(glow.isFinite ? glow : 0, 0), 1)
         guard restyle || glow != self.glow else { return }
         self.tint = tint
         self.glow = glow
-        self.washed = washed
+        self.wash = wash
         hasStyled = true
         if restyle { applyColors() }
         CATransaction.begin()
@@ -538,8 +560,10 @@ final class CardSurfaceView: NSView {
         CATransaction.setDisableActions(true)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             let base = tint ?? .secondaryLabelColor
-            let wash = washed ? base : .secondaryLabelColor
-            surface.colors = [wash.withAlphaComponent(tint == nil || !washed ? 0.10 : 0.16).cgColor, wash.withAlphaComponent(0.03).cgColor]
+            // A card with no colour of its own washes grey, as a plain one.
+            let wash = tint == nil ? Wash.plain : self.wash
+            let ink = wash == .plain ? NSColor.secondaryLabelColor : base
+            surface.colors = [ink.withAlphaComponent(wash.strength.top).cgColor, ink.withAlphaComponent(wash.strength.bottom).cgColor]
             surface.borderColor = borderColor.cgColor
             halo.shadowColor = base.cgColor
             let light = NSColor.white.withAlphaComponent(0.16).cgColor
