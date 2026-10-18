@@ -171,6 +171,10 @@ showing how far it has got as it goes (it can be stopped at any time).
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
   processes.
+- A floating mini monitor: a minute of CPU, memory, GPU, network, disk and
+  power in a small window above other windows, among them or on the desktop,
+  in any corner of any display, see-through until the pointer is over it.
+  Shown on its own it samples no faster than once a second.
 - ⌃⇧⎋ opens the window from anywhere, with no Accessibility permission needed.
 - The `otm` command-line tool: `ps`, `top`, `system`, `power`, `sensors`
   (`--extremes 60` samples for a minute and prints each reading's range),

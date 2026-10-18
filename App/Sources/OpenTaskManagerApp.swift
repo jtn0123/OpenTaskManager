@@ -36,6 +36,7 @@ struct OpenTaskManagerApp: App {
             // 900 points hides it by itself (`SidebarVisibility`).
             SidebarCommands()
             PageCommands()
+            MiniMonitorCommands()
             CommandGroup(after: .toolbar) {
                 Button(UpdateControlLabels.liveMenuTitle(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil)) {
                     model.isPaused.toggle()
@@ -66,6 +67,18 @@ struct OpenTaskManagerApp: App {
                 .environment(model)
         }
         .menuBarExtraStyle(.window)
+    }
+}
+
+/// Window › Mini Monitor, ticked while it's shown.
+private struct MiniMonitorCommands: Commands {
+    @Setting(Settings.miniMonitorShown) private var shown: Bool
+
+    var body: some Commands {
+        CommandGroup(before: .windowArrangement) {
+            Toggle("Mini Monitor", isOn: $shown)
+            Divider()
+        }
     }
 }
 
@@ -393,6 +406,7 @@ struct MenuBarLabel: View {
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Setting(Settings.miniMonitorShown) private var miniMonitorShown: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -425,6 +439,15 @@ struct MenuBarView: View {
             }
 
             Divider()
+            // A row of its own: beside the two buttons its title didn't fit.
+            HStack {
+                Text("Mini monitor").font(.callout)
+                Spacer()
+                Toggle("Mini monitor", isOn: $miniMonitorShown)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
             HStack {
                 Button("Open OpenTaskManager") {
                     openWindow(id: "main")
@@ -469,6 +492,8 @@ struct SettingsView: View {
                 }
                 Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
+            // High enough that the mini monitor's own Settings… item opens on it.
+            MiniMonitorSettings()
             GraphColorSettings()
             RetroDisplaySettings()
             Section("Processes") {

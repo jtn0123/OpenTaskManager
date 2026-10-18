@@ -548,9 +548,19 @@ The incident sheet queries only on a window change, never on a timer or tick.
   and computes CPU over the real interval between reads, never the app tick.
   While any content window is visible, the native process list, CPU, memory,
   disks, network, GPU and power stay live. `SamplingDemand.window` counts the
-  main window, Settings and the menu popup, never the status icon. Application
+  main window, Settings and the menu popup, never the status icon or the mini
+  monitor. Application
   hiding, display sleep and screen lock override the count; showing a window
   interrupts the sampler's wait and takes a fresh sample.
+- The floating mini monitor (`MiniMonitorController`, `Settings.miniMonitor*`)
+  is a nonactivating `NSPanel` above windows, among them or on the desktop. Its
+  demand is `SamplingDemand.miniMonitor`, so shown on its own it keeps the
+  background pace above. `record()` feeds `MiniMonitorStore` every tick while
+  it's on; `MiniMonitorFeed` in OTMKit averages ticks into points of the update
+  speed, never under 1 s, so a visible window's half-second ticks and hidden
+  1 s ticks make the same graphs. The store publishes only while the panel is
+  on screen and the display awake. Its figures are plain text and its graphs
+  don't stream: nothing in it moves between points.
 - With no visible content window, `BackgroundSamplingPolicy` in OTMKit keeps
   a system feed at the chosen update speed, never faster than 1 s, so a hidden
   window never samples more often than a visible one: `HistoryAccumulator`
@@ -869,6 +879,9 @@ once at launch, and saves each change for the next launch. It never follows
 another copy, so a capture's copy and the user's own don't move each other.
 Don't read the page through `@Setting(Settings.page)` (or raw `@AppStorage`):
 a launch argument would pin it for the whole run and the sidebar would stop switching pages.
+`-miniMonitorShown YES -miniMonitorLevel desktop -miniMonitorCorner bottomLeft`
+shows the mini monitor for that run, but launch arguments pin those settings:
+test its menu, its drag-to-corner and Settings with `defaults write` instead.
 `-openWindowFrame "x y width height"` (screen points, origin bottom left) places
 the window for that run and saves nothing, so a narrow capture never sets the
 size the user's next window opens at. `-NSWindow Frame main` no longer places

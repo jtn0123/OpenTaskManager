@@ -24,6 +24,9 @@ final class AppModel {
     let samplingDemand = SamplingDemandStore()
     @ObservationIgnored let backgroundSampling = BackgroundSamplingState()
     let menuBarIcon = MenuBarIconStore()
+    let miniMonitor = MiniMonitorStore()
+    /// The floating mini monitor's panel, made once the app is running.
+    @ObservationIgnored var miniMonitorController: MiniMonitorController?
     /// The on-disk history behind the History page. Nil if it can't be opened.
     let recorder = AppModel.makeIncidentRecorder()
     /// Network traffic by app, read with nettop only while a view shows it.
@@ -216,6 +219,11 @@ final class AppModel {
         SpikeCaptureStore.shared.samplingChanged = { [weak self] in self?.visibilityChanged() }
         BenchmarkContextFeed.attach(self)
         start()
+        // After launch, so a panel shown from the start has an application to open in.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            miniMonitorController = MiniMonitorController(model: self)
+        }
     }
 
     // MARK: - Sampling

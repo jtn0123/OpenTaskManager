@@ -57,6 +57,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Graph colour presets | ✅ | Standard, colour-blind friendly (deuteranopia and protanopia) and high contrast in Settings, with a colour of your own per resource; apps keep their colour in "by app" graphs |
 | Sensors | ✅ | SoC power rails, die, SSD and battery temperatures, fan speeds, clocks and DC input in one table with lowest and highest since a reset |
 | Prometheus / OpenMetrics exporter | ⬜ | `otm serve` for homelab dashboards |
+| Floating mini monitor | ✅ | A minute of each meter above other windows, among them or on the desktop, in a corner of any display; opacity, full strength under the pointer, and the meters it shows in Settings |
 | Dock tile live graph | ⬜ | Optional, like Activity Monitor |
 | Widgets | ⬜ | WidgetKit gauges |
 | Retro display look | ✅ | Settings → Retro display: live graphs on dark display panels, each resource in its own vivid colour (Color, the default) or all in one (green, amber, cyan, red, yellow or white), figures as lit dots or seven-segment bars, with an adjustable glow. On by default as Dot matrix in Color |

@@ -42,6 +42,28 @@ public enum Settings {
     public static let showMenuBarExtra = SettingKey<Bool, Bool>(
         "showMenuBarExtra", default: true, meaning: "Whether the menu bar item is shown."
     )
+    public static let miniMonitorShown = SettingKey<Bool, Bool>(
+        "miniMonitorShown", default: false, meaning: "Whether the floating mini monitor is shown."
+    )
+    public static let miniMonitorLevel = SettingKey<MiniMonitorLevel, String>(
+        "miniMonitorLevel", default: .aboveWindows, meaning: "Whether the mini monitor floats above windows, among them or on the desktop."
+    )
+    public static let miniMonitorCorner = SettingKey<ScreenCorner, String>(
+        "miniMonitorCorner", default: .topRight, meaning: "Corner of the screen the mini monitor sits in."
+    )
+    public static let miniMonitorDisplay = SettingKey<String?, String?>(
+        "miniMonitorDisplay", default: nil,
+        meaning: "UUID of the display the mini monitor was last placed on; absent, or a display not connected, uses the main one."
+    )
+    public static let miniMonitorOpacity = SettingKey<Double, Double>(
+        "miniMonitorOpacity", default: 0.9, meaning: "Opacity of the mini monitor, 0.3 to 1."
+    )
+    public static let miniMonitorSolidUnderPointer = SettingKey<Bool, Bool>(
+        "miniMonitorSolidUnderPointer", default: true, meaning: "Whether the mini monitor turns fully opaque under the pointer."
+    )
+    public static let miniMonitorMeters = SettingKey<MiniMonitorMeters, String>(
+        "miniMonitorMeters", default: .all, meaning: "Meters the mini monitor shows, comma-separated."
+    )
     public static let streamGraphs = SettingKey<Bool, Bool>(
         "streamGraphs", default: true, meaning: "Whether live graphs scroll smoothly."
     )
@@ -268,6 +290,13 @@ public enum Settings {
         cpuGraphMode.descriptor,
         cpuLargerGraphs.descriptor,
         showMenuBarExtra.descriptor,
+        miniMonitorShown.descriptor,
+        miniMonitorLevel.descriptor,
+        miniMonitorCorner.descriptor,
+        miniMonitorDisplay.descriptor,
+        miniMonitorOpacity.descriptor,
+        miniMonitorSolidUnderPointer.descriptor,
+        miniMonitorMeters.descriptor,
         streamGraphs.descriptor,
         sidebarHidden.descriptor,
         mainWindowFrame.descriptor,

@@ -28,7 +28,9 @@ public struct SamplingCadence: Sendable {
 /// slow the source while another still shows it.
 public struct SamplingDemand: Sendable {
     public enum Source: Sendable, Hashable {
-        case sensors, restrictedProcesses, users, sensorTable, menuBarIcon, window
+        /// The mini monitor counts as an icon, not a window: shown on its
+        /// own it keeps sampling at the background pace.
+        case sensors, restrictedProcesses, users, sensorTable, menuBarIcon, miniMonitor, window
     }
 
     private var counts: [Source: Int] = [:]

@@ -87,6 +87,7 @@ targets:
       - App/Sources/Support/MainWindowFrame.swift
       - App/Sources/SamplingDemandStore.swift
       - App/Sources/MenuBarIconStore.swift
+      - App/Sources/MiniMonitorStore.swift
       - App/Sources/UserUsageStore.swift
     dependencies:
       - package: OTMKit

@@ -171,8 +171,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Closing the main window quits, as SwiftUI has a lone Window scene do;
+    /// but while the mini monitor is shown the app keeps running to show it.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !Settings.miniMonitorShown.get()
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { WindowOpener.showMainWindow() }
+        // The mini monitor is a window too, but not one the Dock icon should stop at.
+        if !hasVisibleWindows || !sender.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) {
+            WindowOpener.showMainWindow()
+        }
         return true
     }
 

@@ -290,6 +290,8 @@ extension AppModel {
                 menuBarIcon.update(history: state.iconHistory, usage: snapshot.cpu.usage,
                                    at: ProcessInfo.processInfo.systemUptime)
             }
+            miniMonitor.add(MiniMonitorFigures(snapshot), interval: snapshot.interval, step: updateSpeed.rawValue,
+                            publishes: samplingDemand.contains(.miniMonitor) && samplingDemand.displayIsAwake)
         }
         guard !showsSensorFixture, !Self.usesIncidentFixture else { return }
         let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))

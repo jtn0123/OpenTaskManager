@@ -60,6 +60,7 @@ struct BackgroundSamplingPolicyTests {
     @Test func theMenuIconDoesNotCountAsAVisibleWindow() {
         var demand = SamplingDemand()
         demand.add(.menuBarIcon)
+        demand.add(.miniMonitor)
         let visibility = SamplingVisibility()
         #expect(!visibility.isVisible(windowDemand: demand.contains(.window)))
         demand.add(.window)
