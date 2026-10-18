@@ -62,7 +62,8 @@ struct GPUHero: View {
                     GraphSeries(values: detail.renderer.values, color: Self.renderer, fill: false),
                     GraphSeries(values: detail.tiler.values, color: Self.tiler, fill: false, dashed: true),
                 ],
-                maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8
+                maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8,
+                squeeze: model.squeeze([.gpuBusy(gpu.id), .gpuRenderer(gpu.id), .gpuTiler(gpu.id)])
             )
             .heroPlot(height: Hero.height(pane: pane, extra: Hero.legendLine), tint: Theme.gpu)
         } figures: {
@@ -88,7 +89,8 @@ struct GPUHero: View {
             }
         } plot: {
             GraphView(series: [GraphSeries(values: history, color: Theme.gpu)], glows: true,
-                      minimumCeiling: Self.memoryCeiling, axis: MemoryDetail.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8)
+                      minimumCeiling: Self.memoryCeiling, axis: MemoryDetail.bytesAxis, axisUnits: .binaryBytes, cornerRadius: 8,
+                      squeeze: model.squeeze([.gpuMemory(gpu.id)]))
                 .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.gpu)
         } figures: {
             figures()

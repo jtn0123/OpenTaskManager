@@ -55,6 +55,7 @@ extension AppModel {
             backgroundSampling.keep(snapshot, sensors: held)
         }
         record(snapshot, sensors: held)
+        recordOlderTime(snapshot, sensors: held)
     }
 
     private func publish(_ snapshot: SystemSnapshot, sensors: SensorSample?, processes: Bool = true) {
@@ -325,6 +326,8 @@ extension AppModel {
 extension AppModel {
     func samplingCadenceChanged(to interval: TimeInterval) {
         resetViewHistories()
+        // Its buckets are counted in samples, so a new step starts them again.
+        olderTime.removeAll()
         samplingInterval = interval
     }
 

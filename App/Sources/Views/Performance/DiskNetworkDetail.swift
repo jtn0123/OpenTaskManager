@@ -66,7 +66,8 @@ struct DiskDetail: View {
             VStack(alignment: .leading, spacing: 8) {
                 HeroGraphTitle(title: "Active time", trailing: Format.percent(disk.activeFraction))
                 GraphView(series: [GraphSeries(values: model.diskActiveHistory[disk.id]?.values ?? [], color: Theme.disk)],
-                          maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8)
+                          maxValue: 1, glows: true, axis: { Format.percent($0) }, cornerRadius: 8,
+                          squeeze: model.squeeze([.diskActive(disk.id)]))
                     .heroPlot(height: (height * 0.38).rounded(), tint: Theme.disk, rows: 4)
                 HeroGraphTitle(title: "Transfer rate",
                                trailing: Format.bytesPerSecond(disk.readBytesPerSecond + disk.writeBytesPerSecond))
@@ -76,7 +77,8 @@ struct DiskDetail: View {
                                           fill: false, dashed: true),
                           ],
                           glows: true, minimumCeiling: 1_048_576, axis: Format.bytesPerSecond,
-                          axisUnits: .binaryBytes, cornerRadius: 8)
+                          axisUnits: .binaryBytes, cornerRadius: 8,
+                          squeeze: model.squeeze([.diskRead(disk.id), .diskWrite(disk.id)]))
                     .heroPlot(height: (height * 0.62).rounded(), tint: Theme.disk)
             }
         } figures: {
@@ -202,7 +204,7 @@ struct NetworkDetail: View {
                                   GraphSeries(values: sent, color: Theme.networkSecondary, fill: false, dashed: true),
                               ],
                               glows: true, minimumCeiling: 125_000, axis: Format.bitsPerSecond, axisUnits: .bits,
-                              cornerRadius: 8)
+                              cornerRadius: 8, squeeze: model.squeeze([.networkIn(link.id), .networkOut(link.id)]))
                         .heroPlot(height: Hero.height(pane: pane, extra: Hero.legendLine), tint: Theme.network)
                 } figures: {
                     Stat(label: "Receive", number: link.receivedBytesPerSecond, color: Theme.network, format: Format.bitsPerSecond)

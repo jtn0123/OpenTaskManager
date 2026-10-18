@@ -26,6 +26,10 @@ public enum Settings {
     public static let fitsCollectedGraphData = SettingKey<Bool, Bool>(
         "fitsCollectedGraphData", default: true, meaning: "Whether Performance graphs fit the data collected so far."
     )
+    public static let squeezesOlderTime = SettingKey<Bool, Bool>(
+        "squeezesOlderTime", default: false,
+        meaning: "Whether Performance's main graphs squeeze older time to the left of the newest window."
+    )
     public static let networkByProcess = SettingKey<Bool, Bool>(
         "networkByProcess", default: false, meaning: "Whether network usage is grouped by process instead of app."
     )
@@ -259,6 +263,7 @@ public enum Settings {
         showStartupInspector.descriptor,
         performanceShowsDiskImages.descriptor,
         fitsCollectedGraphData.descriptor,
+        squeezesOlderTime.descriptor,
         networkByProcess.descriptor,
         cpuGraphMode.descriptor,
         cpuLargerGraphs.descriptor,

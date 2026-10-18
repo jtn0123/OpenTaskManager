@@ -20,7 +20,8 @@ struct PowerDetail: View {
                     DeviceCaption(title: "Whole-system power draw", trailing: Format.watts(watts))
                 } plot: {
                     GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)],
-                              glows: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
+                              glows: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8,
+                              squeeze: model.squeeze([.power]))
                         .heroPlot(height: Hero.height(pane: pane), tint: Theme.power)
                 } figures: {
                     figures(power)
@@ -68,6 +69,7 @@ struct PowerDetail: View {
     // MARK: - Where the power goes
 
     private struct Part {
+        let key: PowerComponent
         let name: String
         let color: Color
         let values: [Double]
@@ -79,10 +81,12 @@ struct PowerDetail: View {
         let history = model.powerDetail
         let cpuName = components.sources[.cpu] == .smc ? "CPU (SMC estimate)" : "CPU"
         return [
-            Part(name: cpuName, color: Theme.cpu, values: history.cpu.values, watts: components.watts(.cpu)),
-            Part(name: "GPU", color: Theme.gpu, values: history.gpu.values, watts: components.watts(.gpu)),
-            Part(name: "Neural Engine", color: Theme.neuralEngine, values: history.ane.values, watts: components.watts(.ane)),
-            Part(name: "Memory (DRAM)", color: Theme.dram, values: history.dram.values, watts: components.watts(.dram)),
+            Part(key: .cpu, name: cpuName, color: Theme.cpu, values: history.cpu.values, watts: components.watts(.cpu)),
+            Part(key: .gpu, name: "GPU", color: Theme.gpu, values: history.gpu.values, watts: components.watts(.gpu)),
+            Part(key: .ane, name: "Neural Engine", color: Theme.neuralEngine, values: history.ane.values,
+                 watts: components.watts(.ane)),
+            Part(key: .dram, name: "Memory (DRAM)", color: Theme.dram, values: history.dram.values,
+                 watts: components.watts(.dram)),
         ]
     }
 
@@ -93,15 +97,17 @@ struct PowerDetail: View {
             + [LegendItem(name: "Rest of system", color: Theme.restOfSystem, value: Format.watts(rest.last ?? 0))]
         // Unmeasured parts stay in the legend as "—" but out of the stack,
         // where they'd only draw flat lines over the band below.
-        let series = chip.filter { $0.watts != nil }.map { GraphSeries(values: $0.values, color: $0.color) }
+        let measured = chip.filter { $0.watts != nil }
+        let series = measured.map { GraphSeries(values: $0.values, color: $0.color) }
             + [GraphSeries(values: rest, color: Theme.restOfSystem)]
+        let squeeze = model.squeeze(measured.map { OlderSeries.powerPart($0.key) } + [.powerRest])
         // The legend's two lines and the note's two come out of the height.
         let height = Hero.height(pane: pane, extra: 2 * Hero.legendLine + 40)
         return DeviceCard(tint: Theme.power, legend: legend, footnote: Self.restNote(components)) {
             DeviceCaption(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "")
         } plot: {
             GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts,
-                      cornerRadius: 8)
+                      cornerRadius: 8, squeeze: squeeze)
                 .heroPlot(height: height, tint: Theme.power)
         } figures: {
             figures(power)

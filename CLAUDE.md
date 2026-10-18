@@ -688,7 +688,21 @@ The incident sheet queries only on a window change, never on a timer or tick.
   Performance's Fit collected data toggle (`GraphFit`, on by default, in the
   main graph's time axis until the window is nearly full) narrows that one window, through
   the `graphWindow` environment value, in steps (`GraphCoverage.fittedCapacity`),
-  never per tick, so the graphs keep scrolling. A reading a Mac never gives
+  never per tick, so the graphs keep scrolling. Squeeze older time
+  (`squeezesOlderTime`, off by default, a checkbox in the same axis) keeps
+  that window in the right 60% of each main graph and squeezes 15 windows
+  (75 min at 1 s) into the rest, harder the older they are (`TimeWarp` in
+  OTMKit's Graphing/: 1–3 windows back in 18%, 3–7 in 12%, 7–15 in 10%), ruled
+  and labelled by `SqueezedTimeAxis`; Fit is off while it's on, and the CPU
+  page's graph per core isn't squeezed. `AppModel.olderTime` (`LongHistories`
+  in Monitor/: 10-sample buckets of mean and peak, unobserved) takes every
+  tick, shown or hidden, only while it's on, a hidden tick weighted by its
+  interval; a sleep gap adds unrecorded buckets and a cadence change starts
+  it again. `SqueezedTrace` merges buckets to a column per device pixel, the
+  peaks a faint band over the means, and `StreamGraphOlderTime` draws them in
+  a rasterized layer left of the scroller, redrawn only when a bucket closes
+  (about every 10 s), never per frame. In a debug build `-olderTimeFixture YES`
+  fills it with a made-up hour, ten minutes asleep, for screenshots. A reading a Mac never gives
   (a VM GPU's load) takes `Unavailable.symbol` and a short label, never the
   unrecorded hatch. The Overview keeps one card order at every width.
 - Rows of cards go through `FillGrid`, not an adaptive `LazyVGrid`: it fills

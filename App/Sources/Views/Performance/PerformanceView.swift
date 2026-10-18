@@ -50,9 +50,11 @@ struct PerformanceView: View {
                     }
                     ScrollView {
                         // Every graph on the page covers this one window. Both
-                        // values change a handful of times as it fills, not per tick.
+                        // values change a handful of times as it fills, not per
+                        // tick. Squeezed main graphs keep the whole window, so
+                        // they have nothing to fit.
                         let collected = model.cpuHistory.count
-                        let canFit = GraphCoverage.canFit(samples: collected, span: AppModel.graphSpan)
+                        let canFit = GraphCoverage.canFit(samples: collected, span: AppModel.graphSpan) && !model.squeezesOlderTime
                         detail(for: selected, snapshot: snapshot)
                             .environment(\.graphWindow, GraphFit.window(samples: collected, fits: fitsGraphs && canFit))
                             .environment(\.offersGraphFit, canFit)

@@ -254,19 +254,28 @@ struct TimeAxis: View {
     /// while the page offers one, so the window's label and the control
     /// that changes it sit together.
     var offersFit = false
+    /// A main graph that can squeeze older time in: its axis holds the
+    /// Squeeze older time toggle, and while that's on, marks each zone
+    /// (`SqueezedTimeAxis`).
+    var offersSqueeze = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("Last \(Format.timeSpan(Double(samples ?? window) * (interval ?? model.samplingInterval)))")
-            if offersFit, fitOffered { GraphFitToggle() }
-            Spacer(minLength: 0)
-            if showsNow { Text("now") }
+        if offersSqueeze, model.squeezesOlderTime {
+            SqueezedTimeAxis()
+        } else {
+            HStack(spacing: 10) {
+                Text("Last \(Format.timeSpan(Double(samples ?? window) * (interval ?? model.samplingInterval)))")
+                if offersFit, fitOffered { GraphFitToggle() }
+                if offersSqueeze { GraphSqueezeToggle() }
+                Spacer(minLength: 0)
+                if showsNow { Text("now") }
+            }
+            .font(.metadata)
+            .foregroundStyle(.secondaryText)
+            .padding(.horizontal, 2)
+            // As tall with the toggle as without, so the page doesn't move when it goes.
+            .frame(minHeight: offersFit || offersSqueeze ? GraphFitToggle.height : nil)
         }
-        .font(.metadata)
-        .foregroundStyle(.secondaryText)
-        .padding(.horizontal, 2)
-        // As tall with the toggle as without, so the page doesn't move when it goes.
-        .frame(minHeight: offersFit ? GraphFitToggle.height : nil)
     }
 }
 

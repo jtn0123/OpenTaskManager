@@ -178,6 +178,19 @@ final class AppModel {
         didSet { Settings.cpuRelativeToSystem.set(cpuRelativeToSystem) }
     }
 
+    /// Squeeze older time (`Settings.squeezesOlderTime`): Performance's main
+    /// graphs keep their window at the right and squeeze older time to its
+    /// left. Its figures are kept only while it's on.
+    var squeezesOlderTime: Bool {
+        didSet {
+            Settings.squeezesOlderTime.set(squeezesOlderTime)
+            if !squeezesOlderTime { olderTime.removeAll() }
+        }
+    }
+
+    /// The main graphs' older time, in buckets, while `squeezesOlderTime` is on.
+    @ObservationIgnored var olderTime = LongHistories<OlderSeries>(span: AppModel.graphSpan)
+
     var cpuScale: CPUScale {
         CPUScale(relativeToSystem: cpuRelativeToSystem, logicalCores: topology.logicalCores)
     }
@@ -194,6 +207,7 @@ final class AppModel {
         updateSpeed = Settings.updateSpeed.get()
         includeSystemProcesses = Settings.includeSystemProcesses.get()
         cpuRelativeToSystem = Settings.cpuRelativeToSystem.get()
+        squeezesOlderTime = Settings.squeezesOlderTime.get()
         applyMonitorOptions()
         runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
             Task { @MainActor in self?.runningAppsChanged = true }

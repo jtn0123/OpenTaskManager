@@ -13,6 +13,7 @@ struct SettingsTests {
         "showStartupInspector": .bool(true),
         "performanceShowsDiskImages": .bool(false),
         "fitsCollectedGraphData": .bool(true),
+        "squeezesOlderTime": .bool(false),
         "networkByProcess": .bool(false),
         "cpuGraphMode": .string("cores"),
         "cpuLargerGraphs": .bool(false),

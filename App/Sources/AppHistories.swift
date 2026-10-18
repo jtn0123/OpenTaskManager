@@ -24,13 +24,18 @@ struct MemoryHistory {
         compressed.append(Double(memory.compressed))
         cached.append(Double(memory.cached))
         swapUsed.append(Double(memory.swapUsed))
-        pressure.append(memory.availablePercent.map { 1 - Double($0) / 100 } ?? memory.usedFraction)
+        pressure.append(Self.pressure(memory))
         pageIns.append(memory.pageInRate)
         pageOuts.append(memory.pageOutRate)
         swapIns.append(memory.swapInRate)
         swapOuts.append(memory.swapOutRate)
         compressions.append(memory.compressionRate)
         decompressions.append(memory.decompressionRate)
+    }
+
+    /// 0...1, from the kernel's "memory available" level, or the share used where it gives none.
+    static func pressure(_ memory: MemorySample) -> Double {
+        memory.availablePercent.map { 1 - Double($0) / 100 } ?? memory.usedFraction
     }
 }
 
@@ -79,11 +84,7 @@ struct PowerHistory {
         gpu.append(parts?.watts(.gpu) ?? 0)
         ane.append(parts?.watts(.ane) ?? 0)
         dram.append(parts?.watts(.dram) ?? 0)
-        if let system = power.systemWatts, let parts {
-            rest.append(max(system - parts.total, 0))
-        } else {
-            rest.append(0)
-        }
+        rest.append(Self.rest(power))
         for cluster in parts?.clusters ?? [] {
             clusterWatts[cluster.name, default: Self.history()].append(cluster.watts ?? 0)
             var clock = clusterFrequency[cluster.name] ?? Self.history()
@@ -99,6 +100,12 @@ struct PowerHistory {
 
     /// Average whole-system draw since launch.
     var averageWatts: Double? { integral.averageWatts }
+
+    /// The system figure less the chip's parts, never negative; 0 where either isn't measured.
+    static func rest(_ power: PowerSample) -> Double {
+        guard let system = power.systemWatts, let parts = power.components else { return 0 }
+        return max(system - parts.total, 0)
+    }
 
     private static func history() -> History<Double> {
         History(capacity: AppModel.historyCapacity)

@@ -100,6 +100,9 @@ struct DeviceCard<Caption: View, Plot: View, Figures: View>: View {
     var legend: [LegendItem] = []
     /// What the graph holds, where a line of legend can't say it.
     var footnote: String?
+    /// Whether its graphs squeeze older time in while that's on
+    /// (`GraphSqueeze`): not the CPU page's graph per core.
+    var squeezes = true
     @ViewBuilder var caption: Caption
     @ViewBuilder var plot: Plot
     @ViewBuilder var figures: Figures
@@ -109,7 +112,7 @@ struct DeviceCard<Caption: View, Plot: View, Figures: View>: View {
             caption
             VStack(spacing: 3) {
                 plot
-                TimeAxis(offersFit: true)
+                TimeAxis(offersFit: true, offersSqueeze: squeezes)
             }
             if !legend.isEmpty { ChartLegend(items: legend) }
             if let footnote {

@@ -97,7 +97,7 @@ struct CPUDetail: View {
         let title = mode == CPUGraphMode.cores ? "Utilization of each core"
             : mode == CPUGraphMode.tiers ? "Utilization by core type" : "Utilization"
         let height = Hero.height(pane: pane, extra: Hero.legendLine + 4)
-        return DeviceCard(tint: Theme.cpu, legend: legend(topology)) {
+        return DeviceCard(tint: Theme.cpu, legend: legend(topology), squeezes: mode != CPUGraphMode.cores) {
             CPUGraphHeader(title: title, note: mode == CPUGraphMode.cores ? coreScaleNote(coreTop) : "")
         } plot: {
             switch mode {
@@ -105,10 +105,11 @@ struct CPUDetail: View {
             case CPUGraphMode.tiers: tierGraphs(topology, height: height)
             default:
                 let values = model.cpuHistory.values
+                let squeeze = model.squeeze([.cpu, .cpuSystem])
                 GraphView(series: [GraphSeries(values: values, color: Theme.cpu),
                                    GraphSeries(values: model.cpuSystemHistory.values, color: Theme.wired, fill: false)],
-                          maxValue: top("overall", peak: AutoScaleBounds.peak(values, capacity: window)),
-                          glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8)
+                          maxValue: top("overall", peak: max(AutoScaleBounds.peak(values, capacity: window), squeeze?.peak ?? 0)),
+                          glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote, cornerRadius: 8, squeeze: squeeze)
                     .heroPlot(height: height, tint: Theme.cpu)
             }
         } figures: {
@@ -203,7 +204,9 @@ struct CPUDetail: View {
     /// height, each with its kernel time as a line.
     private func tierGraphs(_ topology: CPUTopology, height: CGFloat) -> some View {
         let histories = topology.tiers.map { model.tierHistory(level: $0.level) }
-        let top = top("tiers", peak: histories.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0)
+        let squeezes = topology.tiers.map { model.squeeze([.tier($0.level), .tierKernel($0.level)]) }
+        let older = squeezes.map { $0?.peak ?? 0 }.max() ?? 0
+        let top = top("tiers", peak: max(histories.map { AutoScaleBounds.peak($0, capacity: window) }.max() ?? 0, older))
         let count = CGFloat(max(topology.tiers.count, 1))
         // Each graph's caption line and the gaps between them come out of the height.
         let each = max((height - (count - 1) * 10 - count * 19) / count, DetailGraph.compact)
@@ -216,7 +219,7 @@ struct CPUDetail: View {
                                        GraphSeries(values: model.tierHistory(level: tier.level, kernel: true), color: Theme.wired,
                                                    fill: false)],
                               maxValue: top, glows: true, axis: CPUGraphScale.axisLabel, axisNote: axisNote,
-                              cornerRadius: 8)
+                              cornerRadius: 8, squeeze: squeezes[index])
                         .heroPlot(height: each, tint: Theme.tier(tier.level), rows: 4)
                 }
             }

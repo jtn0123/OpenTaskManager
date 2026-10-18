@@ -66,6 +66,8 @@ struct GraphView: NSViewRepresentable {
     /// Said after the top label, such as "auto scale" for a top that isn't fixed.
     var axisNote: String?
     var cornerRadius: CGFloat = 0
+    /// Older time to the left of the window; nil draws the window across the width.
+    var squeeze: GraphSqueeze?
 
     func makeNSView(context: Context) -> StreamGraphView {
         StreamGraphView()
@@ -81,7 +83,8 @@ struct GraphView: NSViewRepresentable {
             maxValue: maxValue, capacity: max(capacity, 2), showsGrid: showsGrid, fineRows: fineRows > 0 ? fineRows : nil,
             lineWidth: lineWidth, glows: glows,
             stacked: stacked, minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling,
-            axis: axis, axisUnits: axisUnits, axisNote: axisNote, cornerRadius: cornerRadius
+            axis: axis, axisUnits: axisUnits, axisNote: axisNote, cornerRadius: cornerRadius,
+            squeeze: squeeze
         )
         view.update(configuration, interval: context.environment.sampleInterval, streams: context.environment.streamsGraphs)
     }
@@ -112,9 +115,10 @@ final class StreamGraphView: NSView {
         var axisUnits: GraphMath.AxisUnits
         var axisNote: String?
         var cornerRadius: CGFloat
+        var squeeze: GraphSqueeze?
 
-        /// Whether `other` draws the same apart from its values (and its axis
-        /// labels' wording, a closure that can't be compared).
+        /// Whether `other` draws the same apart from its values, older time
+        /// included (and its axis labels' wording, a closure that can't be compared).
         func drawsLike(_ other: Configuration) -> Bool {
             lines.count == other.lines.count
                 && zip(lines, other.lines).allSatisfy { $0.color == $1.color && $0.fill == $1.fill && $0.dashed == $1.dashed }
@@ -122,7 +126,7 @@ final class StreamGraphView: NSView {
                 && lineWidth == other.lineWidth && glows == other.glows && stacked == other.stacked
                 && minimumCeiling == other.minimumCeiling && maximumCeiling == other.maximumCeiling
                 && (axis == nil) == (other.axis == nil) && axisUnits == other.axisUnits && axisNote == other.axisNote
-                && cornerRadius == other.cornerRadius
+                && cornerRadius == other.cornerRadius && (squeeze == nil) == (other.squeeze == nil)
         }
     }
 
@@ -186,6 +190,12 @@ final class StreamGraphView: NSView {
     /// A fine grid's firmer rows, at its quarters.
     private let majorGrid = CAShapeLayer()
     private let scroller = CALayer()
+    /// The window's part of the plot, which clips the scroller: all of it,
+    /// or with older time squeezed in (`GraphSqueeze`), the part right of it.
+    private let linear = CALayer()
+    private let olderTime = StreamGraphOlderTime()
+    /// Moves on when the graph's colours or lines change, so its older time is drawn again.
+    private var lookRevision = 0
     private lazy var motion = StreamGraphMotion(scroller: scroller)
     private let columns = CAShapeLayer()
     /// The stretch before the first sample, washed and faintly hatched. It lives in
@@ -266,9 +276,15 @@ final class StreamGraphView: NSView {
         scroller.addSublayer(columns)
         scroller.addSublayer(unrecorded)
         scroller.addSublayer(boundary)
+        linear.masksToBounds = true
+        linear.addSublayer(scroller)
+        olderTime.layer.isHidden = true
+        olderTime.rules.isHidden = true
         plot.addSublayer(grid)
         plot.addSublayer(majorGrid)
-        plot.addSublayer(scroller)
+        plot.addSublayer(olderTime.rules)
+        plot.addSublayer(olderTime.layer)
+        plot.addSublayer(linear)
         layer?.addSublayer(plot)
         layer?.addSublayer(captionBadge)
         layer?.addSublayer(topLabel)
@@ -296,9 +312,14 @@ final class StreamGraphView: NSView {
         // its graphs what they already show. Drawing them again cut short
         // the scroll under way, so they jumped a step a sample; now there's
         // nothing to draw and the scroll runs on.
-        if !changed, let previous, configuration.drawsLike(previous), interval == self.interval, streams == self.streams,
-           retro == self.retro, light == self.light {
+        // A closed bucket of older time is drawn whether or not a sample came with it.
+        let olderChanged = configuration.squeeze?.revision != previous?.squeeze?.revision
+        if !changed, !olderChanged, let previous, configuration.drawsLike(previous), interval == self.interval,
+           streams == self.streams, retro == self.retro, light == self.light {
             return
+        }
+        if previous.map({ !configuration.drawsLike($0) }) ?? true || retro != self.retro || light != self.light {
+            lookRevision += 1
         }
         if retro != self.retro || light != self.light {
             self.retro = retro
@@ -348,6 +369,7 @@ final class StreamGraphView: NSView {
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
+        lookRevision += 1
         render(newSample: false)
     }
 
@@ -368,7 +390,11 @@ final class StreamGraphView: NSView {
         guard let configuration, bounds.width > 8, bounds.height > 8 else { return }
         lastSize = bounds.size
         let plotRect = CGRect(x: 0, y: 0, width: bounds.width - headInset, height: bounds.height)
-        let step = plotRect.width / CGFloat(configuration.capacity - 1)
+        // Squeezed, the window keeps its scale over its share at the right.
+        let squeeze = configuration.squeeze
+        let linearWidth = squeeze == nil ? plotRect.width : (plotRect.width * CGFloat(TimeWarp.standard.linearShare)).rounded()
+        let step = linearWidth / CGFloat(configuration.capacity - 1)
+        let scale = window?.backingScaleFactor ?? 2
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let scrolls = newSample && streams && !reduceMotion
         // Redrawn between samples at the same step (a new scale, a taller
@@ -379,9 +405,11 @@ final class StreamGraphView: NSView {
         let raw = configuration.lines.map(\.values)
         let shown = configuration.stacked ? GraphMath.stack(raw) : raw
         let previousCeiling = ceiling
+        // Laid out only as a bucket closes; its peak shares the window's scale.
+        let olderPeak = squeeze.map { olderTime.layOut($0, configuration: configuration, width: plotRect.width, scale: scale) } ?? 0
         // The peak is scanned for only when there's no fixed top.
         ceiling = configuration.maxValue
-            ?? min(GraphMath.ceiling(peak: shown.map { GraphMath.finitePeak($0) }.max() ?? 0,
+            ?? min(GraphMath.ceiling(peak: max(shown.map { GraphMath.finitePeak($0) }.max() ?? 0, olderPeak),
                                      floor: configuration.minimumCeiling, units: configuration.axisUnits),
                    configuration.maximumCeiling)
         let rescales = hasDrawn && !restep && previousCeiling != ceiling && !reduceMotion
@@ -393,8 +421,11 @@ final class StreamGraphView: NSView {
         layer?.cornerRadius = radius
         layer?.masksToBounds = radius > 0
         plot.frame = plotRect
-        scroller.frame = CGRect(x: 0, y: 0, width: plotRect.width + 2 * step + 16, height: plotRect.height)
-        scroller.rasterizationScale = window?.backingScaleFactor ?? 2
+        linear.frame = CGRect(x: plotRect.width - linearWidth, y: 0, width: linearWidth, height: plotRect.height)
+        olderTime.layer.isHidden = squeeze == nil
+        olderTime.rules.isHidden = squeeze == nil
+        scroller.frame = CGRect(x: 0, y: 0, width: linearWidth + 2 * step + 16, height: plotRect.height)
+        scroller.rasterizationScale = scale
         motion.prepare(view: self, step: step, interval: interval, scrolls: scrolls,
                        reset: restep || !streams || reduceMotion)
         syncSeriesLayers(count: shown.count)
@@ -405,8 +436,9 @@ final class StreamGraphView: NSView {
         // Colours resolve for this view's appearance: the data colours are
         // deeper in light mode, and re-render when it changes.
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            drawGrid(in: plotRect, step: step, configuration: configuration, emphasis: emphasis)
-            drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, step: step, configuration: configuration)
+            drawGrid(in: plotRect, linearWidth: linearWidth, step: step, configuration: configuration, emphasis: emphasis)
+            drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, linearWidth: linearWidth, step: step,
+                         configuration: configuration)
             // Each made once: a stacked band's lower edge is the band below's trace.
             let traces = shown.map { makeTrace($0, ceiling: ceiling, height: plotRect.height) }
             for (index, values) in shown.enumerated() {
@@ -414,7 +446,7 @@ final class StreamGraphView: NSView {
                 let layers = series[index]
                 let trace = traces[index]
                 let below = configuration.stacked && index > 0 ? traces[index - 1] : nil
-                let firstX = plotRect.width + step - CGFloat(values.count - 1) * step
+                let firstX = linearWidth + step - CGFloat(values.count - 1) * step
                 let paths = makePaths(trace, below: below, firstX: firstX, step: step)
 
                 if rescales {
@@ -427,6 +459,14 @@ final class StreamGraphView: NSView {
                 }
                 style(layers, line: line, configuration: configuration, emphasis: emphasis, paths: paths)
                 placeHead(layers, line: line, trace: trace, edge: plotRect.maxX, animated: scrolls)
+            }
+            if squeeze != nil {
+                let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                let look = StreamGraphOlderTime.Look(padding: verticalPadding, bloom: bloom, spread: retro.isOn ? retro.bloom.spread : 8,
+                                                     emphasis: emphasis, isDark: isDark, revision: lookRevision)
+                let size = CGSize(width: max(plotRect.width - linearWidth, 0), height: plotRect.height)
+                rescaleAnimations += olderTime.draw(configuration: configuration, size: size, ceiling: ceiling,
+                                                    previousCeiling: rescales ? previousCeiling : nil, look: look)
             }
         }
         CATransaction.commit()
@@ -614,9 +654,14 @@ final class StreamGraphView: NSView {
         ) : nil
         motion.placeHead(layers.head, target: CGPoint(x: edge, y: CGFloat(last)), segment: segment, animated: animated)
     }
+}
 
+// MARK: - Grid and coverage
+
+extension StreamGraphView {
     /// Runs inside `render`'s appearance block, so the colours resolve for this view.
-    private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration, emphasis: GraphEmphasis) {
+    private func drawGrid(in plotRect: CGRect, linearWidth: CGFloat, step: CGFloat, configuration: Configuration,
+                          emphasis: GraphEmphasis) {
         grid.isHidden = !configuration.showsGrid
         majorGrid.isHidden = !configuration.showsGrid || configuration.fineRows == nil
         columns.isHidden = !configuration.showsGrid
@@ -636,7 +681,7 @@ final class StreamGraphView: NSView {
             let colors = retro.isOn
                 ? (minor: ink.withAlphaComponent(ruling.minorGrid).cgColor, major: ink.withAlphaComponent(ruling.majorGrid).cgColor)
                 : FineGridLines.colors(dark: isDark, emphasis: emphasis)
-            drawFineGrid(rows: fineRows, in: plotRect, step: step, colors: colors)
+            drawFineGrid(rows: fineRows, in: plotRect, linearWidth: linearWidth, step: step, colors: colors)
         } else if configuration.showsGrid {
             let rows = CGMutablePath()
             for fraction in [0.25, 0.5, 0.75] as [CGFloat] {
@@ -648,8 +693,14 @@ final class StreamGraphView: NSView {
             grid.path = rows
             grid.strokeColor = lineColor
             columns.frame = scroller.bounds
-            columns.path = verticals(every: max(configuration.capacity / 10, 1), in: plotRect, step: step)
+            columns.path = verticals(every: max(configuration.capacity / 10, 1), width: linearWidth, height: plotRect.height, step: step)
             columns.strokeColor = lineColor
+        }
+        if configuration.squeeze != nil {
+            // Firmer than the grid's quarters, so the zones read apart.
+            let rule = retro.isOn ? ink.withAlphaComponent(ruling.majorGrid).cgColor
+                : FineGridLines.colors(dark: isDark, emphasis: emphasis).major
+            olderTime.drawRules(size: plotRect.size, color: rule)
         }
 
         let axis = configuration.axis
@@ -682,7 +733,8 @@ final class StreamGraphView: NSView {
 
     /// A main graph's fine grid (`FineGridLines`): still rows, firmer at the
     /// quarters, and columns about as far apart that scroll with the data.
-    private func drawFineGrid(rows: Int, in plotRect: CGRect, step: CGFloat, colors: (minor: CGColor, major: CGColor)) {
+    private func drawFineGrid(rows: Int, in plotRect: CGRect, linearWidth: CGFloat, step: CGFloat,
+                              colors: (minor: CGColor, major: CGColor)) {
         let lines = FineGridLines.rows(size: plotRect.size, inset: verticalPadding, rows: rows)
         grid.frame = plot.bounds
         grid.path = lines.minor
@@ -693,65 +745,49 @@ final class StreamGraphView: NSView {
         let rowStep = FineGridSpacing.row(height: Double(plotRect.height), inset: Double(verticalPadding), rows: rows)
         let spacing = FineGridSpacing.columnSamples(rowStep: rowStep, sampleStep: Double(step))
         columns.frame = scroller.bounds
-        columns.path = verticals(every: spacing, in: plotRect, step: step)
+        columns.path = verticals(every: spacing, width: linearWidth, height: plotRect.height, step: step)
         columns.strokeColor = colors.minor
     }
 
-    /// Vertical lines every `spacing` samples, counted from the newest. They
-    /// belong to sample times, so they scroll with the data.
-    private func verticals(every spacing: Int, in plotRect: CGRect, step: CGFloat) -> CGPath {
-        let newestX = plotRect.width + step
+    /// Vertical lines every `spacing` samples, counted from the newest,
+    /// across a window `width` wide. They belong to sample times, so they
+    /// scroll with the data.
+    private func verticals(every spacing: Int, width: CGFloat, height: CGFloat, step: CGFloat) -> CGPath {
+        let newestX = width + step
         let path = CGMutablePath()
         var age = sampleIndex % spacing
         while newestX - CGFloat(age) * step >= -step {
             let x = newestX - CGFloat(age) * step
             path.move(to: CGPoint(x: x, y: 0))
-            path.addLine(to: CGPoint(x: x, y: plotRect.height))
+            path.addLine(to: CGPoint(x: x, y: height))
             age += spacing
         }
         return path
     }
-}
 
-// MARK: - Unrecorded stretch
-
-/// How a graph shows a stretch with nothing recorded, in one place for the
-/// live graphs (`StreamGraphView`: Performance, Overview, the process
-/// inspector) and the History page's gaps (`HistoryGapStyle`): a light
-/// neutral wash over the plot's tint and a faint diagonal hatch, enough to
-/// tell it from a recorded quiet stretch (never drawn as zero) without
-/// outweighing the data beside it, and a firmer dashed edge where recording
-/// starts.
-enum UnrecordedLook {
-    /// Horizontal distance between the hatch's diagonals.
-    static let hatchSpacing: CGFloat = 10
-    static let hatchWidth: CGFloat = 0.75
-
-    /// The window background's opacity over the plot.
-    static func washOpacity(dark: Bool) -> CGFloat { dark ? 0.22 : 0.35 }
-    /// The label colour's opacity in the hatch: a texture that says "nothing
-    /// here", fainter than the grid's lines, while the wash and the edge
-    /// mark the stretch out.
-    static func hatchOpacity(dark: Bool) -> CGFloat { dark ? 0.035 : 0.03 }
-    /// The label colour's opacity in the edge where recording starts.
-    static func edgeOpacity(dark: Bool) -> CGFloat { dark ? 0.35 : 0.4 }
-}
-
-extension StreamGraphView {
     /// Shades the stretch before the first of `samples`, marks where
     /// recording started and captions how much is collected. A sample only
     /// moves and resizes layers here: the paths are rebuilt when the size
     /// changes, and the caption's text when its rounded figure does. Runs
     /// inside `render`'s appearance block, like `drawGrid`.
-    private func drawCoverage(samples: Int, in plotRect: CGRect, step: CGFloat, configuration: Configuration) {
+    private func drawCoverage(samples: Int, in plotRect: CGRect, linearWidth: CGFloat, step: CGFloat,
+                              configuration: Configuration) {
         // The oldest sample's x in the scroller, as in `render`. Left of it
         // nothing was recorded; with a full window it's at or past the edge.
-        let start = plotRect.width + step - CGFloat(samples - 1) * step
+        let start = linearWidth + step - CGFloat(samples - 1) * step
         let filling = start > 0
         unrecorded.isHidden = !filling
         boundary.isHidden = !filling || samples == 0
-        let coverage = GraphCoverage(samples: samples, capacity: configuration.capacity, interval: interval)
-        defer { placeCaption(coverage, room: start - step, in: plotRect, configuration: configuration) }
+        var coverage = GraphCoverage(samples: samples, capacity: configuration.capacity, interval: interval)
+        var room = start - step
+        if configuration.squeeze != nil {
+            // Squeezed, the caption covers the whole graph, from as far back as its older time reaches.
+            let recorded = olderTime.recorded
+            coverage = GraphCoverage(samples: max(samples, recorded?.age ?? 0),
+                                     capacity: Int(Double(configuration.capacity) * TimeWarp.standard.span), interval: interval)
+            room = recorded?.x ?? plotRect.width - linearWidth + max(start - step, 0)
+        }
+        defer { placeCaption(coverage, room: room, in: plotRect, configuration: configuration) }
         guard filling else { return }
 
         let size = scroller.bounds.size

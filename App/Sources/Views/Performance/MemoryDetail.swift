@@ -60,7 +60,7 @@ struct MemoryDetail: View {
                         GraphSeries(values: history.cached.values, color: Theme.cached),
                     ],
                     maxValue: Double(memory.physical), glows: true, stacked: true, axis: Self.bytesAxis,
-                    cornerRadius: 8
+                    cornerRadius: 8, squeeze: model.squeeze([.memoryWired, .memoryApp, .memoryCompressed, .memoryCached])
                 )
                 .heroPlot(height: height, tint: Theme.memory)
                 pressureStrip(memory)
@@ -85,7 +85,7 @@ struct MemoryDetail: View {
         return VStack(alignment: .leading, spacing: 3) {
             HeroGraphTitle(title: "Memory pressure", trailing: memory.pressure.rawValue.capitalized + (now.map { " · \($0)" } ?? ""))
             GraphView(series: [GraphSeries(values: history.values, color: color)], maxValue: 1,
-                      lineWidth: 1.5, cornerRadius: 8)
+                      lineWidth: 1.5, cornerRadius: 8, squeeze: model.squeeze([.memoryPressure]))
                 .heroPlot(height: Self.pressureHeight, tint: color, rows: 2)
         }
     }

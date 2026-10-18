@@ -87,7 +87,7 @@ struct SensorsDetail: View {
             DeviceCaption(title: "Thermal pressure", trailing: thermalState.title)
         } plot: {
             GraphView(series: [GraphSeries(values: model.thermalPressureHistory.values, color: Theme.thermal)], maxValue: 1,
-                      glows: true, cornerRadius: 8)
+                      glows: true, cornerRadius: 8, squeeze: model.squeeze([.thermalPressure]))
                 .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.thermal, rows: 3)
         } figures: {
             figures(thermalState)
@@ -97,10 +97,12 @@ struct SensorsDetail: View {
     private func temperatures(_ sensors: SensorSample, thermalState: ThermalState) -> some View {
         let history = model.sensorHistory
         var series: [GraphSeries] = []
+        var lines: [OlderSeries] = []
         var legend: [LegendItem] = []
         if let chip = sensors.hottest(.chip) {
             series.append(GraphSeries(values: history.hottest[.chip]?.values ?? [], color: Theme.thermal))
             series.append(GraphSeries(values: history.chipAverage.values, color: Theme.thermal.opacity(0.7), fill: false, dashed: true))
+            lines += [.hottest(.chip), .chipAverage]
             legend.append(LegendItem(name: "Chip, hottest die", color: Theme.thermal, value: Format.celsius(chip)))
             let average = sensors.average(.chip).map(Format.celsius) ?? "—"
             legend.append(LegendItem(name: "Chip, average", color: Theme.thermal.opacity(0.7), value: average))
@@ -108,12 +110,14 @@ struct SensorsDetail: View {
         for kind in [SensorKind.storage, .battery] {
             guard let celsius = sensors.hottest(kind) else { continue }
             series.append(GraphSeries(values: history.hottest[kind]?.values ?? [], color: Theme.sensor(kind), fill: false))
+            lines.append(.hottest(kind))
             legend.append(LegendItem(name: kind.title, color: Theme.sensor(kind), value: Format.celsius(celsius)))
         }
         return DeviceCard(tint: Theme.thermal, legend: legend) {
             DeviceCaption(title: "Temperatures", trailing: sensors.hottest(.chip).map { "chip \(Format.celsius($0))" } ?? "")
         } plot: {
-            GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8)
+            GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8,
+                      squeeze: model.squeeze(lines))
                 .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.thermal)
         } figures: {
             figures(thermalState)
