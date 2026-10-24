@@ -16,9 +16,15 @@ It's an early slice, not a release:
 - Live CPU, memory, disk and network graphs.
 - A process table: search, sorting by any column, right-aligned figures, and
   a selection that follows its process through re-sorts (Up and Down move it).
-- End Task and Force Quit for the selected process (Delete and Shift+Delete).
-  Force Quit asks first, naming the process and PID; the outcome stays above
-  the table until dismissed (Esc).
+- Processes grouped by app (or one flat list): a header sums each group's
+  figures and opens to its members (its triangle, or Right and Left). While
+  searching, groups open to show which members matched.
+- A details panel for the selection: program file, command line, what
+  started it, how long it has run, its account and its group.
+- End Task and Force Quit for the selected process, or a whole group from
+  its header (Delete and Shift+Delete). Force Quit asks first, naming the
+  process and PID, or the group and how many; the outcome stays above the
+  table until dismissed (Esc).
 - A tray icon drawing recent CPU load, with close-to-tray.
 - One running copy: launching it again brings its window to the front.
 - It remembers the window's size, the sort and the update speed (every 1, 2
@@ -43,6 +49,22 @@ It's an early slice, not a release:
   formatting, the table's search and order, rate axes, the tray icon's
   pixels. `app/src/graph.rs` (graph paths) is tested too.
 
+## Groups
+
+A process sits under the process that started it, unless that one is a
+launcher: Explorer, the service manager, svchost and the session's own
+processes on Windows; init, systemd, the session and display managers and
+the desktop shell on Linux (`otm_core::groups`). Those start apps without
+being part of them, so each app they start heads its own group, and a
+browser's helpers or a terminal's shells sit with it. A parent only counts
+if it started no later than the process naming it, so a reused PID never
+collects an ended app's helpers. A header's figures are its members' sums;
+one that no member reported stays "—".
+
+A selected member whose group is closed moves the selection to its header;
+a selected process that ends clears it, so End Task (which doesn't ask
+first) never lands on a group nobody picked.
+
 ## Ending a process
 
 | | End Task | Force Quit |
@@ -55,6 +77,12 @@ ended, its PID now belongs to a process started at another time, it's
 another account's or protected (ending it needs administrator rights), it's
 OpenTaskManager itself, or (End Task on Windows) it has no window to close,
 when Force Quit is the way. The wording of the question is the Mac app's.
+
+A group is ended one member at a time, each checked as above just before:
+Force Quit from the bottom up, so no parent outlives its children long
+enough to start more; End Task from the top, so an app can close its own
+helpers. The targets are fixed when Force Quit's question opens, and the
+notice counts what was ended and why the rest weren't.
 
 ## Choices that keep it light
 
@@ -74,9 +102,11 @@ when Force Quit is the way. The wording of the question is the Mac app's.
 ```
 crates/otm-core/   Sampling (sysinfo), figures, formatting, table rules, axis scaling, tray icon pixels,
                    ending a process (actions.rs: rustix on Linux, windows-sys on Windows),
-                   settings, one running copy (instance.rs) and start at sign-in (autostart.rs)
+                   settings, one running copy (instance.rs) and start at sign-in (autostart.rs),
+                   grouping by app (groups.rs) and a process's details (details.rs)
 app/ui/app.slint   The window: graph cards, End Task and Force Quit, process table, status bar
-app/src/main.rs    The view: sampler thread, window life, table model, callbacks
+app/src/main.rs    The view: sampler thread, window life, graphs, settings, callbacks
+app/src/table.rs   The table's rows, selection, details panel and ending what's selected
 app/src/graph.rs   Graph lines as path commands in the graph's own pixels
 app/src/tray.rs    The tray: ksni on Linux, tray-icon elsewhere
 ```
@@ -132,6 +162,11 @@ searches, and checks that a protected process shows "—", not 0 bytes. Then it
 starts a ping with no window, selects it, and checks that End Task says
 Force Quit is needed, that Force Quit asks first and Cancel ends nothing,
 and that confirming ends it (it kills the ping itself if a check fails).
+Then it opens a group header, starts a cmd.exe running ping through a cmd
+that exits (so the group stands alone and can't take in the test), checks
+the details panel names what started the ping, and ends the group: End
+Task says Force Quit is needed, Force Quit asks with how many, and
+confirming ends both. It turns Group by app off and on.
 Last, it checks that a second launch hands over and exits, that Start at
 sign-in writes and removes its Run value, and that the sort and a resized
 window survive `--quit` and a relaunch. It runs as its own instance and
@@ -162,19 +197,20 @@ Linux, in WSL 2 (Ubuntu 26.04, 16 logical CPUs, no GPU, about 50 processes):
 For comparison, the Tauri prototype took 9% and 455 MB with its window open,
 and the C++/Qt one 0.83% and 31 MB (see COMPARISON.md).
 
-Verified on Windows: the core's 38 tests run natively, including one that
+Verified on Windows: the core's 48 tests run natively, including one that
 no process Windows won't open shows 0 bytes, and End Task and Force Quit on
 real processes: one closed through an invisible window that never takes
 focus, a PID with the wrong start time refused and left running, and the
-System process refused, and registry writes under a test key. All 33
-smoke checks pass. Windows registered the tray icon. On Linux (WSL) the core's 37 tests pass, including SIGTERM and
+System process refused, registry writes under a test key, and a group of
+two processes ended in order. All 47 smoke checks pass. Windows registered the tray icon. On Linux (WSL) the core's 47 tests pass, including SIGTERM and
 SIGKILL on real processes and PID 1 refused to an ordinary account.
 
 Not verified yet:
 
 - The Linux tray: WSLg has no tray host, so it didn't start there.
-- Keyboard selection, Delete and Shift+Delete, and the tray menu: no test
-  drives them (UI Automation invokes the buttons instead).
+- Keyboard selection, Delete and Shift+Delete, Right and Left on groups,
+  clicking a header's triangle, and the tray menu: no test drives them (UI
+  Automation invokes the buttons and opens groups instead).
 - The Linux window's End Task and Force Quit buttons: the Linux actions are
   tested in the core, the buttons only on Windows.
 - The update speed menu: UI Automation can't pick from Slint's drop-down,
@@ -182,6 +218,6 @@ Not verified yet:
 - A real sign-in: the Run value and the Linux autostart entry are checked as
   written, not by signing in again.
 
-Known gaps: no multiple selection or ending a group of processes, no history
+Known gaps: no multiple selection, no history
 recording, no per-OS readers beyond what `sysinfo` provides (GPU, sensors,
 per-process network). macOS hasn't been built; the Swift app covers it.

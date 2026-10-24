@@ -13,7 +13,8 @@
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
-    [int]$TimeoutSeconds = 60
+    # A safety net only: the test quits the app with --quit when it's done.
+    [int]$TimeoutSeconds = 150
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
@@ -75,7 +76,18 @@ try {
     function Press([string]$name) {
         $button = Button $name
         if (-not $button) { throw "No button named $name." }
-        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        # A button just shown can be found a moment before it can be pressed: if pressing it fails
+        # and it's still there, press it again; if it's gone, its own click closed its bar.
+        for ($try = 0; $try -lt 5 -and $button; $try++) {
+            try {
+                $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+                break
+            } catch {
+                if ($_.FullyQualifiedErrorId -notmatch 'ElementNotAvailable') { throw }
+                Start-Sleep -Milliseconds 300
+                $button = Button $name
+            }
+        }
         Start-Sleep -Milliseconds 500
     }
     function Texts([string]$pattern) {
@@ -186,6 +198,105 @@ try {
         } finally {
             if (-not $target.HasExited) { $target.Kill() }
         }
+
+        # Groups. Opening one the user already has ends nothing: expand the first header in view.
+        $value = [System.Windows.Automation.ValuePattern]::Pattern
+        $search.GetCurrentPattern($value).SetValue('')
+        Start-Sleep -Milliseconds 900
+        # Rows are slots the list refills as processes come and go, so find a header and open it in one go.
+        $expandPattern = [System.Windows.Automation.ExpandCollapsePattern]::Pattern
+        $opened = $null
+        for ($i = 0; $i -lt 5 -and -not $opened; $i++) {
+            $header = Elements $Type::ListItem | Where-Object { $_.Current.Name -match ', group of \d+ processes, top PID \d+,' } | Select-Object -First 1
+            $pattern = $null
+            if ($header -and $header.TryGetCurrentPattern($expandPattern, [ref]$pattern) -and $header.Current.Name -match ', top PID (\d+),') {
+                $top = $Matches[1]
+                $before = @(Rows).Count
+                try { $pattern.Expand(); $opened = $top } catch {
+                    Write-Output ("  (retrying: {0}, state {1}, search '{2}')" -f $header.Current.Name, $pattern.Current.ExpandCollapseState, $search.GetCurrentPattern($value).Current.Value)
+                    Start-Sleep -Milliseconds 300
+                }
+            } else {
+                Start-Sleep -Milliseconds 300
+            }
+        }
+        if ($opened) {
+            Start-Sleep -Milliseconds 700
+            $header = Elements $Type::ListItem | Where-Object { $_.Current.Name -match ", top PID $opened," } | Select-Object -First 1
+            Check ($header -and $header.GetCurrentPattern($expandPattern).Current.ExpandCollapseState -eq 'Expanded') "a group header opens"
+            Check (@(Rows).Count -gt $before) "and lists its processes under it"
+        } else {
+            Check $false "a group header in view that opens"
+        }
+
+        # A group of its own to end: cmd.exe running ping, started through a cmd that exits at once,
+        # so the group has no parent and can never take in this test or the user's apps.
+        $count = Get-Random -Minimum 130 -Maximum 199
+        $start = New-Object System.Diagnostics.ProcessStartInfo 'cmd.exe', "/c start `"`" /b cmd.exe /c ping -n $count 127.0.0.1"
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $outer = [System.Diagnostics.Process]::Start($start)
+        [void]$outer.WaitForExit(5000)
+        $ping = $null
+        for ($i = 0; $i -lt 20 -and -not $ping; $i++) {
+            Start-Sleep -Milliseconds 250
+            $ping = Get-CimInstance Win32_Process -Filter "Name = 'PING.EXE' AND CommandLine LIKE '%-n $count %'" | Select-Object -First 1
+        }
+        if (-not $ping) { throw 'The test group (cmd running ping) never started.' }
+        $pingId = [int]$ping.ProcessId
+        $cmdId = [int]$ping.ParentProcessId
+        try {
+            # The details panel names what started a process.
+            $search.GetCurrentPattern($value).SetValue("$pingId")
+            $row = $null
+            for ($i = 0; $i -lt 10 -and -not $row; $i++) {
+                Start-Sleep -Milliseconds 500
+                $row = Elements $Type::ListItem | Where-Object { $_.Current.Name -match ", PID $pingId," } | Select-Object -First 1
+            }
+            if (-not $row) { throw "The test ping (PID $pingId) never appeared in the table." }
+            Check ((Elements $Type::ListItem | Where-Object { $_.Current.Name -match "^cmd\.exe, group of 2 processes, top PID $cmdId," }).Count -eq 1) "a search opens the group a match is in (cmd.exe, 2 processes)"
+            $row.GetCurrentPattern($item).Select()
+            Start-Sleep -Milliseconds 800
+            Check ((Texts "^PING\.EXE . PID $pingId$").Count -eq 1) "selecting a process shows its details"
+            Check ((Texts "^cmd\.exe \(PID $cmdId\)$").Count -eq 1) "which name what started it"
+            Check ((Texts '\\PING\.EXE$').Count -ge 1) "and its program file"
+
+            # End the whole group, chosen by its header with this test's cmd at the top.
+            $search.GetCurrentPattern($value).SetValue("$cmdId")
+            $group = $null
+            for ($i = 0; $i -lt 10 -and -not $group; $i++) {
+                Start-Sleep -Milliseconds 500
+                $group = Elements $Type::ListItem | Where-Object { $_.Current.Name -match "^cmd\.exe, group of 2 processes, top PID $cmdId," } | Select-Object -First 1
+            }
+            if (-not $group) { throw "The test group (top PID $cmdId) never appeared." }
+            $group.GetCurrentPattern($item).Select()
+            Start-Sleep -Milliseconds 800
+            Check ((Texts '^cmd\.exe . group of 2 processes$').Count -eq 1) "selecting a header shows the group's details"
+            Press 'End Task'
+            Check ((Texts "^None of cmd\.exe's 2 processes has a window to close\. Force Quit ends them\.$").Count -eq 1) "End Task on a group without windows says Force Quit is needed"
+            Press $forceQuitAsk
+            Check ((Texts "^Force quit cmd\.exe's group, 2 processes\? They stop at once").Count -eq 1) "Force Quit on a group asks first, with how many"
+            Press 'Force Quit'
+            $pingProcess = Get-Process -Id $pingId -ErrorAction SilentlyContinue
+            $cmdProcess = Get-Process -Id $cmdId -ErrorAction SilentlyContinue
+            Check ((-not $pingProcess -or $pingProcess.WaitForExit(5000)) -and (-not $cmdProcess -or $cmdProcess.WaitForExit(5000))) "confirming ends both processes"
+            $said = Texts "cmd\.exe"
+            Check ((Texts "^Ended cmd\.exe's group \(2 processes\) at once\.$").Count -eq 1) "and says so ($($said -join ' | '))"
+            Press 'Dismiss'
+        } finally {
+            foreach ($id in @($pingId, $cmdId)) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+        }
+
+        # Flat, then grouped again.
+        $search.GetCurrentPattern($value).SetValue('')
+        $grouping = Elements $Type::CheckBox | Where-Object { $_.Current.Name -eq 'Group by app' } | Select-Object -First 1
+        $switch = $grouping.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        $switch.Toggle()
+        Start-Sleep -Milliseconds 900
+        Check (@(Elements $Type::ListItem | Where-Object { $_.Current.Name -match ', group of \d+ processes' }).Count -eq 0) "turning Group by app off lists every process flat"
+        $switch.Toggle()
+        Start-Sleep -Milliseconds 900
+        Check (@(Elements $Type::ListItem | Where-Object { $_.Current.Name -match ', group of \d+ processes' }).Count -gt 0) "and on again groups them"
     } else {
         Write-Output "skipped: the search field offers no value pattern to type into"
     }

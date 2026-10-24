@@ -5,9 +5,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod graph;
+mod table;
 mod tray;
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,17 +17,19 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use otm_core::actions::{self, Ending};
 use otm_core::autostart;
+use otm_core::details::Details;
 use otm_core::format::{MISSING, axis_rate, bytes, percent, rate};
+use otm_core::groups::Grouping;
 use otm_core::history::Ring;
 use otm_core::instance::{self, Claim, Message};
 use otm_core::model::{ProcessKey, ProcessRow, Snapshot};
-use otm_core::rows::{self, Column};
+use otm_core::rows::Column;
 use otm_core::sampler::Sampler;
 use otm_core::scale::AutoScale;
 use otm_core::settings::{self, Settings, UPDATE_SECONDS};
-use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, VecModel};
+use slint::{CloseRequestResponse, ComponentHandle, ModelRc, VecModel};
+use table::{Pick, Targets};
 
 slint::include_modules!();
 
@@ -46,11 +50,21 @@ struct View {
     query: String,
     /// The table's rows, changed in place so it keeps its scroll position.
     rows: Rc<VecModel<ProcessCells>>,
-    /// Rows in the order shown, to map a row index back to its process.
-    shown: Vec<ProcessKey>,
-    selected: Option<ProcessKey>,
-    /// Force Quit's target while its question is open, fixed as it opened.
-    pending: Option<(ProcessKey, String)>,
+    /// What each row stands for, in the order shown.
+    shown: Vec<Pick>,
+    selected: Option<Pick>,
+    /// Processes grouped by app (true) or one flat list.
+    grouped: bool,
+    /// Each process's group, worked out once per sample.
+    grouping: Option<Grouping>,
+    /// Groups opened to show their members, by their top process.
+    expanded: HashSet<ProcessKey>,
+    /// The selected process's program and command line, read once per selection.
+    details: Option<(ProcessKey, Option<Details>)>,
+    /// The details panel's lines, changed in place.
+    facts: Rc<VecModel<Fact>>,
+    /// Force Quit's targets while its question is open, fixed as it opened.
+    pending: Option<Targets>,
     /// What the last End Task or Force Quit did, until dismissed.
     notice: String,
     showing: Arc<AtomicBool>,
@@ -162,109 +176,13 @@ impl View {
         window.set_network(card);
     }
 
-    fn draw_table(&mut self, window: &AppWindow) {
-        let (column, descending) = self.sort;
-        window.set_sort_column(Column::ALL.iter().position(|each| *each == column).unwrap_or(0) as i32);
-        window.set_sort_descending(descending);
-        let Some(processes) = &self.processes else {
-            window.set_status("Reading processes…".into());
-            self.draw_actions(window);
-            return;
-        };
-        let arranged = rows::arrange(processes, &self.query, column, descending, self.logical_cpus);
-        self.shown = arranged.iter().map(|row| row.key).collect();
-        if self.selected.is_some_and(|key| !self.shown.contains(&key)) {
-            self.selected = None;
-        }
-        let next: Vec<ProcessCells> = arranged
-            .iter()
-            .map(|row| {
-                let [name, pid, user, cpu, memory, read, write] = rows::cells(row, self.logical_cpus);
-                ProcessCells {
-                    name: name.into(),
-                    pid: pid.into(),
-                    user: user.into(),
-                    cpu: cpu.into(),
-                    memory: memory.into(),
-                    read: read.into(),
-                    write: write.into(),
-                    selected: self.selected == Some(row.key),
-                }
-            })
-            .collect();
-        if self.rows.row_count() == next.len() {
-            for (index, cells) in next.into_iter().enumerate() {
-                if self.rows.row_data(index).as_ref() != Some(&cells) {
-                    self.rows.set_row_data(index, cells);
-                }
-            }
-        } else {
-            self.rows.set_vec(next);
-        }
-        let count = if self.shown.len() == processes.len() {
-            format!("{} processes", processes.len())
-        } else {
-            format!("Showing {} of {} processes", self.shown.len(), processes.len())
-        };
-        window.set_status(
-            format!("{count} · CPU as a share of all {} CPUs · “—” means the system didn't say", self.logical_cpus)
-                .into(),
-        );
-        self.draw_actions(window);
-    }
-
-    fn draw_actions(&self, window: &AppWindow) {
-        window.set_has_selection(self.selected.is_some());
-        let question = self.pending.as_ref().map(|(key, name)| actions::confirmation(name, *key));
-        window.set_confirm_text(question.unwrap_or_default().into());
-        window.set_notice(self.notice.as_str().into());
-    }
-
-    /// The selected process and its name as the table shows it.
-    fn selection(&self) -> Option<(ProcessKey, String)> {
-        let key = self.selected?;
-        let row = self.processes.as_ref()?.iter().find(|row| row.key == key)?;
-        Some((key, row.name.clone()))
-    }
-
-    fn end_task(&mut self) {
-        if let Some((key, name)) = self.selection() {
-            self.pending = None;
-            let outcome = actions::end(key, Ending::Ask);
-            self.notice = actions::describe(&name, key, Ending::Ask, &outcome);
-        }
-        self.redraw_table();
-    }
-
-    fn ask_force_quit(&mut self) {
-        if let Some(target) = self.selection() {
-            self.pending = Some(target);
-        }
-        self.redraw_table();
-    }
-
-    fn force_quit(&mut self) {
-        if let Some((key, name)) = self.pending.take() {
-            let outcome = actions::end(key, Ending::Force);
-            self.notice = actions::describe(&name, key, Ending::Force, &outcome);
-        }
-        self.redraw_table();
-    }
-
-    fn escape(&mut self) {
-        if self.pending.take().is_none() {
-            self.notice.clear();
-        }
-        self.redraw_table();
-    }
-
     fn save_settings(&self) {
         let Some(path) = &self.settings_path else { return };
         let settings = Settings {
             window: self.window_size,
             sort: self.sort.0,
             descending: self.sort.1,
-            grouped: true,
+            grouped: self.grouped,
             update_seconds: self.update_seconds.load(Ordering::Relaxed),
         };
         if let Err(error) = settings.save(path) {
@@ -319,21 +237,6 @@ impl View {
         }
     }
 
-    /// Moves the selection `delta` rows and keeps it on screen.
-    fn move_selection(&mut self, delta: i32) {
-        let Some(last) = self.shown.len().checked_sub(1) else { return };
-        let current = self.selected.and_then(|key| self.shown.iter().position(|shown| *shown == key));
-        let next = match current {
-            Some(index) => index.saturating_add_signed(delta as isize).min(last),
-            None => 0,
-        };
-        self.selected = Some(self.shown[next]);
-        self.redraw_table();
-        if let Some(window) = self.window.clone_strong() {
-            window.invoke_reveal_row(next as i32);
-        }
-    }
-
     fn take_sample(&mut self, snapshot: Snapshot, processes: Option<Vec<ProcessRow>>) {
         self.logical_cpus = snapshot.cores.len().max(1);
         self.snapshots.push(snapshot);
@@ -356,8 +259,9 @@ impl View {
             return;
         }
         self.draw_graphs(&window);
-        if processes.is_some() {
-            self.processes = processes;
+        if let Some(processes) = processes {
+            self.grouping = Some(Grouping::new(&processes));
+            self.processes = Some(processes);
             self.draw_table(&window);
         }
     }
@@ -388,6 +292,7 @@ fn open_window() {
             }
         };
         window.set_rows(ModelRc::from(view.rows.clone()));
+        window.set_details(ModelRc::from(view.facts.clone()));
         // Deferred: the size can change while the view is busy showing the window.
         window.on_graphs_resized(|| {
             let _ = slint::invoke_from_event_loop(|| with_view(View::redraw));
@@ -407,12 +312,11 @@ fn open_window() {
                 view.save_settings();
             });
         });
-        window.on_row_clicked(|index| {
-            with_view(|view| {
-                view.selected = usize::try_from(index).ok().and_then(|index| view.shown.get(index).copied());
-                view.redraw_table();
-            });
-        });
+        window.on_row_clicked(|index| with_view(|view| view.click_row(index)));
+        window.on_toggle_group(|index| with_view(|view| view.toggle_group(index)));
+        window.on_expand_group(|index| with_view(|view| view.expand_group(index)));
+        window.on_expand_selection(|open| with_view(|view| view.expand_selection(open)));
+        window.on_grouped_toggled(|grouped| with_view(|view| view.set_grouped(grouped)));
         window.on_move_selection(|delta| with_view(|view| view.move_selection(delta)));
         window.on_end_task(|| with_view(View::end_task));
         window.on_force_quit_asked(|| with_view(View::ask_force_quit));
@@ -434,6 +338,8 @@ fn open_window() {
                     view.save_settings();
                     view.window = None;
                     view.processes = None;
+                    view.grouping = None;
+                    view.details = None;
                     view.pending = None;
                     view.notice.clear();
                     view.showing.store(false, Ordering::Relaxed);
@@ -560,6 +466,11 @@ fn main() -> Result<(), slint::PlatformError> {
             rows: Rc::new(VecModel::default()),
             shown: Vec::new(),
             selected: None,
+            grouped: saved.grouped,
+            grouping: None,
+            expanded: HashSet::new(),
+            details: None,
+            facts: Rc::new(VecModel::default()),
             pending: None,
             notice: String::new(),
             showing: showing.clone(),

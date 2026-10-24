@@ -24,6 +24,17 @@ export struct ProcessCells {
     read: string,
     write: string,
     selected: bool,
+    // A group's header, with how many processes it sums; or a member listed under one.
+    group: bool,
+    size: int,
+    expanded: bool,
+    indented: bool,
+}
+
+// One line of the details panel.
+export struct Fact {
+    label: string,
+    value: string,
 }
 
 global Look {
@@ -134,6 +145,18 @@ component GraphCard inherits Rectangle {
     }
 }
 
+// A small triangle drawn as a shape: the CPU renderer's font has no arrow glyphs.
+component Triangle inherits Path {
+    // "right", "down" or "up".
+    in property <string> pointing: "right";
+    width: 8px;
+    height: 8px;
+    viewbox-width: 8;
+    viewbox-height: 8;
+    commands: root.pointing == "down" ? "M 0 2 L 8 2 L 4 7 Z" : root.pointing == "up" ? "M 0 6 L 8 6 L 4 1 Z" : "M 2 0 L 7 4 L 2 8 Z";
+    stroke-width: 0px;
+}
+
 component HeaderCell inherits Rectangle {
     in property <string> title;
     in property <bool> numeric;
@@ -145,16 +168,24 @@ component HeaderCell inherits Rectangle {
     accessible-label: root.title + (root.sorted ? (root.descending ? ", sorted highest first" : ", sorted lowest first") : "");
     accessible-action-default => { root.clicked(); }
 
-    Text {
-        width: 100%;
-        height: 100%;
-        text: root.title + (root.sorted ? (root.descending ? " ▾" : " ▴") : "");
-        horizontal-alignment: root.numeric ? right : left;
-        vertical-alignment: center;
-        font-size: 12px;
-        font-weight: 600;
-        color: root.sorted ? Palette.foreground : Look.muted;
-        overflow: elide;
+    HorizontalLayout {
+        alignment: root.numeric ? end : start;
+        spacing: 5px;
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: root.sorted ? Palette.foreground : Look.muted;
+            overflow: elide;
+        }
+        if root.sorted: VerticalLayout {
+            alignment: center;
+            Triangle {
+                pointing: root.descending ? "down" : "up";
+                fill: Palette.foreground;
+            }
+        }
     }
     TouchArea {
         mouse-cursor: pointer;
@@ -189,6 +220,48 @@ component Banner inherits Rectangle {
     }
 }
 
+// What the table shows about the selected process or group, beyond its figures.
+component DetailsPanel inherits Rectangle {
+    in property <string> title;
+    in property <[Fact]> facts;
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    vertical-stretch: 0;
+    accessible-role: groupbox;
+    accessible-label: "Details: " + root.title;
+
+    VerticalLayout {
+        padding: 9px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 3px;
+        Text {
+            text: root.title;
+            font-size: 13px;
+            font-weight: 650;
+            overflow: elide;
+        }
+        for fact in root.facts: HorizontalLayout {
+            spacing: 10px;
+            Text {
+                width: 96px;
+                text: fact.label;
+                font-size: 12px;
+                color: Look.muted;
+            }
+            Text {
+                text: fact.value;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}
+
 component Cell inherits Text {
     in property <bool> numeric;
     horizontal-alignment: root.numeric ? right : left;
@@ -202,12 +275,17 @@ component ProcessTable inherits Rectangle {
     in property <[ProcessCells]> rows;
     in property <int> sort-column;
     in property <bool> sort-descending;
+    in property <bool> grouped;
     callback sort-clicked(int);
     callback row-clicked(int);
     callback move-selection(int);
     callback end-task();
     callback force-quit();
     callback escape();
+    // A header's triangle; and Right (true) or Left (false) on the selection.
+    callback toggle-group(int);
+    callback expand-group(int);
+    callback expand-selection(bool);
 
     public function focus-rows() {
         keys.focus();
@@ -319,6 +397,14 @@ component ProcessTable inherits Rectangle {
                     root.escape();
                     return accept;
                 }
+                if (event.text == Key.RightArrow) {
+                    root.expand-selection(true);
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow) {
+                    root.expand-selection(false);
+                    return accept;
+                }
                 return reject;
             }
             list := ListView {
@@ -327,21 +413,56 @@ component ProcessTable inherits Rectangle {
                     background: row.selected ? Palette.selection-background
                         : Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
                     accessible-role: list-item;
-                    accessible-label: row.name + ", PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory;
+                    accessible-label: row.group
+                        ? row.name + ", group of " + row.size + " processes, top PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory
+                        : row.name + ", PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory;
                     accessible-item-selectable: true;
                     accessible-item-selected: row.selected;
+                    accessible-expandable: row.group;
+                    accessible-expanded: row.expanded;
                     accessible-action-default => {
                         root.row-clicked(index);
+                    }
+                    accessible-action-expand => {
+                        root.expand-group(index);
+                    }
+                    // Under the cells, so the triangle's own area takes its clicks.
+                    TouchArea {
+                        clicked => {
+                            keys.focus();
+                            root.row-clicked(index);
+                        }
                     }
                     HorizontalLayout {
                         padding-left: 10px;
                         padding-right: 12px;
                         spacing: 8px;
-                        Cell {
-                            text: row.name;
+                        HorizontalLayout {
                             horizontal-stretch: 1;
                             min-width: 120px;
-                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                            if root.grouped: Rectangle {
+                                width: row.indented ? 34px : 16px;
+                                if row.group: TouchArea {
+                                    x: 0;
+                                    width: 16px;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        keys.focus();
+                                        root.toggle-group(index);
+                                    }
+                                    Triangle {
+                                        x: 2px;
+                                        y: (parent.height - self.height) / 2;
+                                        pointing: row.expanded ? "down" : "right";
+                                        fill: row.selected ? Palette.selection-foreground : Look.muted;
+                                    }
+                                }
+                            }
+                            Cell {
+                                text: row.group ? row.name + "  (" + row.size + ")" : row.name;
+                                font-weight: row.group ? 600 : 400;
+                                color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                            }
                         }
                         Cell {
                             width: Look.pid;
@@ -379,12 +500,6 @@ component ProcessTable inherits Rectangle {
                             color: row.selected ? Palette.selection-foreground : Palette.foreground;
                         }
                     }
-                    TouchArea {
-                        clicked => {
-                            keys.focus();
-                            root.row-clicked(index);
-                        }
-                    }
                 }
             }
         }
@@ -396,7 +511,7 @@ export component AppWindow inherits Window {
     preferred-width: 1120px;
     preferred-height: 760px;
     min-width: 760px;
-    min-height: 520px;
+    min-height: 580px;
     background: Palette.alternate-background;
 
     in property <CardData> cpu;
@@ -415,6 +530,10 @@ export component AppWindow inherits Window {
     in property <[string]> update-choices: ["1 s", "2 s", "5 s"];
     in-out property <int> update-index;
     in-out property <bool> starts-at-sign-in;
+    in-out property <bool> grouped: true;
+    // The details panel, shown while something is selected.
+    in property <string> details-title;
+    in property <[Fact]> details;
     out property <length> graph-width: cpu-card.graph-width;
     out property <length> graph-height: cpu-card.graph-height;
 
@@ -430,6 +549,10 @@ export component AppWindow inherits Window {
     callback escape-pressed();
     callback update-chosen(int);
     callback sign-in-toggled(bool);
+    callback grouped-toggled(bool);
+    callback toggle-group(int);
+    callback expand-group(int);
+    callback expand-selection(bool);
 
     changed graph-width => {
         root.graphs-resized();
@@ -532,6 +655,7 @@ export component AppWindow inherits Window {
             rows: root.rows;
             sort-column: root.sort-column;
             sort-descending: root.sort-descending;
+            grouped: root.grouped;
             sort-clicked(column) => {
                 root.sort-clicked(column);
             }
@@ -550,9 +674,23 @@ export component AppWindow inherits Window {
             escape => {
                 root.escape-pressed();
             }
+            toggle-group(row) => {
+                root.toggle-group(row);
+            }
+            expand-group(row) => {
+                root.expand-group(row);
+            }
+            expand-selection(open) => {
+                root.expand-selection(open);
+            }
+        }
+        if root.details-title != "": DetailsPanel {
+            title: root.details-title;
+            facts: root.details;
         }
         HorizontalLayout {
             spacing: 10px;
+            // Takes only the room left, so the controls beside it keep their whole labels.
             Text {
                 text: root.status;
                 font-size: 12px;
@@ -560,6 +698,15 @@ export component AppWindow inherits Window {
                 overflow: elide;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
+                min-width: 60px;
+                preferred-width: 60px;
+            }
+            CheckBox {
+                text: "Group by app";
+                checked <=> root.grouped;
+                toggled => {
+                    root.grouped-toggled(self.checked);
+                }
             }
             Text {
                 text: "Update every";

@@ -14,6 +14,8 @@ pub struct ProcessKey {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessRow {
     pub key: ProcessKey,
+    /// The PID of the process that started it, when the system says.
+    pub parent: Option<u32>,
     pub name: String,
     /// None when the account can't be named.
     pub user: Option<String>,

@@ -74,6 +74,84 @@ pub fn describe(name: &str, key: ProcessKey, how: Ending, outcome: &Result<(), R
     }
 }
 
+/// What ending a group came to: how many ended, and why the rest didn't.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GroupOutcome {
+    pub ended: usize,
+    pub refused: Vec<Refusal>,
+}
+
+/// Ends each of `keys` in the order given (see `Grouping::ending_order`),
+/// checking each one's identity just before, as `end` does.
+pub fn end_group(keys: &[ProcessKey], how: Ending) -> GroupOutcome {
+    let mut outcome = GroupOutcome::default();
+    for key in keys {
+        match end(*key, how) {
+            Ok(()) => outcome.ended += 1,
+            Err(refusal) => outcome.refused.push(refusal),
+        }
+    }
+    outcome
+}
+
+/// What Force Quit asks first for a whole group, its size fixed as it opened.
+pub fn group_confirmation(name: &str, size: usize) -> String {
+    format!(
+        concat!(
+            "Force quit {name}'s group, {size} processes? They stop at once, and any unsaved work in them is lost. ",
+            "End Task asks them to quit instead, so they can save first."
+        ),
+        name = name,
+        size = size
+    )
+}
+
+/// What to tell the user about ending the group of `size` processes topped by `name`.
+pub fn describe_group(name: &str, size: usize, how: Ending, outcome: &GroupOutcome) -> String {
+    // Asking, a member without a window is simply left to its app.
+    let windowless = |refusal: &&Refusal| how == Ending::Ask && **refusal == Refusal::NoWindow;
+    if outcome.ended == 0 && !outcome.refused.is_empty() && outcome.refused.iter().all(|refusal| windowless(&refusal)) {
+        return format!("None of {name}'s {size} processes has a window to close. Force Quit ends them.");
+    }
+    let unexplained: Vec<&Refusal> =
+        outcome.refused.iter().filter(|refusal| outcome.ended == 0 || !windowless(refusal)).collect();
+    if unexplained.is_empty() {
+        return match how {
+            Ending::Ask => format!("Asked {name}'s group ({size} processes) to quit."),
+            Ending::Force => format!("Ended {name}'s group ({size} processes) at once."),
+        };
+    }
+    let done = match how {
+        Ending::Ask => format!("Asked {} of {name}'s {size} processes to quit", outcome.ended),
+        Ending::Force => format!("Ended {} of {name}'s {size} processes", outcome.ended),
+    };
+    format!("{done}; {}.", reasons(&unexplained))
+}
+
+/// "3 had already ended, 1 needs administrator rights".
+fn reasons(refused: &[&Refusal]) -> String {
+    let count = |matching: fn(&Refusal) -> bool| refused.iter().filter(|refusal| matching(refusal)).count();
+    let kinds: [(usize, &str, &str); 7] = [
+        (count(|refusal| *refusal == Refusal::Ended), "had already ended", "had already ended"),
+        (count(|refusal| *refusal == Refusal::Replaced), "had been replaced", "had been replaced"),
+        (count(|refusal| *refusal == Refusal::NotPermitted), "needs administrator rights", "need administrator rights"),
+        (count(|refusal| *refusal == Refusal::NoWindow), "had no window to close", "had no window to close"),
+        (count(|refusal| *refusal == Refusal::Itself), "is OpenTaskManager itself", "are OpenTaskManager itself"),
+        (
+            count(|refusal| *refusal == Refusal::Unsupported),
+            "can't be ended on this system",
+            "can't be ended on this system",
+        ),
+        (count(|refusal| matches!(refusal, Refusal::Failed(_))), "failed", "failed"),
+    ];
+    kinds
+        .iter()
+        .filter(|(count, ..)| *count > 0)
+        .map(|(count, one, more)| format!("{count} {}", if *count == 1 { one } else { more }))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[cfg(target_os = "linux")]
 mod platform {
     use rustix::io::Errno;
@@ -247,7 +325,9 @@ mod tests {
 
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
-    use super::{Ending, Refusal, confirmation, describe, end};
+    use super::{
+        Ending, GroupOutcome, Refusal, confirmation, describe, describe_group, end, end_group, group_confirmation,
+    };
     use crate::model::ProcessKey;
 
     /// A harmless process that waits two minutes unless ended.
@@ -417,6 +497,42 @@ $timer.Start()
         let _ = std::fs::remove_file(&script);
         assert_eq!(outcome, Ok(()));
         assert!(closed, "the process quits once its window is closed");
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn ends_a_group_one_checked_process_at_a_time() {
+        let (mut first, mut second) = (waiter(), waiter());
+        let me = ProcessKey { pid: std::process::id(), start_time: 0 };
+        let outcome = end_group(&[key_of(&first), key_of(&second), me], Ending::Force);
+        assert_eq!(outcome, GroupOutcome { ended: 2, refused: vec![Refusal::Itself] });
+        assert!(exits_within(&mut first, Duration::from_secs(5)));
+        assert!(exits_within(&mut second, Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn describes_a_groups_outcome_in_plain_words() {
+        let all = GroupOutcome { ended: 24, refused: Vec::new() };
+        assert_eq!(describe_group("chrome", 24, Ending::Force, &all), "Ended chrome's group (24 processes) at once.");
+        assert_eq!(describe_group("chrome", 24, Ending::Ask, &all), "Asked chrome's group (24 processes) to quit.");
+        let some = GroupOutcome {
+            ended: 20,
+            refused: vec![Refusal::Ended, Refusal::Ended, Refusal::Ended, Refusal::NotPermitted],
+        };
+        assert_eq!(
+            describe_group("chrome", 24, Ending::Force, &some),
+            "Ended 20 of chrome's 24 processes; 3 had already ended, 1 needs administrator rights."
+        );
+        let windows = GroupOutcome { ended: 1, refused: vec![Refusal::NoWindow; 3] };
+        assert_eq!(describe_group("chrome", 4, Ending::Ask, &windows), "Asked chrome's group (4 processes) to quit.");
+        let none = GroupOutcome { ended: 0, refused: vec![Refusal::NoWindow; 4] };
+        assert_eq!(
+            describe_group("chrome", 4, Ending::Ask, &none),
+            "None of chrome's 4 processes has a window to close. Force Quit ends them."
+        );
+        assert!(
+            group_confirmation("chrome", 4).starts_with("Force quit chrome's group, 4 processes? They stop at once")
+        );
     }
 
     #[test]

@@ -56,9 +56,33 @@ pub fn percent(value: Option<f64>) -> String {
     if value < 10.0 { format!("{value:.1}%") } else { format!("{value:.0}%") }
 }
 
+/// How long something has run, to two units at most: "45 s", "12 min",
+/// "3 h 12 min", "2 d 4 h".
+pub fn duration(seconds: u64) -> String {
+    let (minutes, hours, days) = (seconds / 60, seconds / 3600, seconds / 86_400);
+    if days > 0 {
+        format!("{days} d {} h", hours % 24)
+    } else if hours > 0 {
+        format!("{hours} h {} min", minutes % 60)
+    } else if minutes > 0 {
+        format!("{minutes} min")
+    } else {
+        format!("{seconds} s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{MISSING, axis_rate, bytes, percent, rate};
+
+    #[test]
+    fn durations_keep_two_units_at_most() {
+        use super::duration;
+        assert_eq!(duration(45), "45 s");
+        assert_eq!(duration(12 * 60 + 59), "12 min");
+        assert_eq!(duration(3 * 3600 + 12 * 60 + 5), "3 h 12 min");
+        assert_eq!(duration(2 * 86_400 + 4 * 3600 + 30 * 60), "2 d 4 h");
+    }
 
     #[test]
     fn missing_figures_are_a_dash_never_zero() {

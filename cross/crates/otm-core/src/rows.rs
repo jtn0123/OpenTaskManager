@@ -89,8 +89,23 @@ pub fn matches(row: &ProcessRow, query: &str) -> bool {
         || row.user.as_deref().is_some_and(|user| user.to_lowercase().contains(&query))
 }
 
-/// The rows a search keeps, sorted by `column`. Missing figures sort last
-/// either way; ties go by PID, so rows don't swap places between samples.
+/// The table's order by `column`. Missing figures sort last either way;
+/// ties go by PID, so rows don't swap places between samples.
+pub fn compare(a: &ProcessRow, b: &ProcessRow, column: Column, descending: bool, logical_cpus: usize) -> Ordering {
+    let order = match (value(a, column, logical_cpus), value(b, column, logical_cpus)) {
+        (Value::Missing, Value::Missing) => Ordering::Equal,
+        (Value::Missing, _) => return Ordering::Greater,
+        (_, Value::Missing) => return Ordering::Less,
+        (Value::Number(x), Value::Number(y)) => x.total_cmp(&y),
+        (Value::Text(x), Value::Text(y)) => x.to_lowercase().cmp(&y.to_lowercase()),
+        (Value::Number(_), Value::Text(_)) => Ordering::Less,
+        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
+    };
+    let order = if descending { order.reverse() } else { order };
+    order.then(a.key.pid.cmp(&b.key.pid))
+}
+
+/// The rows a search keeps, sorted by `column` (see `compare`).
 pub fn arrange<'a>(
     rows: &'a [ProcessRow],
     query: &str,
@@ -99,19 +114,7 @@ pub fn arrange<'a>(
     logical_cpus: usize,
 ) -> Vec<&'a ProcessRow> {
     let mut kept: Vec<&ProcessRow> = rows.iter().filter(|row| matches(row, query)).collect();
-    kept.sort_by(|a, b| {
-        let order = match (value(a, column, logical_cpus), value(b, column, logical_cpus)) {
-            (Value::Missing, Value::Missing) => Ordering::Equal,
-            (Value::Missing, _) => return Ordering::Greater,
-            (_, Value::Missing) => return Ordering::Less,
-            (Value::Number(x), Value::Number(y)) => x.total_cmp(&y),
-            (Value::Text(x), Value::Text(y)) => x.to_lowercase().cmp(&y.to_lowercase()),
-            (Value::Number(_), Value::Text(_)) => Ordering::Less,
-            (Value::Text(_), Value::Number(_)) => Ordering::Greater,
-        };
-        let order = if descending { order.reverse() } else { order };
-        order.then(a.key.pid.cmp(&b.key.pid))
-    });
+    kept.sort_by(|a, b| compare(a, b, column, descending, logical_cpus));
     kept
 }
 
@@ -136,6 +139,7 @@ mod tests {
     fn row(pid: u32, name: &str, cpu: Option<f32>, read: Option<f64>) -> ProcessRow {
         ProcessRow {
             key: ProcessKey { pid, start_time: 1 },
+            parent: None,
             name: name.to_owned(),
             user: pid.is_multiple_of(2).then(|| "justin".to_owned()),
             cpu,

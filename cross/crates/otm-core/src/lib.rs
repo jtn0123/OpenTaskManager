@@ -6,7 +6,9 @@
 
 pub mod actions;
 pub mod autostart;
+pub mod details;
 pub mod format;
+pub mod groups;
 pub mod history;
 pub mod icon;
 pub mod instance;

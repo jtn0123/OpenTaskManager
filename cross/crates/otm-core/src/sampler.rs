@@ -167,6 +167,7 @@ impl Sampler {
                 let unopened = could_not_open(process.memory());
                 ProcessRow {
                     key,
+                    parent: process.parent().map(sysinfo::Pid::as_u32),
                     name: full_name(
                         &process.name().to_string_lossy(),
                         process.cmd().first().map(|argument| argument.to_string_lossy()).as_deref(),
