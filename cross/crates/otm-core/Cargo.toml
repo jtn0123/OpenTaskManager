@@ -10,10 +10,16 @@ repository.workspace = true
 [dependencies]
 sysinfo.workspace = true
 
-# Ending a process through a handle to it (actions.rs): a pidfd on Linux,
-# a process handle on Windows.
+# Ending a process through a handle to it (actions.rs), one running copy
+# (instance.rs) and sign-in entries (autostart.rs, registry.rs).
 [target.'cfg(target_os = "linux")'.dependencies]
-rustix = { version = "1", features = ["process"] }
+rustix = { version = "1", features = ["net", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }

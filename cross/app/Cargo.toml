@@ -9,11 +9,24 @@ repository.workspace = true
 
 [dependencies]
 otm-core.workspace = true
-slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility"] }
+slint = { version = "1.18", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+    "raw-window-handle-06",
+] }
 
 # Windows and macOS: their own tray through tray-icon.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 tray-icon = "0.26"
+
+# Windows: bringing the window to the front when it's launched again.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 # Linux: a StatusNotifierItem over D-Bus, without loading GTK.
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -37,6 +37,19 @@ impl Column {
         }
     }
 
+    /// The column's name in the settings file, which never changes.
+    pub fn key(self) -> &'static str {
+        match self {
+            Column::Name => "name",
+            Column::Pid => "pid",
+            Column::User => "user",
+            Column::Cpu => "cpu",
+            Column::Memory => "memory",
+            Column::DiskRead => "disk-read",
+            Column::DiskWrite => "disk-write",
+        }
+    }
+
     /// Figures start highest first, text A–Z.
     pub fn numeric(self) -> bool {
         !matches!(self, Column::Name | Column::User)

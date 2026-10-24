@@ -2,8 +2,11 @@
 .SYNOPSIS
   Drives the Windows build through UI Automation (the accessibility tree Slint
   exposes), so it never moves the mouse or takes the keyboard: sorting by
-  clicking headers, the order the rows then come in, search, and End Task
-  and Force Quit on a throwaway ping process it starts and always cleans up.
+  clicking headers, the order the rows then come in, search, End Task and
+  Force Quit on a throwaway ping process it starts and always cleans up, one
+  running copy, Start at sign-in, and settings kept across a relaunch. It
+  runs its own instance (--instance smoke-PID), so the user's settings and
+  sign-in entry are never touched, and removes what that instance wrote.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File cross\scripts\smoke-windows.ps1 -Exe target\release\opentaskmanager.exe
@@ -23,16 +26,40 @@ function Check([bool]$ok, [string]$what) {
     if ($ok) { Write-Output "ok: $what" } else { Write-Output "FAIL: $what"; $script:failures++ }
 }
 
-# The app quits by itself (and removes its tray icon) once the test is surely over.
-$app = Start-Process -FilePath $Exe -ArgumentList '--exit-after', $TimeoutSeconds -PassThru
-try {
-    $byProcess = New-Object System.Windows.Automation.PropertyCondition($A::ProcessIdProperty, $app.Id)
-    $window = $null
-    for ($i = 0; $i -lt 60 -and -not $window; $i++) {
+# A copy of its own, so the user's settings and sign-in entry are never touched.
+$Instance = "smoke-$PID"
+$Settings = Join-Path $env:APPDATA "OpenTaskManager\settings-$Instance.conf"
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$RunValue = "OpenTaskManager ($Instance)"
+function Clean {
+    Remove-Item -LiteralPath $Settings -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue
+}
+function Launch([string[]]$More = @()) {
+    Start-Process -FilePath $Exe -ArgumentList (@('--instance', $Instance) + $More) -PassThru
+}
+function WindowOf($process) {
+    $byProcess = New-Object System.Windows.Automation.PropertyCondition($A::ProcessIdProperty, $process.Id)
+    for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Milliseconds 500
-        $window = $A::RootElement.FindFirst($Scope::Children, $byProcess)
+        $found = $A::RootElement.FindFirst($Scope::Children, $byProcess)
+        if ($found) { return $found }
     }
-    if (-not $window) { throw 'The window never appeared.' }
+    throw 'The window never appeared.'
+}
+# Asks the running copy to quit, as a second launch with --quit does.
+function Quit($process) {
+    $asker = Launch @('--quit')
+    $asked = $asker.WaitForExit(10000)
+    $asked -and $process.WaitForExit(10000)
+}
+
+Clean
+# The app also quits by itself (and removes its tray icon) once the test is surely over.
+$app = Launch @('--exit-after', $TimeoutSeconds)
+$again = $null
+try {
+    $window = WindowOf $app
     Check ($window.Current.Name -eq 'OpenTaskManager') "window titled OpenTaskManager"
 
     function Elements($controlType) {
@@ -162,12 +189,54 @@ try {
     } else {
         Write-Output "skipped: the search field offers no value pattern to type into"
     }
-} finally {
-    if (-not $app.WaitForExit(($TimeoutSeconds + 15) * 1000)) {
-        Stop-Process -Id $app.Id -Force
-        Write-Output "FAIL: the app didn't quit by itself"
-        $failures++
+
+    # One copy: a second launch hands over to the first and exits.
+    $second = Launch
+    Check ($second.WaitForExit(10000) -and $second.ExitCode -eq 0) "a second launch hands over and exits"
+    Check (-not $app.HasExited) "and the first copy keeps running"
+
+    # Start at sign-in writes and removes this instance's Run value.
+    $signIn = Elements $Type::CheckBox | Where-Object { $_.Current.Name -eq 'Start at sign-in' } | Select-Object -First 1
+    if ($signIn) {
+        $toggle = $signIn.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        Check ($toggle.Current.ToggleState -eq 'Off') "Start at sign-in starts off"
+        $toggle.Toggle()
+        Start-Sleep -Milliseconds 600
+        $command = (Get-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue).$RunValue
+        $expected = '"' + (Resolve-Path $Exe).Path + '" --hidden --instance ' + $Instance
+        Check ($command -eq $expected) "turning it on writes the Run value ($command)"
+        $toggle.Toggle()
+        Start-Sleep -Milliseconds 600
+        Check ($null -eq (Get-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue)) "turning it off removes it"
+    } else {
+        Check $false "a Start at sign-in check box"
     }
+
+    # Settings outlive the copy: the size the window was given and the sort (Name, A to Z, from above).
+    $transform = $null
+    if ($window.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern, [ref]$transform) -and $transform.Current.CanResize) {
+        $transform.Resize(1000, 700)
+        Start-Sleep -Milliseconds 800
+    }
+    $size = $window.Current.BoundingRectangle
+    Check (Quit $app) "--quit closes the running copy"
+    Check ((Test-Path $Settings) -and (Get-Content $Settings -Raw) -match 'sort-column = name') "the settings file keeps the sort"
+    $again = Launch @('--exit-after', $TimeoutSeconds)
+    $window = WindowOf $again
+    for ($i = 0; $i -lt 20 -and (Rows).Count -eq 0; $i++) { Start-Sleep -Milliseconds 500 }
+    Check ((Header 'Name').Current.Name -eq 'Name, sorted lowest first') "reopened, it still sorts by name"
+    $reopened = $window.Current.BoundingRectangle
+    Check ([math]::Abs($reopened.Width - $size.Width) -le 2 -and [math]::Abs($reopened.Height - $size.Height) -le 2) "and opens at the size it closed at ($($reopened.Width)x$($reopened.Height))"
+    Check (Quit $again) "--quit closes it again"
+} finally {
+    foreach ($copy in @($app, $again)) {
+        if ($copy -and -not $copy.WaitForExit(($TimeoutSeconds + 15) * 1000)) {
+            Stop-Process -Id $copy.Id -Force
+            Write-Output "FAIL: the app didn't quit"
+            $failures++
+        }
+    }
+    Clean
 }
 
 if ($failures -gt 0) { Write-Output "$failures check(s) failed"; exit 1 }

@@ -20,6 +20,9 @@ It's an early slice, not a release:
   Force Quit asks first, naming the process and PID; the outcome stays above
   the table until dismissed (Esc).
 - A tray icon drawing recent CPU load, with close-to-tray.
+- One running copy: launching it again brings its window to the front.
+- It remembers the window's size, the sort and the update speed (every 1, 2
+  or 5 s), and can start at sign-in, hidden in the tray.
 
 ## Rules carried over from the Mac app
 
@@ -70,8 +73,9 @@ when Force Quit is the way. The wording of the question is the Mac app's.
 
 ```
 crates/otm-core/   Sampling (sysinfo), figures, formatting, table rules, axis scaling, tray icon pixels,
-                   ending a process (actions.rs: rustix on Linux, windows-sys on Windows)
-app/ui/app.slint   The window: graph cards, End Task and Force Quit, process table, status line
+                   ending a process (actions.rs: rustix on Linux, windows-sys on Windows),
+                   settings, one running copy (instance.rs) and start at sign-in (autostart.rs)
+app/ui/app.slint   The window: graph cards, End Task and Force Quit, process table, status bar
 app/src/main.rs    The view: sampler thread, window life, table model, callbacks
 app/src/graph.rs   Graph lines as path commands in the graph's own pixels
 app/src/tray.rs    The tray: ksni on Linux, tray-icon elsewhere
@@ -94,6 +98,20 @@ cargo fmt --all --check
 cargo run --release -p opentaskmanager   # --hidden: tray only; --no-tray: none; --exit-after N: quit after N s
 ```
 
+Another launch hands over to the copy already running and exits: it opens
+that copy's window, or with `--quit` asks it to quit. `--instance NAME`
+runs a separate copy with its own settings file and sign-in entry; the
+smoke test uses one so the user's are never touched.
+
+Settings are a short `key = value` file: `%APPDATA%\OpenTaskManager\settings.conf`
+on Windows, `~/.config/opentaskmanager/settings.conf` on Linux. Start at
+sign-in writes a value in the account's Run key on Windows (and clears any
+"disabled" mark Task Manager left for it), or
+`~/.config/autostart/opentaskmanager.desktop` on Linux; neither needs
+administrator rights. On Windows one copy per sign-in session is a
+session-local mutex and two events; on Linux an abstract socket, whose
+both ends check the other is the same account.
+
 Without admin rights or Visual Studio, the Windows build can be made from
 Linux or WSL with Microsoft's libraries fetched by `xwin` (it asks you to
 accept Microsoft's licence) and Rust's own linker:
@@ -113,7 +131,11 @@ mouse or takes the keyboard. It clicks headers and checks the rows' order,
 searches, and checks that a protected process shows "—", not 0 bytes. Then it
 starts a ping with no window, selects it, and checks that End Task says
 Force Quit is needed, that Force Quit asks first and Cancel ends nothing,
-and that confirming ends it (it kills the ping itself if a check fails):
+and that confirming ends it (it kills the ping itself if a check fails).
+Last, it checks that a second launch hands over and exits, that Start at
+sign-in writes and removes its Run value, and that the sort and a resized
+window survive `--quit` and a relaunch. It runs as its own instance and
+removes that instance's settings and Run value at the end:
 `powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 -Exe <path to opentaskmanager.exe>`.
 
 ## Status
@@ -140,12 +162,12 @@ Linux, in WSL 2 (Ubuntu 26.04, 16 logical CPUs, no GPU, about 50 processes):
 For comparison, the Tauri prototype took 9% and 455 MB with its window open,
 and the C++/Qt one 0.83% and 31 MB (see COMPARISON.md).
 
-Verified on Windows: the core's 29 tests run natively, including one that
+Verified on Windows: the core's 38 tests run natively, including one that
 no process Windows won't open shows 0 bytes, and End Task and Force Quit on
 real processes: one closed through an invisible window that never takes
 focus, a PID with the wrong start time refused and left running, and the
-System process refused. All 23 smoke checks pass. Windows registered the
-tray icon. On Linux (WSL) the core's 27 tests pass, including SIGTERM and
+System process refused, and registry writes under a test key. All 33
+smoke checks pass. Windows registered the tray icon. On Linux (WSL) the core's 37 tests pass, including SIGTERM and
 SIGKILL on real processes and PID 1 refused to an ordinary account.
 
 Not verified yet:
@@ -155,6 +177,10 @@ Not verified yet:
   drives them (UI Automation invokes the buttons instead).
 - The Linux window's End Task and Force Quit buttons: the Linux actions are
   tested in the core, the buttons only on Windows.
+- The update speed menu: UI Automation can't pick from Slint's drop-down,
+  so only the settings rules behind it are tested.
+- A real sign-in: the Run value and the Linux autostart entry are checked as
+  written, not by signing in again.
 
 Known gaps: no multiple selection or ending a group of processes, no history
 recording, no per-OS readers beyond what `sysinfo` provides (GPU, sensors,
