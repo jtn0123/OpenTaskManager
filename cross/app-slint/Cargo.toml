@@ -1,0 +1,20 @@
+[package]
+name = "opentaskmanager-slint"
+description = "OpenTaskManager for Windows and Linux, drawn natively with Slint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+repository.workspace = true
+
+[dependencies]
+otm-core.workspace = true
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility"] }
+tray-icon = "0.26"
+
+# The Linux tray library needs a GTK main loop, run on a thread of its own.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+[build-dependencies]
+slint-build = "1.18"

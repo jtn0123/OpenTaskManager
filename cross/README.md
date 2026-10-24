@@ -11,6 +11,19 @@ graphs, a sortable, searchable process table, and a tray icon with a live CPU
 graph. It exists to prove the stack and measure its cost before more is
 built on it.
 
+The same slice is also built with **Slint** (`app-slint/`, on the same Rust
+core) and with **C++ and Qt 6** (`app-qt/`, its own `/proc` sampler), to
+choose between the three by measurement. See [COMPARISON.md](COMPARISON.md):
+Slint and Qt use about 20–30 MB with the window open, against Tauri's 455 MB,
+and the comparison recommends Slint.
+
+```sh
+cargo run --release -p opentaskmanager-slint      # Slint; --hidden, --no-tray
+SLINT_BACKEND=winit-software cargo run --release -p opentaskmanager-slint
+cmake -S app-qt -B app-qt/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=<Qt 6 dir>
+cmake --build app-qt/build && ctest --test-dir app-qt/build
+```
+
 ## Rules carried over from the Mac app
 
 - **A figure the system didn't give is "—", never zero.** In Rust it's an

@@ -1,0 +1,212 @@
+// The same slice as the Tauri app: four live graphs over a process table.
+// Graph lines are path commands from Rust in the graph's logical pixels: the
+// window reports the graphs' size, and Rust redraws them when it changes.
+
+import { StandardTableView, LineEdit, Palette } from "std-widgets.slint";
+
+export struct CardData {
+    value: string,
+    caption: string,
+    top-label: string,
+    grid: string,
+    area: string,
+    line: string,
+    dashed: string,
+}
+
+component GraphCard inherits Rectangle {
+    in property <string> title;
+    in property <color> accent;
+    in property <CardData> data;
+    out property <length> graph-width: graph.width;
+    out property <length> graph-height: graph.height;
+
+    background: Palette.alternate-background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    // Equal widths, whatever their captions: every graph is drawn at the first one's size.
+    min-width: 170px;
+    preferred-width: 200px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        HorizontalLayout {
+            Text {
+                text: root.title;
+                color: root.accent;
+                font-size: 13px;
+                font-weight: 650;
+            }
+            Text {
+                text: root.data.value;
+                horizontal-alignment: right;
+                font-size: 15px;
+                font-weight: 600;
+                color: Palette.foreground;
+            }
+        }
+        graph := Rectangle {
+            height: 96px;
+            background: #0b0f14;
+            border-radius: 5px;
+            clip: true;
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.grid;
+                stroke: #ffffff17;
+                stroke-width: 1px;
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.area;
+                fill: root.accent.with-alpha(0.2);
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.line;
+                stroke: root.accent;
+                stroke-width: 1.75px;
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.dashed;
+                stroke: root.accent;
+                stroke-width: 1.75px;
+            }
+            Text {
+                x: 5px;
+                y: 3px;
+                text: root.data.top-label;
+                color: #ffffffb3;
+                font-size: 11px;
+            }
+        }
+        Text {
+            text: root.data.caption;
+            color: Palette.foreground.with-alpha(0.65);
+            font-size: 12px;
+            overflow: elide;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "OpenTaskManager (Slint)";
+    preferred-width: 1120px;
+    preferred-height: 760px;
+    min-width: 760px;
+    min-height: 520px;
+
+    in property <CardData> cpu;
+    in property <CardData> memory;
+    in property <CardData> disk;
+    in property <CardData> network;
+    in property <[[StandardListViewItem]]> rows;
+    in property <string> status;
+    out property <length> graph-width: cpu-card.graph-width;
+    out property <length> graph-height: cpu-card.graph-height;
+
+    callback graphs-resized();
+    changed graph-width => {
+        root.graphs-resized();
+    }
+
+    callback search-edited(string);
+    callback sort-ascending(int);
+    callback sort-descending(int);
+    callback row-selected(int);
+
+    public function select-row(row: int) {
+        table.set-current-row(row);
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: "OpenTaskManager";
+                font-size: 15px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Rectangle { }
+            LineEdit {
+                width: 320px;
+                placeholder-text: "Search by name, PID or user";
+                edited(text) => {
+                    root.search-edited(text);
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            vertical-stretch: 0;
+            cpu-card := GraphCard {
+                title: "CPU";
+                accent: #35d07f;
+                data: root.cpu;
+            }
+            GraphCard {
+                title: "Memory";
+                accent: #b38cff;
+                data: root.memory;
+            }
+            GraphCard {
+                title: "Disk";
+                accent: #ffb547;
+                data: root.disk;
+            }
+            GraphCard {
+                title: "Network";
+                accent: #4fb8ff;
+                data: root.network;
+            }
+        }
+        table := StandardTableView {
+            vertical-stretch: 1;
+            columns: [
+                { title: "Name", min-width: 160px, horizontal-stretch: 1 },
+                { title: "PID", width: 80px },
+                { title: "User", width: 120px },
+                { title: "CPU", width: 80px },
+                { title: "Memory", width: 100px },
+                { title: "Disk read", width: 112px },
+                { title: "Disk write", width: 112px },
+            ];
+            rows: root.rows;
+            sort-ascending(index) => {
+                root.sort-ascending(index);
+            }
+            sort-descending(index) => {
+                root.sort-descending(index);
+            }
+            current-row-changed(row) => {
+                root.row-selected(row);
+            }
+        }
+        Text {
+            text: root.status;
+            font-size: 12px;
+            color: Palette.foreground.with-alpha(0.65);
+            overflow: elide;
+        }
+    }
+}
