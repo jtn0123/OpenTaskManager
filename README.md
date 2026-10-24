@@ -233,7 +233,10 @@ are never overwritten. Set `RELEASE_OUTPUT_DIR` to write elsewhere.
 
 The Prepare release workflow validates and packages a stable version. A tag push
 prepares a **draft** GitHub release; a manual run uploads an artifact and optionally
-attaches a draft to an existing tag. It never creates tags or publishes releases.
+attaches a draft to an existing tag. A draft is attached only to the tag of the
+commit that was built: the tag is checked before the build and again just before
+the draft is created, so start a manual draft run from the tag itself (`make
+test-scripts` covers that check). It never creates tags or publishes releases.
 Developer ID signing, notarization and automatic installation remain planned.
 
 ## Disk lights and percentage scales

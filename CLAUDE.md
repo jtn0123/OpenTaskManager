@@ -27,6 +27,11 @@ Manager OG or any other proprietary task manager.
   Keep the hot pointer loops below intact; annotations do not change their work.
 - All tests must pass and lint must be clean (`swiftlint lint --strict`).
   Never suppress warnings or skip tests.
+- A draft release carries only the commit its tag names:
+  `scripts/check-release-source.sh` compares `refs/tags/vVERSION^{commit}`
+  with HEAD before the build, and the remote tag's commit with HEAD just
+  before `gh release create` (whose `--verify-tag` checks only that the tag
+  exists). A manual draft run therefore starts from the tag.
 - `make test` runs OTMKit's Swift Testing suite and `make test-app`'s hostless
   app logic tests. `OpenTaskManagerLogicTests` compiles only the stores and
   helpers listed in `project.yml`, with no application dependency, `TEST_HOST`

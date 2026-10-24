@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       draft_release:
-        description: 'Attach to an existing vVERSION tag as a draft release'
+        description: 'Attach to an existing vVERSION tag as a draft release (run from that tag)'
         default: false
         type: boolean
 
@@ -33,6 +33,18 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # A manual run builds whatever ref it was started from; a draft must
+      # carry the commit its tag names, so check before spending the build.
+      - name: Check the tag names this commit
+        if: github.event_name == 'push' || inputs.draft_release
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          version=$TAG_VERSION
+          if [[ $EVENT_NAME == workflow_dispatch ]]; then version=$INPUT_VERSION; fi
+          bash scripts/check-release-source.sh "$version"
       - name: Select Xcode
         run: |
           xcode=$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -1)
@@ -72,6 +84,9 @@ jobs:
           version=$TAG_VERSION
           if [[ $EVENT_NAME == workflow_dispatch ]]; then version=$INPUT_VERSION; fi
           tag="v${version#v}"
+          # The tag could have moved during the build; --verify-tag only checks it exists.
+          tag_commit=$(gh api "repos/$GH_REPO/commits/refs/tags/$tag" --jq .sha)
+          bash scripts/check-release-source.sh "$version" "$tag_commit"
           cat > "$RUNNER_TEMP/release-notes.md" <<'EOF'
           Ad-hoc signed universal build for macOS 14 or later.
           This build is not Developer ID signed or notarized. Installation is manual.
