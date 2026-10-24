@@ -3,7 +3,8 @@
 A fast, native, open-source task manager for macOS: the Windows Task Manager
 layout people already know, rebuilt for Apple silicon and taken further.
 
-> Status: pre-release (0.1 in progress). Builds and runs on macOS 14 or later.
+> Status: pre-release (0.1 in progress). Targets macOS 14 or later on Apple
+> silicon and Intel; runs on macOS 14 and on Intel Macs haven't been qualified yet.
 
 ## What it does today
 
@@ -79,7 +80,10 @@ Mac it came from, and plays back at 1×, 10× or 60×.
 - It refreshes every 3 seconds, and only while the page is open. macOS only
   lists sockets for your own processes, so the counts are labelled as your
   account's, and a badge says how many root and other users' processes it
-  can't see and why.
+  can't see and why. Show Hidden… reads every account's sockets once with
+  `lsof`, after macOS asks for an administrator password, into a sheet of its
+  own; the table and counts stay your account's, and Read Again takes a fresh
+  snapshot.
 
 **Startup**: everything launchd starts by itself, read from the LaunchAgents
 and LaunchDaemons folders. Each item shows whether it's yours, every user's or
@@ -106,8 +110,19 @@ signed it (Apple, the Mac App Store, a Developer ID with its team, ad hoc or
 nobody), the certificate chain, whether it's running and as which PIDs, and
 the launch agents and daemons that belong to it, with whether they start by
 themselves. Open an app, reveal it in Finder, copy its bundle ID, or jump to
-its items on the Startup page. Sizes fill in after the list appears; nothing
-is re-read until you press Refresh. Uninstalling isn't offered.
+its items on the Startup page. Sizes fill in after the list appears; the list
+is read again only on Refresh, though each app's running state follows launches
+and quits.
+
+**Move to Trash…** (an app's menu or details) removes an app after a review of
+it and what it left in your Library: preferences, caches, containers, saved
+state, logs, launch agents and the like. Exact bundle-ID matches start ticked;
+matches by name or team are marked Uncertain and start unticked. Your launch
+agents for the app are unloaded first, then the app moves, then the rest, and
+everything goes to the Trash; nothing is deleted. A running app has to quit
+first. Apps that are part of macOS or come from Apple, and OpenTaskManager
+itself, aren't offered, and what lies outside your Library (launch daemons, privileged helpers, anything
+in /Library) is listed but left alone.
 
 **Users**: a card for each person using the Mac, with their processes added
 up (CPU, memory, power, GPU), a minute of CPU and memory history, who's signed
@@ -159,14 +174,29 @@ showing how far it has got as it goes (it can be stopped at any time).
 - The space by category: apps, developer files (`node_modules`, DerivedData,
   `.git` and the like), photos and video, music, documents, archives and disk
   images, caches and logs, and system files.
-- Reveal in Finder, Copy Path and Scan This Folder for any item. Nothing on the
-  page deletes anything.
+- Reveal in Finder, Copy Path and Scan This Folder for any item.
+- Clean Up: pick items in Largest Files (or Add to Cleanup from an item's
+  menu) and Clean Up… reviews them first. Each is read again and flagged if
+  it changed since the scan, isn't yours, isn't on a verified local volume, is
+  an iCloud placeholder or sits somewhere protected; flagged items start
+  unticked. Your home folder, its standard folders, mount points and links are
+  never offered. Each item is checked once more just before it moves to the
+  Trash (nothing is permanently deleted), and the review then shows how much
+  space each volume got back. Rescan is offered, never automatic.
 - Sizes are space on disk, counting each hard-linked file once, with the
   files' logical size alongside. Symbolic links aren't followed and other
   volumes aren't entered. Folders macOS keeps private count as unreadable,
   with a button to the Full Disk Access settings.
-- Nothing is read until you ask, and the last scan stays for the session, so
-  the page costs nothing while it sits open.
+- Nothing is read until you ask (or schedule it), and the last scan stays for
+  the session, so the page costs nothing while it sits open.
+- Scan This Automatically… (none until you add one) rescans a folder daily or
+  weekly at a time you pick, only while OpenTaskManager is running and the Mac
+  has been idle for two minutes, on at least 30% battery, outside Low Power
+  Mode and below serious thermal pressure. Each scan's summary is kept, 10 per
+  folder, and an optional notification says when a folder grew by more than
+  both 5 GB and 10%. Desktop, Documents, Downloads and app containers, and the
+  folders that hold them, can't be scheduled. Scheduled scans never delete
+  anything.
 
 **Everywhere else**
 - A menu bar item with a live CPU bar graph and a popover of meters and top
@@ -190,15 +220,33 @@ of rebuilding them, so the app itself uses only a few percent of one core.
 
 ## Build
 
-You need Xcode 16 or later (the full app, not just the Command Line Tools) and
-[XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+You need **Xcode 26 or later with Swift 6.2 or later** (the full app, not just
+the Command Line Tools): OTMKit declares Swift tools 6.2 and strict memory
+safety, which older Xcode releases can't build. The project is developed with
+Swift 6.4. macOS 14 is the oldest system the app *runs* on, not the oldest that
+can build it; the build Mac needs a macOS version that runs your Xcode. You
+also need [XcodeGen](https://github.com/yonaskolb/XcodeGen) and
+[SwiftLint](https://github.com/realm/SwiftLint).
 
 ```sh
-make run          # generate the Xcode project, build, and launch
-make test         # run OTMKit and hostless app logic tests
+brew install xcodegen swiftlint
+xcodebuild -version   # Xcode 26 or later
+swift --version       # Swift 6.2 or later
+make build            # generate the Xcode project and build
+make test             # run OTMKit and hostless app logic tests
+make lint             # SwiftLint, strict
+```
+
+Other targets:
+
+```sh
+make run          # build and launch (quits any running OpenTaskManager first)
 make test-app     # run just the hostless app logic tests
+make coverage     # OTMKit tests with a per-file line coverage report
 make cli          # build the otm tool; `make install-cli` copies it to /usr/local/bin
 make release      # optimized build in .build/xcode/Build/Products/Release
+make lint-automation  # actionlint and ShellCheck (`brew install actionlint shellcheck`)
+make test-scripts     # release script checks; needs only bash and git
 ```
 
 The Makefile finds Xcode by itself even when `xcode-select` points at the
@@ -285,8 +333,16 @@ doesn't report.
 
 macOS hides most details of other users' processes from unprivileged apps. For
 those, OpenTaskManager falls back to `/bin/ps` for CPU and memory and marks the
-rest as unavailable. An optional privileged helper that lifts this limit is
-planned.
+rest as unavailable.
+
+Nothing runs as root in the background, and no helper is installed.
+Administrator rights are asked for one action at a time, through macOS's own
+password prompt: to send a signal to another account's process (End Task,
+Force Quit, Suspend and the rest, as `/bin/kill`) or change its priority
+(`/usr/bin/renice`) once the ordinary attempt has been refused, and for
+Connections' one-off `lsof` read of hidden sockets when you ask for it. Ending
+a group, Startup's controls and app removal never ask. An optional privileged helper that lifts
+the read limit for good is planned.
 
 ## Layout
 
@@ -296,6 +352,14 @@ Packages/OTMKit/     Sampling library, the otm CLI, and tests
 scripts/             Icon renderer and other tooling
 project.yml          XcodeGen project definition
 ```
+
+## Contributing
+
+Start with [CLAUDE.md](CLAUDE.md). It's written for coding agents, but it's the
+fullest account of the project's rules: the performance budget, how missing and
+unavailable readings are shown, process identity, and the UI conventions.
+Before sending a change, run `make test` and `make lint`, plus `make
+lint-automation` and `make test-scripts` for workflow or script changes.
 
 ## Relationship to other task managers
 

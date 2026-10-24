@@ -53,7 +53,7 @@ good deal more. ✅ done · 🚧 in progress · ⬜ planned
 | Flight recorder | ✅ | SQLite history every 10 s, kept 7 days, with a scrubber that shows the busiest apps at any moment: "what was hogging the CPU at 3 a.m.?" Sessions marked on the timeline export as `.otmrecording` files that open read-only and play back at 1×, 10× or 60× |
 | Alerts | ⬜ | Notify when a process holds a resource above a threshold, or on memory pressure and thermal throttling |
 | Per-process network throughput | ✅ | By app or process from `nettop` every 3 s, only while shown: stacked on Performance → Network and as Top Network on the Overview. Also `otm net` |
-| Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. Your own processes only until the privileged helper |
+| Connections page | ✅ | Every TCP and UDP socket by process, with state, scope (loopback, local network, internet) and listeners reachable from the network flagged. The live table covers your own processes until the privileged helper; Show Hidden… reads every account's sockets once, as an administrator |
 | "Who is using…" | 🚧 | Port to process is done (the Connections page and `otm ports`). File and volume to process, and the "can't eject" helper, are planned |
 | Graph colour presets | ✅ | Standard, colour-blind friendly (deuteranopia and protanopia) and high contrast in Settings, with a colour of your own per resource; apps keep their colour in "by app" graphs |
 | Media-engine activity | ✅ | GPU detail and recorded History show time above the minimum power state for reporting video, ProRes, scaler and codec blocks; unavailable counters stay absent |
