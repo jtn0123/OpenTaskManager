@@ -14,6 +14,36 @@ permissions:
   contents: read
 
 jobs:
+  # Workflows and shell scripts get the strictness Swift does, on a Linux
+  # runner, with each linter pinned to a release and its checksum.
+  automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint and ShellCheck
+        env:
+          ACTIONLINT: actionlint_1.7.12_linux_amd64.tar.gz
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          SHELLCHECK: shellcheck-v0.11.0.linux.x86_64.tar.xz
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$ACTIONLINT"
+          curl -fsSLO "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/$SHELLCHECK"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$ACTIONLINT" "$SHELLCHECK_SHA256" "$SHELLCHECK" | sha256sum -c -
+          mkdir -p bin
+          tar -xzf "$ACTIONLINT" -C bin actionlint
+          tar -xJf "$SHELLCHECK" -C bin --strip-components=1 shellcheck-v0.11.0/shellcheck
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Lint workflows and scripts
+        run: make lint-automation
+
+      - name: Test release scripts
+        run: make test-scripts
+
   build-and-test:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -25,7 +55,7 @@ jobs:
       - name: Pick the newest Xcode
         run: |
           ls -d /Applications/Xcode*.app
-          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          xcode=$(printf '%s\n' /Applications/Xcode_*.app | sort -V | tail -1)
           echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Show toolchain

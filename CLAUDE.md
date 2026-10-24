@@ -27,6 +27,12 @@ Manager OG or any other proprietary task manager.
   Keep the hot pointer loops below intact; annotations do not change their work.
 - All tests must pass and lint must be clean (`swiftlint lint --strict`).
   Never suppress warnings or skip tests.
+- Workflows and shell scripts have their own gate: `make lint-automation`
+  (actionlint, which also runs ShellCheck on each `run:` script, then
+  ShellCheck on `scripts/*.sh`) and `make test-scripts` (bash and git only).
+  CI runs both on a Linux runner with each linter pinned to a release and its
+  SHA-256; bump the version and checksum together. Find Xcode with a glob
+  (`printf '%s\n' /Applications/Xcode_*.app`), never by parsing `ls`.
 - A draft release carries only the commit its tag names:
   `scripts/check-release-source.sh` compares `refs/tags/vVERSION^{commit}`
   with HEAD before the build, and the remote tag's commit with HEAD just

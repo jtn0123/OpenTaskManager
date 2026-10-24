@@ -18,7 +18,7 @@ APP_DEBUG := $(DERIVED)/Build/Products/Debug/OpenTaskManager.app
 APP_REL   := $(DERIVED)/Build/Products/Release/OpenTaskManager.app
 KIT       := Packages/OTMKit
 
-.PHONY: help generate build release run test test-app coverage cli install-cli icon lint test-scripts clean package
+.PHONY: help generate build release run test test-app coverage cli install-cli icon lint lint-automation test-scripts clean package
 
 help:
 	@echo "make package VERSION=x.y.z  Build a signed universal ZIP and checksum locally"
@@ -33,6 +33,7 @@ help:
 	@echo "make install-cli  Copy otm to /usr/local/bin"
 	@echo "make icon         Re-render the app icon"
 	@echo "make lint         Run SwiftLint"
+	@echo "make lint-automation  Run actionlint and ShellCheck on workflows and scripts"
 	@echo "make test-scripts Run the release script checks (needs only bash and git)"
 
 generate:
@@ -77,6 +78,12 @@ icon:
 
 lint:
 	swiftlint lint --strict --quiet
+
+# Needs actionlint and shellcheck (`brew install actionlint shellcheck`);
+# actionlint runs shellcheck on the workflows' scripts as well.
+lint-automation:
+	actionlint
+	shellcheck scripts/*.sh
 
 test-scripts:
 	bash scripts/test-release-source.sh
