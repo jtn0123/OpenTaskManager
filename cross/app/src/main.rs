@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use otm_core::actions::{self, Ending};
 use otm_core::format::{MISSING, axis_rate, bytes, percent, rate};
 use otm_core::history::Ring;
 use otm_core::model::{ProcessKey, ProcessRow, Snapshot};
@@ -45,6 +46,10 @@ struct View {
     /// Rows in the order shown, to map a row index back to its process.
     shown: Vec<ProcessKey>,
     selected: Option<ProcessKey>,
+    /// Force Quit's target while its question is open, fixed as it opened.
+    pending: Option<(ProcessKey, String)>,
+    /// What the last End Task or Force Quit did, until dismissed.
+    notice: String,
     showing: Arc<AtomicBool>,
 }
 
@@ -152,6 +157,7 @@ impl View {
         window.set_sort_descending(descending);
         let Some(processes) = &self.processes else {
             window.set_status(format!("Reading processes… · every {} s", INTERVAL.as_secs()).into());
+            self.draw_actions(window);
             return;
         };
         let arranged = rows::arrange(processes, &self.query, column, descending, self.logical_cpus);
@@ -197,6 +203,52 @@ impl View {
             )
             .into(),
         );
+        self.draw_actions(window);
+    }
+
+    fn draw_actions(&self, window: &AppWindow) {
+        window.set_has_selection(self.selected.is_some());
+        let question = self.pending.as_ref().map(|(key, name)| actions::confirmation(name, *key));
+        window.set_confirm_text(question.unwrap_or_default().into());
+        window.set_notice(self.notice.as_str().into());
+    }
+
+    /// The selected process and its name as the table shows it.
+    fn selection(&self) -> Option<(ProcessKey, String)> {
+        let key = self.selected?;
+        let row = self.processes.as_ref()?.iter().find(|row| row.key == key)?;
+        Some((key, row.name.clone()))
+    }
+
+    fn end_task(&mut self) {
+        if let Some((key, name)) = self.selection() {
+            self.pending = None;
+            let outcome = actions::end(key, Ending::Ask);
+            self.notice = actions::describe(&name, key, Ending::Ask, &outcome);
+        }
+        self.redraw_table();
+    }
+
+    fn ask_force_quit(&mut self) {
+        if let Some(target) = self.selection() {
+            self.pending = Some(target);
+        }
+        self.redraw_table();
+    }
+
+    fn force_quit(&mut self) {
+        if let Some((key, name)) = self.pending.take() {
+            let outcome = actions::end(key, Ending::Force);
+            self.notice = actions::describe(&name, key, Ending::Force, &outcome);
+        }
+        self.redraw_table();
+    }
+
+    fn escape(&mut self) {
+        if self.pending.take().is_none() {
+            self.notice.clear();
+        }
+        self.redraw_table();
     }
 
     fn redraw(&mut self) {
@@ -305,12 +357,18 @@ fn open_window() {
             });
         });
         window.on_move_selection(|delta| with_view(|view| view.move_selection(delta)));
+        window.on_end_task(|| with_view(View::end_task));
+        window.on_force_quit_asked(|| with_view(View::ask_force_quit));
+        window.on_force_quit_confirmed(|| with_view(View::force_quit));
+        window.on_escape_pressed(|| with_view(View::escape));
         // Closing drops the window and its renderer; the tray keeps sampling.
         window.window().on_close_requested(|| {
             let _ = slint::invoke_from_event_loop(|| {
                 with_view(|view| {
                     view.window = None;
                     view.processes = None;
+                    view.pending = None;
+                    view.notice.clear();
                     view.showing.store(false, Ordering::Relaxed);
                 })
             });
@@ -366,6 +424,8 @@ fn main() -> Result<(), slint::PlatformError> {
             rows: Rc::new(VecModel::default()),
             shown: Vec::new(),
             selected: None,
+            pending: None,
+            notice: String::new(),
             showing: showing.clone(),
         })
     });

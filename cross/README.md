@@ -16,6 +16,9 @@ It's an early slice, not a release:
 - Live CPU, memory, disk and network graphs.
 - A process table: search, sorting by any column, right-aligned figures, and
   a selection that follows its process through re-sorts (Up and Down move it).
+- End Task and Force Quit for the selected process (Delete and Shift+Delete).
+  Force Quit asks first, naming the process and PID; the outcome stays above
+  the table until dismissed (Esc).
 - A tray icon drawing recent CPU load, with close-to-tray.
 
 ## Rules carried over from the Mac app
@@ -24,7 +27,11 @@ It's an early slice, not a release:
   `Option`. A process seen for the first time has no CPU or disk rate yet;
   another account's disk I/O is private on Linux without root.
 - **A process is its PID and start time** (`ProcessKey`), so a reused PID never
-  inherits another process's selection.
+  inherits another process's selection, or its End Task. Ending one
+  (`otm_core::actions`) first takes a kernel handle to the PID (a pidfd on
+  Linux, a process handle on Windows), then checks the start time through
+  it and signals through it, so a PID reused in between can't be hit.
+  Force Quit's target is fixed when its question opens.
 - **Stay light.** Sampling happens once a second on its own thread. Processes
   are read only while the window is on screen. Closing the window drops it
   and its renderer; the tray keeps sampling the totals. Graphs are redrawn
@@ -32,6 +39,19 @@ It's an early slice, not a release:
 - **Pure rules live in `otm-core`, with tests**: sampling and priming,
   formatting, the table's search and order, rate axes, the tray icon's
   pixels. `app/src/graph.rs` (graph paths) is tested too.
+
+## Ending a process
+
+| | End Task | Force Quit |
+|---|---|---|
+| Linux | SIGTERM, so it can save and quit | SIGKILL |
+| Windows | Closes its visible windows, as their close buttons would | `TerminateProcess` |
+
+Nothing is done, and the notice says why, when the process has already
+ended, its PID now belongs to a process started at another time, it's
+another account's or protected (ending it needs administrator rights), it's
+OpenTaskManager itself, or (End Task on Windows) it has no window to close,
+when Force Quit is the way. The wording of the question is the Mac app's.
 
 ## Choices that keep it light
 
@@ -49,8 +69,9 @@ It's an early slice, not a release:
 ## Layout
 
 ```
-crates/otm-core/   Sampling (sysinfo), figures, formatting, table rules, axis scaling, tray icon pixels
-app/ui/app.slint   The window: graph cards, process table, status line
+crates/otm-core/   Sampling (sysinfo), figures, formatting, table rules, axis scaling, tray icon pixels,
+                   ending a process (actions.rs: rustix on Linux, windows-sys on Windows)
+app/ui/app.slint   The window: graph cards, End Task and Force Quit, process table, status line
 app/src/main.rs    The view: sampler thread, window life, table model, callbacks
 app/src/graph.rs   Graph lines as path commands in the graph's own pixels
 app/src/tray.rs    The tray: ksni on Linux, tray-icon elsewhere
@@ -89,7 +110,10 @@ cargo build --release --target x86_64-pc-windows-msvc -p opentaskmanager
 `scripts/smoke-windows.ps1` then drives the Windows build through UI
 Automation, the accessibility tree Slint exposes, so it never moves the
 mouse or takes the keyboard. It clicks headers and checks the rows' order,
-searches, and checks that a protected process shows "—", not 0 bytes:
+searches, and checks that a protected process shows "—", not 0 bytes. Then it
+starts a ping with no window, selects it, and checks that End Task says
+Force Quit is needed, that Force Quit asks first and Cancel ends nothing,
+and that confirming ends it (it kills the ping itself if a check fails):
 `powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 -Exe <path to opentaskmanager.exe>`.
 
 ## Status
@@ -116,15 +140,22 @@ Linux, in WSL 2 (Ubuntu 26.04, 16 logical CPUs, no GPU, about 50 processes):
 For comparison, the Tauri prototype took 9% and 455 MB with its window open,
 and the C++/Qt one 0.83% and 31 MB (see COMPARISON.md).
 
-Verified on Windows: the core's 21 tests run natively, including one that
-no process Windows won't open shows 0 bytes. All 13 smoke checks pass.
-Windows registered the tray icon.
+Verified on Windows: the core's 29 tests run natively, including one that
+no process Windows won't open shows 0 bytes, and End Task and Force Quit on
+real processes: one closed through an invisible window that never takes
+focus, a PID with the wrong start time refused and left running, and the
+System process refused. All 23 smoke checks pass. Windows registered the
+tray icon. On Linux (WSL) the core's 27 tests pass, including SIGTERM and
+SIGKILL on real processes and PID 1 refused to an ordinary account.
 
 Not verified yet:
 
 - The Linux tray: WSLg has no tray host, so it didn't start there.
-- Keyboard selection and the tray menu: no test drives them.
+- Keyboard selection, Delete and Shift+Delete, and the tray menu: no test
+  drives them (UI Automation invokes the buttons instead).
+- The Linux window's End Task and Force Quit buttons: the Linux actions are
+  tested in the core, the buttons only on Windows.
 
-Known gaps: no process actions yet (End Task and the rest), no history
+Known gaps: no multiple selection or ending a group of processes, no history
 recording, no per-OS readers beyond what `sysinfo` provides (GPU, sensors,
 per-process network). macOS hasn't been built; the Swift app covers it.

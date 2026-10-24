@@ -2,14 +2,15 @@
 .SYNOPSIS
   Drives the Windows build through UI Automation (the accessibility tree Slint
   exposes), so it never moves the mouse or takes the keyboard: sorting by
-  clicking headers, the order the rows then come in, and search.
+  clicking headers, the order the rows then come in, search, and End Task
+  and Force Quit on a throwaway ping process it starts and always cleans up.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File cross\scripts\smoke-windows.ps1 -Exe target\release\opentaskmanager.exe
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
-    [int]$TimeoutSeconds = 45
+    [int]$TimeoutSeconds = 60
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
@@ -40,6 +41,18 @@ try {
     }
     function Header([string]$title) {
         Elements $Type::Button | Where-Object { $_.Current.Name -like "$title*" } | Select-Object -First 1
+    }
+    function Button([string]$name) {
+        Elements $Type::Button | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
+    }
+    function Press([string]$name) {
+        $button = Button $name
+        if (-not $button) { throw "No button named $name." }
+        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Start-Sleep -Milliseconds 500
+    }
+    function Texts([string]$pattern) {
+        @(Elements $Type::Text | ForEach-Object { $_.Current.Name } | Where-Object { $_ -match $pattern })
     }
     function Click([string]$title) {
         $header = Header $title
@@ -104,6 +117,48 @@ try {
         $protected = @(Rows)
         Check ($protected.Count -gt 0 -and @($protected | Where-Object { $_ -notmatch "memory $dash$" }).Count -eq 0) "a protected process (csrss) shows its memory as a dash"
         Check (@($protected | Where-Object { $_ -match 'memory 0 B$' }).Count -eq 0) "no protected process shows 0 bytes"
+
+        # End Task and Force Quit on a process started for the purpose: ping, with no window of its own.
+        $forceQuitAsk = 'Force Quit' + [char]0x2026
+        Check (-not (Button 'End Task').Current.IsEnabled) "End Task is off until a process is selected"
+        $start = New-Object System.Diagnostics.ProcessStartInfo 'ping', '-n 120 127.0.0.1'
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $target = [System.Diagnostics.Process]::Start($start)
+        try {
+            $id = $target.Id
+            $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$id")
+            $row = $null
+            for ($i = 0; $i -lt 10 -and -not $row; $i++) {
+                Start-Sleep -Milliseconds 500
+                $row = Elements $Type::ListItem | Where-Object { $_.Current.Name -match ", PID $id," } | Select-Object -First 1
+            }
+            if (-not $row) { throw "The ping process (PID $id) never appeared in the table." }
+            # Rows are selectable list items: UI Automation selects one as a click would.
+            $item = [System.Windows.Automation.SelectionItemPattern]::Pattern
+            $row.GetCurrentPattern($item).Select()
+            Start-Sleep -Milliseconds 500
+            Check ($row.GetCurrentPattern($item).Current.IsSelected) "the row reports itself selected"
+            Check (Button 'End Task').Current.IsEnabled "selecting a row turns End Task on"
+
+            Press 'End Task'
+            Check ((Texts "\(PID $id\) has no window to close\. Force Quit ends it\.").Count -eq 1) "End Task on a process without windows says Force Quit is needed"
+            Check (-not $target.HasExited) "and leaves it running"
+
+            Press $forceQuitAsk
+            Check ((Texts "^Force quit .+ \(PID $id\)\? It stops at once").Count -eq 1) "Force Quit asks first, naming the process and PID"
+            Press 'Cancel'
+            Check ((Texts '^Force quit ').Count -eq 0 -and -not $target.HasExited) "Cancel closes the question and ends nothing"
+
+            Press $forceQuitAsk
+            Press 'Force Quit'
+            Check ($target.WaitForExit(5000)) "confirming Force Quit ends the process"
+            Check ((Texts "^Ended .+ \(PID $id\) at once\.$").Count -eq 1) "and says so"
+            Press 'Dismiss'
+            Check ((Texts "\(PID $id\)").Count -eq 0) "Dismiss clears the notice"
+        } finally {
+            if (-not $target.HasExited) { $target.Kill() }
+        }
     } else {
         Write-Output "skipped: the search field offers no value pattern to type into"
     }

@@ -2,7 +2,7 @@
 // Graph lines are path commands from Rust in the graph's logical pixels: the
 // window reports the graphs' size, and Rust redraws them when it changes.
 
-import { LineEdit, ListView, Palette } from "std-widgets.slint";
+import { Button, LineEdit, ListView, Palette } from "std-widgets.slint";
 
 export struct CardData {
     value: string,
@@ -162,6 +162,33 @@ component HeaderCell inherits Rectangle {
     }
 }
 
+// Force Quit's question, or what the last End Task or Force Quit did, over the table.
+component Banner inherits Rectangle {
+    in property <string> text;
+    in property <bool> warning;
+
+    background: root.warning ? #ffb547.with-alpha(0.16) : Palette.foreground.with-alpha(0.06);
+    border-color: root.warning ? #ffb547.with-alpha(0.6) : Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    vertical-stretch: 0;
+
+    HorizontalLayout {
+        padding: 7px;
+        padding-left: 12px;
+        spacing: 8px;
+        Text {
+            text: root.text;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            font-size: 13px;
+            accessible-live-region: polite;
+        }
+        @children
+    }
+}
+
 component Cell inherits Text {
     in property <bool> numeric;
     horizontal-alignment: root.numeric ? right : left;
@@ -178,6 +205,13 @@ component ProcessTable inherits Rectangle {
     callback sort-clicked(int);
     callback row-clicked(int);
     callback move-selection(int);
+    callback end-task();
+    callback force-quit();
+    callback escape();
+
+    public function focus-rows() {
+        keys.focus();
+    }
 
     // Scrolls just enough to show `row`, as a keyboard move should.
     public function reveal(row: int) {
@@ -272,6 +306,19 @@ component ProcessTable inherits Rectangle {
                     root.move-selection(-1);
                     return accept;
                 }
+                // Delete asks the selection to quit; Shift+Delete asks first whether to force it.
+                if (event.text == Key.Delete) {
+                    if (event.modifiers.shift) {
+                        root.force-quit();
+                    } else {
+                        root.end-task();
+                    }
+                    return accept;
+                }
+                if (event.text == Key.Escape) {
+                    root.escape();
+                    return accept;
+                }
                 return reject;
             }
             list := ListView {
@@ -281,6 +328,11 @@ component ProcessTable inherits Rectangle {
                         : Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
                     accessible-role: list-item;
                     accessible-label: row.name + ", PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: row.selected;
+                    accessible-action-default => {
+                        root.row-clicked(index);
+                    }
                     HorizontalLayout {
                         padding-left: 10px;
                         padding-right: 12px;
@@ -355,6 +407,10 @@ export component AppWindow inherits Window {
     in property <int> sort-column;
     in property <bool> sort-descending;
     in property <string> status;
+    in property <bool> has-selection;
+    // Force Quit's question while it's open, else empty.
+    in property <string> confirm-text;
+    in property <string> notice;
     out property <length> graph-width: cpu-card.graph-width;
     out property <length> graph-height: cpu-card.graph-height;
 
@@ -363,6 +419,11 @@ export component AppWindow inherits Window {
     callback sort-clicked(int);
     callback row-clicked(int);
     callback move-selection(int);
+    callback end-task();
+    callback force-quit-asked();
+    callback force-quit-confirmed();
+    // Cancels Force Quit's question, or else clears the notice.
+    callback escape-pressed();
 
     changed graph-width => {
         root.graphs-resized();
@@ -385,6 +446,21 @@ export component AppWindow inherits Window {
                 vertical-alignment: center;
             }
             Rectangle { }
+            Button {
+                text: "End Task";
+                enabled: root.has-selection;
+                clicked => {
+                    root.end-task();
+                    table.focus-rows();
+                }
+            }
+            Button {
+                text: "Force Quit…";
+                enabled: root.has-selection;
+                clicked => {
+                    root.force-quit-asked();
+                }
+            }
             LineEdit {
                 width: 320px;
                 placeholder-text: "Search by name, PID or user";
@@ -417,6 +493,35 @@ export component AppWindow inherits Window {
                 data: root.network;
             }
         }
+        if root.confirm-text != "": Banner {
+            text: root.confirm-text;
+            warning: true;
+            Button {
+                text: "Cancel";
+                clicked => {
+                    root.escape-pressed();
+                    table.focus-rows();
+                }
+            }
+            Button {
+                text: "Force Quit";
+                primary: true;
+                clicked => {
+                    root.force-quit-confirmed();
+                    table.focus-rows();
+                }
+            }
+        }
+        if root.confirm-text == "" && root.notice != "": Banner {
+            text: root.notice;
+            Button {
+                text: "Dismiss";
+                clicked => {
+                    root.escape-pressed();
+                    table.focus-rows();
+                }
+            }
+        }
         table := ProcessTable {
             rows: root.rows;
             sort-column: root.sort-column;
@@ -429,6 +534,15 @@ export component AppWindow inherits Window {
             }
             move-selection(delta) => {
                 root.move-selection(delta);
+            }
+            end-task => {
+                root.end-task();
+            }
+            force-quit => {
+                root.force-quit-asked();
+            }
+            escape => {
+                root.escape-pressed();
             }
         }
         Text {

@@ -4,6 +4,7 @@
 //! is `None`, shown as "—", never zero. Pure rules live here, tested; the
 //! app only schedules sampling and draws.
 
+pub mod actions;
 pub mod format;
 pub mod history;
 pub mod icon;
