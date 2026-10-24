@@ -1,0 +1,441 @@
+// OpenTaskManager's window: four live graphs over the process table.
+// Graph lines are path commands from Rust in the graph's logical pixels: the
+// window reports the graphs' size, and Rust redraws them when it changes.
+
+import { LineEdit, ListView, Palette } from "std-widgets.slint";
+
+export struct CardData {
+    value: string,
+    caption: string,
+    top-label: string,
+    grid: string,
+    area: string,
+    line: string,
+    dashed: string,
+}
+
+// One row of the process table, already formatted ("—" where a figure is missing).
+export struct ProcessCells {
+    name: string,
+    pid: string,
+    user: string,
+    cpu: string,
+    memory: string,
+    read: string,
+    write: string,
+    selected: bool,
+}
+
+global Look {
+    out property <length> row-height: 24px;
+    out property <color> muted: Palette.foreground.with-alpha(0.62);
+    out property <color> panel: #0b0f14;
+    // Column widths shared by the header and the rows; Name takes the rest.
+    out property <length> pid: 76px;
+    out property <length> user: 116px;
+    out property <length> cpu: 72px;
+    out property <length> memory: 92px;
+    out property <length> read: 104px;
+    out property <length> write: 104px;
+}
+
+component GraphCard inherits Rectangle {
+    in property <string> title;
+    in property <color> accent;
+    in property <CardData> data;
+    out property <length> graph-width: graph.width;
+    out property <length> graph-height: graph.height;
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    // Equal widths, whatever their captions: every graph is drawn at the first one's size.
+    min-width: 170px;
+    preferred-width: 200px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    accessible-role: groupbox;
+    accessible-label: root.title + " " + root.data.value + ". " + root.data.caption;
+
+    VerticalLayout {
+        padding: 9px;
+        spacing: 6px;
+        HorizontalLayout {
+            Text {
+                text: root.title;
+                color: root.accent;
+                font-size: 13px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.data.value;
+                horizontal-alignment: right;
+                font-size: 15px;
+                font-weight: 600;
+                color: Palette.foreground;
+            }
+        }
+        graph := Rectangle {
+            height: 96px;
+            background: Look.panel;
+            border-radius: 5px;
+            clip: true;
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.grid;
+                stroke: #ffffff17;
+                stroke-width: 1px;
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.area;
+                fill: root.accent.with-alpha(0.2);
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.line;
+                stroke: root.accent;
+                stroke-width: 1.75px;
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.dashed;
+                stroke: root.accent;
+                stroke-width: 1.75px;
+            }
+            Text {
+                x: 5px;
+                y: 3px;
+                text: root.data.top-label;
+                color: #ffffffb3;
+                font-size: 11px;
+            }
+        }
+        Text {
+            text: root.data.caption;
+            color: Look.muted;
+            font-size: 12px;
+            overflow: elide;
+        }
+    }
+}
+
+component HeaderCell inherits Rectangle {
+    in property <string> title;
+    in property <bool> numeric;
+    in property <bool> sorted;
+    in property <bool> descending;
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.title + (root.sorted ? (root.descending ? ", sorted highest first" : ", sorted lowest first") : "");
+    accessible-action-default => { root.clicked(); }
+
+    Text {
+        width: 100%;
+        height: 100%;
+        text: root.title + (root.sorted ? (root.descending ? " ▾" : " ▴") : "");
+        horizontal-alignment: root.numeric ? right : left;
+        vertical-alignment: center;
+        font-size: 12px;
+        font-weight: 600;
+        color: root.sorted ? Palette.foreground : Look.muted;
+        overflow: elide;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Cell inherits Text {
+    in property <bool> numeric;
+    horizontal-alignment: root.numeric ? right : left;
+    vertical-alignment: center;
+    font-size: 13px;
+    overflow: elide;
+}
+
+// Only the rows in view exist (ListView), so hundreds of processes cost what a screenful does.
+component ProcessTable inherits Rectangle {
+    in property <[ProcessCells]> rows;
+    in property <int> sort-column;
+    in property <bool> sort-descending;
+    callback sort-clicked(int);
+    callback row-clicked(int);
+    callback move-selection(int);
+
+    // Scrolls just enough to show `row`, as a keyboard move should.
+    public function reveal(row: int) {
+        if (row * Look.row-height < -list.viewport-y) {
+            list.viewport-y = -row * Look.row-height;
+        } else if ((row + 1) * Look.row-height > -list.viewport-y + list.visible-height) {
+            list.viewport-y = -((row + 1) * Look.row-height - list.visible-height);
+        }
+    }
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    clip: true;
+    vertical-stretch: 1;
+
+    VerticalLayout {
+        HorizontalLayout {
+            height: 30px;
+            padding-left: 10px;
+            // As the rows: the list's scroll bar floats over them rather than taking room.
+            padding-right: 12px;
+            spacing: 8px;
+            HeaderCell {
+                title: "Name";
+                horizontal-stretch: 1;
+                min-width: 120px;
+                sorted: root.sort-column == 0;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(0); }
+            }
+            HeaderCell {
+                width: Look.pid;
+                title: "PID";
+                numeric: true;
+                sorted: root.sort-column == 1;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(1); }
+            }
+            HeaderCell {
+                width: Look.user;
+                title: "User";
+                sorted: root.sort-column == 2;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(2); }
+            }
+            HeaderCell {
+                width: Look.cpu;
+                title: "CPU";
+                numeric: true;
+                sorted: root.sort-column == 3;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(3); }
+            }
+            HeaderCell {
+                width: Look.memory;
+                title: "Memory";
+                numeric: true;
+                sorted: root.sort-column == 4;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(4); }
+            }
+            HeaderCell {
+                width: Look.read;
+                title: "Disk read";
+                numeric: true;
+                sorted: root.sort-column == 5;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(5); }
+            }
+            HeaderCell {
+                width: Look.write;
+                title: "Disk write";
+                numeric: true;
+                sorted: root.sort-column == 6;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(6); }
+            }
+        }
+        Rectangle {
+            height: 1px;
+            background: Palette.border;
+        }
+        keys := FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.DownArrow) {
+                    root.move-selection(1);
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.move-selection(-1);
+                    return accept;
+                }
+                return reject;
+            }
+            list := ListView {
+                for row[index] in root.rows: Rectangle {
+                    height: Look.row-height;
+                    background: row.selected ? Palette.selection-background
+                        : Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
+                    accessible-role: list-item;
+                    accessible-label: row.name + ", PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        Cell {
+                            text: row.name;
+                            horizontal-stretch: 1;
+                            min-width: 120px;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.pid;
+                            text: row.pid;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.user;
+                            text: row.user;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.cpu;
+                            text: row.cpu;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.memory;
+                            text: row.memory;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.read;
+                            text: row.read;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.write;
+                            text: row.write;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                    }
+                    TouchArea {
+                        clicked => {
+                            keys.focus();
+                            root.row-clicked(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "OpenTaskManager";
+    preferred-width: 1120px;
+    preferred-height: 760px;
+    min-width: 760px;
+    min-height: 520px;
+    background: Palette.alternate-background;
+
+    in property <CardData> cpu;
+    in property <CardData> memory;
+    in property <CardData> disk;
+    in property <CardData> network;
+    in property <[ProcessCells]> rows;
+    in property <int> sort-column;
+    in property <bool> sort-descending;
+    in property <string> status;
+    out property <length> graph-width: cpu-card.graph-width;
+    out property <length> graph-height: cpu-card.graph-height;
+
+    callback graphs-resized();
+    callback search-edited(string);
+    callback sort-clicked(int);
+    callback row-clicked(int);
+    callback move-selection(int);
+
+    changed graph-width => {
+        root.graphs-resized();
+    }
+
+    public function reveal-row(row: int) {
+        table.reveal(row);
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        padding-bottom: 6px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: "OpenTaskManager";
+                font-size: 15px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Rectangle { }
+            LineEdit {
+                width: 320px;
+                placeholder-text: "Search by name, PID or user";
+                edited(text) => {
+                    root.search-edited(text);
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            vertical-stretch: 0;
+            cpu-card := GraphCard {
+                title: "CPU";
+                accent: #35d07f;
+                data: root.cpu;
+            }
+            GraphCard {
+                title: "Memory";
+                accent: #b38cff;
+                data: root.memory;
+            }
+            GraphCard {
+                title: "Disk";
+                accent: #ffb547;
+                data: root.disk;
+            }
+            GraphCard {
+                title: "Network";
+                accent: #4fb8ff;
+                data: root.network;
+            }
+        }
+        table := ProcessTable {
+            rows: root.rows;
+            sort-column: root.sort-column;
+            sort-descending: root.sort-descending;
+            sort-clicked(column) => {
+                root.sort-clicked(column);
+            }
+            row-clicked(row) => {
+                root.row-clicked(row);
+            }
+            move-selection(delta) => {
+                root.move-selection(delta);
+            }
+        }
+        Text {
+            text: root.status;
+            font-size: 12px;
+            color: Look.muted;
+            overflow: elide;
+        }
+    }
+}

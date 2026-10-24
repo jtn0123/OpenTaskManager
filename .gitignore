@@ -20,7 +20,3 @@ xcuserdata/
 
 # Cross-platform app (cross/): build output and dependencies
 cross/target/
-cross/app/node_modules/
-cross/app/dist/
-cross/app/src-tauri/gen/
-cross/app-qt/build/

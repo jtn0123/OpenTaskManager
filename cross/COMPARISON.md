@@ -1,7 +1,9 @@
 # Tauri, Slint and Qt: the same slice three ways
 
 The same first slice of OpenTaskManager was built three times, to choose a
-stack for Windows and Linux with evidence rather than opinion:
+stack for Windows and Linux with evidence rather than opinion. Slint was
+chosen; the other two prototypes live on in git history (commit `2a7f73f`,
+branch `cross-compare`), and the paths below are from that commit:
 
 - **Tauri** (`app/`): Rust core (`otm-core`) and a TypeScript interface in the
   system web view.

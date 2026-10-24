@@ -1,107 +1,99 @@
 # OpenTaskManager for Windows and Linux
 
-The start of a cross-platform OpenTaskManager, built with
-[Tauri 2](https://tauri.app): a Rust core that reads the system, and a
-TypeScript interface in the system's own web view (WebView2 on Windows,
-WebKitGTK on Linux). The Mac app in `App/` and `Packages/` stays native Swift;
-this folder doesn't touch it.
+The start of a cross-platform OpenTaskManager: a Rust core that reads the
+system (`crates/otm-core`, on `sysinfo`) and a native interface drawn with
+[Slint](https://slint.dev) (`app/`). The Mac app in `App/` and `Packages/`
+stays native Swift; this folder doesn't touch it.
 
-It's an early slice, not a release: live CPU, memory, disk and network
-graphs, a sortable, searchable process table, and a tray icon with a live CPU
-graph. It exists to prove the stack and measure its cost before more is
-built on it.
+Slint was chosen by building the same slice three ways (Tauri, Slint, C++/Qt)
+and measuring them; see [COMPARISON.md](COMPARISON.md). The Tauri and Qt
+prototypes are in git history: the Tauri app is commit `006ee58` (branch
+`cross-tauri`), and all three together are commit `2a7f73f` (branch
+`cross-compare`).
 
-The same slice is also built with **Slint** (`app-slint/`, on the same Rust
-core) and with **C++ and Qt 6** (`app-qt/`, its own `/proc` sampler), to
-choose between the three by measurement. See [COMPARISON.md](COMPARISON.md):
-Slint and Qt use about 20–30 MB with the window open, against Tauri's 455 MB,
-and the comparison recommends Slint.
+It's an early slice, not a release:
 
-```sh
-cargo run --release -p opentaskmanager-slint      # Slint; --hidden, --no-tray
-SLINT_BACKEND=winit-software cargo run --release -p opentaskmanager-slint
-cmake -S app-qt -B app-qt/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=<Qt 6 dir>
-cmake --build app-qt/build && ctest --test-dir app-qt/build
-```
+- Live CPU, memory, disk and network graphs.
+- A process table: search, sorting by any column, right-aligned figures, and
+  a selection that follows its process through re-sorts (Up and Down move it).
+- A tray icon drawing recent CPU load, with close-to-tray.
 
 ## Rules carried over from the Mac app
 
 - **A figure the system didn't give is "—", never zero.** In Rust it's an
-  `Option`; the generated TypeScript types make it `| null`, so the interface
-  can't forget it. A process seen for the first time has no CPU or disk rate
-  yet; another account's disk I/O is private on Linux without root.
+  `Option`. A process seen for the first time has no CPU or disk rate yet;
+  another account's disk I/O is private on Linux without root.
 - **A process is its PID and start time** (`ProcessKey`), so a reused PID never
   inherits another process's selection.
-- **Stay light.** Sampling happens once a second in Rust. Processes are read
-  only while the window is on screen. Closing the window destroys its web
-  view; the tray keeps sampling the totals in one small process. Graphs are
-  drawn once per sample and slid by the compositor in between, only where a
-  GPU is confirmed: a software renderer steps them instead (see below).
-- **Pure rules live in `otm-core`, with tests**: sampling and priming, the
-  rate axes, the history ring, the tray icon's pixels.
+- **Stay light.** Sampling happens once a second on its own thread. Processes
+  are read only while the window is on screen. Closing the window drops it
+  and its renderer; the tray keeps sampling the totals. Graphs are redrawn
+  once per sample, not per frame.
+- **Pure rules live in `otm-core`, with tests**: sampling and priming,
+  formatting, the table's search and order, rate axes, the tray icon's
+  pixels. `app/src/graph.rs` (graph paths) is tested too.
+
+## Choices that keep it light
+
+- **The CPU renderer is the default** (`BackendSelector`, `winit` +
+  `software`). The window redraws a few small regions a second, and in
+  measurement the GPU renderer cost far more when no GPU was available.
+  Set `SLINT_BACKEND` (for example `winit-femtovg`) to choose another.
+- **The Linux tray is a StatusNotifierItem over D-Bus** (`ksni`), so no GTK is
+  loaded; GTK alone cost about 16 MB in measurement. Windows and macOS use
+  their own tray through `tray-icon`. Desktops without a tray host (GNOME
+  without its extension, WSLg) get no icon, and the app says so on stderr.
+- **The table is its own component**: only the rows in view exist
+  (`ListView`), and rows change in place, so the scroll position holds.
 
 ## Layout
 
 ```
-crates/otm-core/      Sampling (sysinfo), the figures' types, axis scaling, tray icon pixels
-app/src-tauri/        The app: tray, window, sampler thread, one `history` command and a `tick` event
-app/src/              The interface: graphs, process table, formatting
-app/src/bindings/     TypeScript types generated from otm-core by `cargo test` (ts-rs): don't edit
+crates/otm-core/   Sampling (sysinfo), figures, formatting, table rules, axis scaling, tray icon pixels
+app/ui/app.slint   The window: graph cards, process table, status line
+app/src/main.rs    The view: sampler thread, window life, table model, callbacks
+app/src/graph.rs   Graph lines as path commands in the graph's own pixels
+app/src/tray.rs    The tray: ksni on Linux, tray-icon elsewhere
 ```
 
 ## Build
 
-You need Rust 1.90 or later and Node.js 20 or later, plus:
+You need Rust 1.90 or later, plus:
 
-- **Linux**: WebKitGTK 4.1, GTK 3, ayatana-appindicator, librsvg and the usual
-  build tools. On Debian or Ubuntu: `sudo apt install build-essential
-  pkg-config libssl-dev libwebkit2gtk-4.1-dev libgtk-3-dev
-  libayatana-appindicator3-dev librsvg2-dev libxdo-dev`.
-- **Windows**: Microsoft C++ Build Tools (Desktop development with C++) and
-  the WebView2 runtime, which Windows 11 already has.
+- **Linux**: a C toolchain, `pkg-config`, and the X11 and Wayland client
+  libraries most desktops already have (`libxkbcommon-x11`, `libwayland`,
+  `libfontconfig`). A D-Bus session bus for the tray.
+- **Windows**: Microsoft C++ Build Tools (Desktop development with C++).
 
 ```sh
-cargo test --workspace                                  # also regenerates app/src/bindings
+cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-cd app
-npm ci
-npm run check                                           # strict TypeScript
-npx tauri dev                                           # run with live reload
-npx tauri build                                         # release build and installers
-npx tauri build --no-bundle                             # just the binary
+cargo run --release -p opentaskmanager            # --hidden: tray only; --no-tray: none
 ```
-
-`--hidden` starts with the tray only. In a plain browser, `npm run dev` shows
-the interface with made-up figures and a Preview badge, for layout work.
 
 ## Status
 
-Measured 2026-10-24 in WSL 2 (Ubuntu 26.04, 16 logical CPUs, about 70
-processes; WebKit's compositor fell back to software rendering, `llvmpipe`),
-release build, 20 s to settle then 60 s, whole process tree (app, WebKit's
-web and network processes):
+Measured 2026-10-24 in WSL 2 (Ubuntu 26.04, 16 logical CPUs, no GPU, about
+50 processes), release build, 20 s to settle, then 60 s sampled:
 
 | State | CPU, % of one core | Memory (PSS) |
 |---|---|---|
-| Window open, graphs sliding (`--slide-graphs`) | 181–194% | ~470 MB |
-| Window open, graphs stepping (the default here) | 10.0% (web view 9.1%, app 0.8%) | ~470 MB |
-| Window closed, tray only (`--hidden`) | 0.3% | 46 MB |
+| Window open | 0.65% | 19 MB |
+| Window closed | 0.08% | 12 MB |
 
-What that shows:
+For comparison, the Tauri prototype took 9% and 455 MB with its window open,
+and the C++/Qt one 0.83% and 31 MB (see COMPARISON.md).
 
-- Sliding graphs are only affordable where a GPU composites. Only Chromium's
-  web view (WebView2) names the GPU; WebKit calls every renderer "Apple GPU",
-  so on Linux graphs step unless `--slide-graphs` is given. The status bar
-  says when they step and why.
-- The web view's memory is the real cost: about 470 MB with the window open
-  here (software rendering inflates it; real GPUs should be lower), against
-  46 MB with it closed. Closing the window to the tray gives that back.
-- Not measured yet: Windows (WebView2), a Linux desktop with a real GPU,
-  hundreds of processes.
+What isn't verified yet:
+
+- WSLg has no tray host, so the tray didn't start in those runs; the D-Bus
+  tray hasn't been seen working on a real desktop.
+- The window was checked by screenshot. Sorting by clicking a header,
+  keyboard selection and the tray menu haven't been driven by an automated
+  test.
 
 Known gaps: no process actions yet (End Task and the rest), no history
 recording, no per-OS readers beyond what `sysinfo` provides (GPU, sensors,
-per-process network), and the Linux tray logs a GTK warning on each icon
-update (`gtk_widget_get_scale_factor`, from the tray library). Windows hasn't
-been built yet: it needs the C++ Build Tools.
+per-process network). Windows type-checks with Clippy, but hasn't been built
+or run there yet.

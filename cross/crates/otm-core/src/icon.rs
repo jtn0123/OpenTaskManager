@@ -34,9 +34,22 @@ pub fn cpu_bars(values: &[f32], size: u32) -> Vec<u8> {
     pixels
 }
 
+/// RGBA pixels as ARGB in network byte order, the StatusNotifierItem tray
+/// format on Linux.
+pub fn to_argb(rgba: &[u8]) -> Vec<u8> {
+    let (pixels, _) = rgba.as_chunks::<4>();
+    pixels.iter().flat_map(|&[red, green, blue, alpha]| [alpha, red, green, blue]).collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BAR, FRAME, cpu_bars};
+    use super::{BAR, FRAME, cpu_bars, to_argb};
+
+    #[test]
+    fn moves_alpha_first_for_the_linux_tray() {
+        assert_eq!(to_argb(&[1, 2, 3, 4, 5, 6, 7, 8]), [4, 1, 2, 3, 8, 5, 6, 7]);
+        assert_eq!(to_argb(&cpu_bars(&[50.0], 16)).len(), 16 * 16 * 4);
+    }
 
     fn pixel(image: &[u8], size: usize, x: usize, y: usize) -> [u8; 4] {
         let at = (y * size + x) * 4;

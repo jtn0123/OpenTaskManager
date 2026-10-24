@@ -1,6 +1,6 @@
-//! OpenTaskManager drawn natively with Slint: the Tauri app's slice (graphs,
-//! process table, tray) on the same Rust core, without a web view. The window
-//! exists only while it's open; closing it drops it, and the tray keeps sampling.
+//! OpenTaskManager for Windows and Linux, drawn natively with Slint on the
+//! shared Rust core. The window exists only while it's open; closing it
+//! drops it, and the tray keeps sampling.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -8,6 +8,7 @@ mod graph;
 mod tray;
 
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -19,8 +20,7 @@ use otm_core::model::{ProcessKey, ProcessRow, Snapshot};
 use otm_core::rows::{self, Column};
 use otm_core::sampler::Sampler;
 use otm_core::scale::AutoScale;
-use slint::{CloseRequestResponse, ComponentHandle, ModelRc, SharedString, StandardListViewItem, VecModel};
-use tray_icon::menu::MenuEvent;
+use slint::{CloseRequestResponse, ComponentHandle, Model, ModelRc, VecModel};
 
 slint::include_modules!();
 
@@ -40,6 +40,8 @@ struct View {
     processes: Option<Vec<ProcessRow>>,
     sort: (Column, bool),
     query: String,
+    /// The table's rows, changed in place so it keeps its scroll position.
+    rows: Rc<VecModel<ProcessCells>>,
     /// Rows in the order shown, to map a row index back to its process.
     shown: Vec<ProcessKey>,
     selected: Option<ProcessKey>,
@@ -51,8 +53,7 @@ thread_local! {
 }
 
 /// Runs `change` on the view. A call made while the view is already in use
-/// is skipped: those come from Slint answering our own updates (setting the
-/// table's selection reports it back), never from the user.
+/// is skipped: those can only come from Slint answering our own updates.
 fn with_view(change: impl FnOnce(&mut View)) {
     VIEW.with(|view| {
         if let Ok(mut view) = view.try_borrow_mut()
@@ -146,28 +147,42 @@ impl View {
     }
 
     fn draw_table(&mut self, window: &AppWindow) {
+        let (column, descending) = self.sort;
+        window.set_sort_column(Column::ALL.iter().position(|each| *each == column).unwrap_or(0) as i32);
+        window.set_sort_descending(descending);
         let Some(processes) = &self.processes else {
             window.set_status(format!("Reading processes… · every {} s", INTERVAL.as_secs()).into());
             return;
         };
-        let (column, descending) = self.sort;
         let arranged = rows::arrange(processes, &self.query, column, descending, self.logical_cpus);
         self.shown = arranged.iter().map(|row| row.key).collect();
-        let model: Vec<ModelRc<StandardListViewItem>> = arranged
+        if self.selected.is_some_and(|key| !self.shown.contains(&key)) {
+            self.selected = None;
+        }
+        let next: Vec<ProcessCells> = arranged
             .iter()
             .map(|row| {
-                let cells: Vec<StandardListViewItem> = rows::cells(row, self.logical_cpus)
-                    .into_iter()
-                    .map(|text| StandardListViewItem::from(SharedString::from(text)))
-                    .collect();
-                ModelRc::new(VecModel::from(cells))
+                let [name, pid, user, cpu, memory, read, write] = rows::cells(row, self.logical_cpus);
+                ProcessCells {
+                    name: name.into(),
+                    pid: pid.into(),
+                    user: user.into(),
+                    cpu: cpu.into(),
+                    memory: memory.into(),
+                    read: read.into(),
+                    write: write.into(),
+                    selected: self.selected == Some(row.key),
+                }
             })
             .collect();
-        window.set_rows(ModelRc::new(VecModel::from(model)));
-        if let Some(index) = self.selected.and_then(|key| self.shown.iter().position(|shown| *shown == key)) {
-            window.invoke_select_row(index as i32);
+        if self.rows.row_count() == next.len() {
+            for (index, cells) in next.into_iter().enumerate() {
+                if self.rows.row_data(index).as_ref() != Some(&cells) {
+                    self.rows.set_row_data(index, cells);
+                }
+            }
         } else {
-            self.selected = None;
+            self.rows.set_vec(next);
         }
         let count = if self.shown.len() == processes.len() {
             format!("{} processes", processes.len())
@@ -188,6 +203,27 @@ impl View {
         if let Some(window) = self.window.clone_strong() {
             self.draw_graphs(&window);
             self.draw_table(&window);
+        }
+    }
+
+    fn redraw_table(&mut self) {
+        if let Some(window) = self.window.clone_strong() {
+            self.draw_table(&window);
+        }
+    }
+
+    /// Moves the selection `delta` rows and keeps it on screen.
+    fn move_selection(&mut self, delta: i32) {
+        let Some(last) = self.shown.len().checked_sub(1) else { return };
+        let current = self.selected.and_then(|key| self.shown.iter().position(|shown| *shown == key));
+        let next = match current {
+            Some(index) => index.saturating_add_signed(delta as isize).min(last),
+            None => 0,
+        };
+        self.selected = Some(self.shown[next]);
+        self.redraw_table();
+        if let Some(window) = self.window.clone_strong() {
+            window.invoke_reveal_row(next as i32);
         }
     }
 
@@ -243,6 +279,7 @@ fn open_window() {
                 return;
             }
         };
+        window.set_rows(ModelRc::from(view.rows.clone()));
         // Deferred: the size can change while the view is busy showing the window.
         window.on_graphs_resized(|| {
             let _ = slint::invoke_from_event_loop(|| with_view(View::redraw));
@@ -250,26 +287,24 @@ fn open_window() {
         window.on_search_edited(|text| {
             with_view(|view| {
                 view.query = text.to_string();
-                view.redraw();
+                view.redraw_table();
             });
         });
-        let sort = |descending: bool| {
-            move |index: i32| {
-                with_view(|view| {
-                    if let Some(column) = usize::try_from(index).ok().and_then(Column::from_index) {
-                        view.sort = (column, descending);
-                        view.redraw();
-                    }
-                });
-            }
-        };
-        window.on_sort_ascending(sort(false));
-        window.on_sort_descending(sort(true));
-        window.on_row_selected(|index| {
+        window.on_sort_clicked(|index| {
             with_view(|view| {
-                view.selected = usize::try_from(index).ok().and_then(|index| view.shown.get(index).copied())
+                let Some(column) = usize::try_from(index).ok().and_then(Column::from_index) else { return };
+                let descending = if view.sort.0 == column { !view.sort.1 } else { column.numeric() };
+                view.sort = (column, descending);
+                view.redraw_table();
             });
         });
+        window.on_row_clicked(|index| {
+            with_view(|view| {
+                view.selected = usize::try_from(index).ok().and_then(|index| view.shown.get(index).copied());
+                view.redraw_table();
+            });
+        });
+        window.on_move_selection(|delta| with_view(|view| view.move_selection(delta)));
         // Closing drops the window and its renderer; the tray keeps sampling.
         window.window().on_close_requested(|| {
             let _ = slint::invoke_from_event_loop(|| {
@@ -290,8 +325,24 @@ fn open_window() {
     });
 }
 
+/// The tray's Open and Quit, run on the UI thread whichever thread the tray uses.
+fn on_tray(action: tray::Action) {
+    let _ = slint::invoke_from_event_loop(move || match action {
+        tray::Action::Open => open_window(),
+        tray::Action::Quit => {
+            let _ = slint::quit_event_loop();
+        }
+    });
+}
+
 fn main() -> Result<(), slint::PlatformError> {
-    let starts_hidden = std::env::args().any(|argument| argument == "--hidden");
+    // The CPU renderer: a few small redraws a second need no GPU, and it
+    // measured lightest by far. SLINT_BACKEND still chooses another.
+    if std::env::var_os("SLINT_BACKEND").is_none() {
+        slint::BackendSelector::new().backend_name("winit".into()).renderer_name("software".into()).select()?;
+    }
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let starts_hidden = arguments.iter().any(|argument| argument == "--hidden");
     let showing = Arc::new(AtomicBool::new(false));
     let history: tray::CpuHistory = Arc::new(Mutex::new(Vec::new()));
     let mut sampler = Sampler::new();
@@ -306,25 +357,15 @@ fn main() -> Result<(), slint::PlatformError> {
             processes: None,
             sort: (Column::Cpu, true),
             query: String::new(),
+            rows: Rc::new(VecModel::default()),
             shown: Vec::new(),
             selected: None,
             showing: showing.clone(),
         })
     });
 
-    MenuEvent::set_event_handler(Some(|event: MenuEvent| {
-        let id = event.id.0;
-        let _ = slint::invoke_from_event_loop(move || match id.as_str() {
-            tray::OPEN => open_window(),
-            tray::QUIT => {
-                let _ = slint::quit_event_loop();
-            }
-            _ => {}
-        });
-    }));
-    // `--no-tray` measures the app without the tray's GTK stack on Linux.
-    if !std::env::args().any(|argument| argument == "--no-tray") {
-        tray::start(history.clone());
+    if !arguments.iter().any(|argument| argument == "--no-tray") {
+        tray::start(history.clone(), on_tray);
     }
     if !starts_hidden {
         open_window();
