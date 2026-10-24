@@ -1,0 +1,13 @@
+[package]
+name = "otm-core"
+description = "Sampling and figures for OpenTaskManager's cross-platform app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../../LICENSE"
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+sysinfo.workspace = true
+ts-rs.workspace = true

@@ -17,3 +17,9 @@ xcuserdata/
 
 # Local release archives
 /dist/
+
+# Cross-platform app (cross/): build output and dependencies
+cross/target/
+cross/app/node_modules/
+cross/app/dist/
+cross/app/src-tauri/gen/
