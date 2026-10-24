@@ -164,6 +164,7 @@ impl Sampler {
                 let readable = self.superuser || (self.me.is_some() && process.user_id() == self.me.as_ref());
                 let usage = process.disk_usage();
                 let rate = |bytes: u64| (measured && readable).then(|| bytes as f64 / interval);
+                let unopened = could_not_open(process.memory());
                 ProcessRow {
                     key,
                     name: full_name(
@@ -174,14 +175,28 @@ impl Sampler {
                         .user_id()
                         .and_then(|uid| self.users.get_user_by_id(uid))
                         .map(|user| user.name().to_owned()),
-                    cpu: measured.then(|| process.cpu_usage()),
-                    memory: process.memory(),
+                    cpu: (measured && !unopened).then(|| process.cpu_usage()),
+                    memory: (!unopened).then(|| process.memory()),
                     disk_read: rate(usage.read_bytes),
                     disk_write: rate(usage.written_bytes),
                 }
             })
             .collect()
     }
+}
+
+/// Windows won't let an ordinary account open protected and system
+/// processes (System, csrss, services and the like), and they come back with
+/// no memory and no CPU time: unknown, not zero. Elsewhere a process with no
+/// resident memory is real (Linux's kernel threads), so this is Windows only.
+#[cfg(windows)]
+fn could_not_open(resident: u64) -> bool {
+    resident == 0
+}
+
+#[cfg(not(windows))]
+fn could_not_open(_resident: u64) -> bool {
+    false
 }
 
 fn key(pid: sysinfo::Pid, start_time: u64) -> ProcessKey {
@@ -223,6 +238,24 @@ mod tests {
     use super::{Sampler, full_name, is_loopback};
     use std::thread::sleep;
     use std::time::Duration;
+
+    /// Live, on Windows: the processes Windows won't open (System among them)
+    /// show their memory as unknown, never as zero bytes.
+    #[cfg(windows)]
+    #[test]
+    fn windows_never_reports_a_process_it_could_not_open_as_zero() {
+        let mut sampler = Sampler::new();
+        sampler.sample(true);
+        sleep(Duration::from_millis(300));
+        sampler.sample(true);
+        sleep(Duration::from_millis(300));
+        let (_, processes) = sampler.sample(true).expect("a snapshot");
+        let processes = processes.expect("processes on their second reading");
+        assert!(processes.iter().all(|row| row.memory != Some(0)), "no process shows 0 bytes");
+        let system = processes.iter().find(|row| row.key.pid == 4).expect("the System process");
+        assert_eq!(system.memory, None);
+        assert_eq!(system.cpu, None);
+    }
 
     #[test]
     fn names_loopback_interfaces() {
@@ -267,6 +300,6 @@ mod tests {
         let own = processes.iter().find(|row| row.key.pid == me).expect("this test's own process");
         assert!(own.cpu.is_some(), "a process seen before has a CPU figure");
         assert!(own.disk_read.is_some(), "this account's own I/O is readable");
-        assert!(own.memory > 0);
+        assert!(own.memory.is_some_and(|bytes| bytes > 0));
     }
 }

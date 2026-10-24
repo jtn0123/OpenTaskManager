@@ -61,7 +61,7 @@ fn value(row: &ProcessRow, column: Column, logical_cpus: usize) -> Value<'_> {
         Column::Pid => Value::Number(f64::from(row.key.pid)),
         Column::User => row.user.as_deref().map_or(Value::Missing, Value::Text),
         Column::Cpu => number(machine_share(row, logical_cpus)),
-        Column::Memory => Value::Number(row.memory as f64),
+        Column::Memory => number(row.memory.map(|bytes| bytes as f64)),
         Column::DiskRead => number(row.disk_read),
         Column::DiskWrite => number(row.disk_write),
     }
@@ -109,7 +109,7 @@ pub fn cells(row: &ProcessRow, logical_cpus: usize) -> [String; 7] {
         row.key.pid.to_string(),
         row.user.clone().unwrap_or_else(|| MISSING.to_owned()),
         percent(machine_share(row, logical_cpus)),
-        bytes(Some(row.memory as f64)),
+        bytes(row.memory.map(|bytes| bytes as f64)),
         rate(row.disk_read),
         rate(row.disk_write),
     ]
@@ -126,7 +126,7 @@ mod tests {
             name: name.to_owned(),
             user: pid.is_multiple_of(2).then(|| "justin".to_owned()),
             cpu,
-            memory: u64::from(pid) * 1024,
+            memory: Some(u64::from(pid) * 1024),
             disk_read: read,
             disk_write: None,
         }

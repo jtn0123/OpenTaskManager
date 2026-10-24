@@ -22,8 +22,9 @@ pub struct ProcessRow {
     /// share of the whole machine. None the first time a process is seen,
     /// before there is an interval to measure.
     pub cpu: Option<f32>,
-    /// Resident memory in bytes.
-    pub memory: u64,
+    /// Resident memory in bytes, or None for a process the system won't let
+    /// this account open (Windows' protected and system processes).
+    pub memory: Option<u64>,
     /// Bytes per second, or None where the system won't say (another
     /// account's process without administrator rights, or a first sighting).
     pub disk_read: Option<f64>,

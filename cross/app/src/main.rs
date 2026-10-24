@@ -343,6 +343,12 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let starts_hidden = arguments.iter().any(|argument| argument == "--hidden");
+    // `--exit-after SECONDS` quits cleanly after a while, for measurements and tests.
+    let exit_after = arguments
+        .iter()
+        .position(|argument| argument == "--exit-after")
+        .and_then(|at| arguments.get(at + 1))
+        .and_then(|seconds| seconds.parse::<u64>().ok());
     let showing = Arc::new(AtomicBool::new(false));
     let history: tray::CpuHistory = Arc::new(Mutex::new(Vec::new()));
     let mut sampler = Sampler::new();
@@ -397,5 +403,13 @@ fn main() -> Result<(), slint::PlatformError> {
         })
         .map_err(|error| slint::PlatformError::Other(error.to_string()))?;
 
-    slint::run_event_loop_until_quit()
+    let exit_timer = slint::Timer::default();
+    if let Some(seconds) = exit_after {
+        exit_timer.start(slint::TimerMode::SingleShot, Duration::from_secs(seconds), || {
+            let _ = slint::quit_event_loop();
+        });
+    }
+    let result = slint::run_event_loop_until_quit();
+    tray::stop();
+    result
 }

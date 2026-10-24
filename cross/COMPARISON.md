@@ -100,8 +100,9 @@ GPU will draw its animations.
 
 Not yet known, and worth checking before committing:
 
-- Windows builds of all three (each needs the C++ Build Tools, and Qt also
-  needs an MSVC build of Qt).
+- Windows builds of Tauri and Qt. The Slint app has since been built,
+  tested and measured on Windows: 1.18% of a core and 11.8 MB of private
+  memory with the window open (see README.md).
 - A Linux desktop with a real GPU, where Slint's GPU renderer and WebKit
   should both cost less.
 - A machine with hundreds of processes.

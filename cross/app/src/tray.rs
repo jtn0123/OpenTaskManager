@@ -92,6 +92,9 @@ mod platform {
             eprintln!("The tray icon won't update: {error}");
         }
     }
+
+    /// The tray's D-Bus connection closes with the process, and the host drops the icon then.
+    pub fn stop() {}
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -104,15 +107,17 @@ mod platform {
     const OPEN: &str = "open";
     const QUIT: &str = "quit";
 
+    thread_local! {
+        /// The redraw timer, which owns the tray icon.
+        static REDRAW_TIMER: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) };
+    }
+
     fn icon(history: &CpuHistory) -> Option<Icon> {
         Icon::from_rgba(cpu_bars(&values(history), SIZE), SIZE, SIZE).ok()
     }
 
     /// The tray lives on the main thread, redrawn by a Slint timer.
     pub fn start(history: CpuHistory, act: fn(Action)) {
-        thread_local! {
-            static REDRAW_TIMER: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) };
-        }
         let menu = Menu::new();
         let open = MenuItem::with_id(OPEN, OPEN_LABEL, true, None);
         let quit = MenuItem::with_id(QUIT, QUIT_LABEL, true, None);
@@ -147,10 +152,21 @@ mod platform {
         });
         REDRAW_TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
     }
+
+    /// Removes the icon now: the main thread's thread-locals aren't reliably
+    /// dropped at exit, and an icon left behind lingers until hovered.
+    pub fn stop() {
+        REDRAW_TIMER.with(|slot| drop(slot.borrow_mut().take()));
+    }
 }
 
 /// Starts the tray. `act` runs, on whichever thread the tray uses, when the
 /// user picks Open or Quit or clicks the icon.
 pub fn start(history: CpuHistory, act: fn(Action)) {
     platform::start(history, act);
+}
+
+/// Removes the tray icon, before the app exits.
+pub fn stop() {
+    platform::stop();
 }
