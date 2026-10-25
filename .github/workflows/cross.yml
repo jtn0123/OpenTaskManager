@@ -63,13 +63,13 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Build (release)
-        run: cargo build --release -p opentaskmanager
+        run: cargo build --locked --release -p opentaskmanager
 
       # AT-SPI against the release build on a display of its own: the table,
       # ending processes, the keyboard, sign-in, Startup, History, one copy,
@@ -106,7 +106,7 @@ jobs:
           restore-keys: linux-packages-
 
       - name: Build (release)
-        run: cargo build --release -p opentaskmanager
+        run: cargo build --locked --release -p opentaskmanager
 
       - name: Package
         run: |
@@ -152,14 +152,14 @@ jobs:
           restore-keys: windows-
 
       - name: Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       # Live tests end real processes and close a hidden window they start.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Build (release)
-        run: cargo build --release -p opentaskmanager
+        run: cargo build --locked --release -p opentaskmanager
 
       # UI Automation against the release build: sorting, search, ending
       # processes and groups, one copy, sign-in and settings.

@@ -305,11 +305,11 @@ try {
         # Flat, then grouped again.
         $search.GetCurrentPattern($value).SetValue('')
         $grouping = Elements $Type::CheckBox | Where-Object { $_.Current.Name -eq 'Group by app' } | Select-Object -First 1
-        $switch = $grouping.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-        $switch.Toggle()
+        $groupToggle = $grouping.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+        $groupToggle.Toggle()
         Start-Sleep -Milliseconds 900
         Check (@(Elements $Type::ListItem | Where-Object { $_.Current.Name -match ', group of \d+ processes' }).Count -eq 0) "turning Group by app off lists every process flat"
-        $switch.Toggle()
+        $groupToggle.Toggle()
         Start-Sleep -Milliseconds 900
         Check (@(Elements $Type::ListItem | Where-Object { $_.Current.Name -match ', group of \d+ processes' }).Count -gt 0) "and on again groups them"
     } else {

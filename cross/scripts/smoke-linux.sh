@@ -3,7 +3,8 @@
 # in a D-Bus session of its own, with accessibility turned on as a screen
 # reader would, so it never touches the user's desktop.
 #
-# Usage: cross/scripts/smoke-linux.sh PATH_TO_OPENTASKMANAGER
+# Usage: cross/scripts/smoke-linux.sh cross/target/{release,debug}/opentaskmanager
+# Only this checkout's Cargo outputs are accepted.
 # Needs Xvfb, dbus-run-session, gdbus, at-spi2-core and Python's GObject
 # bindings with Atspi; xdotool too for the keyboard checks.
 set -euo pipefail

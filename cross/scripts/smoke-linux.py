@@ -12,6 +12,7 @@ temporary folders, so nothing of the user's is touched.
 """
 
 import os
+from pathlib import Path
 import re
 import shutil
 import signal
@@ -147,7 +148,17 @@ def menu_items():
 
 # --- The app, through AT-SPI. ---------------------------------------------------
 
-binary = sys.argv[1]
+def build_binary(requested):
+    """Select a known Cargo output; never execute an arbitrary CLI path."""
+    target = Path(__file__).resolve().parents[1] / "target"
+    for profile in ("release", "debug"):
+        candidate = str(target / profile / "opentaskmanager")
+        if requested == candidate:
+            return candidate
+    raise ValueError("Expected this checkout's target/{release,debug}/opentaskmanager")
+
+
+binary = build_binary(sys.argv[1])
 home = tempfile.mkdtemp(prefix="otm-smoke-")
 environment = dict(os.environ, XDG_CONFIG_HOME=os.path.join(home, "config"), XDG_DATA_HOME=os.path.join(home, "data"))
 instance = f"smoke-{os.getpid()}"
@@ -202,20 +213,24 @@ def nodes(root, depth=0):
 
 
 # Roles by AT-SPI's numbers: their names differ between versions ("push button", "button").
+CHECK_BOX = "check box"
+LIST_ITEM = "list item"
+PAGE_TAB = "page tab"
+
 ROLES = {
     "button": Atspi.Role.PUSH_BUTTON,
-    "check box": Atspi.Role.CHECK_BOX,
+    CHECK_BOX: Atspi.Role.CHECK_BOX,
     "frame": Atspi.Role.FRAME,
     "label": Atspi.Role.LABEL,
-    "list item": Atspi.Role.LIST_ITEM,
-    "page tab": Atspi.Role.PAGE_TAB,
+    LIST_ITEM: Atspi.Role.LIST_ITEM,
+    PAGE_TAB: Atspi.Role.PAGE_TAB,
     "slider": Atspi.Role.SLIDER,
     "window": Atspi.Role.WINDOW,
 }
 
 
 def find(role, pattern=None, every=False):
-    """Accessibles with this role ("button", "list item"...) whose name matches."""
+    """Accessibles with this role (buttons, list items...) whose name matches."""
     root = application()
     if root is None:
         return [] if every else None
@@ -250,7 +265,7 @@ def press_button(name):
 
 
 def row(pid):
-    return find("list item", f", PID {pid},")
+    return find(LIST_ITEM, f", PID {pid},")
 
 
 def selected(node):
@@ -261,14 +276,14 @@ try:
     window = wait_for(lambda: find("frame") or find("window"), 30)
     check(window is not None and window.get_name() == "OpenTaskManager", "the window, titled OpenTaskManager")
 
-    rows = wait_for(lambda: [r for r in find("list item", ", PID \\d+", every=True)], 20)
+    rows = wait_for(lambda: list(find(LIST_ITEM, ", PID \\d+", every=True)), 20)
     check(len(rows) >= 5, f"the table lists processes ({len(rows)} rows in view)")
     check(find("button", "^CPU, sorted highest first$") is not None, "starts sorted by CPU, highest first")
 
-    grouping = find("check box", "^Group by app$")
+    grouping = find(CHECK_BOX, "^Group by app$")
     if grouping is not None and grouping.get_state_set().contains(Atspi.StateType.CHECKED):
         press(grouping)
-    check(not find("list item", ", group of \\d+ processes", every=True), "Group by app off lists every process flat")
+    check(not find(LIST_ITEM, ", group of \\d+ processes", every=True), "Group by app off lists every process flat")
 
     # Newest processes first, so the test's own appear at the top.
     press(find("button", "^PID"))
@@ -329,34 +344,34 @@ try:
 
     # Start at sign-in: an autostart entry in the account's (here temporary) folder.
     entry = os.path.join(autostart, f"opentaskmanager-{instance}.desktop")
-    press(find("check box", "^Start at sign-in$"))
+    press(find(CHECK_BOX, "^Start at sign-in$"))
     written = wait_for(lambda: os.path.exists(entry), 3)
     text = open(entry).read() if written else ""
     check(f'Exec="{binary}" --hidden --instance {instance}' in text, "Start at sign-in writes an autostart entry")
-    press(find("check box", "^Start at sign-in$"))
+    press(find(CHECK_BOX, "^Start at sign-in$"))
     check(wait_for(lambda: not os.path.exists(entry), 3), "and turning it off removes it")
 
     # Startup: the test's entry, switched off and on.
-    press(find("page tab", "^Startup$"))
-    listed = wait_for(lambda: find("list item", "^Smoke Entry, "), 5)
+    press(find(PAGE_TAB, "^Startup$"))
+    listed = wait_for(lambda: find(LIST_ITEM, "^Smoke Entry, "), 5)
     check(listed is not None and listed.get_name().startswith("Smoke Entry, Enabled, Your autostart folder"), "the Startup page lists the test's entry")
     switch = next((node for node in nodes(listed) if node is not listed and node.get_action_iface() is not None), None)
     if switch is not None:
         press(switch)
-        check(wait_for(lambda: find("list item", "^Smoke Entry, Disabled, "), 3) is not None, "its switch turns it off")
+        check(wait_for(lambda: find(LIST_ITEM, "^Smoke Entry, Disabled, "), 3) is not None, "its switch turns it off")
         check("Hidden=true" in open(os.path.join(autostart, "smoke-entry.desktop")).read(), "with Hidden=true in its entry")
     else:
         check(False, "a switch on the Startup row")
 
     # History: a record comes every 10 s.
-    press(find("page tab", "^History$"))
+    press(find(PAGE_TAB, "^History$"))
     check(wait_for(lambda: labels(" recorded in this range"), 25), "History shows what was recorded")
     check(bool(wait_for(lambda: labels("\\(PID \\d+\\) . CPU "), 5)), "and the busiest processes at now")
     slider = find("slider")
     if slider is not None:
         slider.get_value_iface().set_current_value(0)
         check(wait_for(lambda: labels("^Nothing recorded at "), 3), "the hour's start, before the app ran, is a gap")
-    press(find("page tab", "^Processes$"))
+    press(find(PAGE_TAB, "^Processes$"))
 
     # One copy: a second launch hands over and exits.
     second_copy = subprocess.run([binary, "--instance", instance], env=environment, timeout=15)
