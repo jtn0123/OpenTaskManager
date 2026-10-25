@@ -73,6 +73,10 @@ struct View {
     /// What starts at sign-in, read when that page opens or is refreshed.
     startup: Vec<StartupItem>,
     startup_rows: Rc<VecModel<StartupCells>>,
+    /// Which of `startup` each row shows, as the search leaves them.
+    startup_shown: Vec<usize>,
+    /// Why the last switch didn't take, until the page is read again.
+    startup_problem: Option<String>,
     /// What the last End Task or Force Quit did, until dismissed.
     notice: String,
     showing: Arc<AtomicBool>,
@@ -211,18 +215,48 @@ impl View {
 
     fn read_startup(&mut self) {
         self.startup = startup::read();
+        self.startup_problem = None;
         self.draw_startup();
+    }
+
+    /// Turns the item on row `index` on or off, then reads the list again
+    /// so the page shows what the system now holds.
+    fn toggle_startup(&mut self, index: i32, on: bool) {
+        let Some(item) = usize::try_from(index).ok().and_then(|row| self.startup.get(*self.startup_shown.get(row)?))
+        else {
+            return;
+        };
+        let problem = startup::set_enabled(item, on).err().map(|error| {
+            let what = if on { "turn on" } else { "turn off" };
+            match error.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    format!(
+                        "Couldn't {what} {}: it's set for every account, which needs administrator rights.",
+                        item.name
+                    )
+                }
+                _ => format!("Couldn't {what} {}: {error}.", item.name),
+            }
+        });
+        self.read_startup();
+        if problem.is_some() {
+            self.startup_problem = problem;
+            self.draw_startup();
+        }
     }
 
     /// The Startup page's rows, kept to those the search matches.
     fn draw_startup(&mut self) {
         let Some(window) = self.window.clone_strong() else { return };
+        self.startup_shown =
+            (0..self.startup.len()).filter(|index| startup::matches(&self.startup[*index], &self.query)).collect();
         let shown: Vec<StartupCells> = self
-            .startup
+            .startup_shown
             .iter()
-            .filter(|item| startup::matches(item, &self.query))
+            .map(|index| &self.startup[*index])
             .map(|item| StartupCells {
                 name: item.name.as_str().into(),
+                enabled: item.enabled,
                 status: if item.enabled { "Enabled" } else { "Disabled" }.into(),
                 source: item.source.as_str().into(),
                 command: item.command.as_str().into(),
@@ -230,6 +264,7 @@ impl View {
             .collect();
         let enabled = self.startup.iter().filter(|item| item.enabled).count();
         let summary = match (self.startup.len(), shown.len()) {
+            _ if self.startup_problem.is_some() => self.startup_problem.clone().unwrap_or_default(),
             (0, _) => "Nothing starts at sign-in from the places read here.".to_owned(),
             (all, matched) if matched < all => format!("Showing {matched} of {all} items · {enabled} enabled"),
             (all, _) => format!("{all} items start at sign-in · {enabled} enabled · read when this page opened"),
@@ -360,6 +395,7 @@ fn open_window() {
         window.set_page(view.page);
         window.on_page_chosen(|page| with_view(|view| view.show_page(page)));
         window.on_startup_refresh(|| with_view(View::read_startup));
+        window.on_startup_toggled(|index, on| with_view(|view| view.toggle_startup(index, on)));
         // Deferred: the size can change while the view is busy showing the window.
         window.on_graphs_resized(|| {
             let _ = slint::invoke_from_event_loop(|| with_view(View::redraw));
@@ -544,6 +580,8 @@ fn main() -> Result<(), slint::PlatformError> {
             page: 0,
             startup: Vec::new(),
             startup_rows: Rc::new(VecModel::default()),
+            startup_shown: Vec::new(),
+            startup_problem: None,
             notice: String::new(),
             showing: showing.clone(),
             instance: instance.clone(),

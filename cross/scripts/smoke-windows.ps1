@@ -32,9 +32,11 @@ $Instance = "smoke-$PID"
 $Settings = Join-Path $env:APPDATA "OpenTaskManager\settings-$Instance.conf"
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $RunValue = "OpenTaskManager ($Instance)"
+$ApprovedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 function Clean {
     Remove-Item -LiteralPath $Settings -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $ApprovedKey -Name $RunValue -ErrorAction SilentlyContinue
 }
 function Launch([string[]]$More = @()) {
     Start-Process -FilePath $Exe -ArgumentList (@('--instance', $Instance) + $More) -PassThru
@@ -335,6 +337,26 @@ try {
         Start-Sleep -Milliseconds 900
         Check ((Listed) -contains "$RunValue, Enabled, Your Run key, $expected") "the Startup page lists it, enabled, in your Run key"
         Check ((Texts '^Showing 1 of \d+ items').Count -eq 1) "and a search narrows the list to it"
+
+        # Its switch turns it off and on as Task Manager does: Explorer's mark, never the Run value.
+        function SwitchOf {
+            $row = Elements $Type::ListItem | Where-Object { $_.Current.Name -like "$RunValue, *" } | Select-Object -First 1
+            if (-not $row) { return $null }
+            @($row.FindAll($Scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_ }) |
+                Where-Object { $_.GetCurrentPropertyValue($A::IsTogglePatternAvailableProperty) } | Select-Object -First 1
+        }
+        function Mark {
+            $mark = (Get-ItemProperty -Path $ApprovedKey -Name $RunValue -ErrorAction SilentlyContinue).$RunValue
+            if ($mark) { $mark[0] } else { $null }
+        }
+        $togglePattern = [System.Windows.Automation.TogglePattern]::Pattern
+        (SwitchOf).GetCurrentPattern($togglePattern).Toggle()
+        Start-Sleep -Milliseconds 900
+        Check ((Mark) -eq 3 -and (Listed) -contains "$RunValue, Disabled, Your Run key, $expected") "its switch turns it off, marked as Task Manager marks it"
+        Check ($null -ne (Get-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue)) "leaving its Run value in place"
+        (SwitchOf).GetCurrentPattern($togglePattern).Toggle()
+        Start-Sleep -Milliseconds 900
+        Check ((Mark) -eq 2 -and (Listed) -contains "$RunValue, Enabled, Your Run key, $expected") "and on again"
 
         $toggle.Toggle()
         Start-Sleep -Milliseconds 600

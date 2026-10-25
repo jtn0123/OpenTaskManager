@@ -98,7 +98,7 @@ pub fn write_string(hive: Hive, subkey: &str, name: &str, value: &str) -> io::Re
     write(hive, subkey, name, REG_SZ, &bytes)
 }
 
-#[cfg(test)]
+/// Writes a binary value, creating the key if it's missing.
 pub fn write_binary(hive: Hive, subkey: &str, name: &str, value: &[u8]) -> io::Result<()> {
     write(hive, subkey, name, windows_sys::Win32::System::Registry::REG_BINARY, value)
 }

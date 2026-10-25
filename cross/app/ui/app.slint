@@ -2,7 +2,7 @@
 // Graph lines are path commands from Rust in the graph's logical pixels: the
 // window reports the graphs' size, and Rust redraws them when it changes.
 
-import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, Switch } from "std-widgets.slint";
 
 export struct CardData {
     value: string,
@@ -35,6 +35,7 @@ export struct ProcessCells {
 // One item that starts at sign-in.
 export struct StartupCells {
     name: string,
+    enabled: bool,
     status: string,
     source: string,
     command: string,
@@ -584,6 +585,8 @@ component StartupPage inherits Rectangle {
     in property <[StartupCells]> items;
     in property <string> summary;
     callback refresh();
+    // The row's item turned on (true) or off.
+    callback toggled(int, bool);
 
     VerticalLayout {
         spacing: 8px;
@@ -626,7 +629,7 @@ component StartupPage inherits Rectangle {
                     }
                     ColumnTitle {
                         text: "Status";
-                        width: 80px;
+                        width: 118px;
                     }
                     ColumnTitle {
                         text: "Source";
@@ -659,10 +662,14 @@ component StartupPage inherits Rectangle {
                                 min-width: 140px;
                                 preferred-width: 140px;
                             }
-                            Cell {
-                                width: 80px;
+                            // Its switch writes what Task Manager or the desktop would, then the list is read again.
+                            Switch {
+                                width: 118px;
                                 text: item.status;
-                                color: item.status == "Enabled" ? Palette.foreground : Look.muted;
+                                checked: item.enabled;
+                                toggled => {
+                                    root.toggled(index, self.checked);
+                                }
                             }
                             Cell {
                                 width: 200px;
@@ -737,6 +744,7 @@ export component AppWindow inherits Window {
     callback grouped-toggled(bool);
     callback page-chosen(int);
     callback startup-refresh();
+    callback startup-toggled(int, bool);
     callback toggle-group(int);
     callback expand-group(int);
     callback expand-selection(bool);
@@ -912,6 +920,9 @@ export component AppWindow inherits Window {
                 summary: root.startup-summary;
                 refresh => {
                     root.startup-refresh();
+                }
+                toggled(row, on) => {
+                    root.startup-toggled(row, on);
                 }
             }
         }

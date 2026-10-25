@@ -22,7 +22,8 @@ It's an early slice, not a release:
 - A GPU column: each process's busiest GPU engine, as Task Manager counts it.
   The GPU card and column appear only where GPU load can be read.
 - A Startup page: what starts at sign-in, from the same places Task Manager
-  and the desktop read, with whether each is enabled. Read-only.
+  and the desktop read, each with a switch that turns it on or off the way
+  they do.
 - A details panel for the selection: program file, command line, what
   started it, how long it has run, its account and its group.
 - End Task and Force Quit for the selected process, or a whole group from
@@ -87,8 +88,16 @@ the machine's Run keys (64- and 32-bit) and both Startup folders on
 Windows, each enabled unless Task Manager's Startup page turned it off; on
 Linux the account's and the system's XDG autostart folders, an account's
 entry replacing the system's of the same name, off when `Hidden` or GNOME's
-switch says so (`otm_core::startup`). Search filters it too. It changes
-nothing yet; scheduled tasks and services aren't listed.
+switch says so (`otm_core::startup`). Search filters it too; scheduled
+tasks and services aren't listed.
+
+Each item's switch writes what the system's own tools write, so they
+agree. On Windows that's Explorer's approval mark, as Task Manager's
+Startup page writes it (2 on; 3 off, with when), never the Run value or
+the shortcut itself; items listed for every account need administrator
+rights, and the page says so. On Linux it's `Hidden` and GNOME's switch
+in the account's copy of the entry; a system entry gets an account copy
+that replaces it, as the spec has it, and is never changed itself.
 
 Per-process network use isn't shown: neither system gives it without
 administrator rights (event tracing on Windows, packet capture on Linux),
@@ -202,8 +211,9 @@ Last, it checks that a second launch hands over and exits, that Start at
 sign-in writes and removes its Run value, and that the sort and a resized
 window survive `--quit` and a relaunch. Along the way it checks a protected
 process still gets a GPU share, and that the Startup page lists the test
-instance's own sign-in entry while it's on and not after Refresh once it's
-off. It runs as its own instance and
+instance's own sign-in entry while it's on, that its switch turns it off
+and on with Task Manager's mark (leaving the Run value), and that it's gone
+after Refresh once sign-in is off. It runs as its own instance and
 removes that instance's settings and Run value at the end:
 `powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 -Exe <path to opentaskmanager.exe>`.
 
@@ -273,5 +283,5 @@ Not verified yet:
   written, not by signing in again.
 
 Known gaps: no multiple selection, no history recording, no sensors or
-per-process network, and the Startup page can't turn items on or off yet.
+per-process network.
 macOS hasn't been built; the Swift app covers it.
