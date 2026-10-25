@@ -297,6 +297,11 @@ try:
 
     # The keyboard, typed into the virtual display.
     if shutil.which("xdotool"):
+        # The virtual display has no window manager to give the window the
+        # keyboard, so the test does, as one would on a click.
+        windows = subprocess.run(["xdotool", "search", "--pid", str(app.pid)], capture_output=True, text=True).stdout.split()
+        for window_id in windows:
+            subprocess.run(["xdotool", "windowfocus", "--sync", window_id], capture_output=True)
         third = sleeper()
         node = wait_for(lambda: row(third), 10)
         extents = node.get_component_iface().get_extents(Atspi.CoordType.SCREEN)
