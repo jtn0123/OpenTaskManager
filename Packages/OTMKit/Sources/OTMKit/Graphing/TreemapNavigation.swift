@@ -34,7 +34,7 @@ public enum TreemapNavigation {
     /// closest edges and centres. Ties keep layout order; edges never wrap.
     /// With no current tile, the first valid region starts the selection.
     public static func next(from id: Int?, direction: Direction, tiles: [Tile]) -> Int? {
-        let valid = tiles.filter { valid($0.rect) }
+        let valid = tiles.filter { Self.valid($0.rect) }
         guard let current = valid.first(where: { $0.id == id }) else { return valid.first?.id }
         let horizontal = direction == .left || direction == .right
         let forward = direction == .right || direction == .down
@@ -42,18 +42,18 @@ public enum TreemapNavigation {
         var best: Candidate?
         for tile in valid where tile.id != current.id {
             let rect = tile.rect
-            let along = horizontal ? rect.midX - origin.midX : rect.midY - origin.midY
+            let along: CGFloat = horizontal ? rect.midX - origin.midX : rect.midY - origin.midY
             guard forward ? along > 0 : along < 0 else { continue }
             // A lane needs a shared span, not a shared edge: a folder's header
             // touches its inner tiles' row without being in it.
-            let crossOverlap = horizontal
+            let crossOverlap: CGFloat = horizontal
                 ? min(rect.maxY, origin.maxY) - max(rect.minY, origin.minY)
                 : min(rect.maxX, origin.maxX) - max(rect.minX, origin.minX)
-            let crossGap = max(-crossOverlap, 0)
-            let alongGap = horizontal
+            let crossGap: CGFloat = max(-crossOverlap, 0)
+            let alongGap: CGFloat = horizontal
                 ? max(rect.minX - origin.maxX, origin.minX - rect.maxX, 0)
                 : max(rect.minY - origin.maxY, origin.minY - rect.maxY, 0)
-            let cross = horizontal ? rect.midY - origin.midY : rect.midX - origin.midX
+            let cross: CGFloat = horizontal ? rect.midY - origin.midY : rect.midX - origin.midX
             let candidate = Candidate(id: tile.id, inLane: crossOverlap > 0,
                                       distance: alongGap * alongGap + crossGap * crossGap,
                                       centerDistance: along * along + cross * cross)
