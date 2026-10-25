@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenTaskManager
+GenericName=Task Manager
+Comment=See what's running and what it uses, and end what you need to
+Exec=opentaskmanager
+Icon=opentaskmanager
+Terminal=false
+Categories=System;Monitor;
+Keywords=task;process;system;monitor;cpu;memory;gpu;startup;
+StartupNotify=true

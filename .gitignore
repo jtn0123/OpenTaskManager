@@ -17,3 +17,7 @@ xcuserdata/
 
 # Local release archives
 /dist/
+
+# Cross-platform app (cross/): build output and dependencies
+cross/target/
+cross/dist/

@@ -1,0 +1,32 @@
+[package]
+name = "otm-core"
+description = "Sampling and figures for OpenTaskManager's cross-platform app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../../LICENSE"
+repository.workspace = true
+
+[dependencies]
+sysinfo.workspace = true
+
+# Ending a process through a handle to it (actions.rs), one running copy
+# (instance.rs), sign-in entries (autostart.rs, registry.rs) and GPU load
+# (gpu.rs: performance counters on Windows).
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["net", "process"] }
+
+# Local time for History (clock.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Performance",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_UI_WindowsAndMessaging",
+] }

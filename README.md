@@ -351,6 +351,7 @@ App/                 SwiftUI + AppKit app (views, model, menu bar, settings)
 Packages/OTMKit/     Sampling library, the otm CLI, and tests
 scripts/             Icon renderer and other tooling
 project.yml          XcodeGen project definition
+cross/               Early Windows and Linux app (Rust core, Slint interface); see cross/README.md
 ```
 
 ## Contributing

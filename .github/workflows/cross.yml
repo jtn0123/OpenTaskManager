@@ -1,0 +1,204 @@
+name: Windows and Linux app
+
+# The Slint app in cross/, built, linted and tested on each system it ships
+# for, then driven through that system's accessibility tree. Linux runners
+# are free and quick, so this runs on pushes to main as well as pull requests.
+on:
+  pull_request:
+    paths:
+      - 'cross/**'
+      - '.github/workflows/cross.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cross/**'
+      - '.github/workflows/cross.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: cross-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: cross
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Building needs fontconfig's headers; the UI test needs a display
+      # (Xvfb), the X libraries winit loads, the accessibility bus, Python's
+      # AT-SPI bindings and xdotool for the keyboard.
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev             xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-atspi-2.0 xdotool             libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 libx11-xcb1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cross/target
+          key: linux-${{ hashFiles('cross/Cargo.lock') }}
+          restore-keys: linux-
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --workspace
+
+      - name: Build (release)
+        run: cargo build --locked --release -p opentaskmanager
+
+      # AT-SPI against the release build on a display of its own: the table,
+      # ending processes, the keyboard, sign-in, Startup, History, one copy,
+      # and the tray's icon and menu through a stand-in tray host.
+      - name: Smoke test
+        run: scripts/smoke-linux.sh target/release/opentaskmanager
+
+  # Packages are built on the oldest supported Ubuntu, so they run on
+  # distributions with an older C library than the newest runner's.
+  linux-packages:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-deb
+            cross/target
+          key: linux-packages-${{ hashFiles('cross/Cargo.lock') }}
+          restore-keys: linux-packages-
+
+      - name: Build (release)
+        run: cargo build --locked --release -p opentaskmanager
+
+      - name: Package
+        run: |
+          command -v cargo-deb || cargo install cargo-deb --version 3.8.0 --locked
+          scripts/package-linux.sh dist
+
+      # The .deb installs with the libraries it names, and both packages start.
+      - name: Install and run the packages
+        run: |
+          sudo apt-get install -y ./dist/opentaskmanager_*_amd64.deb
+          test -f /usr/share/applications/opentaskmanager.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/opentaskmanager.png
+          opentaskmanager --quit | grep -q "isn't running"
+          appimages=(./dist/OpenTaskManager-*-x86_64.AppImage)
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimages[0]}" --quit | grep -q "isn't running"
+          sudo apt-get remove -y opentaskmanager
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentaskmanager-linux
+          path: cross/dist/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cross/target
+          key: windows-${{ hashFiles('cross/Cargo.lock') }}
+          restore-keys: windows-
+
+      - name: Lint
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      # Live tests end real processes and close a hidden window they start.
+      - name: Test
+        run: cargo test --locked --workspace
+
+      - name: Build (release)
+        run: cargo build --locked --release -p opentaskmanager
+
+      # UI Automation against the release build: sorting, search, ending
+      # processes and groups, one copy, sign-in and settings.
+      - name: Smoke test
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-windows.ps1 -Exe target/release/opentaskmanager.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+              choco install innosetup -y --no-progress
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Exe target/release/opentaskmanager.exe -Out dist
+          if (-not (Get-ChildItem dist -Filter '*-setup.exe')) { throw 'No installer was built.' }
+
+      # A silent install for this account (no administrator rights), then a
+      # silent uninstall, each checked for what it should leave.
+      - name: Install and uninstall
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1).FullName
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/TASKS=signin' -Wait
+          $folder = Join-Path $env:LOCALAPPDATA 'Programs\OpenTaskManager'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\OpenTaskManager.lnk'
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (-not (Test-Path (Join-Path $folder 'opentaskmanager.exe'))) { throw 'The program was not installed.' }
+          if (-not (Test-Path $shortcut)) { throw 'No Start menu entry.' }
+          $command = (Get-ItemProperty $run -Name OpenTaskManager).OpenTaskManager
+          if ($command -notmatch 'opentaskmanager\.exe" --hidden$') { throw "Unexpected sign-in command: $command" }
+          Start-Process (Join-Path $folder 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path (Join-Path $folder 'opentaskmanager.exe')) { throw 'The uninstaller left the program.' }
+          if (Test-Path $shortcut) { throw 'The uninstaller left the Start menu entry.' }
+          if (Get-ItemProperty $run -Name OpenTaskManager -ErrorAction SilentlyContinue) { throw 'The uninstaller left the sign-in entry.' }
+          'Installed, checked and removed.'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentaskmanager-windows
+          path: cross/dist/*
+          if-no-files-found: error

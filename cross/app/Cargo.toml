@@ -1,0 +1,57 @@
+[package]
+name = "opentaskmanager"
+description = "OpenTaskManager for Windows and Linux, drawn natively with Slint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file = "../../LICENSE"
+repository.workspace = true
+
+[dependencies]
+otm-core.workspace = true
+slint = { version = "1.18", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+    "raw-window-handle-06",
+] }
+
+# Windows and macOS: their own tray through tray-icon.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = "0.26"
+
+# Windows: bringing the window to the front when it's launched again.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+# Linux: a StatusNotifierItem over D-Bus, without loading GTK.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
+
+[build-dependencies]
+slint-build = "1.18"
+
+# `cargo deb -p opentaskmanager --no-build` after a release build (scripts/package-linux.sh).
+[package.metadata.deb]
+name = "opentaskmanager"
+maintainer = "jtn0123 <jtn0123@users.noreply.github.com>"
+copyright = "OpenTaskManager's contributors"
+license-file = ["../../LICENSE", "0"]
+extended-description = """A task manager for Linux: live CPU, memory, disk, network and GPU graphs, processes grouped by app, End Task and Force Quit safe against reused PIDs, and what starts at sign-in. It stays light and lives in the tray."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/opentaskmanager", "usr/bin/", "755"],
+    ["../packaging/linux/opentaskmanager.desktop", "usr/share/applications/", "644"],
+    ["icons/opentaskmanager-32.png", "usr/share/icons/hicolor/32x32/apps/opentaskmanager.png", "644"],
+    ["icons/opentaskmanager-48.png", "usr/share/icons/hicolor/48x48/apps/opentaskmanager.png", "644"],
+    ["icons/opentaskmanager-64.png", "usr/share/icons/hicolor/64x64/apps/opentaskmanager.png", "644"],
+    ["icons/opentaskmanager-128.png", "usr/share/icons/hicolor/128x128/apps/opentaskmanager.png", "644"],
+    ["icons/opentaskmanager-256.png", "usr/share/icons/hicolor/256x256/apps/opentaskmanager.png", "644"],
+    ["icons/opentaskmanager-512.png", "usr/share/icons/hicolor/512x512/apps/opentaskmanager.png", "644"],
+]

@@ -1,0 +1,1216 @@
+// OpenTaskManager's window: four live graphs over the process table.
+// Graph lines are path commands from Rust in the graph's logical pixels: the
+// window reports the graphs' size, and Rust redraws them when it changes.
+
+import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, Slider, Switch } from "std-widgets.slint";
+
+export struct CardData {
+    value: string,
+    caption: string,
+    top-label: string,
+    grid: string,
+    area: string,
+    line: string,
+    dashed: string,
+}
+
+// One row of the process table, already formatted ("—" where a figure is missing).
+export struct ProcessCells {
+    name: string,
+    pid: string,
+    user: string,
+    cpu: string,
+    gpu: string,
+    memory: string,
+    read: string,
+    write: string,
+    selected: bool,
+    // A group's header, with how many processes it sums; or a member listed under one.
+    group: bool,
+    size: int,
+    expanded: bool,
+    indented: bool,
+}
+
+// One item that starts at sign-in.
+export struct StartupCells {
+    name: string,
+    enabled: bool,
+    status: string,
+    source: string,
+    command: string,
+}
+
+// One graph on the History page: path commands in the plot's pixels.
+export struct HistoryGraph {
+    title: string,
+    accent: color,
+    // The figure at the chosen moment, and the axis's top.
+    value: string,
+    top-label: string,
+    grid: string,
+    area: string,
+    line: string,
+    dashed: string,
+}
+
+// One line of the details panel.
+export struct Fact {
+    label: string,
+    value: string,
+}
+
+global Look {
+    out property <length> row-height: 24px;
+    out property <color> muted: Palette.foreground.with-alpha(0.62);
+    out property <color> panel: #0b0f14;
+    // Column widths shared by the header and the rows; Name takes the rest.
+    out property <length> pid: 76px;
+    out property <length> user: 104px;
+    out property <length> cpu: 66px;
+    out property <length> gpu: 62px;
+    out property <length> memory: 88px;
+    out property <length> read: 96px;
+    out property <length> write: 96px;
+}
+
+component GraphCard inherits Rectangle {
+    in property <string> title;
+    in property <color> accent;
+    in property <CardData> data;
+    out property <length> graph-width: graph.width;
+    out property <length> graph-height: graph.height;
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    // Equal widths, whatever their captions: every graph is drawn at the first one's size.
+    min-width: 136px;
+    preferred-width: 200px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    accessible-role: groupbox;
+    accessible-label: root.title + " " + root.data.value + ". " + root.data.caption;
+
+    VerticalLayout {
+        padding: 9px;
+        spacing: 6px;
+        HorizontalLayout {
+            Text {
+                text: root.title;
+                color: root.accent;
+                font-size: 13px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.data.value;
+                horizontal-alignment: right;
+                font-size: 15px;
+                font-weight: 600;
+                color: Palette.foreground;
+            }
+        }
+        graph := Rectangle {
+            height: 96px;
+            background: Look.panel;
+            border-radius: 5px;
+            clip: true;
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.grid;
+                stroke: #ffffff17;
+                stroke-width: 1px;
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.area;
+                fill: root.accent.with-alpha(0.2);
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.line;
+                stroke: root.accent;
+                stroke-width: 1.75px;
+            }
+            Path {
+                width: 100%;
+                height: 100%;
+                viewbox-width: self.width / 1px;
+                viewbox-height: self.height / 1px;
+                commands: root.data.dashed;
+                stroke: root.accent;
+                stroke-width: 1.75px;
+            }
+            Text {
+                x: 5px;
+                y: 3px;
+                text: root.data.top-label;
+                color: #ffffffb3;
+                font-size: 11px;
+            }
+        }
+        Text {
+            text: root.data.caption;
+            color: Look.muted;
+            font-size: 12px;
+            overflow: elide;
+        }
+    }
+}
+
+// A small triangle drawn as a shape: the CPU renderer's font has no arrow glyphs.
+component Triangle inherits Path {
+    // "right", "down" or "up".
+    in property <string> pointing: "right";
+    width: 8px;
+    height: 8px;
+    viewbox-width: 8;
+    viewbox-height: 8;
+    commands: root.pointing == "down" ? "M 0 2 L 8 2 L 4 7 Z" : root.pointing == "up" ? "M 0 6 L 8 6 L 4 1 Z" : "M 2 0 L 7 4 L 2 8 Z";
+    stroke-width: 0px;
+}
+
+component HeaderCell inherits Rectangle {
+    in property <string> title;
+    in property <bool> numeric;
+    in property <bool> sorted;
+    in property <bool> descending;
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.title + (root.sorted ? (root.descending ? ", sorted highest first" : ", sorted lowest first") : "");
+    accessible-action-default => { root.clicked(); }
+
+    HorizontalLayout {
+        alignment: root.numeric ? end : start;
+        spacing: 5px;
+        Text {
+            text: root.title;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: root.sorted ? Palette.foreground : Look.muted;
+            overflow: elide;
+        }
+        if root.sorted: VerticalLayout {
+            alignment: center;
+            Triangle {
+                pointing: root.descending ? "down" : "up";
+                fill: Palette.foreground;
+            }
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Force Quit's question, or what the last End Task or Force Quit did, over the table.
+component Banner inherits Rectangle {
+    in property <string> text;
+    in property <bool> warning;
+
+    background: root.warning ? #ffb547.with-alpha(0.16) : Palette.foreground.with-alpha(0.06);
+    border-color: root.warning ? #ffb547.with-alpha(0.6) : Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    vertical-stretch: 0;
+
+    HorizontalLayout {
+        padding: 7px;
+        padding-left: 12px;
+        spacing: 8px;
+        Text {
+            text: root.text;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            font-size: 13px;
+            accessible-live-region: polite;
+        }
+        @children
+    }
+}
+
+// What the table shows about the selected process or group, beyond its figures.
+component DetailsPanel inherits Rectangle {
+    in property <string> title;
+    in property <[Fact]> facts;
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    vertical-stretch: 0;
+    accessible-role: groupbox;
+    accessible-label: "Details: " + root.title;
+
+    VerticalLayout {
+        padding: 9px;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 3px;
+        Text {
+            text: root.title;
+            font-size: 13px;
+            font-weight: 650;
+            overflow: elide;
+        }
+        for fact in root.facts: HorizontalLayout {
+            spacing: 10px;
+            Text {
+                width: 96px;
+                text: fact.label;
+                font-size: 12px;
+                color: Look.muted;
+            }
+            Text {
+                text: fact.value;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}
+
+component Cell inherits Text {
+    in property <bool> numeric;
+    horizontal-alignment: root.numeric ? right : left;
+    vertical-alignment: center;
+    font-size: 13px;
+    overflow: elide;
+}
+
+// Only the rows in view exist (ListView), so hundreds of processes cost what a screenful does.
+component ProcessTable inherits Rectangle {
+    in property <[ProcessCells]> rows;
+    in property <int> sort-column;
+    in property <bool> sort-descending;
+    in property <bool> grouped;
+    in property <bool> has-gpu;
+    callback sort-clicked(int);
+    callback row-clicked(int);
+    callback move-selection(int);
+    callback end-task();
+    callback force-quit();
+    callback escape();
+    // A header's triangle; and Right (true) or Left (false) on the selection.
+    callback toggle-group(int);
+    callback expand-group(int);
+    callback expand-selection(bool);
+
+    public function focus-rows() {
+        keys.focus();
+    }
+
+    // Scrolls just enough to show `row`, as a keyboard move should.
+    public function reveal(row: int) {
+        if (row * Look.row-height < -list.viewport-y) {
+            list.viewport-y = -row * Look.row-height;
+        } else if ((row + 1) * Look.row-height > -list.viewport-y + list.visible-height) {
+            list.viewport-y = -((row + 1) * Look.row-height - list.visible-height);
+        }
+    }
+
+    background: Palette.background;
+    border-color: Palette.border;
+    border-width: 1px;
+    border-radius: 8px;
+    clip: true;
+    vertical-stretch: 1;
+
+    VerticalLayout {
+        HorizontalLayout {
+            height: 30px;
+            padding-left: 10px;
+            // As the rows: the list's scroll bar floats over them rather than taking room.
+            padding-right: 12px;
+            spacing: 8px;
+            HeaderCell {
+                title: "Name";
+                horizontal-stretch: 1;
+                min-width: 120px;
+                sorted: root.sort-column == 0;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(0); }
+            }
+            HeaderCell {
+                width: Look.pid;
+                title: "PID";
+                numeric: true;
+                sorted: root.sort-column == 1;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(1); }
+            }
+            HeaderCell {
+                width: Look.user;
+                title: "User";
+                sorted: root.sort-column == 2;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(2); }
+            }
+            HeaderCell {
+                width: Look.cpu;
+                title: "CPU";
+                numeric: true;
+                sorted: root.sort-column == 3;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(3); }
+            }
+            if root.has-gpu: HeaderCell {
+                width: Look.gpu;
+                title: "GPU";
+                numeric: true;
+                sorted: root.sort-column == 4;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(4); }
+            }
+            HeaderCell {
+                width: Look.memory;
+                title: "Memory";
+                numeric: true;
+                sorted: root.sort-column == 5;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(5); }
+            }
+            HeaderCell {
+                width: Look.read;
+                title: "Disk read";
+                numeric: true;
+                sorted: root.sort-column == 6;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(6); }
+            }
+            HeaderCell {
+                width: Look.write;
+                title: "Disk write";
+                numeric: true;
+                sorted: root.sort-column == 7;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(7); }
+            }
+        }
+        Rectangle {
+            height: 1px;
+            background: Palette.border;
+        }
+        keys := FocusScope {
+            key-pressed(event) => {
+                if (event.text == Key.DownArrow) {
+                    root.move-selection(1);
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.move-selection(-1);
+                    return accept;
+                }
+                // Delete asks the selection to quit; Shift+Delete asks first whether to force it.
+                if (event.text == Key.Delete) {
+                    if (event.modifiers.shift) {
+                        root.force-quit();
+                    } else {
+                        root.end-task();
+                    }
+                    return accept;
+                }
+                if (event.text == Key.Escape) {
+                    root.escape();
+                    return accept;
+                }
+                if (event.text == Key.RightArrow) {
+                    root.expand-selection(true);
+                    return accept;
+                }
+                if (event.text == Key.LeftArrow) {
+                    root.expand-selection(false);
+                    return accept;
+                }
+                return reject;
+            }
+            list := ListView {
+                for row[index] in root.rows: Rectangle {
+                    height: Look.row-height;
+                    background: row.selected ? Palette.selection-background
+                        : Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
+                    accessible-role: list-item;
+                    accessible-label: (row.group ? row.name + ", group of " + row.size + " processes, top PID " + row.pid : row.name + ", PID " + row.pid)
+                        + ", CPU " + row.cpu + (root.has-gpu ? ", GPU " + row.gpu : "") + ", memory " + row.memory;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: row.selected;
+                    accessible-expandable: row.group;
+                    accessible-expanded: row.expanded;
+                    accessible-action-default => {
+                        root.row-clicked(index);
+                    }
+                    accessible-action-expand => {
+                        root.expand-group(index);
+                    }
+                    // Under the cells, so the triangle's own area takes its clicks.
+                    TouchArea {
+                        clicked => {
+                            keys.focus();
+                            root.row-clicked(index);
+                        }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 12px;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            horizontal-stretch: 1;
+                            min-width: 120px;
+                            if root.grouped: Rectangle {
+                                width: row.indented ? 34px : 16px;
+                                if row.group: TouchArea {
+                                    x: 0;
+                                    width: 16px;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        keys.focus();
+                                        root.toggle-group(index);
+                                    }
+                                    Triangle {
+                                        x: 2px;
+                                        y: (parent.height - self.height) / 2;
+                                        pointing: row.expanded ? "down" : "right";
+                                        fill: row.selected ? Palette.selection-foreground : Look.muted;
+                                    }
+                                }
+                            }
+                            Cell {
+                                text: row.group ? row.name + "  (" + row.size + ")" : row.name;
+                                font-weight: row.group ? 600 : 400;
+                                color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                            }
+                        }
+                        Cell {
+                            width: Look.pid;
+                            text: row.pid;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.user;
+                            text: row.user;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.cpu;
+                            text: row.cpu;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        if root.has-gpu: Cell {
+                            width: Look.gpu;
+                            text: row.gpu;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.memory;
+                            text: row.memory;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.read;
+                            text: row.read;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            width: Look.write;
+                            text: row.write;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A page's tab beside the window's title.
+component PageTab inherits Rectangle {
+    in property <string> title;
+    in property <bool> selected;
+    callback chosen();
+
+    height: 30px;
+    width: label.preferred-width + 24px;
+    accessible-role: tab;
+    accessible-label: root.title;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => {
+        root.chosen();
+    }
+
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.title;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: 13px;
+        font-weight: root.selected ? 650 : 400;
+        color: root.selected ? Palette.foreground : Look.muted;
+    }
+    Rectangle {
+        x: 8px;
+        y: parent.height - 3px;
+        width: parent.width - 16px;
+        height: 2px;
+        border-radius: 1px;
+        background: root.selected ? Palette.accent-background : transparent;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.chosen();
+        }
+    }
+}
+
+component ColumnTitle inherits Text {
+    vertical-alignment: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: Look.muted;
+}
+
+// What starts at sign-in: read when the page opens and on Refresh, never changed here.
+component StartupPage inherits Rectangle {
+    in property <[StartupCells]> items;
+    in property <string> summary;
+    callback refresh();
+    // The row's item turned on (true) or off.
+    callback toggled(int, bool);
+
+    VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.summary;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Button {
+                text: "Refresh";
+                clicked => {
+                    root.refresh();
+                }
+            }
+        }
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 8px;
+            clip: true;
+            vertical-stretch: 1;
+            VerticalLayout {
+                HorizontalLayout {
+                    height: 30px;
+                    padding-left: 10px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    // Name and Command share the room from fixed starting widths, so every row lines up.
+                    ColumnTitle {
+                        text: "Name";
+                        horizontal-stretch: 1;
+                        min-width: 140px;
+                        preferred-width: 140px;
+                    }
+                    ColumnTitle {
+                        text: "Status";
+                        width: 118px;
+                    }
+                    ColumnTitle {
+                        text: "Source";
+                        width: 200px;
+                    }
+                    ColumnTitle {
+                        text: "Command";
+                        horizontal-stretch: 2;
+                        min-width: 100px;
+                        preferred-width: 100px;
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    background: Palette.border;
+                }
+                ListView {
+                    for item[index] in root.items: Rectangle {
+                        height: Look.row-height;
+                        background: Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
+                        accessible-role: list-item;
+                        accessible-label: item.name + ", " + item.status + ", " + item.source + ", " + item.command;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 12px;
+                            spacing: 8px;
+                            Cell {
+                                text: item.name;
+                                horizontal-stretch: 1;
+                                min-width: 140px;
+                                preferred-width: 140px;
+                            }
+                            // Its switch writes what Task Manager or the desktop would, then the list is read again.
+                            Switch {
+                                width: 118px;
+                                text: item.status;
+                                checked: item.enabled;
+                                toggled => {
+                                    root.toggled(index, self.checked);
+                                }
+                            }
+                            Cell {
+                                width: 200px;
+                                text: item.source;
+                                color: Look.muted;
+                            }
+                            Cell {
+                                text: item.command;
+                                horizontal-stretch: 2;
+                                min-width: 100px;
+                                preferred-width: 100px;
+                                font-size: 12px;
+                                color: Look.muted;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// What was recorded over the last hour to week: graphs, a moment picked
+// on them (or with the slider), and what was busiest then.
+component HistoryPage inherits Rectangle {
+    in property <[HistoryGraph]> graphs;
+    in property <string> summary;
+    in property <int> range;
+    in property <string> start-label;
+    in property <string> moment-title;
+    in property <[string]> moment-lines;
+    // 0 is the range's start, 1000 now.
+    in-out property <float> moment: 1000;
+    in-out property <bool> recording;
+    out property <length> plot-width: root.width - 170px;
+    out property <length> plot-height: 42px;
+    callback range-chosen(int);
+    callback moment-moved(float);
+    callback recording-toggled(bool);
+
+    VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 4px;
+            for title[index] in ["Hour", "6 hours", "Day", "Week"]: PageTab {
+                title: title;
+                selected: root.range == index;
+                chosen => {
+                    root.range-chosen(index);
+                }
+            }
+            Text {
+                text: root.summary;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                horizontal-alignment: right;
+                overflow: elide;
+                min-width: 60px;
+                preferred-width: 60px;
+            }
+            CheckBox {
+                text: "Record history";
+                checked <=> root.recording;
+                toggled => {
+                    root.recording-toggled(self.checked);
+                }
+            }
+        }
+        for graph in root.graphs: HorizontalLayout {
+            spacing: 10px;
+            height: root.plot-height;
+            VerticalLayout {
+                width: 160px;
+                alignment: center;
+                Text {
+                    text: graph.title;
+                    color: graph.accent;
+                    font-size: 12px;
+                    font-weight: 650;
+                }
+                Text {
+                    text: graph.value;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            plot := Rectangle {
+                background: Look.panel;
+                border-radius: 4px;
+                clip: true;
+                accessible-role: image;
+                accessible-label: graph.title + " over the range, " + graph.value + " at the chosen moment";
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.grid;
+                    stroke: #ffffff17;
+                    stroke-width: 1px;
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.area;
+                    fill: graph.accent.with-alpha(0.2);
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.line;
+                    stroke: graph.accent;
+                    stroke-width: 1.5px;
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.dashed;
+                    stroke: graph.accent;
+                    stroke-width: 1.5px;
+                }
+                Text {
+                    x: 4px;
+                    y: 2px;
+                    text: graph.top-label;
+                    color: #ffffffb3;
+                    font-size: 10px;
+                }
+                // The chosen moment.
+                Rectangle {
+                    x: Math.clamp(root.moment / 1000 * parent.width, 0px, parent.width - 1px);
+                    width: 1px;
+                    background: #ffffffcc;
+                }
+                TouchArea {
+                    mouse-cursor: crosshair;
+                    clicked => {
+                        root.moment-moved(Math.clamp(self.mouse-x / self.width * 1000, 0, 1000));
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.moment-moved(Math.clamp(self.mouse-x / self.width * 1000, 0, 1000));
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 170px;
+            Text {
+                text: root.start-label;
+                font-size: 11px;
+                color: Look.muted;
+            }
+            Text {
+                text: "now";
+                font-size: 11px;
+                color: Look.muted;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+            }
+        }
+        HorizontalLayout {
+            padding-left: 164px;
+            Slider {
+                minimum: 0;
+                maximum: 1000;
+                value <=> root.moment;
+                changed(value) => {
+                    root.moment-moved(value);
+                }
+            }
+        }
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 8px;
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 9px;
+                padding-left: 12px;
+                spacing: 3px;
+                Text {
+                    text: root.moment-title;
+                    font-size: 13px;
+                    font-weight: 650;
+                    overflow: elide;
+                    accessible-live-region: polite;
+                }
+                for line in root.moment-lines: Text {
+                    text: line;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+                Rectangle { }
+            }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "OpenTaskManager";
+    icon: @image-url("../icons/opentaskmanager-64.png");
+    preferred-width: 1120px;
+    preferred-height: 760px;
+    min-width: 800px;
+    min-height: 580px;
+    background: Palette.alternate-background;
+
+    in property <CardData> cpu;
+    in property <CardData> memory;
+    in property <CardData> disk;
+    in property <CardData> network;
+    in property <CardData> gpu;
+    in property <bool> has-gpu;
+    // 0 shows processes, 1 what starts at sign-in.
+    in-out property <int> page;
+    in property <[StartupCells]> startup;
+    in property <string> startup-summary;
+    in property <[HistoryGraph]> history-graphs;
+    in property <string> history-summary;
+    in property <int> history-range;
+    in property <string> history-start;
+    in property <string> history-moment-title;
+    in property <[string]> history-moment-lines;
+    in-out property <float> history-moment: 1000;
+    in-out property <bool> recording;
+    // The History plots' size, for drawing; changes when the window does.
+    out property <length> history-plot-width: root.width - 24px - 170px;
+    out property <length> history-plot-height: 42px;
+    in property <[ProcessCells]> rows;
+    in property <int> sort-column;
+    in property <bool> sort-descending;
+    in property <string> status;
+    in property <bool> has-selection;
+    // Force Quit's question while it's open, else empty.
+    in property <string> confirm-text;
+    in property <string> notice;
+    // The update speeds offered and the one in use, and whether it starts at sign-in.
+    in property <[string]> update-choices: ["1 s", "2 s", "5 s"];
+    in-out property <int> update-index;
+    in-out property <bool> starts-at-sign-in;
+    in-out property <bool> grouped: true;
+    // The details panel, shown while something is selected.
+    in property <string> details-title;
+    in property <[Fact]> details;
+    out property <length> graph-width: cpu-card.graph-width;
+    out property <length> graph-height: cpu-card.graph-height;
+
+    callback graphs-resized();
+    callback search-edited(string);
+    callback sort-clicked(int);
+    callback row-clicked(int);
+    callback move-selection(int);
+    callback end-task();
+    callback force-quit-asked();
+    callback force-quit-confirmed();
+    // Cancels Force Quit's question, or else clears the notice.
+    callback escape-pressed();
+    callback update-chosen(int);
+    callback sign-in-toggled(bool);
+    callback grouped-toggled(bool);
+    callback page-chosen(int);
+    callback startup-refresh();
+    callback history-range-chosen(int);
+    callback history-moment-moved(float);
+    callback recording-toggled(bool);
+    callback startup-toggled(int, bool);
+    callback toggle-group(int);
+    callback expand-group(int);
+    callback expand-selection(bool);
+
+    changed graph-width => {
+        root.graphs-resized();
+    }
+    changed history-plot-width => {
+        root.graphs-resized();
+    }
+
+    public function reveal-row(row: int) {
+        table.reveal(row);
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        padding-bottom: 6px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: "OpenTaskManager";
+                font-size: 15px;
+                font-weight: 650;
+                vertical-alignment: center;
+            }
+            HorizontalLayout {
+                padding-left: 6px;
+                PageTab {
+                    title: "Processes";
+                    selected: root.page == 0;
+                    chosen => {
+                        root.page-chosen(0);
+                    }
+                }
+                PageTab {
+                    title: "Startup";
+                    selected: root.page == 1;
+                    chosen => {
+                        root.page-chosen(1);
+                    }
+                }
+                PageTab {
+                    title: "History";
+                    selected: root.page == 2;
+                    chosen => {
+                        root.page-chosen(2);
+                    }
+                }
+            }
+            Rectangle { }
+            Button {
+                text: "End Task";
+                enabled: root.has-selection && root.page == 0;
+                clicked => {
+                    root.end-task();
+                    table.focus-rows();
+                }
+            }
+            Button {
+                text: "Force Quit…";
+                enabled: root.has-selection && root.page == 0;
+                clicked => {
+                    root.force-quit-asked();
+                }
+            }
+            LineEdit {
+                width: 320px;
+                placeholder-text: root.page == 0 ? "Search by name, PID or user" : root.page == 1 ? "Search by name or command" : "Search applies to Processes and Startup";
+                edited(text) => {
+                    root.search-edited(text);
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            vertical-stretch: 0;
+            cpu-card := GraphCard {
+                title: "CPU";
+                accent: #35d07f;
+                data: root.cpu;
+            }
+            GraphCard {
+                title: "Memory";
+                accent: #b38cff;
+                data: root.memory;
+            }
+            GraphCard {
+                title: "Disk";
+                accent: #ffb547;
+                data: root.disk;
+            }
+            GraphCard {
+                title: "Network";
+                accent: #4fb8ff;
+                data: root.network;
+            }
+            if root.has-gpu: GraphCard {
+                title: "GPU";
+                accent: #ff7aa8;
+                data: root.gpu;
+            }
+        }
+        // The page area. Processes stay built while Startup shows, so the table keeps its place.
+        Rectangle {
+            vertical-stretch: 1;
+            Rectangle {
+                visible: root.page == 0;
+                VerticalLayout {
+                    spacing: 10px;
+                    if root.confirm-text != "": Banner {
+                        text: root.confirm-text;
+                        warning: true;
+                        Button {
+                            text: "Cancel";
+                            clicked => {
+                                root.escape-pressed();
+                                table.focus-rows();
+                            }
+                        }
+                        Button {
+                            text: "Force Quit";
+                            primary: true;
+                            clicked => {
+                                root.force-quit-confirmed();
+                                table.focus-rows();
+                            }
+                        }
+                    }
+                    if root.confirm-text == "" && root.notice != "": Banner {
+                        text: root.notice;
+                        Button {
+                            text: "Dismiss";
+                            clicked => {
+                                root.escape-pressed();
+                                table.focus-rows();
+                            }
+                        }
+                    }
+                    table := ProcessTable {
+                        rows: root.rows;
+                        sort-column: root.sort-column;
+                        sort-descending: root.sort-descending;
+                        grouped: root.grouped;
+                        has-gpu: root.has-gpu;
+                        sort-clicked(column) => {
+                            root.sort-clicked(column);
+                        }
+                        row-clicked(row) => {
+                            root.row-clicked(row);
+                        }
+                        move-selection(delta) => {
+                            root.move-selection(delta);
+                        }
+                        end-task => {
+                            root.end-task();
+                        }
+                        force-quit => {
+                            root.force-quit-asked();
+                        }
+                        escape => {
+                            root.escape-pressed();
+                        }
+                        toggle-group(row) => {
+                            root.toggle-group(row);
+                        }
+                        expand-group(row) => {
+                            root.expand-group(row);
+                        }
+                        expand-selection(open) => {
+                            root.expand-selection(open);
+                        }
+                    }
+                    if root.details-title != "": DetailsPanel {
+                        title: root.details-title;
+                        facts: root.details;
+                    }
+                }
+            }
+            if root.page == 1: StartupPage {
+                items: root.startup;
+                summary: root.startup-summary;
+                refresh => {
+                    root.startup-refresh();
+                }
+                toggled(row, on) => {
+                    root.startup-toggled(row, on);
+                }
+            }
+            if root.page == 2: HistoryPage {
+                graphs: root.history-graphs;
+                summary: root.history-summary;
+                range: root.history-range;
+                start-label: root.history-start;
+                moment-title: root.history-moment-title;
+                moment-lines: root.history-moment-lines;
+                moment <=> root.history-moment;
+                recording <=> root.recording;
+                range-chosen(index) => {
+                    root.history-range-chosen(index);
+                }
+                moment-moved(value) => {
+                    root.history-moment-moved(value);
+                }
+                recording-toggled(on) => {
+                    root.recording-toggled(on);
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            // Takes only the room left, so the controls beside it keep their whole labels.
+            Text {
+                text: root.status;
+                font-size: 12px;
+                color: Look.muted;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                min-width: 60px;
+                preferred-width: 60px;
+            }
+            CheckBox {
+                text: "Group by app";
+                checked <=> root.grouped;
+                toggled => {
+                    root.grouped-toggled(self.checked);
+                }
+            }
+            Text {
+                text: "Update every";
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+            }
+            ComboBox {
+                width: 76px;
+                model: root.update-choices;
+                current-index <=> root.update-index;
+                selected => {
+                    root.update-chosen(self.current-index);
+                }
+            }
+            CheckBox {
+                text: "Start at sign-in";
+                checked <=> root.starts-at-sign-in;
+                toggled => {
+                    root.sign-in-toggled(self.checked);
+                }
+            }
+        }
+    }
+}

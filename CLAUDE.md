@@ -54,6 +54,12 @@ Manager OG or any other proprietary task manager.
 
 ## Layout
 
+- `cross/`: the early Windows and Linux app, separate from everything
+  below (Rust core in `crates/otm-core`, Slint interface in `app/`). Its
+  rules and commands are in `cross/README.md`; why Slint (over Tauri and
+  C++/Qt) is in `cross/COMPARISON.md`. It shares the Mac app's principles
+  (missing is "—", never zero; a process is PID plus start time; stay
+  light), not its code.
 - `Packages/OTMKit`: sampling library (System/, Model/, Monitor/, Format/,
   Graphing/ for axis and curve maths and the squarified `Treemap`;
   System/LaunchItems, BundledLaunchItems, LaunchTriggers and Launchctl read launchd
