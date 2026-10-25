@@ -11,6 +11,7 @@ use sysinfo::{
     ProcessesToUpdate, System, ThreadKind, Uid, UpdateKind, Users,
 };
 
+use crate::gpu::{GpuReader, GpuReading};
 use crate::model::{DiskRates, NetworkRates, ProcessKey, ProcessRow, Snapshot};
 
 pub struct Sampler {
@@ -25,6 +26,11 @@ pub struct Sampler {
     seen: Option<HashSet<ProcessKey>>,
     me: Option<Uid>,
     superuser: bool,
+    /// Whether this system offers a GPU reading at all.
+    gpu_readable: bool,
+    /// The GPU reader, open only while processes are read: on Windows an
+    /// open counter query costs CPU even when nothing collects from it.
+    gpu: Option<GpuReader>,
 }
 
 impl Default for Sampler {
@@ -55,14 +61,21 @@ impl Sampler {
             seen: None,
             me,
             superuser,
+            gpu_readable: GpuReader::new().is_some(),
+            gpu: None,
         }
+    }
+
+    /// Whether GPU load can be read here at all.
+    pub fn reads_gpu(&self) -> bool {
+        self.gpu_readable
     }
 
     pub fn logical_cpus(&self) -> usize {
         self.system.cpus().len()
     }
 
-    /// Reads the machine, and its processes when `with_processes` is set.
+    /// Reads the machine, and its processes and GPU when `with_processes` is set.
     /// Returns None from the very first call, which only primes the
     /// counters. The process list is None on the first interval processes
     /// are read after a pause, for the same reason.
@@ -74,6 +87,14 @@ impl Sampler {
         self.disks.refresh_specifics(true, DiskRefreshKind::nothing().with_io_usage());
         self.networks.refresh(true);
         let interval = previous.map(|previous| now.duration_since(previous).as_secs_f64());
+        // Read only while the window shows it, from a reader opened for that
+        // and closed after; a newly opened one primes first.
+        if with_processes && self.gpu_readable && self.gpu.is_none() {
+            self.gpu = GpuReader::new();
+        } else if !with_processes {
+            self.gpu = None;
+        }
+        let gpu = self.gpu.as_mut().and_then(GpuReader::read);
         let processes = if with_processes {
             self.system.refresh_processes_specifics(
                 ProcessesToUpdate::All,
@@ -89,7 +110,7 @@ impl Sampler {
             );
             let seen = self.seen.take();
             let rows = match (seen, interval) {
-                (Some(seen), Some(interval)) => Some(self.rows(&seen, interval)),
+                (Some(seen), Some(interval)) => Some(self.rows(&seen, interval, gpu.as_ref())),
                 _ => None,
             };
             self.seen = Some(self.keys());
@@ -99,7 +120,10 @@ impl Sampler {
             None
         };
         let interval = interval?;
-        Some((self.snapshot(interval), processes))
+        let mut snapshot = self.snapshot(interval);
+        snapshot.gpu = gpu.as_ref().map(|reading| reading.busy);
+        snapshot.gpu_memory = gpu.as_ref().and_then(|reading| reading.memory_used);
+        Some((snapshot, processes))
     }
 
     fn snapshot(&self, interval: f64) -> Snapshot {
@@ -115,6 +139,8 @@ impl Sampler {
             swap_total: self.system.total_swap(),
             disk: self.disk_rates(interval),
             network: self.network_rates(interval),
+            gpu: None,
+            gpu_memory: None,
         }
     }
 
@@ -155,7 +181,7 @@ impl Sampler {
         self.processes().map(|process| key(process.pid(), process.start_time())).collect()
     }
 
-    fn rows(&self, seen: &HashSet<ProcessKey>, interval: f64) -> Vec<ProcessRow> {
+    fn rows(&self, seen: &HashSet<ProcessKey>, interval: f64, gpu: Option<&GpuReading>) -> Vec<ProcessRow> {
         self.processes()
             .map(|process| {
                 let key = key(process.pid(), process.start_time());
@@ -177,6 +203,7 @@ impl Sampler {
                         .and_then(|uid| self.users.get_user_by_id(uid))
                         .map(|user| user.name().to_owned()),
                     cpu: (measured && !unopened).then(|| process.cpu_usage()),
+                    gpu: gpu.and_then(|reading| reading.process(key.pid)),
                     memory: (!unopened).then(|| process.memory()),
                     disk_read: rate(usage.read_bytes),
                     disk_write: rate(usage.written_bytes),

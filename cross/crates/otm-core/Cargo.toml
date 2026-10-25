@@ -11,7 +11,8 @@ repository.workspace = true
 sysinfo.workspace = true
 
 # Ending a process through a handle to it (actions.rs), one running copy
-# (instance.rs) and sign-in entries (autostart.rs, registry.rs).
+# (instance.rs), sign-in entries (autostart.rs, registry.rs) and GPU load
+# (gpu.rs: performance counters on Windows).
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", features = ["net", "process"] }
 
@@ -19,6 +20,7 @@ rustix = { version = "1", features = ["net", "process"] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
+    "Win32_System_Performance",
     "Win32_System_Registry",
     "Win32_System_Threading",
     "Win32_UI_WindowsAndMessaging",

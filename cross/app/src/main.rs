@@ -28,6 +28,7 @@ use otm_core::rows::Column;
 use otm_core::sampler::Sampler;
 use otm_core::scale::AutoScale;
 use otm_core::settings::{self, Settings, UPDATE_SECONDS};
+use otm_core::startup::{self, StartupItem};
 use slint::{CloseRequestResponse, ComponentHandle, ModelRc, VecModel};
 use table::{Pick, Targets};
 
@@ -65,6 +66,13 @@ struct View {
     facts: Rc<VecModel<Fact>>,
     /// Force Quit's targets while its question is open, fixed as it opened.
     pending: Option<Targets>,
+    /// Whether this system's GPU load can be read, so the GPU card and column show.
+    has_gpu: bool,
+    /// The page shown: 0 processes, 1 what starts at sign-in.
+    page: i32,
+    /// What starts at sign-in, read when that page opens or is refreshed.
+    startup: Vec<StartupItem>,
+    startup_rows: Rc<VecModel<StartupCells>>,
     /// What the last End Task or Force Quit did, until dismissed.
     notice: String,
     showing: Arc<AtomicBool>,
@@ -174,6 +182,60 @@ impl View {
             )
             .into();
         window.set_network(card);
+
+        if self.has_gpu {
+            let gpu = self.series(|s| s.gpu.map(f64::from));
+            let mut card = self.card(frame, &gpu, None, 100.0, true);
+            card.top_label = "100%".into();
+            card.value = percent(latest.and_then(|s| s.gpu).map(f64::from)).into();
+            card.caption = match latest.and_then(|s| s.gpu_memory) {
+                Some(used) => format!("{} memory in use", bytes(Some(used as f64))),
+                None => "Its busiest engine".to_owned(),
+            }
+            .into();
+            window.set_gpu(card);
+        }
+    }
+
+    fn show_page(&mut self, page: i32) {
+        self.page = page;
+        if page == 1 {
+            self.read_startup();
+        } else {
+            self.redraw_table();
+        }
+        if let Some(window) = self.window.clone_strong() {
+            window.set_page(page);
+        }
+    }
+
+    fn read_startup(&mut self) {
+        self.startup = startup::read();
+        self.draw_startup();
+    }
+
+    /// The Startup page's rows, kept to those the search matches.
+    fn draw_startup(&mut self) {
+        let Some(window) = self.window.clone_strong() else { return };
+        let shown: Vec<StartupCells> = self
+            .startup
+            .iter()
+            .filter(|item| startup::matches(item, &self.query))
+            .map(|item| StartupCells {
+                name: item.name.as_str().into(),
+                status: if item.enabled { "Enabled" } else { "Disabled" }.into(),
+                source: item.source.as_str().into(),
+                command: item.command.as_str().into(),
+            })
+            .collect();
+        let enabled = self.startup.iter().filter(|item| item.enabled).count();
+        let summary = match (self.startup.len(), shown.len()) {
+            (0, _) => "Nothing starts at sign-in from the places read here.".to_owned(),
+            (all, matched) if matched < all => format!("Showing {matched} of {all} items · {enabled} enabled"),
+            (all, _) => format!("{all} items start at sign-in · {enabled} enabled · read when this page opened"),
+        };
+        self.startup_rows.set_vec(shown);
+        window.set_startup_summary(summary.into());
     }
 
     fn save_settings(&self) {
@@ -293,6 +355,11 @@ fn open_window() {
         };
         window.set_rows(ModelRc::from(view.rows.clone()));
         window.set_details(ModelRc::from(view.facts.clone()));
+        window.set_startup(ModelRc::from(view.startup_rows.clone()));
+        window.set_has_gpu(view.has_gpu);
+        window.set_page(view.page);
+        window.on_page_chosen(|page| with_view(|view| view.show_page(page)));
+        window.on_startup_refresh(|| with_view(View::read_startup));
         // Deferred: the size can change while the view is busy showing the window.
         window.on_graphs_resized(|| {
             let _ = slint::invoke_from_event_loop(|| with_view(View::redraw));
@@ -301,6 +368,7 @@ fn open_window() {
             with_view(|view| {
                 view.query = text.to_string();
                 view.redraw_table();
+                view.draw_startup();
             });
         });
         window.on_sort_clicked(|index| {
@@ -472,6 +540,10 @@ fn main() -> Result<(), slint::PlatformError> {
             details: None,
             facts: Rc::new(VecModel::default()),
             pending: None,
+            has_gpu: sampler.reads_gpu(),
+            page: 0,
+            startup: Vec::new(),
+            startup_rows: Rc::new(VecModel::default()),
             notice: String::new(),
             showing: showing.clone(),
             instance: instance.clone(),

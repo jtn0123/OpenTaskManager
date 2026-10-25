@@ -12,14 +12,23 @@ pub enum Column {
     Pid,
     User,
     Cpu,
+    Gpu,
     Memory,
     DiskRead,
     DiskWrite,
 }
 
 impl Column {
-    pub const ALL: [Column; 7] =
-        [Column::Name, Column::Pid, Column::User, Column::Cpu, Column::Memory, Column::DiskRead, Column::DiskWrite];
+    pub const ALL: [Column; 8] = [
+        Column::Name,
+        Column::Pid,
+        Column::User,
+        Column::Cpu,
+        Column::Gpu,
+        Column::Memory,
+        Column::DiskRead,
+        Column::DiskWrite,
+    ];
 
     pub fn from_index(index: usize) -> Option<Column> {
         Self::ALL.get(index).copied()
@@ -31,6 +40,7 @@ impl Column {
             Column::Pid => "PID",
             Column::User => "User",
             Column::Cpu => "CPU",
+            Column::Gpu => "GPU",
             Column::Memory => "Memory",
             Column::DiskRead => "Disk read",
             Column::DiskWrite => "Disk write",
@@ -44,6 +54,7 @@ impl Column {
             Column::Pid => "pid",
             Column::User => "user",
             Column::Cpu => "cpu",
+            Column::Gpu => "gpu",
             Column::Memory => "memory",
             Column::DiskRead => "disk-read",
             Column::DiskWrite => "disk-write",
@@ -74,6 +85,7 @@ fn value(row: &ProcessRow, column: Column, logical_cpus: usize) -> Value<'_> {
         Column::Pid => Value::Number(f64::from(row.key.pid)),
         Column::User => row.user.as_deref().map_or(Value::Missing, Value::Text),
         Column::Cpu => number(machine_share(row, logical_cpus)),
+        Column::Gpu => number(row.gpu.map(f64::from)),
         Column::Memory => number(row.memory.map(|bytes| bytes as f64)),
         Column::DiskRead => number(row.disk_read),
         Column::DiskWrite => number(row.disk_write),
@@ -119,12 +131,13 @@ pub fn arrange<'a>(
 }
 
 /// Each column's text for `row`, in `Column::ALL` order.
-pub fn cells(row: &ProcessRow, logical_cpus: usize) -> [String; 7] {
+pub fn cells(row: &ProcessRow, logical_cpus: usize) -> [String; 8] {
     [
         row.name.clone(),
         row.key.pid.to_string(),
         row.user.clone().unwrap_or_else(|| MISSING.to_owned()),
         percent(machine_share(row, logical_cpus)),
+        percent(row.gpu.map(f64::from)),
         bytes(row.memory.map(|bytes| bytes as f64)),
         rate(row.disk_read),
         rate(row.disk_write),
@@ -143,6 +156,7 @@ mod tests {
             name: name.to_owned(),
             user: pid.is_multiple_of(2).then(|| "justin".to_owned()),
             cpu,
+            gpu: None,
             memory: Some(u64::from(pid) * 1024),
             disk_read: read,
             disk_write: None,
@@ -183,6 +197,7 @@ mod tests {
         let text = cells(&row(3, "c", Some(400.0), None), 16);
         assert_eq!(text[2], "—", "an account that can't be named");
         assert_eq!(text[3], "25%", "400% of one CPU is a quarter of sixteen");
-        assert_eq!(text[5], "—");
+        assert_eq!(text[4], "—", "no GPU reading");
+        assert_eq!(text[6], "—");
     }
 }

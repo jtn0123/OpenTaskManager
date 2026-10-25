@@ -23,6 +23,12 @@ pub use self::windows::{Place, disable, enable, is_enabled};
 #[cfg(not(windows))]
 pub use self::xdg::{Place, disable, enable, is_enabled};
 
+// The Startup page reads entries the same way.
+#[cfg(windows)]
+pub(crate) use self::windows::turned_off;
+#[cfg(not(windows))]
+pub(crate) use self::xdg::desktop_entry_enabled;
+
 #[cfg(windows)]
 mod windows {
     use std::io;

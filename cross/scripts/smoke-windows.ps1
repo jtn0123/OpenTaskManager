@@ -156,6 +156,11 @@ try {
         $protected = @(Rows)
         Check ($protected.Count -gt 0 -and @($protected | Where-Object { $_ -notmatch "memory $dash$" }).Count -eq 0) "a protected process (csrss) shows its memory as a dash"
         Check (@($protected | Where-Object { $_ -match 'memory 0 B$' }).Count -eq 0) "no protected process shows 0 bytes"
+        if (Header 'GPU') {
+            Check (@($protected | Where-Object { $_ -notmatch ', GPU [\d.]+%' }).Count -eq 0) "but its GPU share, which Windows counts for every process"
+        } else {
+            Write-Output "skipped: this machine's GPU load can't be read, so there's no GPU column"
+        }
 
         # End Task and Force Quit on a process started for the purpose: ping, with no window of its own.
         $forceQuitAsk = 'Force Quit' + [char]0x2026
@@ -316,9 +321,30 @@ try {
         $command = (Get-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue).$RunValue
         $expected = '"' + (Resolve-Path $Exe).Path + '" --hidden --instance ' + $Instance
         Check ($command -eq $expected) "turning it on writes the Run value ($command)"
+
+        # The Startup page lists it, found by a search for this instance.
+        $select = [System.Windows.Automation.SelectionItemPattern]::Pattern
+        function Page([string]$name) {
+            $tab = Elements $Type::TabItem | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
+            $tab.GetCurrentPattern($select).Select()
+            Start-Sleep -Milliseconds 900
+        }
+        function Listed { @(Elements $Type::ListItem | Where-Object { $_.Current.Name -like "$RunValue, *" } | ForEach-Object { $_.Current.Name }) }
+        Page 'Startup'
+        $search.GetCurrentPattern($value).SetValue($Instance)
+        Start-Sleep -Milliseconds 900
+        Check ((Listed) -contains "$RunValue, Enabled, Your Run key, $expected") "the Startup page lists it, enabled, in your Run key"
+        Check ((Texts '^Showing 1 of \d+ items').Count -eq 1) "and a search narrows the list to it"
+
         $toggle.Toggle()
         Start-Sleep -Milliseconds 600
         Check ($null -eq (Get-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue)) "turning it off removes it"
+        Press 'Refresh'
+        Check ((Listed).Count -eq 0) "and the Startup page, refreshed, no longer lists it"
+        $search.GetCurrentPattern($value).SetValue('')
+        Page 'Processes'
+        for ($i = 0; $i -lt 10 -and (Rows).Count -eq 0; $i++) { Start-Sleep -Milliseconds 300 }
+        Check ((Rows).Count -gt 0) "back on Processes, the table is as it was"
     } else {
         Check $false "a Start at sign-in check box"
     }

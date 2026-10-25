@@ -20,6 +20,7 @@ export struct ProcessCells {
     pid: string,
     user: string,
     cpu: string,
+    gpu: string,
     memory: string,
     read: string,
     write: string,
@@ -29,6 +30,14 @@ export struct ProcessCells {
     size: int,
     expanded: bool,
     indented: bool,
+}
+
+// One item that starts at sign-in.
+export struct StartupCells {
+    name: string,
+    status: string,
+    source: string,
+    command: string,
 }
 
 // One line of the details panel.
@@ -43,11 +52,12 @@ global Look {
     out property <color> panel: #0b0f14;
     // Column widths shared by the header and the rows; Name takes the rest.
     out property <length> pid: 76px;
-    out property <length> user: 116px;
-    out property <length> cpu: 72px;
-    out property <length> memory: 92px;
-    out property <length> read: 104px;
-    out property <length> write: 104px;
+    out property <length> user: 104px;
+    out property <length> cpu: 66px;
+    out property <length> gpu: 62px;
+    out property <length> memory: 88px;
+    out property <length> read: 96px;
+    out property <length> write: 96px;
 }
 
 component GraphCard inherits Rectangle {
@@ -62,7 +72,7 @@ component GraphCard inherits Rectangle {
     border-width: 1px;
     border-radius: 8px;
     // Equal widths, whatever their captions: every graph is drawn at the first one's size.
-    min-width: 170px;
+    min-width: 136px;
     preferred-width: 200px;
     horizontal-stretch: 1;
     vertical-stretch: 0;
@@ -276,6 +286,7 @@ component ProcessTable inherits Rectangle {
     in property <int> sort-column;
     in property <bool> sort-descending;
     in property <bool> grouped;
+    in property <bool> has-gpu;
     callback sort-clicked(int);
     callback row-clicked(int);
     callback move-selection(int);
@@ -345,29 +356,37 @@ component ProcessTable inherits Rectangle {
                 descending: root.sort-descending;
                 clicked => { root.sort-clicked(3); }
             }
-            HeaderCell {
-                width: Look.memory;
-                title: "Memory";
+            if root.has-gpu: HeaderCell {
+                width: Look.gpu;
+                title: "GPU";
                 numeric: true;
                 sorted: root.sort-column == 4;
                 descending: root.sort-descending;
                 clicked => { root.sort-clicked(4); }
             }
             HeaderCell {
-                width: Look.read;
-                title: "Disk read";
+                width: Look.memory;
+                title: "Memory";
                 numeric: true;
                 sorted: root.sort-column == 5;
                 descending: root.sort-descending;
                 clicked => { root.sort-clicked(5); }
             }
             HeaderCell {
-                width: Look.write;
-                title: "Disk write";
+                width: Look.read;
+                title: "Disk read";
                 numeric: true;
                 sorted: root.sort-column == 6;
                 descending: root.sort-descending;
                 clicked => { root.sort-clicked(6); }
+            }
+            HeaderCell {
+                width: Look.write;
+                title: "Disk write";
+                numeric: true;
+                sorted: root.sort-column == 7;
+                descending: root.sort-descending;
+                clicked => { root.sort-clicked(7); }
             }
         }
         Rectangle {
@@ -413,9 +432,8 @@ component ProcessTable inherits Rectangle {
                     background: row.selected ? Palette.selection-background
                         : Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
                     accessible-role: list-item;
-                    accessible-label: row.group
-                        ? row.name + ", group of " + row.size + " processes, top PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory
-                        : row.name + ", PID " + row.pid + ", CPU " + row.cpu + ", memory " + row.memory;
+                    accessible-label: (row.group ? row.name + ", group of " + row.size + " processes, top PID " + row.pid : row.name + ", PID " + row.pid)
+                        + ", CPU " + row.cpu + (root.has-gpu ? ", GPU " + row.gpu : "") + ", memory " + row.memory;
                     accessible-item-selectable: true;
                     accessible-item-selected: row.selected;
                     accessible-expandable: row.group;
@@ -481,6 +499,12 @@ component ProcessTable inherits Rectangle {
                             numeric: true;
                             color: row.selected ? Palette.selection-foreground : Palette.foreground;
                         }
+                        if root.has-gpu: Cell {
+                            width: Look.gpu;
+                            text: row.gpu;
+                            numeric: true;
+                            color: row.selected ? Palette.selection-foreground : Palette.foreground;
+                        }
                         Cell {
                             width: Look.memory;
                             text: row.memory;
@@ -506,11 +530,166 @@ component ProcessTable inherits Rectangle {
     }
 }
 
+// A page's tab beside the window's title.
+component PageTab inherits Rectangle {
+    in property <string> title;
+    in property <bool> selected;
+    callback chosen();
+
+    height: 30px;
+    width: label.preferred-width + 24px;
+    accessible-role: tab;
+    accessible-label: root.title;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.selected;
+    accessible-action-default => {
+        root.chosen();
+    }
+
+    label := Text {
+        width: 100%;
+        height: 100%;
+        text: root.title;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: 13px;
+        font-weight: root.selected ? 650 : 400;
+        color: root.selected ? Palette.foreground : Look.muted;
+    }
+    Rectangle {
+        x: 8px;
+        y: parent.height - 3px;
+        width: parent.width - 16px;
+        height: 2px;
+        border-radius: 1px;
+        background: root.selected ? Palette.accent-background : transparent;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.chosen();
+        }
+    }
+}
+
+component ColumnTitle inherits Text {
+    vertical-alignment: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: Look.muted;
+}
+
+// What starts at sign-in: read when the page opens and on Refresh, never changed here.
+component StartupPage inherits Rectangle {
+    in property <[StartupCells]> items;
+    in property <string> summary;
+    callback refresh();
+
+    VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            Text {
+                text: root.summary;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Button {
+                text: "Refresh";
+                clicked => {
+                    root.refresh();
+                }
+            }
+        }
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 8px;
+            clip: true;
+            vertical-stretch: 1;
+            VerticalLayout {
+                HorizontalLayout {
+                    height: 30px;
+                    padding-left: 10px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    // Name and Command share the room from fixed starting widths, so every row lines up.
+                    ColumnTitle {
+                        text: "Name";
+                        horizontal-stretch: 1;
+                        min-width: 140px;
+                        preferred-width: 140px;
+                    }
+                    ColumnTitle {
+                        text: "Status";
+                        width: 80px;
+                    }
+                    ColumnTitle {
+                        text: "Source";
+                        width: 200px;
+                    }
+                    ColumnTitle {
+                        text: "Command";
+                        horizontal-stretch: 2;
+                        min-width: 100px;
+                        preferred-width: 100px;
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    background: Palette.border;
+                }
+                ListView {
+                    for item[index] in root.items: Rectangle {
+                        height: Look.row-height;
+                        background: Math.mod(index, 2) == 1 ? Palette.foreground.with-alpha(0.035) : transparent;
+                        accessible-role: list-item;
+                        accessible-label: item.name + ", " + item.status + ", " + item.source + ", " + item.command;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 12px;
+                            spacing: 8px;
+                            Cell {
+                                text: item.name;
+                                horizontal-stretch: 1;
+                                min-width: 140px;
+                                preferred-width: 140px;
+                            }
+                            Cell {
+                                width: 80px;
+                                text: item.status;
+                                color: item.status == "Enabled" ? Palette.foreground : Look.muted;
+                            }
+                            Cell {
+                                width: 200px;
+                                text: item.source;
+                                color: Look.muted;
+                            }
+                            Cell {
+                                text: item.command;
+                                horizontal-stretch: 2;
+                                min-width: 100px;
+                                preferred-width: 100px;
+                                font-size: 12px;
+                                color: Look.muted;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "OpenTaskManager";
     preferred-width: 1120px;
     preferred-height: 760px;
-    min-width: 760px;
+    min-width: 800px;
     min-height: 580px;
     background: Palette.alternate-background;
 
@@ -518,6 +697,12 @@ export component AppWindow inherits Window {
     in property <CardData> memory;
     in property <CardData> disk;
     in property <CardData> network;
+    in property <CardData> gpu;
+    in property <bool> has-gpu;
+    // 0 shows processes, 1 what starts at sign-in.
+    in-out property <int> page;
+    in property <[StartupCells]> startup;
+    in property <string> startup-summary;
     in property <[ProcessCells]> rows;
     in property <int> sort-column;
     in property <bool> sort-descending;
@@ -550,6 +735,8 @@ export component AppWindow inherits Window {
     callback update-chosen(int);
     callback sign-in-toggled(bool);
     callback grouped-toggled(bool);
+    callback page-chosen(int);
+    callback startup-refresh();
     callback toggle-group(int);
     callback expand-group(int);
     callback expand-selection(bool);
@@ -574,10 +761,27 @@ export component AppWindow inherits Window {
                 font-weight: 650;
                 vertical-alignment: center;
             }
+            HorizontalLayout {
+                padding-left: 6px;
+                PageTab {
+                    title: "Processes";
+                    selected: root.page == 0;
+                    chosen => {
+                        root.page-chosen(0);
+                    }
+                }
+                PageTab {
+                    title: "Startup";
+                    selected: root.page == 1;
+                    chosen => {
+                        root.page-chosen(1);
+                    }
+                }
+            }
             Rectangle { }
             Button {
                 text: "End Task";
-                enabled: root.has-selection;
+                enabled: root.has-selection && root.page == 0;
                 clicked => {
                     root.end-task();
                     table.focus-rows();
@@ -585,14 +789,14 @@ export component AppWindow inherits Window {
             }
             Button {
                 text: "Force Quit…";
-                enabled: root.has-selection;
+                enabled: root.has-selection && root.page == 0;
                 clicked => {
                     root.force-quit-asked();
                 }
             }
             LineEdit {
                 width: 320px;
-                placeholder-text: "Search by name, PID or user";
+                placeholder-text: root.page == 0 ? "Search by name, PID or user" : "Search by name or command";
                 edited(text) => {
                     root.search-edited(text);
                 }
@@ -621,72 +825,95 @@ export component AppWindow inherits Window {
                 accent: #4fb8ff;
                 data: root.network;
             }
+            if root.has-gpu: GraphCard {
+                title: "GPU";
+                accent: #ff7aa8;
+                data: root.gpu;
+            }
         }
-        if root.confirm-text != "": Banner {
-            text: root.confirm-text;
-            warning: true;
-            Button {
-                text: "Cancel";
-                clicked => {
-                    root.escape-pressed();
-                    table.focus-rows();
+        // The page area. Processes stay built while Startup shows, so the table keeps its place.
+        Rectangle {
+            vertical-stretch: 1;
+            Rectangle {
+                visible: root.page == 0;
+                VerticalLayout {
+                    spacing: 10px;
+                    if root.confirm-text != "": Banner {
+                        text: root.confirm-text;
+                        warning: true;
+                        Button {
+                            text: "Cancel";
+                            clicked => {
+                                root.escape-pressed();
+                                table.focus-rows();
+                            }
+                        }
+                        Button {
+                            text: "Force Quit";
+                            primary: true;
+                            clicked => {
+                                root.force-quit-confirmed();
+                                table.focus-rows();
+                            }
+                        }
+                    }
+                    if root.confirm-text == "" && root.notice != "": Banner {
+                        text: root.notice;
+                        Button {
+                            text: "Dismiss";
+                            clicked => {
+                                root.escape-pressed();
+                                table.focus-rows();
+                            }
+                        }
+                    }
+                    table := ProcessTable {
+                        rows: root.rows;
+                        sort-column: root.sort-column;
+                        sort-descending: root.sort-descending;
+                        grouped: root.grouped;
+                        has-gpu: root.has-gpu;
+                        sort-clicked(column) => {
+                            root.sort-clicked(column);
+                        }
+                        row-clicked(row) => {
+                            root.row-clicked(row);
+                        }
+                        move-selection(delta) => {
+                            root.move-selection(delta);
+                        }
+                        end-task => {
+                            root.end-task();
+                        }
+                        force-quit => {
+                            root.force-quit-asked();
+                        }
+                        escape => {
+                            root.escape-pressed();
+                        }
+                        toggle-group(row) => {
+                            root.toggle-group(row);
+                        }
+                        expand-group(row) => {
+                            root.expand-group(row);
+                        }
+                        expand-selection(open) => {
+                            root.expand-selection(open);
+                        }
+                    }
+                    if root.details-title != "": DetailsPanel {
+                        title: root.details-title;
+                        facts: root.details;
+                    }
                 }
             }
-            Button {
-                text: "Force Quit";
-                primary: true;
-                clicked => {
-                    root.force-quit-confirmed();
-                    table.focus-rows();
+            if root.page == 1: StartupPage {
+                items: root.startup;
+                summary: root.startup-summary;
+                refresh => {
+                    root.startup-refresh();
                 }
             }
-        }
-        if root.confirm-text == "" && root.notice != "": Banner {
-            text: root.notice;
-            Button {
-                text: "Dismiss";
-                clicked => {
-                    root.escape-pressed();
-                    table.focus-rows();
-                }
-            }
-        }
-        table := ProcessTable {
-            rows: root.rows;
-            sort-column: root.sort-column;
-            sort-descending: root.sort-descending;
-            grouped: root.grouped;
-            sort-clicked(column) => {
-                root.sort-clicked(column);
-            }
-            row-clicked(row) => {
-                root.row-clicked(row);
-            }
-            move-selection(delta) => {
-                root.move-selection(delta);
-            }
-            end-task => {
-                root.end-task();
-            }
-            force-quit => {
-                root.force-quit-asked();
-            }
-            escape => {
-                root.escape-pressed();
-            }
-            toggle-group(row) => {
-                root.toggle-group(row);
-            }
-            expand-group(row) => {
-                root.expand-group(row);
-            }
-            expand-selection(open) => {
-                root.expand-selection(open);
-            }
-        }
-        if root.details-title != "": DetailsPanel {
-            title: root.details-title;
-            facts: root.details;
         }
         HorizontalLayout {
             spacing: 10px;

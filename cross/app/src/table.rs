@@ -59,12 +59,13 @@ impl Targets {
 }
 
 fn cells(row: &ProcessRow, logical_cpus: usize) -> ProcessCells {
-    let [name, pid, user, cpu, memory, read, write] = rows::cells(row, logical_cpus);
+    let [name, pid, user, cpu, gpu, memory, read, write] = rows::cells(row, logical_cpus);
     ProcessCells {
         name: name.into(),
         pid: pid.into(),
         user: user.into(),
         cpu: cpu.into(),
+        gpu: gpu.into(),
         memory: memory.into(),
         read: read.into(),
         write: write.into(),

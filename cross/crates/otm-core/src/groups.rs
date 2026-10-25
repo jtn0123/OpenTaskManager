@@ -137,6 +137,8 @@ fn sum<T: Copy + std::iter::Sum>(values: impl Iterator<Item = Option<T>>) -> Opt
 fn totals(root: &ProcessRow, members: &[&ProcessRow]) -> ProcessRow {
     ProcessRow {
         cpu: sum(members.iter().map(|row| row.cpu)),
+        // Engines are shared, so members' shares can't add up past the whole GPU.
+        gpu: sum(members.iter().map(|row| row.gpu)).map(|share| share.min(100.0)),
         memory: sum(members.iter().map(|row| row.memory)),
         disk_read: sum(members.iter().map(|row| row.disk_read)),
         disk_write: sum(members.iter().map(|row| row.disk_write)),
@@ -240,6 +242,7 @@ mod tests {
             name: name.to_owned(),
             user: Some("justin".to_owned()),
             cpu,
+            gpu: None,
             memory: Some(u64::from(pid) * 1000),
             disk_read: None,
             disk_write: None,

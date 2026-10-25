@@ -24,6 +24,8 @@ pub struct ProcessRow {
     /// share of the whole machine. None the first time a process is seen,
     /// before there is an interval to measure.
     pub cpu: Option<f32>,
+    /// Its busiest GPU engine, 0–100; None where GPU load can't be read for it.
+    pub gpu: Option<f32>,
     /// Resident memory in bytes, or None for a process the system won't let
     /// this account open (Windows' protected and system processes).
     pub memory: Option<u64>,
@@ -66,4 +68,9 @@ pub struct Snapshot {
     pub disk: Option<DiskRates>,
     /// None when no interface other than loopback is listed.
     pub network: Option<NetworkRates>,
+    /// The busiest GPU engine, 0–100; None where it isn't read (no GPU
+    /// reading on this system, or the window was closed).
+    pub gpu: Option<f32>,
+    /// Bytes of GPU memory in use, where the system says.
+    pub gpu_memory: Option<u64>,
 }
