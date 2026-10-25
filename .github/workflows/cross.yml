@@ -36,10 +36,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      # Building needs fontconfig's headers; the UI test needs a display
+      # (Xvfb), the X libraries winit loads, the accessibility bus, Python's
+      # AT-SPI bindings and xdotool for the keyboard.
+      - name: Install build and test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev             xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-atspi-2.0 xdotool             libxkbcommon-x11-0 libxcursor1 libxrandr2 libxi6 libx11-xcb1
 
       - name: Install Rust
         run: |
@@ -67,6 +70,12 @@ jobs:
 
       - name: Build (release)
         run: cargo build --release -p opentaskmanager
+
+      # AT-SPI against the release build on a display of its own: the table,
+      # ending processes, the keyboard, sign-in, Startup, History, one copy,
+      # and the tray's icon and menu through a stand-in tray host.
+      - name: Smoke test
+        run: scripts/smoke-linux.sh target/release/opentaskmanager
 
   # Packages are built on the oldest supported Ubuntu, so they run on
   # distributions with an older C library than the newest runner's.

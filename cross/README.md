@@ -272,6 +272,19 @@ turning recording off and on, and that the records outlive a relaunch. It runs a
 removes that instance's settings and Run value at the end:
 `powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 -Exe <path to opentaskmanager.exe>`.
 
+`scripts/smoke-linux.sh` does the same on Linux through AT-SPI, the
+accessibility bus, on a display (Xvfb) and in a D-Bus session of its own,
+so it never touches the desktop it's run from. It checks the table and
+sorting, End Task (SIGTERM) and Force Quit (SIGKILL) on `sleep` processes
+it starts, the keyboard (Up, Down, Delete, Shift+Delete and Esc, typed
+with `xdotool` into the virtual display, skipped where it's missing),
+Start at sign-in's autostart entry, a Startup switch writing `Hidden`,
+History, one running copy, and the tray: a stand-in tray host (a
+StatusNotifierWatcher) checks the icon registers with its title, pixels
+and menu, then clicks the menu's Quit. Settings, history and autostart
+entries go to temporary folders. It needs Xvfb, at-spi2-core, Python's
+GObject bindings with Atspi, and xdotool for the keyboard. CI runs both.
+
 ## Status
 
 Measured 2026-10-24, release builds.
@@ -325,15 +338,15 @@ for amdgpu and xe.
 
 Not verified yet:
 
-- The Linux tray: WSLg has no tray host, so it didn't start there.
-- Linux GPU load on real hardware: WSL has no DRM device, so only the
-  parsing and the arithmetic are tested, on recorded `fdinfo` text.
-- The Linux Startup page on a desktop, beyond tests on temporary folders.
-- Keyboard selection, Delete and Shift+Delete, Right and Left on groups,
-  clicking a header's triangle, and the tray menu: no test drives them (UI
-  Automation invokes the buttons and opens groups instead).
-- The Linux window's End Task and Force Quit buttons: the Linux actions are
-  tested in the core, the buttons only on Windows.
+- Linux GPU load on real hardware: neither WSL nor CI's runners have a DRM
+  device, so only the parsing and the arithmetic are tested, on recorded
+  `fdinfo` text.
+- The tray on a real desktop's tray host: CI's stand-in host checks the
+  protocol (registration, title, icon, menu, Quit), not how a panel draws it.
+- Right and Left on groups, and clicking a header's triangle: UI
+  Automation opens groups through their expand action instead.
+- The Windows keyboard: the Linux test types the keys; on Windows UI
+  Automation invokes the buttons instead.
 - The update speed menu: UI Automation can't pick from Slint's drop-down,
   so only the settings rules behind it are tested.
 - A real sign-in: the Run value and the Linux autostart entry are checked as

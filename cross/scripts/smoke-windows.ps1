@@ -158,7 +158,13 @@ try {
         $search.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue('csrss')
         Start-Sleep -Milliseconds 900
         $protected = @(Rows)
-        Check ($protected.Count -gt 0 -and @($protected | Where-Object { $_ -notmatch "memory $dash$" }).Count -eq 0) "a protected process (csrss) shows its memory as a dash"
+        $administrator = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if ($administrator) {
+            # An administrator (as on CI's runners) may read csrss; then its memory is a real figure.
+            Write-Output "skipped: csrss's memory as a dash (an administrator may read it)"
+        } else {
+            Check ($protected.Count -gt 0 -and @($protected | Where-Object { $_ -notmatch "memory $dash$" }).Count -eq 0) "a protected process (csrss) shows its memory as a dash"
+        }
         Check (@($protected | Where-Object { $_ -match 'memory 0 B$' }).Count -eq 0) "no protected process shows 0 bytes"
         if (Header 'GPU') {
             Check (@($protected | Where-Object { $_ -notmatch ', GPU [\d.]+%' }).Count -eq 0) "but its GPU share, which Windows counts for every process"
