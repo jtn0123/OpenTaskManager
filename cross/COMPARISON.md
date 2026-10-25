@@ -43,10 +43,6 @@ about 16 MB and 0.25% of a core, as much as the rest of the Slint app. A
 D-Bus tray without GTK (the `ksni` crate, the StatusNotifierItem protocol)
 would avoid it on Linux.
 
-For reference, TMOG's own Linux build (C++ and Qt 6, sampling twice a second,
-rendering offscreen) measured about 17% and 106 MB in the same environment,
-in a separate clean-room analysis.
-
 ## What else differed
 
 | | Tauri | Slint | Qt |
@@ -92,7 +88,7 @@ in a separate clean-room analysis.
   re-entrant callbacks), and each now has a known answer in `app-slint/`.
 
 Qt is a close and credible second. It has the best ready-made table and
-the quickest build, and it's what TMOG uses. But it means C++ for the risky
+the quickest build. But it means C++ for the risky
 parsing and process work, a second copy of the core, and shipping Qt.
 Tauri is out for a task manager: the web view costs about 450 MB with the
 window open, and it's the only one of the three that can't tell whether a
