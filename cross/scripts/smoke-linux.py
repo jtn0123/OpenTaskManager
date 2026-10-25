@@ -201,16 +201,30 @@ def nodes(root, depth=0):
         yield from nodes(child, depth + 1)
 
 
+# Roles by AT-SPI's numbers: their names differ between versions ("push button", "button").
+ROLES = {
+    "button": Atspi.Role.PUSH_BUTTON,
+    "check box": Atspi.Role.CHECK_BOX,
+    "frame": Atspi.Role.FRAME,
+    "label": Atspi.Role.LABEL,
+    "list item": Atspi.Role.LIST_ITEM,
+    "page tab": Atspi.Role.PAGE_TAB,
+    "slider": Atspi.Role.SLIDER,
+    "window": Atspi.Role.WINDOW,
+}
+
+
 def find(role, pattern=None, every=False):
-    """Accessibles with this role name ("button", "list item"...) whose name matches."""
+    """Accessibles with this role ("button", "list item"...) whose name matches."""
     root = application()
     if root is None:
         return [] if every else None
     root.clear_cache()
+    wanted = ROLES[role]
     found = []
     for node in nodes(root):
         try:
-            if node.get_role_name() == role and (pattern is None or re.search(pattern, node.get_name() or "")):
+            if node.get_role() == wanted and (pattern is None or re.search(pattern, node.get_name() or "")):
                 if not every:
                     return node
                 found.append(node)
