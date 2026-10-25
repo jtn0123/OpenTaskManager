@@ -35,6 +35,28 @@ It's an early slice, not a release:
 - It remembers the window's size, the sort and the update speed (every 1, 2
   or 5 s), and can start at sign-in, hidden in the tray.
 
+## Install
+
+CI builds every package on each pull request (the workflow run's
+artifacts):
+
+- **Windows**: `OpenTaskManager-VERSION-windows-x64-setup.exe` installs for
+  your account only, with no administrator rights, in
+  `%LOCALAPPDATA%\Programs\OpenTaskManager`, with a Start menu entry and, if
+  you ask, start at sign-in. Uninstalling quits the running copy and
+  removes its sign-in entry; settings stay. Or unzip
+  `OpenTaskManager-VERSION-windows-x64.zip` and run it from anywhere.
+- **Linux**: `opentaskmanager_VERSION_amd64.deb` (Debian, Ubuntu and
+  their kin: `sudo apt install ./opentaskmanager_*.deb`), or
+  `OpenTaskManager-VERSION-x86_64.AppImage`, which runs as is (it needs
+  FUSE 2, or `APPIMAGE_EXTRACT_AND_RUN=1`). Both are built on Ubuntu 22.04,
+  so they run on distributions from about then on.
+
+The icon is the Mac app's, its rounded tile cropped from Apple's grid
+(`scripts/make-icons.ps1` makes every size from it). The Windows program
+carries it and its version details as resources, which `app/build.rs`
+writes itself, so a cross-compiled build has them too.
+
 ## Rules carried over from the Mac app
 
 - **A figure the system didn't give is "—", never zero.** In Rust it's an
@@ -193,6 +215,13 @@ xwin --accept-license --arch x86_64 --cache-dir ~/opt/xwin-cache splat --output 
 export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=rust-lld
 export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS="-Lnative=$HOME/opt/xwin/crt/lib/x86_64 -Lnative=$HOME/opt/xwin/sdk/lib/um/x86_64 -Lnative=$HOME/opt/xwin/sdk/lib/ucrt/x86_64"
 cargo build --release --target x86_64-pc-windows-msvc -p opentaskmanager
+```
+
+To package (each script says what it needs):
+
+```sh
+scripts/package-linux.sh dist                    # .deb and AppImage, after a release build
+powershell -File scripts\package-windows.ps1 -Exe target\release\opentaskmanager.exe -Out dist   # zip, and the installer with Inno Setup 6
 ```
 
 `scripts/smoke-windows.ps1` then drives the Windows build through UI

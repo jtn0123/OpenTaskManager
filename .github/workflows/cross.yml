@@ -68,6 +68,59 @@ jobs:
       - name: Build (release)
         run: cargo build --release -p opentaskmanager
 
+  # Packages are built on the oldest supported Ubuntu, so they run on
+  # distributions with an older C library than the newest runner's.
+  linux-packages:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-deb
+            cross/target
+          key: linux-packages-${{ hashFiles('cross/Cargo.lock') }}
+          restore-keys: linux-packages-
+
+      - name: Build (release)
+        run: cargo build --release -p opentaskmanager
+
+      - name: Package
+        run: |
+          command -v cargo-deb || cargo install cargo-deb --version 3.8.0 --locked
+          scripts/package-linux.sh dist
+
+      # The .deb installs with the libraries it names, and both packages start.
+      - name: Install and run the packages
+        run: |
+          sudo apt-get install -y ./dist/opentaskmanager_*_amd64.deb
+          test -f /usr/share/applications/opentaskmanager.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/opentaskmanager.png
+          opentaskmanager --quit | grep -q "isn't running"
+          appimages=(./dist/OpenTaskManager-*-x86_64.AppImage)
+          APPIMAGE_EXTRACT_AND_RUN=1 "${appimages[0]}" --quit | grep -q "isn't running"
+          sudo apt-get remove -y opentaskmanager
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentaskmanager-linux
+          path: cross/dist/*
+          if-no-files-found: error
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 40
@@ -104,3 +157,39 @@ jobs:
       - name: Smoke test
         shell: pwsh
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-windows.ps1 -Exe target/release/opentaskmanager.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+              choco install innosetup -y --no-progress
+          }
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-windows.ps1 -Exe target/release/opentaskmanager.exe -Out dist
+          if (-not (Get-ChildItem dist -Filter '*-setup.exe')) { throw 'No installer was built.' }
+
+      # A silent install for this account (no administrator rights), then a
+      # silent uninstall, each checked for what it should leave.
+      - name: Install and uninstall
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist -Filter '*-setup.exe' | Select-Object -First 1).FullName
+          Start-Process $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/TASKS=signin' -Wait
+          $folder = Join-Path $env:LOCALAPPDATA 'Programs\OpenTaskManager'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\OpenTaskManager.lnk'
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (-not (Test-Path (Join-Path $folder 'opentaskmanager.exe'))) { throw 'The program was not installed.' }
+          if (-not (Test-Path $shortcut)) { throw 'No Start menu entry.' }
+          $command = (Get-ItemProperty $run -Name OpenTaskManager).OpenTaskManager
+          if ($command -notmatch 'opentaskmanager\.exe" --hidden$') { throw "Unexpected sign-in command: $command" }
+          Start-Process (Join-Path $folder 'unins000.exe') -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          Start-Sleep -Seconds 3
+          if (Test-Path (Join-Path $folder 'opentaskmanager.exe')) { throw 'The uninstaller left the program.' }
+          if (Test-Path $shortcut) { throw 'The uninstaller left the Start menu entry.' }
+          if (Get-ItemProperty $run -Name OpenTaskManager -ErrorAction SilentlyContinue) { throw 'The uninstaller left the sign-in entry.' }
+          'Installed, checked and removed.'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opentaskmanager-windows
+          path: cross/dist/*
+          if-no-files-found: error

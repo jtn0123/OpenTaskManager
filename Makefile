@@ -83,7 +83,7 @@ lint:
 # actionlint runs shellcheck on the workflows' scripts as well.
 lint-automation:
 	actionlint
-	shellcheck scripts/*.sh
+	shellcheck scripts/*.sh cross/scripts/*.sh
 
 test-scripts:
 	bash scripts/test-release-source.sh

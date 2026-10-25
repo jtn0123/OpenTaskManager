@@ -20,3 +20,4 @@ xcuserdata/
 
 # Cross-platform app (cross/): build output and dependencies
 cross/target/
+cross/dist/
