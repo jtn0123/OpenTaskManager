@@ -1,0 +1,106 @@
+name: Windows and Linux app
+
+# The Slint app in cross/, built, linted and tested on each system it ships
+# for, then driven through that system's accessibility tree. Linux runners
+# are free and quick, so this runs on pushes to main as well as pull requests.
+on:
+  pull_request:
+    paths:
+      - 'cross/**'
+      - '.github/workflows/cross.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'cross/**'
+      - '.github/workflows/cross.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: cross-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: cross
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cross/target
+          key: linux-${{ hashFiles('cross/Cargo.lock') }}
+          restore-keys: linux-
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build (release)
+        run: cargo build --release -p opentaskmanager
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cross/target
+          key: windows-${{ hashFiles('cross/Cargo.lock') }}
+          restore-keys: windows-
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Live tests end real processes and close a hidden window they start.
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build (release)
+        run: cargo build --release -p opentaskmanager
+
+      # UI Automation against the release build: sorting, search, ending
+      # processes and groups, one copy, sign-in and settings.
+      - name: Smoke test
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-windows.ps1 -Exe target/release/opentaskmanager.exe
