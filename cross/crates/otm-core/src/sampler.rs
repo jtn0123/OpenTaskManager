@@ -267,8 +267,9 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    /// Live, on Windows: the processes Windows won't open (System among them)
-    /// show their memory as unknown, never as zero bytes.
+    /// Live, on Windows: the processes Windows won't open (System among them,
+    /// for an ordinary account) show their memory as unknown, never as zero
+    /// bytes. An administrator may read System's; then it's a real figure.
     #[cfg(windows)]
     #[test]
     fn windows_never_reports_a_process_it_could_not_open_as_zero() {
@@ -281,8 +282,10 @@ mod tests {
         let processes = processes.expect("processes on their second reading");
         assert!(processes.iter().all(|row| row.memory != Some(0)), "no process shows 0 bytes");
         let system = processes.iter().find(|row| row.key.pid == 4).expect("the System process");
-        assert_eq!(system.memory, None);
-        assert_eq!(system.cpu, None);
+        match system.memory {
+            None => assert_eq!(system.cpu, None, "unopened: its CPU is unknown too"),
+            Some(bytes) => assert!(bytes > 0, "opened, by an administrator: a real figure"),
+        }
     }
 
     #[test]
