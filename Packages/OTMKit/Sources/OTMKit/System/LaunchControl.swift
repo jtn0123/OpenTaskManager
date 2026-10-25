@@ -19,6 +19,10 @@ public enum LaunchControl {
 
     /// Why an item can't be switched from here, or nil when it can.
     public static func restriction(for item: LaunchItem) -> String? {
+        if item.source.isAppBundled {
+            return "The app registers this item with macOS. Manage it in the app or Login Items Settings."
+        }
+        if !item.hasFile { return "No file was found for this job, so OpenTaskManager cannot safely change its registration." }
         if item.isMissingLabel || item.isUnreadable { return "launchd can't load this property list, so there's nothing to switch." }
         if item.scope == .daemon { return "Daemons run outside your session, so switching one needs an administrator." }
         if item.publisher == .apple { return "Apple's agents are part of macOS, so OpenTaskManager leaves them alone." }

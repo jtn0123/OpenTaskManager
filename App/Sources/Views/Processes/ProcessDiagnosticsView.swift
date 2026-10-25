@@ -16,14 +16,6 @@ extension AppModel {
     }
 }
 
-extension CPUScale {
-    /// One shown step (0.1%) in per-core percent, so sorts compare CPU as it
-    /// reads and rows that read the same don't trade places every tick.
-    var shownStep: Double {
-        relativeToSystem ? 0.1 * Double(max(logicalCores, 1)) : 0.1
-    }
-}
-
 /// Why the inspector has no figure for a field.
 enum ProcessAccess {
     static let denied = "Needs admin rights"
@@ -64,7 +56,7 @@ struct ProcessFieldRow: View, Equatable {
                 Text("—").help(ProcessAccess.unavailableHelp)
             }
         }
-        .font(.callout)
+        .font(.tableText)
     }
 }
 
@@ -173,7 +165,7 @@ struct ProcessDiagnosticsSections: View {
                 }
             }
         }
-        .font(.callout)
+        .font(.tableText)
     }
 
     // MARK: Scheduling
@@ -258,7 +250,7 @@ struct ProcessAncestryList: View {
             }
             if process.responsiblePID != process.pid { responsible }
         }
-        .font(.callout)
+        .font(.tableText)
     }
 
     private func row(_ member: ProcessSample, depth: Int) -> some View {
@@ -313,7 +305,7 @@ struct ProcessAncestryList: View {
             Text("Responsible:").foregroundStyle(.secondaryText)
             if let owner {
                 Button(model.displayName(for: owner)) { onSelect(owner.identity) }
-                    .buttonStyle(.link)
+                    .linkButtonStyle()
                     .help("Select \(model.displayName(for: owner)) (PID \(String(pid))) in the table")
                 Text("PID \(String(pid))").monospacedDigit().foregroundStyle(.secondaryText)
             } else {

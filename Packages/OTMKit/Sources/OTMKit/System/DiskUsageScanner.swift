@@ -16,6 +16,8 @@ public struct DiskScanRequest: Sendable {
     /// folders keep their totals but drop their contents, so memory stays
     /// bounded however many files the disk holds.
     public var nodeBudget = 200_000
+    /// Manual scans keep their usual priority; automatic scans yield to foreground work.
+    public var background = false
     public var rules = DiskCategoryRules()
     /// How to classify the scanned folder's contents. Nil works it out from
     /// the folder's path, so scanning `~/Library/Caches` counts as caches.
@@ -43,7 +45,8 @@ public struct DiskScanRequest: Sendable {
 ///
 /// It walks the tree once with `FileManager`'s enumerator and prefetched
 /// resource values, never following symbolic links or entering other
-/// volumes, and counts each hard-linked file once. Packages (apps, Photos
+/// mounts (`MountBoundary`), and counts each hard-linked file once, by
+/// device and inode (`HardLinkLedger`). Packages (apps, Photos
 /// libraries) count towards the totals but are kept as one item. Each folder
 /// keeps only its largest children and the scan keeps a fixed number of the
 /// largest files, so memory stays bounded on a disk of millions of files.
@@ -74,7 +77,7 @@ public enum DiskUsageScanner {
                     }
                 }
                 thread.name = "OpenTaskManager disk scan"
-                thread.qualityOfService = .userInitiated
+                thread.qualityOfService = request.background ? .utility : .userInitiated
                 thread.start()
             }
         } onCancel: {
@@ -155,6 +158,9 @@ private final class DiskScan {
         .totalFileSizeKey, .fileSizeKey, .linkCountKey, .contentModificationDateKey, .typeIdentifierKey,
         .volumeIdentifierKey,
     ]
+    private static let rootKeys: Set<URLResourceKey> = [
+        .volumeIdentifierKey, .contentModificationDateKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
+    ]
     private static let keySet = Set(keys)
     private static let checkEvery = 512
 
@@ -165,6 +171,7 @@ private final class DiskScan {
         let logical: UInt64
         let category: DiskCategory
         let modified: Date?
+        let identity: StorageFileIdentity?
     }
 
     private enum Child {
@@ -182,6 +189,7 @@ private final class DiskScan {
         /// Strictly inside a package: merged into it, never listed.
         let withinPackage: Bool
         let modified: Date?
+        let identity: StorageFileIdentity?
         var allocated: UInt64 = 0
         var logical: UInt64 = 0
         var items = 0
@@ -217,6 +225,7 @@ private final class DiskScan {
         var items: Int
         var category: DiskCategory
         var modified: Date?
+        var identity: StorageFileIdentity?
         var children: [Int32] = []
         var omitted = false
         var unreadable = false
@@ -240,9 +249,9 @@ private final class DiskScan {
     private var largest: LargestKept<DiskFile>
     /// Set once a file or package didn't make the list of the largest.
     private var largestTurnedAway = false
-    private var hardLinks = Set<UInt64>()
+    private var hardLinks = HardLinkLedger()
     private var typeCategories: [String: DiskCategory] = [:]
-    private var allowedVolumes: [any NSObjectProtocol] = []
+    private var boundary = MountBoundary<AnyHashable>(root: "/", allowed: [], mountPoints: [])
     private let excludedDepth: Int
     private let rootDepth: Int
 
@@ -252,8 +261,6 @@ private final class DiskScan {
     private var allocatedSoFar: UInt64 = 0
     private var unreadableFolders = 0
     private var unreadablePaths: [String] = []
-    private var hardLinkDuplicates = 0
-    private var skippedVolumes: [String] = []
 
     init(request: DiskScanRequest) {
         self.request = request
@@ -266,18 +273,22 @@ private final class DiskScan {
     }
 
     static func realPath(_ url: URL) -> String {
-        guard let resolved = realpath(url.path, nil) else { return url.standardizedFileURL.path }
-        defer { free(resolved) }
-        return String(cString: resolved)
+        // realpath returns an owned NUL-terminated allocation; copy its text before the deferred free.
+        guard let resolved = unsafe realpath(url.path, nil) else { return url.standardizedFileURL.path }
+        defer { unsafe free(resolved) }
+        return unsafe String(cString: resolved)
     }
 
     func run(isCancelled: () -> Bool, progress: (DiskScanProgress) -> Void) -> DiskUsage? {
+        if request.background && DiskScanScheduleSafety.refusal(path: rootPath, home: NSHomeDirectory()) != nil { return nil }
         let started = Date()
         let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-        let rootValues = try? root.resourceValues(forKeys: [.volumeIdentifierKey, .contentModificationDateKey])
-        allowedVolumes = ([root] + request.alsoEnters).compactMap { try? $0.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier }
+        let rootValues = try? root.resourceValues(forKeys: Self.rootKeys)
+        let volumes = ([root] + request.alsoEnters).compactMap { try? Self.volume($0.resourceValues(forKeys: [.volumeIdentifierKey])) }
+        boundary = MountBoundary(root: rootPath, allowed: volumes, mountPoints: MountTable.mountPoints())
         stack = [Frame(url: root, name: (rootPath as NSString).lastPathComponent, region: request.rootRegion ?? request.rules.region(at: rootPath),
                        isPackage: false, withinPackage: false, modified: rootValues?.contentModificationDate,
+                       identity: Self.cleanupIdentity(root),
                        children: LargestKept(limit: request.childLimit))]
 
         let errors = ErrorLog()
@@ -310,12 +321,32 @@ private final class DiskScan {
         while stack.count > 1 { finishTop() }
         let rootFrame = stack[0]
         let rootIndex = finishTop()
-        return result(rootIndex: rootIndex, rootFrame: rootFrame, duration: Date().timeIntervalSince(started))
+        return result(rootIndex: rootIndex, rootFrame: rootFrame, duration: Date().timeIntervalSince(started),
+                      usedAtStart: rootValues.flatMap(Self.usedSpace))
+    }
+
+    /// The volume a folder is on, as the mount rule compares them.
+    private static func volume(_ values: URLResourceValues) -> AnyHashable? {
+        (values.volumeIdentifier as? NSObject).map(AnyHashable.init)
+    }
+
+    /// The volume's used space: its capacity less what's free.
+    private static func usedSpace(_ values: URLResourceValues) -> UInt64? {
+        guard let total = values.volumeTotalCapacity, let available = values.volumeAvailableCapacity else { return nil }
+        return UInt64(max(total - available, 0))
     }
 
     // MARK: - Walking
 
     private func visit(_ url: URL, level: Int, enumerator: FileManager.DirectoryEnumerator) {
+        if request.background && DiskScanScheduleSafety.refusal(path: url.path, home: NSHomeDirectory()) != nil {
+            // Refuse a protected descendant before asking the enumerator to enter it.
+            enumerator.skipDescendants()
+            let errors = ErrorLog()
+            errors.pending.append(url)
+            recordErrors(errors)
+            return
+        }
         guard let values = try? url.resourceValues(forKeys: Self.keySet) else {
             itemCount += 1
             stack[stack.count - 1].items += 1
@@ -323,9 +354,8 @@ private final class DiskScan {
         }
         if values.isDirectory == true, values.isSymbolicLink != true {
             let depth = rootDepth + level
-            if let volume = values.volumeIdentifier, !allowedVolumes.contains(where: { $0.isEqual(volume) }) {
+            guard boundary.enters(depth: depth, volume: Self.volume(values), path: { url.path }) else {
                 enumerator.skipDescendants()
-                if skippedVolumes.count < 20 { skippedVolumes.append(url.path) }
                 return
             }
             if depth <= excludedDepth, request.excludedPaths.contains(url.path) {
@@ -353,22 +383,21 @@ private final class DiskScan {
             }
         }
         stack.append(Frame(url: url, name: name, region: region, isPackage: isPackage, withinPackage: parent.insidePackage,
-                           modified: values.contentModificationDate, children: LargestKept(limit: parent.insidePackage ? 0 : request.childLimit)))
+                           modified: values.contentModificationDate, identity: Self.cleanupIdentity(url),
+                           children: LargestKept(limit: parent.insidePackage ? 0 : request.childLimit)))
     }
 
     private func addFile(_ url: URL, values: URLResourceValues) {
         let top = stack.count - 1
-        if values.isSymbolicLink != true, (values.linkCount ?? 1) > 1,
-           let identifier = try? url.resourceValues(forKeys: [.fileIdentifierKey]).fileIdentifier,
-           !hardLinks.insert(identifier).inserted {
+        let allocated = UInt64(max(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0, 0))
+        if values.isSymbolicLink != true, (values.linkCount ?? 1) > 1, let file = Self.identity(of: url),
+           !hardLinks.count(device: file.device, inode: file.inode, allocated: allocated) {
             // Another name for a file already counted.
-            hardLinkDuplicates += 1
             fileCount += 1
             stack[top].items += 1
             return
         }
         fileCount += 1
-        let allocated = UInt64(max(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0, 0))
         let logical = UInt64(max(values.totalFileSize ?? values.fileSize ?? 0, 0))
         allocatedSoFar += allocated
         let category: DiskCategory
@@ -383,10 +412,26 @@ private final class DiskScan {
         stack[top].categoryBytes[category.rawValue] += allocated
         guard !stack[top].insidePackage else { return }
         let modified = values.contentModificationDate
-        offer(.file(FileChild(url: url, allocated: allocated, logical: logical, category: category, modified: modified)), size: allocated, to: top)
+        let identity = stack[top].children.accepts(allocated) || largest.accepts(allocated) ? Self.cleanupIdentity(url) : nil
+        offer(.file(FileChild(url: url, allocated: allocated, logical: logical, category: category, modified: modified,
+                              identity: identity)), size: allocated, to: top)
         offerLargest(allocated) {
-            DiskFile(path: url.path, isPackage: false, allocatedSize: allocated, logicalSize: logical, category: category, modified: modified)
+            DiskFile(path: url.path, isPackage: false, allocatedSize: allocated, logicalSize: logical, category: category,
+                     modified: modified, identity: identity)
         }
+    }
+
+    /// Only files that can enter a kept list need another identity read; smaller files stay folded.
+    private static func cleanupIdentity(_ url: URL) -> StorageFileIdentity? {
+        identity(of: url).map { StorageFileIdentity(volume: String($0.device), file: String($0.inode)) }
+    }
+
+    /// A file's device and inode, which together name it however many paths it has.
+    private static func identity(of url: URL) -> HardLinkLedger.Key? {
+        // lstat borrows the aligned local record for this call only.
+        var info = stat()
+        guard unsafe url.withUnsafeFileSystemRepresentation({ unsafe $0.map { unsafe lstat($0, &info) } }) == 0 else { return nil }
+        return HardLinkLedger.Key(device: Int64(info.st_dev), inode: UInt64(info.st_ino))
     }
 
     /// Offers a file or package to the list of the largest, noting when one
@@ -428,7 +473,8 @@ private final class DiskScan {
                         return index
                     case let .file(file):
                         return allocate(Node(name: file.url.lastPathComponent, kind: .file, allocated: file.allocated,
-                                             logical: file.logical, items: 0, category: file.category, modified: file.modified))
+                                             logical: file.logical, items: 0, category: file.category, modified: file.modified,
+                                             identity: file.identity))
                     }
                 }
                 if frame.foldedCount > 0 {
@@ -438,7 +484,8 @@ private final class DiskScan {
             }
         }
         let index = allocate(Node(name: frame.name, kind: frame.isPackage ? .package : .folder, allocated: frame.allocated,
-                                  logical: frame.logical, items: frame.items, category: frame.dominantCategory, modified: frame.modified,
+                                  logical: frame.logical, items: frame.items, category: frame.dominantCategory,
+                                  modified: frame.modified, identity: frame.identity,
                                   children: children, omitted: omitted, unreadable: frame.isUnreadable,
                                   unreadableCount: frame.unreadableCount))
         guard !isRoot else { return index }
@@ -448,7 +495,7 @@ private final class DiskScan {
         if frame.isPackage {
             offerLargest(frame.allocated) {
                 DiskFile(path: frame.url.path, isPackage: true, allocatedSize: frame.allocated, logicalSize: frame.logical,
-                         category: frame.dominantCategory, modified: frame.modified)
+                         category: frame.dominantCategory, modified: frame.modified, identity: frame.identity)
             }
         }
         if liveNodes > request.nodeBudget { tighten() }
@@ -549,7 +596,7 @@ private final class DiskScan {
 
     // MARK: - Result
 
-    private func result(rootIndex: Int32, rootFrame: Frame, duration: TimeInterval) -> DiskUsage {
+    private func result(rootIndex: Int32, rootFrame: Frame, duration: TimeInterval, usedAtStart: UInt64?) -> DiskUsage {
         // Breadth first, so every node's children are contiguous.
         var order: [Int32] = [rootIndex]
         var parents: [Int?] = [nil]
@@ -559,7 +606,7 @@ private final class DiskScan {
             let children = arena[Int(order[position])].children
             let start = order.count
             order.append(contentsOf: children)
-            parents.append(contentsOf: repeatElement(position, count: children.count))
+            parents.append(contentsOf: repeatElement(Optional(position), count: children.count))
             ranges.append(start..<order.count)
             position += 1
         }
@@ -569,7 +616,7 @@ private final class DiskScan {
             return DiskItem(id: offset, parent: parents[offset], name: isRoot ? rootFrame.name : node.name, kind: isRoot ? .folder : node.kind,
                             allocatedSize: node.allocated, logicalSize: node.logical, itemCount: node.items, category: node.category,
                             modified: node.modified, children: ranges[offset], contentsOmitted: node.omitted, isUnreadable: node.unreadable,
-                            unreadableCount: node.unreadableCount)
+                            unreadableCount: node.unreadableCount, identity: node.identity)
         }
         let categories = DiskCategory.allCases
             .map { DiskCategoryTotal(category: $0, allocatedSize: rootFrame.categoryBytes[$0.rawValue]) }
@@ -578,8 +625,9 @@ private final class DiskScan {
             rootPath: rootPath, items: items, largestFiles: largest.sortedDescending(),
             largestFilesCutoff: largestTurnedAway ? largest.smallestKey ?? .max : 0, categories: categories,
             fileCount: fileCount, folderCount: folderCount, unreadableFolders: unreadableFolders,
-            unreadablePaths: unreadablePaths, hardLinkDuplicates: hardLinkDuplicates, skippedVolumes: skippedVolumes,
-            detailThreshold: threshold, duration: duration, finishedAt: Date()
+            unreadablePaths: unreadablePaths, hardLinkDuplicates: hardLinks.duplicates, hardLinkDuplicateSize: hardLinks.duplicateSize,
+            skippedVolumes: boundary.skipped, skippedVolumeCount: boundary.skippedCount, detailThreshold: threshold,
+            duration: duration, finishedAt: Date(), volumeUsedAtStart: usedAtStart
         )
     }
 }

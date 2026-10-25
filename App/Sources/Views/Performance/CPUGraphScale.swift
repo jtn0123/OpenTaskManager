@@ -3,14 +3,10 @@ import SwiftUI
 
 /// How the CPU graphs are scaled: fitted to the load on screen (`AutoScale`),
 /// or always to the whole CPU, for watching for saturation. One setting,
-/// `CPUGraphScale.key`, for every graph that offers it: Performance's CPU
+/// `Settings.cpuGraphScale`, for every graph that offers it: Performance's CPU
 /// graph, its core-type and per-core graphs, CPU by app, and the History
 /// page's CPU chart.
-enum CPUGraphScale: String, CaseIterable {
-    case auto
-    case full
-
-    static let key = "cpuGraphScale"
+extension CPUGraphScale {
     /// After the top axis label of an auto-scaled graph, so a reader knows
     /// the top isn't 100%.
     static let autoNote = "auto scale"
@@ -24,7 +20,7 @@ enum CPUGraphScale: String, CaseIterable {
 
 /// The Auto / 100% choice, for a graph's caption row.
 struct CPUScalePicker: View {
-    @AppStorage(CPUGraphScale.key) private var scale = CPUGraphScale.auto
+    @Setting(Settings.cpuGraphScale) private var scale: CPUGraphScale
 
     var body: some View {
         Picker("Scale", selection: $scale) {
@@ -58,6 +54,6 @@ final class AutoScaleBounds {
     /// The highest value a graph of `capacity` samples shows: its last
     /// `capacity + 1` values, as `GraphView` draws them.
     static func peak(_ values: [Double], capacity: Int) -> Double {
-        values.suffix(capacity + 1).lazy.filter(\.isFinite).max() ?? 0
+        GraphMath.finitePeak(values, last: capacity + 1)
     }
 }

@@ -19,9 +19,10 @@ final class NetworkActivityStore {
     /// Readings across the graphs: the same minutes as the main sampler's
     /// graphs at `interval` seconds per sample (100 readings, five minutes,
     /// at the normal speed), so the by-app graph lines up with the
-    /// throughput graph above it.
-    static func graphSpan(interval: TimeInterval) -> Int {
-        max(Int((Double(AppModel.graphSpan) * interval / refreshSeconds).rounded()), 2)
+    /// throughput graph above it; or, for a page whose graphs are fitted to
+    /// what's been collected, the same minutes as its window of `samples`.
+    static func graphSpan(interval: TimeInterval, samples: Int = AppModel.graphSpan) -> Int {
+        max(Int((Double(samples) * interval / refreshSeconds).rounded()), 2)
     }
     /// Started again after a longer gap than this, the graphs begin afresh
     /// instead of joining old readings to new ones.
@@ -74,15 +75,25 @@ final class NetworkActivityStore {
             var due = ContinuousClock.now
             while !Task.isCancelled {
                 guard let model else { return }
-                self?.fit(interval: model.updateSpeed.rawValue)
-                if model.isPaused {
+                await model.samplingDemand.waitUntilVisible()
+                guard !Task.isCancelled else { return }
+                if let previous = baseline, ContinuousClock.now - previous.time > .seconds(Self.refreshSeconds * 1.5) {
+                    baseline = nil
+                }
+                if model.isPaused || !model.samplingDemand.hasVisibleWindow {
                     // Frozen like the other pages. The first reading after
                     // resuming is a new baseline, not a rate across the pause.
                     baseline = nil
                 } else {
+                    if baseline == nil, self?.hasMeasured == true { self?.reset() }
+                    self?.fit(interval: model.samplingInterval)
                     let traffic = await Task.detached(priority: .utility) { ProcessNetwork.read(excludingLoopback: true) }.value
                     let now = ContinuousClock.now
                     guard let self, !Task.isCancelled else { return }
+                    guard model.samplingDemand.hasVisibleWindow else {
+                        baseline = nil
+                        continue
+                    }
                     if isUnavailable != (traffic == nil) { isUnavailable = traffic == nil }
                     if let traffic, let previous = baseline {
                         ingest(ProcessNetwork.rates(from: previous.traffic, to: traffic, interval: (now - previous.time) / .seconds(1)),

@@ -7,7 +7,7 @@ import SwiftUI
 /// open folder by folder, a ranked list beside it, the largest files and the
 /// space by category.
 ///
-/// Nothing is read until asked (the Scan button or a scope pick), the page
+/// Manual scans start from Scan or a scope pick; automatic scans are opt-in. The page
 /// reads nothing from `AppModel`, and the last scan is kept for the session,
 /// so the page costs nothing while it sits open.
 struct StorageView: View {
@@ -47,7 +47,21 @@ struct StorageView: View {
                 Task { focus = stage }
             }
         }
+        .sheet(item: Binding(get: { store.cleanupReview }, set: { store.cleanupReview = $0 })) { model in
+            StorageCleanupSheet(model: model, store: store)
+        }
+        .sheet(item: Binding(get: { StorageScheduler.shared.editing }, set: { StorageScheduler.shared.editing = $0 })) { scope in
+            StorageScheduleSheet(scope: scope)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) { StorageSavedScanPicker(store: store) }
+        .safeAreaInset(edge: .bottom, spacing: 0) { StorageScheduleStatus() }
         .toolbar {
+            ToolbarItem {
+                if !store.cleanupSelection.isEmpty {
+                    Button(store.readingCleanup ? "Reviewing…" : "Clean Up (\(store.cleanupSelection.count))…") { store.reviewCleanup() }
+                        .disabled(store.readingCleanup || store.isScanning)
+                }
+            }
             ToolbarItem {
                 ScopeMenu(store: store)
             }
@@ -100,13 +114,17 @@ private struct ScopeMenu: View {
                 } label: {
                     Label("\(scope.title) — \(scope.subtitle)", systemImage: scope.symbol)
                 }
+                .disabled(store.isScanning)
             }
+            Divider()
+            Button("Scan This Automatically…") { StorageScheduler.shared.editing = store.scope }
             Divider()
             Button {
                 store.chooseFolder()
             } label: {
                 Label("Choose Folder…", systemImage: "folder.badge.plus")
             }
+            .disabled(store.isScanning)
         } label: {
             Label(store.scope.title, systemImage: store.scope.symbol)
         }
@@ -115,7 +133,7 @@ private struct ScopeMenu: View {
     }
 }
 
-/// The right-click actions for an item. Nothing here deletes anything.
+/// Right-click offers paths and adds a real scan item to a separate cleanup review.
 struct StorageItemMenu: View {
     let path: String
     let isFolder: Bool
@@ -124,6 +142,13 @@ struct StorageItemMenu: View {
     var body: some View {
         Button("Reveal in Finder") { store.reveal(path) }
         Button("Copy Path") { store.copyPath(path) }
+        if store.cleanupPick(path) != nil {
+            if store.cleanupSelection.contains(path) {
+                Button("Remove from Cleanup") { store.cleanupSelection.remove(path) }
+            } else {
+                Button("Add to Cleanup") { store.addToCleanup(path) }
+            }
+        }
         if isFolder {
             Divider()
             Button("Scan This Folder") { store.scan(.folder(URL(fileURLWithPath: path, isDirectory: true))) }
@@ -133,7 +158,8 @@ struct StorageItemMenu: View {
 
 // MARK: - Before a scan
 
-/// A card per place to scan, since nothing is scanned until asked.
+/// How full each local volume is, then a card per place to scan, since
+/// nothing is scanned until asked.
 private struct StorageStartView: View {
     let store: StorageStore
     var focus: FocusState<StorageStage?>.Binding
@@ -156,25 +182,30 @@ private struct StorageStartView: View {
                     .foregroundStyle(LinearGradient(colors: [Theme.disk, Theme.cpu], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .accessibilityHidden(true)
                 Text("What's using your disk space?").font(.title2.weight(.semibold))
-                Text("Pick a place to scan. Nothing is read until you do, and nothing is ever deleted.")
+            }
+            let volumes = store.scopes.compactMap(\.volume)
+            if !volumes.isEmpty {
+                StorageCapacityPanel(volumes: volumes).frame(maxWidth: 820)
+            }
+            VStack(spacing: 14) {
+                Text("Pick a place to scan. Nothing is read until you do. Cleanup needs a separate review before anything moves to the Trash.")
                     .foregroundStyle(.secondaryText)
                     .multilineTextAlignment(.center)
-            }
-            FillGrid(minimum: 220, spacing: 14) {
-                ForEach(store.scopes) { scope in
-                    ScopeCard(symbol: scope.symbol, title: scope.title, subtitle: scope.subtitle,
-                              detail: Self.detail(scope), volume: scope.volume) {
-                        store.scan(scope)
+                FillGrid(minimum: 220, spacing: 14) {
+                    ForEach(store.scopes) { scope in
+                        ScopeCard(symbol: scope.symbol, title: scope.title, subtitle: scope.subtitle, detail: Self.detail(scope)) {
+                            store.scan(scope)
+                        }
+                        .focused(focus, equals: .start)
+                    }
+                    ScopeCard(symbol: "folder.badge.plus", title: "Choose Folder…", subtitle: "Any folder, on any disk",
+                              detail: "Scan just the folder you pick.") {
+                        store.chooseFolder()
                     }
                     .focused(focus, equals: .start)
                 }
-                ScopeCard(symbol: "folder.badge.plus", title: "Choose Folder…", subtitle: "Any folder, on any disk",
-                          detail: "Scan just the folder you pick.", volume: nil) {
-                    store.chooseFolder()
-                }
-                .focused(focus, equals: .start)
+                .frame(maxWidth: 820)
             }
-            .frame(maxWidth: 820)
             Text("Folders macOS keeps private (Mail, Messages, other apps' data) are counted as unreadable "
                 + "unless OpenTaskManager has Full Disk Access.")
                 .font(.explanation)
@@ -205,7 +236,6 @@ private struct ScopeCard: View {
     let title: String
     let subtitle: String
     let detail: String
-    let volume: VolumeInfo?
     var action: () -> Void
     @State private var isHovering = false
 
@@ -220,16 +250,6 @@ private struct ScopeCard: View {
                     }
                 }
                 Text(detail).font(.explanation).foregroundStyle(.secondaryText).fixedSize(horizontal: false, vertical: true)
-                if let volume, volume.totalBytes > 0 {
-                    let used = Double(volume.usedBytes) / Double(volume.totalBytes)
-                    VStack(alignment: .leading, spacing: 4) {
-                        ShareBar(segments: [(Theme.disk, used), (Color.secondary.opacity(0.25), 1 - used)]).frame(height: 6)
-                        Text("\(Format.bytes(volume.usedBytes)) used of \(Format.bytes(volume.totalBytes))")
-                            .font(.explanation)
-                            .foregroundStyle(.secondaryText)
-                            .monospacedDigit()
-                    }
-                }
                 Spacer(minLength: 0)
                 Label("Scan", systemImage: "magnifyingglass").font(.callout.weight(.medium)).foregroundStyle(Theme.disk)
             }
@@ -314,6 +334,8 @@ private struct StorageResultsView: View {
     let result: StorageResult
     let hover: StorageHover
     var focus: FocusState<StorageStage?>.Binding
+    @State private var summaryHeight: CGFloat = 160
+    @State private var footerHeight: CGFloat = 40
 
     var body: some View {
         let usage = result.usage
@@ -321,6 +343,27 @@ private struct StorageResultsView: View {
         // This scan's comparison, once saved; the treemap shows it in Changes mode.
         let comparison = store.comparison.flatMap { $0.later.scannedAt == usage.finishedAt ? $0 : nil }
         let changes = store.list == .changes ? comparison.map(TreemapChanges.init) : nil
+        GeometryReader { geometry in
+            results(usage: usage, folder: folder, comparison: comparison, changes: changes, height: geometry.size.height)
+        }
+        // A new scan's items are numbered afresh.
+        .onChange(of: usage.finishedAt, initial: true) { hover.useScan(usage) }
+        .onChange(of: ChangesFocus(showsChanges: store.list == .changes, since: comparison?.earlier.scannedAt, folder: folder.id),
+                  initial: true) {
+            focusChanges(comparison, in: folder)
+        }
+    }
+
+    private func results(usage: DiskUsage, folder: DiskItem, comparison: DiskScanComparison?,
+                         changes: TreemapChanges?, height: CGFloat) -> some View {
+        ScrollView {
+            resultCards(usage: usage, folder: folder, comparison: comparison, changes: changes, height: height)
+                .padding(16)
+        }
+    }
+
+    private func resultCards(usage: DiskUsage, folder: DiskItem, comparison: DiskScanComparison?,
+                             changes: TreemapChanges?, height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 SummaryCard(store: store, result: result, comparison: comparison)
@@ -329,6 +372,7 @@ private struct StorageResultsView: View {
                     .frame(maxWidth: .infinity)
             }
             .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { summaryHeight = $0 }
             GeometryReader { proxy in
                 HStack(spacing: 12) {
                     TreemapCard(store: store, result: result, folder: folder, hover: hover, changes: changes, open: open)
@@ -337,15 +381,11 @@ private struct StorageResultsView: View {
                         .frame(width: min(max(proxy.size.width * 0.36, 250), 340))
                 }
             }
-            .frame(minHeight: 200)
-            StorageFooter(store: store, usage: usage)
-        }
-        .padding(16)
-        // A new scan's items are numbered afresh.
-        .onChange(of: usage.finishedAt) { hover.clearMarks() }
-        .onChange(of: ChangesFocus(showsChanges: store.list == .changes, since: comparison?.earlier.scannedAt, folder: folder.id),
-                  initial: true) {
-            focusChanges(comparison, in: folder)
+            .frame(height: StorageResultsLayout.cardHeight(available: Double(height), summary: Double(summaryHeight),
+                                                          footer: Double(footerHeight)))
+            StorageFooter(store: store, usage: usage,
+                          maximumHeight: StorageResultsLayout.footerHeight(available: Double(height), summary: Double(summaryHeight)))
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
     }
 
@@ -382,6 +422,8 @@ private struct StorageResultsView: View {
     /// In Changes, keeps a change picked: the largest in the open folder,
     /// unless the one picked is still listed there. Leaving Changes drops it.
     private func focusChanges(_ comparison: DiskScanComparison?, in folder: DiskItem) {
+        // Reset fresh item IDs before the initial change is picked, whichever callback arrives first.
+        hover.useScan(result.usage)
         guard store.list == .changes, let comparison else {
             if hover.markedChange != nil { hover.clearMarks() }
             return
@@ -517,7 +559,7 @@ private struct TreemapCard: View {
     var open: (Int) -> Void
     @State private var copied = false
     /// In Changes, fade what didn't change.
-    @AppStorage("storageChangesOnly") private var changesOnly = true
+    @Setting(Settings.storageChangesOnly) private var changesOnly: Bool
 
     var body: some View {
         let usage = result.usage
@@ -555,6 +597,9 @@ private struct TreemapCard: View {
                 if usage.children(of: folder).contains(where: { $0.allocatedSize > 0 }) {
                     StorageTreemap(usage: usage, folder: folder, hover: hover, changes: changes, quietsUnchanged: changesOnly) { item in
                         open(item.id)
+                    } select: { item in
+                        store.list = .contents
+                        hover.select(item, in: usage)
                     } menu: { item in
                         StorageItemMenu(path: usage.path(of: item.id), isFolder: item.isFolder, store: store)
                     }
@@ -562,9 +607,12 @@ private struct TreemapCard: View {
                     EmptyFolder(store: store, usage: usage, folder: folder)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minHeight: StorageResultsLayout.mapMinimum, maxHeight: .infinity)
+            .frame(maxWidth: .infinity)
+            Divider()
+            TreemapSelectionStrip(usage: usage, folder: folder, hover: hover)
             HStack(spacing: 8) {
-                TreemapCaption(usage: usage, folder: folder, hover: hover, changes: changes, quietsUnchanged: changesOnly)
+                TreemapCaption(changes: changes, quietsUnchanged: changesOnly)
                 Spacer(minLength: 8)
                 if let changes {
                     // The list beside says which scan the colours compare with.
@@ -605,8 +653,10 @@ private struct EmptyFolder: View {
             ContentUnavailableView {
                 Label("Only the total was kept", systemImage: "square.dashed")
             } description: {
-                Text("To keep memory down on a big scan, folders under \(Format.bytes(usage.detailThreshold)) "
-                    + "keep their size but not their contents.")
+                Text(store.showingSavedScan
+                     ? "Saved summaries keep only the largest folders. Scan this folder by hand to see its full contents."
+                     : "To keep memory down on a big scan, folders under \(Format.bytes(usage.detailThreshold)) "
+                        + "keep their size but not their contents.")
             } actions: {
                 Button("Scan This Folder") { store.scan(.folder(URL(fileURLWithPath: usage.path(of: folder.id), isDirectory: true))) }
             }
@@ -617,13 +667,12 @@ private struct EmptyFolder: View {
     }
 }
 
-/// The unreadable-folder warning and why the totals can differ from the volume's.
+/// The unreadable-folder warning, and how the scan relates to its volume.
 private struct StorageFooter: View {
-    private static let explanation = "Sizes are space on disk. They won't match the space the volume reports used: "
-        + "APFS clones and snapshots, purgeable files and unreadable folders count differently."
-
     let store: StorageStore
     let usage: DiskUsage
+    let maximumHeight: Double
+    @State private var warningHeight: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -638,17 +687,14 @@ private struct StorageFooter: View {
                         + Text("Give OpenTaskManager Full Disk Access to count them.").foregroundStyle(.secondaryText))
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Open Full Disk Access Settings") { store.openFullDiskAccessSettings() }
-                        .buttonStyle(.link)
+                        .linkButtonStyle()
                         .fixedSize()
                 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { warningHeight = $0 }
                 .help(usage.unreadablePaths.prefix(5).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
             }
-            // Two lines at 820 points; the limit only bounds what a squeezed
-            // window would ask of the treemap above.
-            Text(Self.explanation)
-                .foregroundStyle(.secondaryText)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+            StorageReconcilePanel(store: store,
+                                  maximumHeight: max(0, maximumHeight - (usage.unreadableFolders > 0 ? Double(warningHeight) + 6 : 0)))
         }
         .font(.explanation)
     }

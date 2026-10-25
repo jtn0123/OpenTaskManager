@@ -19,7 +19,9 @@ private struct TableNeeds: Equatable {
     var height: CGFloat
     /// The room under the last row, which the system stripes like a row.
     var spare: CGFloat
-    /// The table has that height now, so nothing scrolls.
+    /// There's room for every row, so nothing scrolls and the spare room
+    /// can be cut off. Not while a scroller shows under the rows: cutting
+    /// the bottom off would take it too.
     var showsEveryRow: Bool
 }
 
@@ -64,6 +66,12 @@ final class TableFitProbeView: NSView {
     }
 
     private weak var table: NSTableView?
+    /// The table's width when last measured: a column dragged wider can
+    /// bring in a horizontal scroller without the scroll view changing size.
+    private var tableWidth: CGFloat = 0
+    /// Whether the spare room was last cut off, which leaves the scroll view
+    /// that much taller than the room the page gives it.
+    private var trimmed = false
     private var isScheduled = false
 
     override func viewDidMoveToWindow() {
@@ -72,6 +80,12 @@ final class TableFitProbeView: NSView {
     }
 
     @objc private func scrollViewResized(_ notification: Notification) {
+        scheduleMeasure()
+    }
+
+    @objc private func tableResized(_ notification: Notification) {
+        guard let table, table.frame.width != tableWidth else { return }
+        tableWidth = table.frame.width
         scheduleMeasure()
     }
 
@@ -95,6 +109,9 @@ final class TableFitProbeView: NSView {
             scrollView.postsFrameChangedNotifications = true
             NotificationCenter.default.addObserver(self, selector: #selector(scrollViewResized),
                                                    name: NSView.frameDidChangeNotification, object: scrollView)
+            table.postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(tableResized),
+                                                   name: NSView.frameDidChangeNotification, object: table)
         }
         let count = table.numberOfRows
         let header = table.headerView?.frame.height ?? 0
@@ -104,7 +121,14 @@ final class TableFitProbeView: NSView {
         // legacy scrollers, both, as one squeezes the other) and stay there.
         let spare = count > 0 ? table.rect(ofRow: 0).maxY : 0
         let height = ceil(header + rows + spare)
-        report?(TableNeeds(height: height, spare: spare, showsEveryRow: scrollView.frame.height >= height - 0.5))
+        // Either way, whether the page's room holds the header and every row.
+        // Trimmed, the scroll view was offered that room and the spare, which
+        // its height takes in; untrimmed, the room alone, so the spare is added.
+        let room = scrollView.frame.height + (trimmed ? 0 : spare)
+        // A scroller that takes room of its own, not one over the rows.
+        let showsScroller = scrollView.scrollerStyle == .legacy && !(scrollView.horizontalScroller?.isHidden ?? true)
+        trimmed = room >= height - 0.5 && !showsScroller
+        report?(TableNeeds(height: height, spare: spare, showsEveryRow: trimmed))
     }
 
     /// The table this probe sits behind: the first one found in the

@@ -15,6 +15,21 @@ struct PSReaderTests {
 
     @Test func rejectsGarbageCPUTime() {
         #expect(PSReader.parseCPUTime("abc") == nil)
+        #expect(PSReader.parseCPUTime("1:2.3.4") == nil)
+        #expect(PSReader.parseCPUTime("-1:00.00") == nil)
+    }
+
+    /// The byte parser rounds each part exactly as `Double`'s parser does.
+    @Test(arguments: ["0:00.07", "59:59.99", "1:23:45.67", "3-04:05:06.78", "0:0.1", "12345678901234567:00.00", "1e2:00"])
+    func cpuTimeMatchesDoubleParsing(text: String) throws {
+        var days = 0.0
+        var clock = Substring(text)
+        if let dash = clock.firstIndex(of: "-") {
+            days = try #require(Double(clock[..<dash]))
+            clock = clock[clock.index(after: dash)...]
+        }
+        let seconds = try clock.split(separator: ":").reduce(0.0) { try $0 * 60 + #require(Double($1)) }
+        #expect(PSReader.parseCPUTime(text) == days * 86_400 + seconds)
     }
 
     @Test func parsesRows() {
@@ -23,9 +38,13 @@ struct PSReaderTests {
           546 Ss     1:58.15  34720
           999 Z      0:00.00      0
         broken line
+        4294967296 S  0:00.00      0
+         1000 R      0:01.00     12
+
         """
         let rows = PSReader.parse(output)
-        #expect(rows.count == 3)
+        #expect(rows.count == 4)
+        #expect(rows[1000] == PSReader.Row(cpuSeconds: 1, residentBytes: 12 * 1024, state: .running))
         #expect(rows[1] == PSReader.Row(cpuSeconds: 356.48, residentBytes: 21696 * 1024, state: .sleeping))
         #expect(rows[999]?.state == .zombie)
     }

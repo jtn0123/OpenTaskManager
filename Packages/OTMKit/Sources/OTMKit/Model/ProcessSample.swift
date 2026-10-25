@@ -43,7 +43,8 @@ public struct ProcessSample: Sendable, Codable, Identifiable, Hashable {
     /// Share of this process's recent CPU time spent on the fastest core tier.
     public var topTierShare: Double?
     public var wakeupsPerSecond: Double?
-    /// GPU busy fraction attributed to this process, 0...1.
+    /// GPU time macOS counted for this process since the last sample, over
+    /// the time that passed, at most 1: not a share of all GPU time.
     public var gpuFraction: Double?
     /// Cumulative GPU time in seconds.
     public var gpuTime: Double?

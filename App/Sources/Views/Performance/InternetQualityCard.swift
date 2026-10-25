@@ -2,8 +2,9 @@ import OTMKit
 import SwiftUI
 
 /// "Internet quality" on a network link's detail: a networkQuality run when
-/// asked, its result in plain words, and the last few runs on this link.
-/// Its inputs don't change from tick to tick and it reads only
+/// asked, its result in plain words, and the last few runs on this link
+/// folded away under Saved runs, beside a link to compare them in the
+/// Benchmarks workspace. Its inputs don't change from tick to tick and it reads only
 /// `NetworkQualityStore`, so it redraws when a test starts or ends, not per tick.
 struct InternetQualityCard: View, Equatable {
     /// The BSD name, "en0".
@@ -51,7 +52,8 @@ struct InternetQualityCard: View, Equatable {
                 summary(latest)
             }
             if results.count > 1 {
-                history(results)
+                SavedRunsDisclosure(kind: .network, runs: results.map(BenchmarkRun.init), place: "over \(interface)")
+                    .equatable()
             }
             MethodologyDisclosure(preview: "macOS's networkQuality through \(name) (\(interface))") {
                 Text(caption)
@@ -137,35 +139,6 @@ struct InternetQualityCard: View, Equatable {
 
     private static func rate(_ bitsPerSecond: Double?) -> String {
         bitsPerSecond.map { Format.bitsPerSecond($0 / 8) } ?? "—"
-    }
-
-    // MARK: - History
-
-    private func history(_ results: [NetworkQualityResult]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Recent tests on \(interface)").font(.callout.weight(.semibold))
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
-                GridRow {
-                    Text("When")
-                    Text("Download").gridColumnAlignment(.trailing)
-                    Text("Upload").gridColumnAlignment(.trailing)
-                    Text("Responsiveness")
-                }
-                .font(.tableText)
-                .foregroundStyle(.secondaryText)
-                ForEach(results) { result in
-                    GridRow {
-                        Text(result.date.formatted(date: .abbreviated, time: .shortened))
-                        Text(Self.rate(result.downloadBitsPerSecond))
-                        Text(Self.rate(result.uploadBitsPerSecond))
-                        Text(result.responsiveness.map { "\(Int($0.rounded()).formatted()) RPM · \(NetworkResponsiveness(rpm: $0).title)" } ?? "—")
-                    }
-                    .font(.tableText)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                }
-            }
-        }
     }
 }
 

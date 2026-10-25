@@ -96,10 +96,11 @@ public struct DiskSpeedVolume: Sendable, Codable, Hashable {
 
     /// The volume holding `path`.
     public static func containing(_ path: String) -> DiskSpeedVolume? {
+        // statfs borrows the aligned local record; text decoding stays inside its fixed C tuples.
         var stats = statfs()
-        guard statfs(path, &stats) == 0 else { return nil }
+        guard unsafe statfs(path, &stats) == 0 else { return nil }
         func text<T>(_ field: T) -> String {
-            withUnsafeBytes(of: field) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            withUnsafeBytes(of: field) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         }
         let mountPoint = text(stats.f_mntonname)
         let device = VolumeReader.bsdName(mountSource: text(stats.f_mntfromname))
@@ -139,6 +140,11 @@ public struct DiskSpeedResult: SpeedTestRecord, Equatable, Identifiable {
     public var sequentialRead: DiskSpeedMeasurement
     public var randomWrite: DiskSpeedMeasurement
     public var randomRead: DiskSpeedMeasurement
+    /// The Mac's state as the test started and ended; nil in results saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
+    /// The guided protocol that measured this repeat; nil in older results.
+    public var session: BenchmarkSession?
 
     public var historyKey: String { volume.key }
 
@@ -188,12 +194,13 @@ public enum DiskSpeedError: Error, Equatable, Sendable {
     case cancelled
 
     public var message: String {
+        // strerror returns NUL-terminated storage, which is copied before another error lookup.
         switch self {
         case let .notAFolder(path): "There's no folder at \(path)."
         case let .notWritable(path, code):
-            "Couldn't make a test file in \(path): \(String(cString: strerror(code))). Choose a folder you can write to."
+            unsafe "Couldn't make a test file in \(path): \(String(cString: strerror(code))). Choose a folder you can write to."
         case let .notEnoughSpace(free): "Not enough free space: the test uses at most a tenth of the \(Format.bytes(free)) free."
-        case let .ioFailed(phase, code): "\(phase.title) failed: \(String(cString: strerror(code)))."
+        case let .ioFailed(phase, code): unsafe "\(phase.title) failed: \(String(cString: strerror(code)))."
         case let .verificationFailed(phase, offset):
             "\(phase.title) read back different data at byte \(offset.formatted()). The disk or its connection may be faulty."
         case .cancelled: "The test was cancelled."
@@ -203,15 +210,36 @@ public enum DiskSpeedError: Error, Equatable, Sendable {
 
 /// Stops a running test from another thread; the test notices between operations.
 public final class DiskSpeedCancellation: Sendable {
-    private let flag = OSAllocatedUnfairLock(initialState: false)
+    private struct State {
+        var cancelled = false
+        var stoppedOperations = 0
+        var stoppedPhase: DiskSpeedPhase?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 
     public func cancel() {
-        flag.withLock { $0 = true }
+        state.withLock { $0.cancelled = true }
     }
 
-    public var isCancelled: Bool { flag.withLock { $0 } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    /// Operations that saw the cancel before starting, and the phase that
+    /// stopped. Tests can distinguish a stop mid-phase from a completed run.
+    var stoppedOperations: Int { state.withLock { $0.stoppedOperations } }
+    var stoppedPhase: DiskSpeedPhase? { state.withLock { $0.stoppedPhase } }
+
+    func stopsOperation(in phase: DiskSpeedPhase) -> Bool {
+        state.withLock { state in
+            if state.cancelled {
+                state.stoppedOperations += 1
+                state.stoppedPhase = phase
+            }
+            return state.cancelled
+        }
+    }
 }
 
 /// Measures a volume through one temporary file: sequential write and read
@@ -228,8 +256,9 @@ public enum DiskSpeedTest {
 
     /// Free space at `path`, for the size limit.
     public static func freeBytes(at path: String) -> UInt64? {
+        // statfs borrows this aligned local record only until the call returns.
         var stats = statfs()
-        guard statfs(path, &stats) == 0 else { return nil }
+        guard unsafe statfs(path, &stats) == 0 else { return nil }
         return UInt64(stats.f_bavail) * UInt64(stats.f_bsize)
     }
 
@@ -266,9 +295,10 @@ public enum DiskSpeedTest {
     public static func run(in folder: String, configuration: DiskSpeedConfiguration = DiskSpeedConfiguration(),
                            cancellation: DiskSpeedCancellation? = nil,
                            progress: @escaping (DiskSpeedProgress) -> Void = { _ in }) throws(DiskSpeedError) -> DiskSpeedResult {
+        // FileManager borrows the local directory flag only until this call returns.
         precondition(configuration.isValid, "block sizes must tile")
         var isFolder: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else { throw .notAFolder(folder) }
+        guard unsafe FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else { throw .notAFolder(folder) }
         let free = freeBytes(at: folder) ?? 0
         var settings = configuration
         settings.fileSize = plannedSize(requested: configuration.fileSize, freeBytes: free, blockSize: configuration.sequentialBlockSize)
@@ -294,7 +324,13 @@ public enum DiskSpeedTest {
     /// Swift concurrency thread. Cancelling the calling task stops it.
     public static func measure(in folder: String, configuration: DiskSpeedConfiguration = DiskSpeedConfiguration(),
                                progress: @escaping @Sendable (DiskSpeedProgress) -> Void) async throws(DiskSpeedError) -> DiskSpeedResult {
-        let cancellation = DiskSpeedCancellation()
+        try await measure(in: folder, configuration: configuration, cancellation: DiskSpeedCancellation(), progress: progress)
+    }
+
+    /// `measure`, with the cancellation that cancelling the task sets, so a
+    /// test can see how the run stopped.
+    static func measure(in folder: String, configuration: DiskSpeedConfiguration, cancellation: DiskSpeedCancellation,
+                        progress: @escaping @Sendable (DiskSpeedProgress) -> Void) async throws(DiskSpeedError) -> DiskSpeedResult {
         let outcome: Result<DiskSpeedResult, DiskSpeedError> = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
@@ -319,15 +355,17 @@ private struct TestFile {
     let stillLinked: Bool
 
     init(in folder: String) throws(DiskSpeedError) {
+        // The C calls borrow path's NUL-terminated bytes; open receives the mode_t required by O_CREAT.
         path = (folder as NSString).appendingPathComponent(DiskSpeedTest.filePrefix + UUID().uuidString + ".tmp")
-        descriptor = open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, mode_t(0o600))
+        descriptor = unsafe open(path, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, mode_t(0o600))
         guard descriptor >= 0 else { throw .notWritable(folder, code: errno) }
-        stillLinked = unlink(path) != 0
+        stillLinked = unsafe unlink(path) != 0
     }
 
     func close() {
+        // unlink borrows path's NUL-terminated bytes only until the call returns.
         Darwin.close(descriptor)
-        if stillLinked { unlink(path) }
+        if stillLinked { unsafe unlink(path) }
     }
 }
 
@@ -348,7 +386,8 @@ private struct SplitMix64 {
 /// repeated through the file, with every 4K block stamped with its own index
 /// and a generation (0 when written in sequence, 1 when rewritten at random),
 /// so each block read back can be checked exactly.
-private final class SpeedRun {
+/// This run owns all three aligned buffers and frees them after its single-threaded I/O finishes.
+@safe private final class SpeedRun {
     private static let alignment = 16_384
     private static let reportInterval: UInt64 = 250_000_000
 
@@ -370,27 +409,29 @@ private final class SpeedRun {
 
     init(descriptor: Int32, settings: DiskSpeedConfiguration, cancellation: DiskSpeedCancellation?,
          report: @escaping (DiskSpeedProgress) -> Void) {
+        // The run owns the page-aligned buffers; configured block lengths fit them, and each synchronous I/O finishes before cleanup.
         self.descriptor = descriptor
         self.settings = settings
         self.cancellation = cancellation
         self.report = report
         let size = settings.sequentialBlockSize
-        pattern = .allocate(byteCount: size, alignment: Self.alignment)
-        buffer = .allocate(byteCount: size, alignment: Self.alignment)
-        expected = .allocate(byteCount: size, alignment: Self.alignment)
+        unsafe pattern = .allocate(byteCount: size, alignment: Self.alignment)
+        unsafe buffer = .allocate(byteCount: size, alignment: Self.alignment)
+        unsafe expected = .allocate(byteCount: size, alignment: Self.alignment)
         random = SplitMix64(state: settings.seed)
         let slots = settings.fileSize / UInt64(settings.randomBlockSize)
         rewritten = Array(repeating: 0, count: Int((slots + 63) / 64))
         var fill = SplitMix64(state: ~settings.seed)
         for offset in stride(from: 0, to: size - 7, by: 8) {
-            pattern.storeBytes(of: fill.next(), toByteOffset: offset, as: UInt64.self)
+            unsafe pattern.storeBytes(of: fill.next(), toByteOffset: offset, as: UInt64.self)
         }
     }
 
     deinit {
-        pattern.deallocate()
-        buffer.deallocate()
-        expected.deallocate()
+        // Each raw allocation belongs to this run and is deallocated exactly once here.
+        unsafe pattern.deallocate()
+        unsafe buffer.deallocate()
+        unsafe expected.deallocate()
     }
 
     private var slotCount: UInt64 { settings.fileSize / UInt64(settings.randomBlockSize) }
@@ -410,14 +451,15 @@ private final class SpeedRun {
     }
 
     private func sequentialWrite() throws(DiskSpeedError) -> DiskSpeedMeasurement {
+        // The run owns the page-aligned buffers; configured block lengths fit them, and each synchronous I/O finishes before cleanup.
         let block = settings.sequentialBlockSize
         let blocks = Int(settings.fileSize / UInt64(block))
         var nanoseconds: UInt64 = 0
         for index in 0..<blocks {
-            try checkCancelled()
+            try checkCancelled(in: .sequentialWrite)
             let offset = UInt64(index * block)
-            fill(buffer, length: block, at: offset, generation: 0)
-            nanoseconds += try transfer(.sequentialWrite, buffer, length: block, at: offset)
+            unsafe fill(buffer, length: block, at: offset, generation: 0)
+            unsafe nanoseconds += try transfer(.sequentialWrite, buffer, length: block, at: offset)
             progress(.sequentialWrite, done: Double(index + 1) / Double(blocks), bytes: offset + UInt64(block), nanoseconds: nanoseconds)
         }
         nanoseconds += flush()
@@ -425,15 +467,16 @@ private final class SpeedRun {
     }
 
     private func sequentialRead() throws(DiskSpeedError) -> DiskSpeedMeasurement {
+        // The run owns the page-aligned buffers; configured block lengths fit them, and each synchronous I/O finishes before cleanup.
         let block = settings.sequentialBlockSize
         let blocks = Int(settings.fileSize / UInt64(block))
         var nanoseconds: UInt64 = 0
         for index in 0..<blocks {
-            try checkCancelled()
+            try checkCancelled(in: .sequentialRead)
             let offset = UInt64(index * block)
-            nanoseconds += try transfer(.sequentialRead, buffer, length: block, at: offset)
-            fill(expected, length: block, at: offset, generation: 0)
-            guard memcmp(buffer.baseAddress, expected.baseAddress, block) == 0 else {
+            unsafe nanoseconds += try transfer(.sequentialRead, buffer, length: block, at: offset)
+            unsafe fill(expected, length: block, at: offset, generation: 0)
+            guard unsafe memcmp(buffer.baseAddress, expected.baseAddress, block) == 0 else {
                 throw .verificationFailed(.sequentialRead, offset: offset)
             }
             progress(.sequentialRead, done: Double(index + 1) / Double(blocks), bytes: offset + UInt64(block), nanoseconds: nanoseconds)
@@ -442,9 +485,10 @@ private final class SpeedRun {
     }
 
     private func randomWrite() throws(DiskSpeedError) -> DiskSpeedMeasurement {
+        // The run owns the page-aligned buffers; configured block lengths fit them, and each synchronous I/O finishes before cleanup.
         var result = try randomPhase(.randomWrite) { (slot: UInt64, offset: UInt64) throws(DiskSpeedError) -> UInt64 in
-            fill(buffer, length: settings.randomBlockSize, at: offset, generation: 1)
-            let nanoseconds = try transfer(.randomWrite, buffer, length: settings.randomBlockSize, at: offset)
+            unsafe fill(buffer, length: settings.randomBlockSize, at: offset, generation: 1)
+            let nanoseconds = unsafe try transfer(.randomWrite, buffer, length: settings.randomBlockSize, at: offset)
             rewritten[Int(slot / 64)] |= 1 << (slot % 64)
             return nanoseconds
         }
@@ -453,12 +497,13 @@ private final class SpeedRun {
     }
 
     private func randomRead() throws(DiskSpeedError) -> DiskSpeedMeasurement {
+        // The run owns the page-aligned buffers; configured block lengths fit them, and each synchronous I/O finishes before cleanup.
         try randomPhase(.randomRead) { (slot: UInt64, offset: UInt64) throws(DiskSpeedError) -> UInt64 in
             let length = settings.randomBlockSize
-            let nanoseconds = try transfer(.randomRead, buffer, length: length, at: offset)
+            let nanoseconds = unsafe try transfer(.randomRead, buffer, length: length, at: offset)
             let generation: UInt64 = rewritten[Int(slot / 64)] & (1 << (slot % 64)) != 0 ? 1 : 0
-            fill(expected, length: length, at: offset, generation: generation)
-            guard memcmp(buffer.baseAddress, expected.baseAddress, length) == 0 else {
+            unsafe fill(expected, length: length, at: offset, generation: generation)
+            guard unsafe memcmp(buffer.baseAddress, expected.baseAddress, length) == 0 else {
                 throw .verificationFailed(.randomRead, offset: offset)
             }
             return nanoseconds
@@ -474,8 +519,10 @@ private final class SpeedRun {
         let slots = slotCount
         var operations = 0
         var nanoseconds: UInt64 = 0
-        while operations < settings.randomOperationLimit, Self.now() - start < limit {
-            try checkCancelled()
+        while operations < settings.randomOperationLimit {
+            // A cancel still stops this phase if the thread was stalled past its time limit.
+            try checkCancelled(in: phase)
+            guard Self.now() - start < limit else { break }
             let slot = random.next() % slots
             nanoseconds += try operation(slot, slot * UInt64(settings.randomBlockSize))
             operations += 1
@@ -491,13 +538,14 @@ private final class SpeedRun {
     /// Reads or writes `length` bytes at `offset`, returning the nanoseconds it took.
     private func transfer(_ phase: DiskSpeedPhase, _ memory: UnsafeMutableRawBufferPointer, length: Int,
                           at offset: UInt64) throws(DiskSpeedError) -> UInt64 {
+        // length fits memory; done advances only by returned bytes, so every transfer stays in that allocation.
         guard let base = memory.baseAddress else { return 0 }
         var done = 0
         var elapsed: UInt64 = 0
         while done < length {
             let start = Self.now()
             let position = off_t(offset) + off_t(done)
-            let count = phase.isWrite ? pwrite(descriptor, base + done, length - done, position)
+            let count = unsafe phase.isWrite ? pwrite(descriptor, base + done, length - done, position)
                 : pread(descriptor, base + done, length - done, position)
             let code = errno
             elapsed += Self.now() - start
@@ -521,21 +569,22 @@ private final class SpeedRun {
     /// The pattern's bytes for `length` bytes of the file at `offset`, each
     /// 4K block stamped with its index and `generation`.
     private func fill(_ memory: UnsafeMutableRawBufferPointer, length: Int, at offset: UInt64, generation: UInt64) {
-        guard let destination = memory.baseAddress, let source = pattern.baseAddress else { return }
-        let start = Int(offset % UInt64(pattern.count))
-        destination.copyMemory(from: source + start, byteCount: length)
+        // Block offsets are multiples of length, which tiles pattern; each stamp fits its aligned random block.
+        guard let destination = memory.baseAddress, let source = unsafe pattern.baseAddress else { return }
+        let start = unsafe Int(offset % UInt64(pattern.count))
+        unsafe destination.copyMemory(from: source + start, byteCount: length)
         let unit = settings.randomBlockSize
         for position in stride(from: 0, to: length, by: unit) {
             let slot = (offset + UInt64(position)) / UInt64(unit)
-            destination.storeBytes(of: slot ^ settings.seed, toByteOffset: position, as: UInt64.self)
-            destination.storeBytes(of: generation ^ (settings.seed >> 1), toByteOffset: position + 8, as: UInt64.self)
+            unsafe destination.storeBytes(of: slot ^ settings.seed, toByteOffset: position, as: UInt64.self)
+            unsafe destination.storeBytes(of: generation ^ (settings.seed >> 1), toByteOffset: position + 8, as: UInt64.self)
         }
     }
 
     // MARK: Bookkeeping
 
-    private func checkCancelled() throws(DiskSpeedError) {
-        if cancellation?.isCancelled == true { throw .cancelled }
+    private func checkCancelled(in phase: DiskSpeedPhase) throws(DiskSpeedError) {
+        if cancellation?.stopsOperation(in: phase) == true { throw .cancelled }
     }
 
     private func progress(_ phase: DiskSpeedPhase, done: Double, bytes: UInt64, nanoseconds: UInt64) {

@@ -2,13 +2,17 @@ import Darwin
 import Foundation
 import OTMKit
 
-// `otm bench`: every saved CPU, GPU, disk and Internet result, as the app's
-// Benchmarks workspace reads them, and a comparison of two. It only reads.
+// `otm bench`: every saved CPU, GPU, disk, Internet and sustained CPU result,
+// as the app's Benchmarks workspace reads them, and a comparison of two. It only reads.
 
 /// `otm bench [list|compare A B] [--json]`. Runs are numbered newest first
-/// across the four tests, so `compare` takes two numbers from `list`.
-func benchCommand(_ options: Options) {
-    let runs = BenchmarkLibrary().load()
+/// across the tests, so `compare` takes two numbers from `list`.
+func benchCommand(_ options: Options) async {
+    if options.positional.first == "guided" {
+        await benchGuidedCommand(options)
+        return
+    }
+    let runs = BenchmarkRun.groupedSessions(BenchmarkLibrary().load())
     let arguments = options.positional
     switch arguments.first ?? "list" {
     case "list":
@@ -41,7 +45,7 @@ func benchCommand(_ options: Options) {
             }
         }
     default:
-        fail("unknown bench command \(arguments[0]): use list or compare")
+        fail("unknown bench command \(arguments[0]): use list, compare or guided")
     }
 }
 
@@ -54,15 +58,16 @@ private let benchDate: DateFormatter = {
 
 func benchList(_ runs: [BenchmarkRun]) -> String {
     guard !runs.isEmpty else {
-        return "No saved results yet. Run otm cpubench, otm gpubench, otm diskspeed or otm netquality, "
+        return "No saved results yet. Run otm cpubench, otm cpubench --sustained, otm gpubench, otm diskspeed or otm netquality, "
             + "or a test on the app's Performance page."
     }
     var lines = [pad("#", 4, right: true) + "  " + pad("TEST", 18) + pad("WHEN", 18) + pad("BUILD", 9) + pad("ON", 25) + " FIGURES"]
     for (index, run) in runs.enumerated() {
         // The volume or interface, or the chip without the model ("Apple M5 Pro").
         let on = run.target?.name ?? run.machine.map { $0.name.components(separatedBy: " · ")[0] } ?? "—"
+        let session = run.session.map { " · session \($0.recordedRepeats ?? 1)/\($0.repeatCount), protocol v\($0.protocolVersion)" } ?? ""
         lines.append(pad("\(index + 1)", 4, right: true) + "  " + pad(run.kind.title, 18) + pad(benchDate.string(from: run.date), 18)
-            + pad(run.build?.title.lowercased() ?? "—", 9) + pad(on, 25) + " " + run.headlineSummary)
+            + pad(run.build?.title.lowercased() ?? "—", 9) + pad(on, 25) + " " + run.headlineSummary + session)
     }
     lines += [
         "",
@@ -88,11 +93,15 @@ func benchComparison(_ comparison: BenchmarkComparison, runs: [BenchmarkRun], nu
     ]
     for change in comparison.changes {
         lines.append(pad(change.title, 26) + pad(change.unit.format(change.baseline), 15) + pad(change.unit.format(change.compared), 15)
-            + pad(change.change.map(BenchmarkChange.formatChange) ?? "—", 9) + pad(change.spreadText, 18) + change.verdict.title.lowercased()
+            + pad(change.change.map(BenchmarkChange.formatChange) ?? "—", 9) + pad(change.spreadText, 18) + change.verdictTitle.lowercased()
             + (change.caveat.map { ", \($0.title.lowercased())" } ?? ""))
     }
     lines += ["", "A change counts only when the two runs' ranges of repeats, slowest to fastest, don't overlap; "
         + "± is half a run's range."]
     lines += comparison.caveats
+    if !comparison.contextWarnings.isEmpty {
+        lines += ["", "How the runs' starts differed:"] + comparison.contextWarnings.map { "  \($0.text)" }
+    }
+    lines += ["", "Earlier: \(earlier.contextSummary)", "Later: \(later.contextSummary)"]
     return lines.joined(separator: "\n")
 }

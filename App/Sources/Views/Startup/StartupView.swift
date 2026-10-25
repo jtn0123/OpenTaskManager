@@ -2,17 +2,7 @@ import OTMKit
 import SwiftUI
 
 /// Which items the Startup table shows.
-enum StartupFilter: String, CaseIterable, Identifiable {
-    case all = "All"
-    case thirdParty = "Third party"
-    case apple = "Apple"
-    case running = "Running"
-    case agents = "Agents"
-    case daemons = "Daemons"
-    case problems = "Problems"
-
-    var id: String { rawValue }
-
+extension StartupFilter {
     func includes(_ item: LaunchItem, health: LaunchJobHealth) -> Bool {
         switch self {
         case .all: true
@@ -35,17 +25,26 @@ enum StartupFilter: String, CaseIterable, Identifiable {
 struct StartupRow: Identifiable, Equatable {
     let item: LaunchItem
     let health: LaunchJobHealth
+    /// What the job is doing, as the Status column and the details' header
+    /// both say it, apart from whether launchd has it loaded.
+    let status: LaunchItemStatus
     /// The latest sample's figures, filled in only while the table sorts by
     /// them, so the rows aren't rebuilt every tick otherwise. -1 when the
     /// job isn't running or isn't in the sample.
     var cpu = -1.0
     var memory: UInt64 = 0
 
+    init(item: LaunchItem, health: LaunchJobHealth) {
+        self.item = item
+        self.health = health
+        status = LaunchItemStatus(item: item, health: health)
+    }
+
     var id: LaunchItem.ID { item.id }
 }
 
-/// Everything launchd starts by itself: the agents and daemons in the
-/// LaunchAgents and LaunchDaemons folders, with what launchd says about each.
+/// Registrations in launchd folders and app bundles, and loaded jobs without
+/// a file, with what launchd says about each.
 ///
 /// The scan runs off the main actor when the page opens and on Refresh. While
 /// the page is on screen launchd is asked again every few seconds, without
@@ -54,14 +53,23 @@ struct StartupRow: Identifiable, Equatable {
 /// by the PID launchd reports, so a tick redraws them and not the table.
 struct StartupView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
-    @AppStorage("startupFilter") private var filter: StartupFilter = .all
-    @AppStorage("showStartupInspector") private var showInspector = true
+    @CurrentPage private var page
+    @Setting(Settings.startupFilter) private var filter: StartupFilter
+    @Setting(Settings.showStartupInspector) private var showInspector: Bool
+    @State private var showsInventory = LaunchArgument.string("openStartupView") == "inventory"
+    @State private var source: LaunchItemSource?
     @State private var items: [LaunchItem]?
     @State private var scannedAt: Date?
     @State private var isScanning = false
+    /// The columns' widths from what the last scan found, measured once per scan.
+    @State private var columnWidths = ColumnWidths<StartupColumn>()
     @State private var search = ""
     @State private var selection: LaunchItem.ID?
+    /// A row to bring into view, once: the selection's, when it comes from a
+    /// launch argument or another page, after the filter, search or sort
+    /// changes, and on Show in List. Never set by a tick or launchd's reads,
+    /// so the table doesn't move under the pointer.
+    @State private var scrollTarget: LaunchItem.ID?
     @State private var sortOrder = [KeyPathComparator(\StartupRow.item.publisher), KeyPathComparator(\StartupRow.item.name)]
     /// The item waiting on the Disable confirmation.
     @State private var disabling: LaunchItem?
@@ -71,6 +79,8 @@ struct StartupView: View {
     /// In a narrow window, the details cover the table.
     @State private var showsFullDetail = false
     @State private var openedRequest = false
+    /// The item the Apps page asked for, selected after the first read.
+    @State private var requestedItem: LaunchItem.ID?
     @FocusState private var tableFocused: Bool
 
     var body: some View {
@@ -84,7 +94,7 @@ struct StartupView: View {
         }
         .toolbar {
             ToolbarItem {
-                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Read the launchd folders and ask launchd again") {
+                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Read launchd folders, app registrations and launchd state") {
                     Task { await scan() }
                 }
             }
@@ -98,14 +108,31 @@ struct StartupView: View {
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Label, program or path")
         .task {
-            // "Show in Startup" on the Apps page searches for that app's items.
+            // "Show in Startup" on the Apps page searches for that app's
+            // items, and one of them picked there is selected once they're read.
             if let query = model.requestedStartupSearch {
                 model.requestedStartupSearch = nil
                 search = query
+                showsInventory = true
                 filter = .all
             }
-            if items == nil { await scan() }
+            source = LaunchArgument.string("openStartupSource").flatMap { LaunchItemSource(name: $0) }
+            if source != nil || model.requestedStartupItem != nil || IncidentNavigation.shared.job != nil
+                || LaunchArgument.string("openStartupItem") != nil {
+                showsInventory = true
+                filter = .all
+            }
+            if !showsInventory, ![StartupFilter.all, .running, .problems].contains(filter) { filter = .all }
+            requestedItem = model.requestedStartupItem
+            model.requestedStartupItem = nil
+            if items == nil || IncidentNavigation.shared.job != nil { await scan() }
         }
+        // The selected row may have moved out of view; these are the user's
+        // own changes, never a tick or a read of launchd's list.
+        .onChange(of: filter) { revealSelection() }
+        .onChange(of: source) { revealSelection() }
+        .onChange(of: search) { revealSelection() }
+        .onChange(of: sortOrder) { revealSelection() }
         // Only while the page is on screen, and not while updates are paused.
         .task(id: model.isPaused) { await followLaunchd() }
         .confirmationDialog("Disable \(disabling?.name ?? "this item")?", isPresented: Binding(
@@ -126,7 +153,8 @@ struct StartupView: View {
 
     private func page(_ items: [LaunchItem]) -> some View {
         let watch = model.launchJobs.watch
-        let rows = visibleRows(items, watch: watch)
+        let scopedItems = showsInventory ? items : items.filter(\.isLoginRegistration)
+        let rows = visibleRows(scopedItems, watch: watch)
         // Like the Processes inspector, the details take room only once
         // something is selected. Beside the table, Publisher gives its room
         // to Name and a badge marks the third-party rows instead.
@@ -134,14 +162,30 @@ struct StartupView: View {
         let besideTable = wantsInspector && !isNarrow
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
-                summary(items, watch: watch)
+                scopePicker
+                Text(showsInventory ? "All launchd registrations, including macOS services and boot daemons."
+                     : "Third-party agents and app helpers configured to start at login, including disabled registrations.")
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                summary(scopedItems, watch: watch)
                     .padding(.bottom, 2)
-                Picker("Show", selection: $filter) {
-                    ForEach(StartupFilter.allCases) { Text($0.rawValue).tag($0) }
+                FlowRow(spacing: 12, lineSpacing: 8, spreads: false, centresRows: true, balancesRows: false) {
+                    Picker("Show", selection: $filter) {
+                        ForEach(StartupFilter.allCases.filter { showsInventory || ![.apple, .agents, .daemons, .thirdParty].contains($0) }) {
+                            Text($0.rawValue).tag($0)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    Picker("Source", selection: $source) {
+                        Text("All sources").tag(nil as LaunchItemSource?)
+                        ForEach(LaunchItemSource.allCases) { Text($0.title).tag(Optional($0)) }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    FilteredCount(shown: rows.count, total: scopedItems.count, noun: "items", showAll: showAll)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
                 LoginItemsNote()
             }
             .padding(.horizontal, 16)
@@ -153,15 +197,17 @@ struct StartupView: View {
                 wantsInspector: wantsInspector,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
-                widthKey: "startupInspectorWidth",
+                widthKey: Settings.startupInspectorWidth,
                 backTitle: "Startup"
             ) {
                 VStack(spacing: 0) {
                     // Only as tall as its rows, so a short list, as Problems
                     // usually is, isn't followed by empty stripes.
-                    StartupTable(model: model, rows: rows, showsPublisher: filter.showsPublisher && !besideTable,
-                                 filterShowsPublisher: filter.showsPublisher,
-                                 selection: $selection, sortOrder: $sortOrder, focus: $tableFocused, toggle: toggle, open: openDetails)
+                    StartupTable(model: model, rows: rows, widths: columnWidths,
+                                 showsPublisher: showsInventory && filter.showsPublisher && !besideTable,
+                                 filterShowsPublisher: showsInventory && filter.showsPublisher, showsSource: source == nil,
+                                 selection: $selection, sortOrder: $sortOrder, scrollTarget: $scrollTarget,
+                                 focus: $tableFocused, toggle: toggle, open: openDetails)
                         .fitsTableToRows(rows.count)
                         .layoutPriority(1)
                     if rows.isEmpty, filter == .problems, search.isEmpty {
@@ -176,7 +222,8 @@ struct StartupView: View {
                         model: model, item: item, health: watch.health(of: item), record: watch.record(for: item),
                         refreshID: scannedAt, toggle: { toggle(item) },
                         control: { action in Task { await perform(action, on: item) } },
-                        showProcess: showProcess
+                        showProcess: showProcess,
+                        showInList: showInList
                     )
                 } else {
                     ContentUnavailableView("No item selected", systemImage: "info.circle",
@@ -184,9 +231,26 @@ struct StartupView: View {
                 }
             }
             Divider()
-            StartupStatusBar(shown: rows.count, total: items.count, scannedAt: scannedAt, isScanning: isScanning,
-                             watchedSince: watch.since)
+            StartupStatusBar(total: scopedItems.count, scannedAt: scannedAt, isScanning: isScanning, watchedSince: watch.since)
         }
+    }
+
+    private var scopePicker: some View {
+        Picker("Startup view", selection: Binding(get: { showsInventory }, set: {
+            showsInventory = $0
+            filter = .all
+            source = nil
+            search = ""
+            selection = nil
+            if let items {
+                columnWidths = StartupTable.widths(for: showsInventory ? items : items.filter(\.isLoginRegistration))
+            }
+        })) {
+            Text("Login items").tag(false)
+            Text("All launchd jobs").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 360)
     }
 
     /// Double-click: the pane in a wide window, the full-width details in a narrow one.
@@ -206,14 +270,22 @@ struct StartupView: View {
     private func summary(_ items: [LaunchItem], watch: LaunchJobWatch) -> some View {
         let problems = items.filter { watch.health(of: $0).needsAttention }.count
         return FillGrid(minimum: 140, spacing: 12) {
-            SummaryCard(title: "Total", value: items.count, tint: Theme.cpu,
-                        help: "Property lists in the five LaunchAgents and LaunchDaemons folders")
+            SummaryCard(title: showsInventory ? "Total" : "Login registrations", value: items.count, tint: Theme.cpu,
+                        help: "Launchd folders, app-bundled registrations and loaded jobs without a file")
             SummaryCard(title: "Running", value: items.filter { $0.pid != nil }.count, tint: Theme.disk,
                         help: "Jobs with a process running right now")
-            SummaryCard(title: "Third party", value: items.filter { $0.publisher == .thirdParty }.count, tint: Theme.network,
-                        help: "Installed by something other than macOS")
-            SummaryCard(title: "Launch at login", value: items.filter(\.startsAutomatically).count, tint: Theme.memory,
-                        help: "Agents that start when you log in and daemons that start at boot, unless they're disabled")
+            if showsInventory {
+                SummaryCard(title: "Third party", value: items.filter { $0.publisher == .thirdParty }.count, tint: Theme.network,
+                            help: "Installed by something other than macOS")
+            } else {
+                SummaryCard(title: "Disabled", value: items.filter(\.isDisabled).count, tint: Theme.other,
+                            help: "Disabled registrations stay in this list. Select one to see how to enable it.")
+            }
+            // Boot daemons and unregistered helpers are not login starts.
+            SummaryCard(title: "Start at login", value: items.filter(\.startsAtLogin).count, tint: Theme.memory,
+                        caption: "Agents and loaded app login helpers",
+                        help: "Agents set to run at load or kept alive, including those bundled in apps, and app login helpers "
+                            + "listed by launchd. Excludes boot daemons, Open at Login apps and macOS approval switches.")
             SummaryCard(title: "Problems", value: problems, tint: problems > 0 ? LaunchJobHealth.tint : Theme.other,
                         glow: problems > 0 ? 0.35 : 0,
                         help: "Jobs whose last run crashed or failed, or that were seen restarting again and again. "
@@ -225,11 +297,7 @@ struct StartupView: View {
         let query = search.trimmingCharacters(in: .whitespaces)
         return items.compactMap { item -> StartupRow? in
             let health = watch.health(of: item)
-            guard filter.includes(item, health: health),
-                  query.isEmpty || [item.name, item.label, item.program ?? "", item.plistPath].contains(where: {
-                      $0.localizedCaseInsensitiveContains(query)
-                  })
-            else { return nil }
+            guard source == nil || source == item.source, filter.includes(item, health: health), Self.matches(item, query) else { return nil }
             var row = StartupRow(item: item, health: health)
             // The samples are read only while the table sorts by them; otherwise
             // a tick would rebuild every row for figures only their cells show.
@@ -242,9 +310,41 @@ struct StartupView: View {
         .sorted(using: sortOrder)
     }
 
+    /// Whether the search finds the item: its name, label, program or property list path.
+    private static func matches(_ item: LaunchItem, _ query: String) -> Bool {
+        query.isEmpty || [item.name, item.label, item.program ?? "", item.plistPath].contains {
+            $0.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     private var sortsByUsage: Bool {
         let usage: [PartialKeyPath<StartupRow>] = [\.cpu, \.memory]
         return sortOrder.first.map { usage.contains($0.keyPath) } ?? false
+    }
+
+    /// Every item again: the filter, source and search cleared.
+    private func showAll() {
+        filter = .all
+        source = nil
+        search = ""
+    }
+
+    /// Brings the selected row into view, once, if the list shows it.
+    private func revealSelection() {
+        if let selection { scrollTarget = selection }
+    }
+
+    /// The details' Show in List: the row of the item they show, in view and
+    /// selected as a click would leave it. A filter or search that hides it
+    /// gives way, and in a narrow window the list comes back over the details.
+    private func showInList() {
+        guard let selection, let item = items?.first(where: { $0.id == selection }) else { return }
+        if !showsInventory && !item.isLoginRegistration { showsInventory = true }
+        if source != nil, source != item.source { source = nil }
+        if !filter.includes(item, health: model.launchJobs.watch.health(of: item)) { filter = .all }
+        if !Self.matches(item, search.trimmingCharacters(in: .whitespaces)) { search = "" }
+        showsFullDetail = false
+        select(selection)
     }
 
     /// Enables an item straight away; disabling asks first, since it stops the job.
@@ -278,28 +378,58 @@ struct StartupView: View {
 
     private func scan() async {
         isScanning = true
-        let scanned = await Task.detached(priority: .userInitiated) { LaunchItems.scan() }.value
-        apply(scanned)
+        let inventory = await Task.detached(priority: .userInitiated) { LaunchItems.inventory() }.value
+        let scanned = inventory.items
+        // Before the rows, so a first table starts at these widths.
+        columnWidths = StartupTable.widths(for: showsInventory ? scanned : scanned.filter(\.isLoginRegistration))
+        apply(inventory, configurationsRead: true)
         scannedAt = .now
         isScanning = false
+        // An item picked among an app's launch items on the Apps page, once.
+        if let requested = requestedItem {
+            requestedItem = nil
+            if scanned.contains(where: { $0.id == requested }) {
+                await LaunchArgument.afterTableLayout()
+                select(requested)
+                // Beside the list, not over it, so the row shows in a narrow window too.
+                showInspector = true
+            }
+        }
         // `--args -openStartupItem <text>` picks the first item whose label or name contains it, once, for screenshots.
+        if let key = IncidentNavigation.shared.job {
+            await LaunchArgument.afterTableLayout()
+            filter = .all
+            source = nil
+            search = key.label
+            select(visibleRows(scanned, watch: model.launchJobs.watch).first { LaunchHistoryKey($0.item) == key }?.id)
+            if selection != nil { openDetails() }
+            IncidentNavigation.shared.job = nil
+        }
         if !openedRequest, let query = LaunchArgument.string("openStartupItem") {
             openedRequest = true
             await LaunchArgument.afterTableLayout()
-            selection = visibleRows(scanned, watch: model.launchJobs.watch).first {
+            select(visibleRows(scanned, watch: model.launchJobs.watch).first {
                 $0.item.label.localizedCaseInsensitiveContains(query) || $0.item.name.localizedCaseInsensitiveContains(query)
-            }?.id
+            }?.id)
             openDetails()
-            // As a click would: the row shows the selection's colour, not
-            // the grey of a table without the focus.
-            Task { tableFocused = true }
         }
     }
 
+    /// Selects a row picked somewhere other than the table, and brings it
+    /// into view. As a click would, the row shows the selection's colour,
+    /// not the grey of a table without the focus.
+    private func select(_ id: LaunchItem.ID?) {
+        selection = id
+        scrollTarget = id
+        Task { tableFocused = true }
+    }
+
     /// Shows a read of launchd's list and notes it for the restart counts.
-    private func apply(_ read: [LaunchItem]) {
+    private func apply(_ inventory: LaunchItemInventory, configurationsRead: Bool = false) {
+        let read = inventory.items
         if read != items { items = read }
-        model.launchJobs.observe(read, processes: model.snapshot?.processes ?? [])
+        model.launchJobs.observe(inventory, processes: model.snapshot?.processes ?? [],
+                                 recorder: model.showsSensorFixture ? nil : model.recorder, configurationsRead: configurationsRead)
         if let selection, !read.contains(where: { $0.id == selection }) { self.selection = nil }
     }
 
@@ -310,10 +440,11 @@ struct StartupView: View {
         guard !model.isPaused else { return }
         while !Task.isCancelled {
             try? await Task.sleep(for: LaunchJobStore.readInterval)
-            guard !Task.isCancelled, !isScanning, let before = items else { continue }
-            let read = await Task.detached(priority: .utility) { LaunchItems.withCurrentStatus(before) }.value
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow, !isScanning, let before = items else { continue }
+            let read = await Task.detached(priority: .utility) { LaunchItems.currentInventory(before) }.value
             // A full read, after Refresh or an action, finished meanwhile: its list is newer.
-            guard !Task.isCancelled, !isScanning, items == before else { continue }
+            guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow, !isScanning, items == before else { continue }
             apply(read)
         }
     }
@@ -324,11 +455,21 @@ private struct SummaryCard: View {
     var value: Int
     var tint: Color
     var glow = 0.0
+    /// What the number counts, under it, where a tooltip alone wouldn't be seen.
+    var caption: String?
     var help: String
 
     var body: some View {
         Card(tint: tint, glow: glow) {
-            Stat(label: title, value: String(value), color: tint)
+            VStack(alignment: .leading, spacing: 3) {
+                Stat(label: title, value: String(value), color: tint)
+                if let caption {
+                    Text(caption)
+                        .font(.metadata)
+                        .foregroundStyle(.secondaryText)
+                        .lineLimit(2)
+                }
+            }
         }
         .help(help)
     }
@@ -336,20 +477,29 @@ private struct SummaryCard: View {
 
 // MARK: - Table
 
+/// The columns, their widths and the order they give way in are
+/// `StartupColumn` in OTMKit: Publisher, Source, Launches, Memory, CPU, then Kind.
+extension StartupColumn: FittingColumn {}
+
 private struct StartupTable: View {
     typealias Column = TableColumnContent<StartupRow, KeyPathComparator<StartupRow>>
 
     /// For the CPU and Memory cells, which read the latest sample.
     let model: AppModel
     var rows: [StartupRow]
+    var widths: ColumnWidths<StartupColumn>
     /// Off while the filter leaves one publisher, as every row would say it,
     /// and while the details sit beside the table, which say it once.
     var showsPublisher: Bool
     /// Whether rows can differ in publisher, so a third-party mark in Name
     /// says something once Publisher is off.
     var filterShowsPublisher: Bool
+    /// Off while the Source filter picks one, which says it for every row.
+    var showsSource: Bool
     @Binding var selection: LaunchItem.ID?
     @Binding var sortOrder: [KeyPathComparator<StartupRow>]
+    /// A row to scroll into view, cleared once it's done.
+    @Binding var scrollTarget: LaunchItem.ID?
     var focus: FocusState<Bool>.Binding
     var toggle: (LaunchItem) -> Void
     var open: () -> Void
@@ -360,14 +510,36 @@ private struct StartupTable: View {
     @State private var columns = TableColumnCustomization<StartupRow>()
     /// Columns too wide for the table now, lowest priority first.
     @State private var hiddenToFit = StartupColumn.givingWay
+    /// The columns with room for their long forms ("System agent",
+    /// "Running PID 501") without costing a column.
+    @State private var widened: Set<StartupColumn> = []
+    /// Where the asked-for row is in `rows`, until it's been brought into view.
+    @State private var revealRow: Int?
 
-    private var userHidden: Set<StartupColumn> { showsPublisher ? [] : [.publisher] }
+    private var userHidden: Set<StartupColumn> {
+        var hidden: Set<StartupColumn> = []
+        if !showsPublisher { hidden.insert(.publisher) }
+        if !showsSource { hidden.insert(.source) }
+        return hidden
+    }
+    /// The columns' widths as the table's room has them.
+    private var fittedWidths: ColumnWidths<StartupColumn> { widths.widened(widened) }
 
     var body: some View {
+        table
+            .onChange(of: scrollTarget, initial: true) { _, target in
+                guard let target else { return }
+                scrollTarget = nil
+                revealRow = rows.firstIndex { $0.id == target }
+            }
+    }
+
+    private var table: some View {
         let hidden = userHidden.union(hiddenToFit)
-        Table(rows, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columns) {
+        return Table(rows, selection: $selection, sortOrder: $sortOrder, columnCustomization: $columns) {
             nameColumn(badgesThirdParty: filterShowsPublisher && hidden.contains(.publisher))
             kindColumn
+            sourceColumn
             statusColumn
             cpuColumn
             memoryColumn
@@ -381,10 +553,11 @@ private struct StartupTable: View {
                     Button(item.isDisabled ? "Enable" : "Disable…") { toggle(item) }
                     Divider()
                 }
-                Button("Reveal in Finder") { StartupActions.reveal(item) }
-                Button("Show plist") { StartupActions.openPlist(item) }
+                if item.hasFile { Button("Reveal in Finder") { StartupActions.reveal(item) } }
+                if item.hasPlist { Button("Show plist") { StartupActions.openPlist(item) } }
                 Divider()
                 Button("Copy Label") { StartupActions.copyLabel(item) }
+                if item.hasFile { Button("Copy Path") { StartupActions.copyPath(item) } }
             }
         } primaryAction: { _ in
             open()
@@ -395,14 +568,44 @@ private struct StartupTable: View {
         .frame(minWidth: 0, maxWidth: .infinity)
         // In views of their own, so resizing the window re-runs those, not
         // the rows, and the columns change only when one has to give way.
-        .background(TableColumnFitter(userHidden: userHidden, hiddenToFit: $hiddenToFit))
+        .background(TableColumnFitter(userHidden: userHidden, widths: widths, hiddenToFit: $hiddenToFit, widened: $widened))
         .background(TableColumnSqueeze(columns: StartupColumn.allCases.count, shown: shownCount))
+        .background(TableRowReveal(row: $revealRow, rows: rows.count))
         .onChange(of: hidden, initial: true, showColumns)
         // The table writes its columns back as it resizes them, and a write
         // made between Publisher going (the details opening) and the others
         // hiding for the narrower table brought back a column that should
         // have stayed hidden. So any write is checked against what should show.
         .onChange(of: columns, showColumns)
+    }
+
+    /// Widths from what a scan found. Source and Launches start at their
+    /// widest value (within their caps), so they give way whole rather than
+    /// cut "Your LaunchAgents folder" short; Name and Kind stop where theirs
+    /// end, so spare room goes after the last column, not into a gap after
+    /// the names; Kind keeps room for "System agent", then Status for a
+    /// running job's PID, while that costs no column, and they say "Agent"
+    /// and "Running" in a table too narrow; Publisher keeps its title whole.
+    static func widths(for items: [LaunchItem]) -> ColumnWidths<StartupColumn> {
+        // The icon and its gap; third-party rows can carry a badge too.
+        let thirdParty = items.filter { $0.publisher == .thirdParty }.map(\.name)
+        let name = Swift.max(ColumnContent.fitting(items.map(\.name), title: "Name", floor: StartupColumn.name.minWidth, extra: 22),
+                             ColumnContent.fitting(thirdParty, title: "Name", floor: StartupColumn.name.minWidth, extra: 22 + 86))
+        let kind = ColumnContent.fitting(items.map(\.scope.title), title: "Kind", floor: StartupColumn.kind.minWidth,
+                                         cap: StartupColumn.kind.maxWidth)
+        // "Running PID 501", with the dot and the gaps either side of the title.
+        let status = ColumnContent.fitting(items.compactMap(\.pid).map { "Running PID \($0)" }, title: "Status",
+                                           floor: StartupColumn.status.minWidth, cap: StartupColumn.status.maxWidth,
+                                           extra: 16)
+        let source = ColumnContent.fitting(items.map(\.source.title), title: "Source", floor: StartupColumn.source.minWidth,
+                                           cap: StartupColumn.source.maxWidth)
+        let launches = ColumnContent.fitting(items.map(\.launchSummary), title: "Launches", floor: StartupColumn.launches.minWidth,
+                                             cap: StartupColumn.launches.maxWidth)
+        let publisher = ColumnContent.fitting(items.map(\.publisher.title), title: "Publisher",
+                                              floor: StartupColumn.publisher.minWidth, cap: StartupColumn.publisher.maxWidth)
+        return ColumnWidths(minimums: [.source: source, .launches: launches, .publisher: publisher],
+                            maximums: [.name: name, .kind: kind, .source: source, .launches: launches, .publisher: publisher],
+                            longForms: [.init(column: .kind, width: kind), .init(column: .status, width: status)])
     }
 
     /// How many columns the table has been told to show.
@@ -444,7 +647,7 @@ private struct StartupTable: View {
             // The whole name, for when the column cuts it short.
             .help("\(item.name)\n\(item.label)")
         }
-        .fitted(StartupColumn.name)
+        .fitted(StartupColumn.name, widths: fittedWidths)
     }
 
     private var kindColumn: some Column {
@@ -457,22 +660,27 @@ private struct StartupTable: View {
             .lineLimit(1)
             .help(row.item.scope.title)
         }
-        .fitted(StartupColumn.kind)
+        .fitted(StartupColumn.kind, widths: fittedWidths)
     }
 
-    private var statusColumn: some Column {
-        TableColumn("Status", value: \.item.state) { row in
-            LaunchStateLabel(state: row.item.state, health: row.health)
-                .help(statusHelp(row))
+    private var sourceColumn: some Column {
+        TableColumn("Source", value: \.item.source.rawValue) { row in
+            Text(row.item.source.title).lineLimit(1).help(row.item.sourceDescription)
         }
-        .fitted(StartupColumn.status)
+        .fitted(StartupColumn.source, widths: fittedWidths)
     }
 
-    private func statusHelp(_ row: StartupRow) -> String {
-        let state = row.item.pid.map { "\(row.item.state.title), PID \($0)" } ?? row.item.state.title
-        guard let headline = row.health.headline else { return state }
-        let exit = row.item.job?.lastExit.map { "\nLast exit: \($0.description)" } ?? ""
-        return "\(state)\n\(headline)\(exit)"
+    /// "Failed exit code 1", "Failed exit 1" in a narrow column, and the
+    /// whole of it in the tooltip where only "Failed" fits.
+    private var statusColumn: some Column {
+        TableColumn("Status", value: \.status) { row in
+            let key = LaunchHistoryKey(row.item)
+            let firstSeen = row.status.failureFirstSeen(in: model.launchJobs.observedStates[key], key: key)
+            let explanation = row.status.observationExplanation(firstSeen: firstSeen)
+            LaunchStateLabel(status: row.status)
+                .help("\(row.status.summary)\n\(explanation)\nlaunchd: \(row.status.registration.title)")
+        }
+        .fitted(StartupColumn.status, widths: fittedWidths)
     }
 
     /// Highest first on the first click, as on the Processes table.
@@ -480,21 +688,21 @@ private struct StartupTable: View {
         TableColumn("CPU", sortUsing: KeyPathComparator(\StartupRow.cpu, order: .reverse)) { row in
             JobUsage(model: model, pid: row.item.pid, figure: .cpu)
         }
-        .fitted(StartupColumn.cpu)
+        .fitted(StartupColumn.cpu, widths: fittedWidths)
     }
 
     private var memoryColumn: some Column {
         TableColumn("Memory", sortUsing: KeyPathComparator(\StartupRow.memory, order: .reverse)) { row in
             JobUsage(model: model, pid: row.item.pid, figure: .memory)
         }
-        .fitted(StartupColumn.memory)
+        .fitted(StartupColumn.memory, widths: fittedWidths)
     }
 
     private var launchesColumn: some Column {
         TableColumn("Launches", value: \.item.timing) { row in
             Text(row.item.launchSummary).lineLimit(1).help(row.item.launchSummary)
         }
-        .fitted(StartupColumn.launches)
+        .fitted(StartupColumn.launches, widths: fittedWidths)
     }
 
     private var publisherColumn: some Column {
@@ -503,7 +711,7 @@ private struct StartupTable: View {
                 .lineLimit(1)
                 .foregroundStyle(row.item.publisher == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
-        .fitted(StartupColumn.publisher)
+        .fitted(StartupColumn.publisher, widths: fittedWidths)
     }
 }
 
@@ -571,48 +779,56 @@ private struct ThirdPartyBadge: View {
     }
 }
 
-/// A coloured dot and the state, with the PID while it runs and there's
-/// room. A job that needs a look has a warning sign for its dot, and says
-/// Restarting, Crashed or Failed when that's more to the point.
+/// What a job is doing: a coloured dot and the state, with its detail (the
+/// PID, the exit code, the signal) where there's room, shortened ("exit 1")
+/// where there's less. A job that needs a look has a warning sign for its
+/// dot. The table and the details share these execution words; a failed
+/// job's header instead dates its last exit. Registration stays on its
+/// own line.
 struct LaunchStateLabel: View {
-    var state: LaunchItemState
-    var health: LaunchJobHealth = .healthy
+    var status: LaunchItemStatus
     @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            label(showsPID: true)
-            label(showsPID: false)
+            label(detail: status.detail)
+            if let compact = status.compactDetail {
+                label(detail: compact)
+            }
+            label(detail: nil)
         }
+        .accessibilityElement(children: .combine)
     }
 
-    private func label(showsPID: Bool) -> some View {
+    private func label(detail: String?) -> some View {
         HStack(spacing: 6) {
-            if health.needsAttention {
+            if status.needsAttention {
                 // On a selected row it turns white like the row's text.
                 Image(systemName: "exclamationmark.triangle.fill")
                     .imageScale(.small)
                     .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(LaunchJobHealth.tint))
             } else {
-                Circle().fill(state.color).frame(width: 7, height: 7)
+                Circle().fill(status.color).frame(width: 7, height: 7)
             }
-            Text(health.stateTitle(isRunning: state.isRunning) ?? state.title)
-            if showsPID, case let .running(pid) = state {
-                // Verbatim, so the PID isn't grouped like a quantity ("4,673").
-                Text(verbatim: "PID \(pid)").foregroundStyle(.secondaryText).monospacedDigit()
+            Text(status.title)
+            if let detail {
+                // Verbatim, so a PID isn't grouped like a quantity ("4,673").
+                Text(verbatim: detail).foregroundStyle(.secondaryText).monospacedDigit()
             }
         }
         .lineLimit(1)
     }
 }
 
-extension LaunchItemState {
+extension LaunchItemStatus {
+    /// The dot's colour. The states that need a look show a warning sign instead.
     var color: Color {
-        switch self {
+        switch execution {
         case .running: Theme.disk
-        case .loaded: Theme.cpu
+        case .notRunning: Theme.cpu
         case .disabled: Theme.swap
         case .notLoaded: Theme.other
+        case .restarting, .crashed, .failed: LaunchJobHealth.tint
         }
     }
 }
@@ -624,8 +840,8 @@ extension LaunchJobHealth {
 
 // MARK: - Status bar
 
+/// All the items read; how many the filters leave is over the table (`FilteredCount`).
 private struct StartupStatusBar: View {
-    var shown: Int
     var total: Int
     var scannedAt: Date?
     var isScanning: Bool
@@ -634,7 +850,7 @@ private struct StartupStatusBar: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(shown == total ? "\(total) items" : "\(shown) of \(total) items")
+            Text("\(total) \(total == 1 ? "item" : "items")")
             if isScanning {
                 Text("Reading…")
             } else if let scannedAt {
@@ -668,46 +884,5 @@ private struct NoProblemsNote: View {
             .font(.explanation)
             .foregroundStyle(.secondaryText)
             .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// What the table can't show, above it where it reads as the table's scope:
-/// Login Items live where only an administrator can read them. The text
-/// wraps rather than truncating in a narrow window.
-private struct LoginItemsNote: View {
-    static let settings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Label("Login Items aren't listed: macOS keeps them private. System Settings shows and changes them.",
-                  systemImage: "info.circle")
-                .font(.explanation)
-                .foregroundStyle(.secondaryText)
-                .help("Apps that open at login, and background items apps register with macOS, are kept where only "
-                    + "an administrator can read them.")
-            Spacer(minLength: 0)
-            Button("Open Login Items Settings") {
-                if let url = Self.settings { NSWorkspace.shared.open(url) }
-            }
-            .controlSize(.small)
-            .fixedSize()
-        }
-    }
-}
-
-/// Shared by the context menu and the detail pane.
-@MainActor
-enum StartupActions {
-    static func reveal(_ item: LaunchItem) {
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: item.plistPath)])
-    }
-
-    static func openPlist(_ item: LaunchItem) {
-        NSWorkspace.shared.open(URL(fileURLWithPath: item.plistPath))
-    }
-
-    static func copyLabel(_ item: LaunchItem) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.label, forType: .string)
     }
 }

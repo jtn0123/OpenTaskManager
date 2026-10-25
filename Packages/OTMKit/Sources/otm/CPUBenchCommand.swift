@@ -3,9 +3,11 @@ import Foundation
 import OTMKit
 
 // `otm cpubench`: the CPU benchmark the CPU page runs, saved to the same
-// history, and `otm cpubench layout`: the chip layout that page shows.
+// history, `otm cpubench --sustained`: its sustained run, and `otm cpubench
+// layout`: the chip layout that page shows.
 
-/// `otm cpubench [layout] [--json]`. Ctrl-C stops a run cleanly.
+/// `otm cpubench [layout] [--json]`, `otm cpubench --sustained [2|5] [--json]`.
+/// Ctrl-C stops a run cleanly.
 func cpuBenchCommand(_ options: Options) {
     if options.positional.first == "layout" {
         let layout = ChipLayoutReader.read()
@@ -16,13 +18,13 @@ func cpuBenchCommand(_ options: Options) {
         }
         return
     }
+    if options.sustained {
+        cpuSustainedCommand(options)
+        return
+    }
 
-    let cancellation = CPUBenchmarkCancellation()
-    signal(SIGINT, SIG_IGN)
-    let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
-    interrupt.setEventHandler { cancellation.cancel() }
-    interrupt.resume()
-    defer { interrupt.cancel() }
+    let cancellation = interruptCancels()
+    defer { cancellation.interrupt.cancel() }
 
     let showsProgress = isatty(STDERR_FILENO) == 1 && !options.json
     if !options.json {
@@ -31,9 +33,10 @@ func cpuBenchCommand(_ options: Options) {
             + "for about \(seconds) s. Other work on this Mac lowers the figures.\n"
         FileHandle.standardError.write(Data(notice.utf8))
     }
-    let result: CPUBenchmarkResult
+    let context = benchmarkContext()
+    var result: CPUBenchmarkResult
     do throws(CPUBenchmarkError) {
-        result = try CPUBenchmark.run(appVersion: "otm \(version)", cancellation: cancellation) { progress in
+        result = try CPUBenchmark.run(appVersion: "otm \(version)", cancellation: cancellation.token) { progress in
             guard showsProgress else { return }
             let who = progress.phase.isMulti ? "\(progress.phase.workers) workers" : "one worker"
             let line = "\(progress.phase.workload.title), \(who): \(Format.percent(progress.fraction)) of the run"
@@ -44,12 +47,36 @@ func cpuBenchCommand(_ options: Options) {
         fail(error.message)
     }
     if showsProgress { FileHandle.standardError.write(Data("\u{1B}[2K\r".utf8)) }
+    result.context = context.ended()
     _ = try? SpeedTestHistory.cpuBenchmark.append(result)
     if options.json {
         printJSON(result)
     } else {
         print(cpuBenchSummary(result))
     }
+}
+
+/// Ctrl-C cancels the CPU benchmark or sustained run in hand instead of
+/// killing `otm`, so it stops cleanly between units of work.
+func interruptCancels() -> (token: CPUBenchmarkCancellation, interrupt: any DispatchSourceSignal) {
+    let cancellation = CPUBenchmarkCancellation()
+    signal(SIGINT, SIG_IGN)
+    let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+    interrupt.setEventHandler { cancellation.cancel() }
+    interrupt.resume()
+    return (cancellation, interrupt)
+}
+
+/// The Mac's state before a test, saved with its result. `otm` keeps no
+/// sampler, so the CPU's load comes from a second's probe of its tick counters.
+func benchmarkContext() -> BenchmarkContext {
+    BenchmarkContextReader.atStart(appVersion: "otm \(version)")
+}
+
+/// "Started on the power adapter · thermal nominal · CPU 3% busy before · 21.3 GB memory available."
+func contextLine(_ context: BenchmarkContext?) -> String {
+    guard let context, !context.conditionsLine.isEmpty else { return BenchmarkContext.notRecorded + "." }
+    return "Started \(context.conditionsLine)."
 }
 
 func cpuBenchSummary(_ result: CPUBenchmarkResult) -> String {
@@ -80,6 +107,7 @@ func cpuBenchSummary(_ result: CPUBenchmarkResult) -> String {
         ? "Thermal state \(result.thermalStateAtStart.rawValue) throughout"
         : "Thermal state \(result.thermalStateAtStart.rawValue) at the start, \(result.thermalStateAtEnd.rawValue) at the end"
     lines.append("\(thermal)\(result.lowPowerMode ? ", Low Power Mode on" : ""). Took \(Format.fixed(result.seconds, 1)) s.")
+    lines.append(contextLine(result.context))
     lines.append("macOS chooses which cores run the workers; nothing pins them to a kind of core.")
     if !result.optimized {
         lines.append("This debug build runs the workloads far slower than a release build (make cli), so its figures don't compare.")

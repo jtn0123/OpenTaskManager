@@ -28,9 +28,12 @@ private func gpu(at time: TimeInterval, optimized: Bool = true, rates: [Double] 
         let gpu = shortTimed.contains(workload) ? 0.45 : 0.5
         return GPUWorkloadResult(workload: workload, measurement: GPUBenchmarkMeasurement(repeats: rates, gpuSeconds: [gpu, gpu, gpu],
                                                                                           wallSeconds: [0.501, 0.501, 0.501],
-                                                                                          unitsPerRepeat: 40))
+                                                                                          unitsPerRepeat: 40, timingEvidence: Array(repeating:
+                        GPUTimingEvidence(counterInterval: workload == .fill ? .init(start: 10.001, end: 10 + gpu - 0.001) : nil,
+                            commandBufferInterval: .init(start: 10, end: 10 + gpu), wallInterval: .init(start: 0, end: 0.501)), count: 3)))
     }
-    return GPUBenchmarkResult(date: Date(timeIntervalSince1970: time), suiteVersion: 1, configuration: .standard, device: device,
+    return GPUBenchmarkResult(date: Date(timeIntervalSince1970: time), suiteVersion: GPUBenchmark.suiteVersion, configuration: .standard,
+                              device: device,
                               osVersion: "macOS 27.2 (27C61)", appVersion: optimized ? "otm 0.1.0" : "OpenTaskManager 0.1.0",
                               optimized: optimized, thermalStateAtStart: .nominal, thermalStateAtEnd: .fair, lowPowerMode: false,
                               seconds: 9, workloads: workloads)
@@ -246,6 +249,35 @@ struct BenchmarkRunTests {
         #expect(BenchmarkChange.verdict(baseline: measurement(100), compared: measurement(100)) == .unchanged)
     }
 
+    @Test func theVerdictWordSaysWhichWayAChangeWent() {
+        func word(_ baseline: BenchmarkMeasurement, _ compared: BenchmarkMeasurement) -> String {
+            BenchmarkChange(baseline: baseline, compared: compared).verdictWord
+        }
+        // Speeds go faster or slower.
+        #expect(word(measurement(100, 99, 101), measurement(110, 108, 111)) == "faster")
+        #expect(word(measurement(100, 99, 101), measurement(90, 89, 92)) == "slower")
+        #expect(word(measurement(100, 99, 101, unit: .operationsPerSecond), measurement(120, 119, 121, unit: .operationsPerSecond))
+            == "faster")
+        // A delay or responsiveness only goes higher or lower, whichever is better.
+        #expect(word(measurement(20, 19, 21, unit: .milliseconds), measurement(10, 9, 11, unit: .milliseconds)) == "lower")
+        #expect(word(measurement(20, 19, 21, unit: .milliseconds), measurement(30, 29, 31, unit: .milliseconds)) == "higher")
+        #expect(word(measurement(900, 890, 910, unit: .roundTripsPerMinute), measurement(1200, 1190, 1210, unit: .roundTripsPerMinute))
+            == "higher")
+        // Otherwise why it doesn't count.
+        #expect(word(measurement(100, 95, 105), measurement(103, 99, 108)) == "within spread")
+        #expect(word(measurement(8.012, 8.011, 8.013), measurement(8.009, 8.008, 8.010)) == "negligible")
+        #expect(word(measurement(100), measurement(150)) == "measured once")
+        #expect(word(measurement(100), measurement(100)) == "unchanged")
+    }
+
+    @Test func everyRateIsASpeed() {
+        let speeds: [BenchmarkUnit] = [.bytesPerSecond, .flopsPerSecond, .pixelsPerSecond, .megabytesPerSecond, .bitsPerSecond,
+                                       .operationsPerSecond]
+        #expect(speeds.allSatisfy { $0.isSpeed && $0.higherIsBetter })
+        #expect(!BenchmarkUnit.milliseconds.isSpeed)
+        #expect(!BenchmarkUnit.roundTripsPerMinute.isSpeed)
+    }
+
     @Test func comparisonRowsCarryBothSpreads() throws {
         let compared = try #require(comparison(BenchmarkRun(cpu(at: 100)), BenchmarkRun(cpu(at: 200, multi: [140, 135, 138]))))
         let multi = try #require(compared.changes.first { $0.id == "integer.multi" })
@@ -271,7 +303,7 @@ struct BenchmarkRunTests {
         #expect(!macs.caveats.contains { $0.hasPrefix("Both runs are from a debug build") })
 
         let debug = try #require(comparison(BenchmarkRun(cpu(at: 100, optimized: false)), BenchmarkRun(cpu(at: 200, optimized: false))))
-        #expect(debug.caveats.contains { $0.hasPrefix("Both runs are from a debug build") })
+        #expect(debug.caveats.contains(BenchmarkComparison.debugBuildQualification))
 
         let links = try #require(comparison(BenchmarkRun(network(at: 100)), BenchmarkRun(network(at: 200, endpoint: "edge-2.example"))))
         #expect(links.caveats.first?.contains("not on this Mac; these runs reached different servers (edge-1.example, then edge-2.example)") == true)
@@ -283,7 +315,11 @@ struct BenchmarkRunTests {
         #expect(fill.baselineCaveat == nil)
         #expect(fill.comparedCaveat == .timingUnverified)
         #expect(fill.caveat == .timingUnverified)
-        #expect(fill.caveatNote == "Fill rate: timing unverified in the later run, so this change may not be real.")
+        #expect(fill.verdict == .timingUnverified)
+        #expect(fill.verdictWord == "timing unverified")
+        #expect(fill.caveatNote == "Fill rate: timing unverified in the later run, so its change is left out of the verdicts.")
+        // The row's note already says it's left out: no second line repeats it.
+        #expect(!later.caveats.contains(GPUTimingEvidence.fillExclusion))
         #expect(later.changes.first { $0.id == "compute" }?.caveat == nil)
         // First, since it bears on a row's verdict.
         #expect(later.caveats.first == fill.caveatNote)
@@ -341,7 +377,7 @@ struct BenchmarkExportTests {
         let data = try export.json()
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["format"] as? String == BenchmarkExport.formatName)
-        #expect(object["version"] as? Int == 1)
+        #expect(object["version"] as? Int == 2)
         #expect(object["exported"] as? String == "1970-01-01T00:05:00Z")
         let read = try BenchmarkExport.read(data)
         #expect(read == export)
@@ -382,7 +418,7 @@ struct BenchmarkExportTests {
         #expect(markdown.contains("| FP32 compute | 8.00 TFLOP/s | 9.20 TFLOP/s | +15% | ±1.9% / ±1.1% | better |"))
         #expect(markdown.contains("## Internet quality\n\nThese figures measure the Internet connection"))
         #expect(markdown.contains("| When | On | Download | Upload | Responsiveness | Idle latency | Notes |"))
-        #expect(markdown.contains("Workloads v1."))
+        #expect(markdown.contains("Workloads v2."))
         #expect(markdown.contains("Test v1. Settings: Mode parallel."))
         // GPU before Internet, as the workspace orders them.
         let gpu = try #require(markdown.range(of: "## GPU"))
@@ -399,7 +435,7 @@ struct BenchmarkExportTests {
         #expect(markdown.contains("| 8.00 Tpixel/s ±1.9% (timing unverified) |"))
         #expect(markdown.contains("| Fill rate | 8.00 Tpixel/s | 8.00 Tpixel/s (timing unverified) |"))
         #expect(markdown.contains("Timing unverified: The GPU's own clock"))
-        #expect(markdown.contains("- Fill rate: timing unverified in the later run, so this change may not be real."))
+        #expect(markdown.contains("- Fill rate: timing unverified in the later run, so its change is left out of the verdicts."))
         let read = try BenchmarkExport.read(export.json())
         #expect(read.runs.first?.measurement("fill")?.caveat == .timingUnverified)
         #expect(read.comparisons.first?.changes?.first { $0.id == "fill" }?.comparedCaveat == .timingUnverified)

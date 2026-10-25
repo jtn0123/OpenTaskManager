@@ -93,20 +93,39 @@ public struct InfoSection: Sendable, Hashable, Identifiable {
     /// The rows grouped for an attached-device card: a heading takes the
     /// detail rows after it, and the other rows run together.
     public var blocks: [InfoBlock] {
-        var blocks: [InfoBlock] = []
-        for row in rows {
+        blockIndices().map { block in
+            switch block {
+            case let .rows(run): .rows(run.map { rows[$0] })
+            case let .device(heading, details): .device(rows[heading], details: details.map { rows[$0] })
+            }
+        }
+    }
+
+    /// `blocks` as indices among `rows`, of just the `shown` rows (all of
+    /// them when nil), so a search can show part of a card and the page can
+    /// still tell a device by its place in the whole card.
+    public func blockIndices(showing shown: [Int]? = nil) -> [InfoBlockIndices] {
+        var blocks: [InfoBlockIndices] = []
+        for index in shown ?? Array(rows.indices) {
+            let row = rows[index]
             if row.isHeading {
-                blocks.append(.device(row, details: []))
+                blocks.append(.device(index, details: []))
             } else if row.isDetail, case let .device(heading, details) = blocks.last {
-                blocks[blocks.count - 1] = .device(heading, details: details + [row])
+                blocks[blocks.count - 1] = .device(heading, details: details + [index])
             } else if case let .rows(run) = blocks.last {
-                blocks[blocks.count - 1] = .rows(run + [row])
+                blocks[blocks.count - 1] = .rows(run + [index])
             } else {
-                blocks.append(.rows([row]))
+                blocks.append(.rows([index]))
             }
         }
         return blocks
     }
+}
+
+/// An `InfoBlock` by the indices of its rows among its section's rows.
+public enum InfoBlockIndices: Sendable, Hashable {
+    case rows([Int])
+    case device(Int, details: [Int])
 }
 
 /// Turns a `SystemInfo` into titled label/value sections, shared by the

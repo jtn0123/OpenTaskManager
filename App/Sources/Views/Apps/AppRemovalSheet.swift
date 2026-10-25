@@ -8,6 +8,7 @@ import SwiftUI
 /// listed but never offered.
 struct AppRemovalSheet: View {
     @State private var model: AppRemovalModel
+    @Environment(AppModel.self) private var appModel
     private let otherApps: [InstalledApp]
     /// Called as the sheet closes if the bundle went to the Trash.
     private let onRemoved: () -> Void
@@ -44,7 +45,7 @@ struct AppRemovalSheet: View {
             await model.load(otherApps: otherApps)
             await model.measureSizes()
         }
-        .task { await model.watchRunning() }
+        .task { await model.watchRunning(demand: appModel.samplingDemand) }
         .onDisappear {
             if model.appWasMoved { onRemoved() }
         }
@@ -356,7 +357,7 @@ private struct RemovalEvidence: View {
                 .foregroundStyle(.secondaryText)
             Spacer(minLength: 8)
             Button("Reveal in Finder") { RemovalActions.reveal(path) }
-                .buttonStyle(.link)
+                .linkButtonStyle()
                 .font(.explanation)
                 .fixedSize()
                 .help("Show it in a Finder window")

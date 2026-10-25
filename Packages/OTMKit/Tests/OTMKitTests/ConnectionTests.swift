@@ -378,6 +378,10 @@ struct ConnectionSamplerLiveTests {
         #expect(mine.local.formatted == "127.0.0.1:\(port)")
         #expect(mine.scope == .loopback)
         #expect(!mine.isExposed)
+        // Its process, with the start time the process list reads, so a reused PID can't pass for it.
+        #expect(mine.processStart != nil)
+        #expect(mine.process == ProcessDetailReader.identity(of: getpid()))
+        #expect(mine.processName != "PID \(getpid())")
         #expect(snapshot.scannedProcesses > 0)
         #expect(snapshot.hiddenProcesses >= 0)
         #expect(snapshot.duration >= 0)

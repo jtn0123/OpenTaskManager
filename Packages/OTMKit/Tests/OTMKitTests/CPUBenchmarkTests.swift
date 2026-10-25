@@ -41,7 +41,7 @@ private final class FailingKernel: BenchmarkKernel, BenchmarkWorker {
     }
 
     var workPerUnit: Double { 1 }
-    func makeWorker(_ index: Int, of count: Int) -> any BenchmarkWorker { self }
+    func withWorker(_ index: Int, of count: Int, _ body: (any BenchmarkWorker) -> Void) { body(self) }
     func run(unit index: Int) -> Bool { index != failingUnit }
 }
 
@@ -61,17 +61,62 @@ struct CPUBenchmarkTests {
 
     @Test func everyUnitChecksOutWhereverItStarts() {
         let hash = HashKernel(bytes: 4 << 10, seed: 7)
-        #expect((0..<200).allSatisfy { hash.run(unit: $0) })
+        hash.withWorker(0, of: 1) { worker in
+            #expect((0..<200).allSatisfy { worker.run(unit: $0) })
+        }
 
         let matrix = MatrixKernel(size: 12, seed: 7)
-        let matrixWorker = matrix.makeWorker(0, of: 1)
-        #expect((0..<40).allSatisfy { matrixWorker.run(unit: $0) })
+        matrix.withWorker(0, of: 1) { worker in
+            #expect((0..<40).allSatisfy { worker.run(unit: $0) })
+        }
 
         let memory = MemoryKernel(bytes: 256 << 10, chunkBytes: 16 << 10, seed: 7)
         #expect(memory.chunkCount == 16)
         for index in 0..<5 {
-            let worker = memory.makeWorker(index, of: 5)
-            #expect((0..<40).allSatisfy { worker.run(unit: $0) })
+            memory.withWorker(index, of: 5) { worker in
+                #expect((0..<40).allSatisfy { worker.run(unit: $0) })
+            }
+        }
+    }
+
+    @Test func smallestWorkloadsKeepTheirGeometry() {
+        let kernels: [any BenchmarkKernel] = [
+            HashKernel(bytes: 0, seed: 7),
+            MatrixKernel(size: 0, seed: 7),
+            MemoryKernel(bytes: 0, chunkBytes: 0, seed: 7),
+        ]
+        #expect(kernels.map(\.workPerUnit) == [64, 2, 32])
+        for kernel in kernels {
+            kernel.withWorker(0, of: 1) { worker in
+                #expect((0..<20).allSatisfy { worker.run(unit: $0) })
+            }
+        }
+    }
+
+    /// Shared inputs serve overlapping workers without sharing their scratch buffers.
+    @Test func workersBorrowSharedInputsConcurrently() async {
+        let kernels: [any BenchmarkKernel] = [
+            HashKernel(bytes: 4 << 10, seed: 7),
+            MatrixKernel(size: 12, seed: 7),
+            MemoryKernel(bytes: 256 << 10, chunkBytes: 16 << 10, seed: 7),
+        ]
+        for kernel in kernels {
+            await withTaskGroup(of: Bool.self) { group in
+                for index in 0..<5 {
+                    group.addTask {
+                        var passed = false
+                        kernel.withWorker(index, of: 5) { worker in
+                            passed = (0..<80).allSatisfy { worker.run(unit: $0) }
+                        }
+                        return passed
+                    }
+                }
+                for await passed in group { #expect(passed) }
+            }
+            // A later pass borrows the same storage after every earlier worker has returned.
+            kernel.withWorker(0, of: 1) { worker in
+                #expect((0..<80).allSatisfy { worker.run(unit: $0) })
+            }
         }
     }
 
@@ -137,23 +182,34 @@ struct CPUBenchmarkTests {
         }
     }
 
+    /// The cancel lands as the warm-up ends, with the run held there, so the
+    /// first timed repeat starts cancelled. How the run then stopped is read
+    /// from the cancellation, never from a clock that a loaded Mac stretches.
     @Test func cancellingTheTaskStopsAMeasurement() async {
         var long = quick
         long.repeatSeconds = 30
-        let started = Date()
+        let cancellation = CPUBenchmarkCancellation()
+        let gate = ProgressGate(holdingAt: 1)
         // As the app runs it: a typed catch inside a task.
         let task = Task { () async -> CPUBenchmarkError? in
+            defer { gate.runEnded() }
             do throws(CPUBenchmarkError) {
-                _ = try await CPUBenchmark.measure(configuration: long, workers: 2, appVersion: "tests") { _ in }
+                _ = try await CPUBenchmark.measure(configuration: long, workers: 2, appVersion: "tests", cancellation: cancellation) {
+                    gate.report(fraction: $0.fraction)
+                }
                 return nil
             } catch {
                 return error
             }
         }
-        try? await Task.sleep(for: .milliseconds(100))
+        let held = await gate.waitUntilHeld()
         task.cancel()
+        gate.open()
+        #expect(held, "the run reached its first timed repeat")
         #expect(await task.value == .cancelled)
-        #expect(Date().timeIntervalSince(started) < 5)
+        // Its one worker had 30 s to run: it saw the cancel and stopped partway.
+        #expect(cancellation.stoppedWorkers == 1, "the worker stops when cancelled rather than running out the repeat")
+        #expect(gate.reportsAfterHold == 0, "no repeat finishes after the cancel")
     }
 
     @Test func summarisesRepeats() {

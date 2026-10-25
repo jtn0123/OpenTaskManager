@@ -123,14 +123,17 @@ public enum VolumeReader {
             guard let values = try? url.resourceValues(forKeys: Set(keys)),
                   values.volumeIsBrowsable != false,
                   let total = values.volumeTotalCapacity, total > 0 else { return nil }
-            let available = values.volumeAvailableCapacityForImportantUsage.map { UInt64(max($0, 0)) }
-                ?? UInt64(max(values.volumeAvailableCapacity ?? 0, 0))
+            let free = values.volumeAvailableCapacity.map { UInt64(max($0, 0)) }
+            // A disk image reports 0 for important use while it has space free: not a figure.
+            let important = values.volumeAvailableCapacityForImportantUsage
+                .flatMap { $0 > 0 || (free ?? 0) == 0 ? UInt64(max($0, 0)) : nil }
             return VolumeInfo(
                 name: values.volumeName ?? url.lastPathComponent,
                 mountPoint: url.path,
                 fileSystem: values.volumeLocalizedFormatDescription,
                 totalBytes: UInt64(total),
-                availableBytes: available,
+                availableBytes: important ?? free ?? 0,
+                freeBytes: free,
                 isInternal: values.volumeIsInternal ?? false,
                 isRemovable: values.volumeIsRemovable ?? false,
                 isRoot: values.volumeIsRootFileSystem ?? false,
@@ -141,9 +144,10 @@ public enum VolumeReader {
 
     /// The BSD device a volume is mounted from, e.g. "disk3s1s1".
     private static func deviceName(of path: String) -> String? {
+        // statfs borrows an aligned local record; mount-source text stops within the fixed C tuple.
         var stats = statfs()
-        guard statfs(path, &stats) == 0 else { return nil }
-        let source = withUnsafeBytes(of: stats.f_mntfromname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        guard unsafe statfs(path, &stats) == 0 else { return nil }
+        let source = withUnsafeBytes(of: stats.f_mntfromname) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         return bsdName(mountSource: source)
     }
 

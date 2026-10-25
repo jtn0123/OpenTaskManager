@@ -46,7 +46,7 @@ struct GPUBenchmarkTests {
     /// workloads changed: bump `GPUBenchmark.suiteVersion` and update the pinned values.
     @Test func standardWorkloadsArePinned() {
         let standard = GPUBenchmarkConfiguration.standard
-        #expect(GPUBenchmark.suiteVersion == 1)
+        #expect(GPUBenchmark.suiteVersion == 2)
         #expect(standard.computeThreads == 1 << 20 && standard.computeIterations == 1024 && standard.computeSeedGroups == 64)
         #expect(standard.memoryBytes == 256 << 20 && standard.memoryLanes == 1 << 17)
         #expect(standard.fillSize == 2048 && standard.fillLayers == 256)
@@ -102,25 +102,26 @@ struct GPUBenchmarkTests {
     }
 
     @Test func checksCatchAWrongOrMissingUnit() {
+        // Each array stays borrowed through verification, and its span never leaves the closure.
         let compute = GPUComputeReference(groups: 4, iterations: 10, seed: 3)
         var results = (0..<64).map { compute.expected[$0 % 4] &* 3 }
-        #expect(results.withUnsafeBufferPointer { compute.verify($0, units: 3) })
-        #expect(!results.withUnsafeBufferPointer { compute.verify($0, units: 2) })
+        #expect(results.withUnsafeBufferPointer { compute.verify(unsafe Span(_unsafeElements: $0), units: 3) })
+        #expect(!results.withUnsafeBufferPointer { compute.verify(unsafe Span(_unsafeElements: $0), units: 2) })
         results[41] &+= 1
-        #expect(!results.withUnsafeBufferPointer { compute.verify($0, units: 3) })
+        #expect(!results.withUnsafeBufferPointer { compute.verify(unsafe Span(_unsafeElements: $0), units: 3) })
 
         let memory = GPUMemoryReference(bytes: 16 << 10, lanes: 64, seed: 3)
         var sums = memory.expected.map { $0 &* 5 }
-        #expect(sums.withUnsafeBufferPointer { memory.verify($0, units: 5) })
-        #expect(!sums.withUnsafeBufferPointer { memory.verify($0, units: 4) })
+        #expect(sums.withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 5) })
+        #expect(!sums.withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 4) })
         sums[200] ^= 1
-        #expect(!sums.withUnsafeBufferPointer { memory.verify($0, units: 5) })
-        #expect(!Array(memory.expected.dropLast()).withUnsafeBufferPointer { memory.verify($0, units: 1) })
+        #expect(!sums.withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 5) })
+        #expect(!Array(memory.expected.dropLast()).withUnsafeBufferPointer { memory.verify(unsafe Span(_unsafeElements: $0), units: 1) })
 
         var pixels = [Float](repeating: 24, count: 100)
-        #expect(pixels.withUnsafeBufferPointer { GPUFillReference.verify($0, units: 3, layers: 8) })
+        #expect(pixels.withUnsafeBufferPointer { GPUFillReference.verify(unsafe Span(_unsafeElements: $0), units: 3, layers: 8) })
         pixels[99] = 23
-        #expect(!pixels.withUnsafeBufferPointer { GPUFillReference.verify($0, units: 3, layers: 8) })
+        #expect(!pixels.withUnsafeBufferPointer { GPUFillReference.verify(unsafe Span(_unsafeElements: $0), units: 3, layers: 8) })
     }
 
     @Test func sizesCommandBuffersFromTheWarmUp() {
@@ -146,6 +147,7 @@ struct GPUBenchmarkTests {
             let measured = workload.measurement
             #expect(measured.repeats.count == quick.repeats)
             #expect(measured.gpuSeconds.count == quick.repeats && measured.wallSeconds.count == quick.repeats)
+            #expect(measured.timingEvidence?.count == quick.repeats)
             #expect(measured.median > 0 && measured.unitsPerRepeat >= 1)
             #expect(measured.gpuSeconds.allSatisfy { $0 > 0 })
         }
@@ -175,24 +177,39 @@ struct GPUBenchmarkTests {
         }
     }
 
+    /// The cancel lands with the run held between its first and second timed
+    /// repeats, so it's known to fall between two submissions; whether the
+    /// next one went ahead is read from the cancellation, never from a clock.
     @Test func cancellingTheTaskStopsBetweenSubmissions() async {
         // Thousands of short command buffers: a cancel lands at the next one.
         var long = quick
         long.repeats = 100_000
-        let started = Date()
+        let cancellation = GPUBenchmarkCancellation()
+        let gate = ProgressGate(holdingAt: 2)
         let task = Task { () async -> GPUBenchmarkError? in
+            defer { gate.runEnded() }
             do throws(GPUBenchmarkError) {
-                _ = try await GPUBenchmark.measure(configuration: long, appVersion: "tests") { _ in }
+                _ = try await GPUBenchmark.measure(configuration: long, appVersion: "tests", cancellation: cancellation) {
+                    gate.report(fraction: $0.fraction)
+                }
                 return nil
             } catch {
                 return error
             }
         }
-        try? await Task.sleep(for: .milliseconds(200))
+        let held = await gate.waitUntilHeld()
         task.cancel()
+        gate.open()
         let error = await task.value
-        #expect(error == .cancelled || (MTLCreateSystemDefaultDevice() == nil && error == .noDevice))
-        #expect(Date().timeIntervalSince(started) < 5)
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            // Without Metal, a run says so rather than failing some other way.
+            #expect(error == .noDevice)
+            return
+        }
+        #expect(held, "the run finished its first timed repeat")
+        #expect(error == .cancelled)
+        #expect(cancellation.heldBackSubmissions == 1, "the command buffer after the cancel is held back")
+        #expect(gate.reportsAfterHold == 0, "no repeat finishes after the cancel")
     }
 
     @Test func summarisesRepeats() {

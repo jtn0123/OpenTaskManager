@@ -98,4 +98,42 @@ struct ColorContrastTests {
         #expect(ColorContrast.ink(over: [amber, faded]) == (dark >= light ? .dark : .light))
         #expect(ColorContrast.ink(over: []) == .dark, "nothing under it: the default")
     }
+
+    // MARK: Brightening for a dark window
+
+    private static let darkWindow = RGB(0x1E1E1E)
+
+    @Test func brighteningReachesTheContrastWithTheLeastWhite() {
+        let blue = RGB(0x0072B2)
+        for target in [4.5, 7.0, 9.0] {
+            let bright = ColorContrast.brightened(blue, toContrast: target, against: Self.darkWindow)
+            #expect(ColorContrast.ratio(bright, Self.darkWindow) >= target)
+            #expect(ColorContrast.ratio(bright, Self.darkWindow) < target + 0.01, "no brighter than needed")
+            // Mixed toward white: every component rises, blue stays the strongest.
+            #expect(bright.red > blue.red && bright.green > blue.green && bright.blue >= blue.blue)
+            #expect(bright.blue > bright.green && bright.green > bright.red)
+        }
+    }
+
+    @Test func aBrightEnoughToneIsLeftAlone() {
+        let yellow = RGB(0xF0E442)
+        #expect(ColorContrast.brightened(yellow, toContrast: 3, against: Self.darkWindow) == yellow)
+    }
+
+    // MARK: Hex
+
+    @Test func hexRoundTrips() {
+        #expect(RGB(0x56B4E9).hex == "#56B4E9")
+        #expect(RGB(hex: "#56B4E9") == RGB(0x56B4E9))
+        #expect(RGB(hex: "d55e00") == RGB(0xD55E00))
+        #expect(RGB(hex: " #000000 ") == Self.black)
+        #expect(RGB(red: 0.24, green: 0.56, blue: 1.00).hex == "#3D8FFF")
+        #expect(RGB(red: -0.2, green: 1.4, blue: 0.5).hex == "#00FF80", "out of range components clamp")
+    }
+
+    @Test func hexRejectsAnythingElse() {
+        for text in ["", "#", "56B4E", "#56B4E9F", "56B4EG", "#-6B4E9", "0x56B4E9"] {
+            #expect(RGB(hex: text) == nil, "\(text)")
+        }
+    }
 }

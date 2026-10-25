@@ -6,26 +6,31 @@ final class CPUSampler {
     private var previousTicks: [[UInt32]] = []
 
     func sample() -> CPUSample {
+        // Mach owns info until the deferred deallocation; its reported word count bounds the CPU states, and load has three doubles.
         var cpuCount: natural_t = 0
         var info: processor_info_array_t?
         var infoCount: mach_msg_type_number_t = 0
-        guard host_processor_info(host, PROCESSOR_CPU_LOAD_INFO, &cpuCount, &info, &infoCount) == KERN_SUCCESS,
-              let info else {
+        guard unsafe host_processor_info(host, PROCESSOR_CPU_LOAD_INFO, &cpuCount, &info, &infoCount) == KERN_SUCCESS,
+              let info = unsafe info else {
             return .zero
         }
         defer {
-            vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(infoCount) * MemoryLayout<integer_t>.stride))
+            unsafe vm_deallocate(mach_task_self_, vm_address_t(bitPattern: info), vm_size_t(Int(infoCount) * MemoryLayout<integer_t>.stride))
         }
 
         let states = Int(CPU_STATE_MAX)
+        guard Int(cpuCount) <= Int(infoCount) / states else { return .zero }
         var ticks: [[UInt32]] = []
         ticks.reserveCapacity(Int(cpuCount))
         for cpu in 0..<Int(cpuCount) {
-            ticks.append((0..<states).map { UInt32(bitPattern: info[cpu * states + $0]) })
+            ticks.append((0..<states).map { unsafe UInt32(bitPattern: info[cpu * states + $0]) })
         }
         defer { previousTicks = ticks }
 
         var coreUsage: [Double] = []
+        var coreSystem: [Double] = []
+        coreUsage.reserveCapacity(ticks.count)
+        coreSystem.reserveCapacity(ticks.count)
         var totalUser: UInt64 = 0, totalSystem: UInt64 = 0, totalAll: UInt64 = 0
         let haveBaseline = previousTicks.count == ticks.count
         for (cpu, current) in ticks.enumerated() {
@@ -37,20 +42,21 @@ final class CPUSampler {
             let nice = UInt64(current[Int(CPU_STATE_NICE)] &- before[Int(CPU_STATE_NICE)])
             let all = user + system + idle + nice
             coreUsage.append(all == 0 ? 0 : Double(user + system + nice) / Double(all))
+            coreSystem.append(all == 0 ? 0 : Double(system) / Double(all))
             totalUser += user + nice
             totalSystem += system
             totalAll += all
         }
 
         var load = [Double](repeating: 0, count: 3)
-        _ = getloadavg(&load, 3)
+        _ = unsafe getloadavg(&load, 3)
 
         guard totalAll > 0 else {
-            return CPUSample(usage: 0, user: 0, system: 0, coreUsage: coreUsage, loadAverage: load)
+            return CPUSample(usage: 0, user: 0, system: 0, coreUsage: coreUsage, coreSystem: coreSystem, loadAverage: load)
         }
         let user = Double(totalUser) / Double(totalAll)
         let system = Double(totalSystem) / Double(totalAll)
-        return CPUSample(usage: user + system, user: user, system: system, coreUsage: coreUsage, loadAverage: load)
+        return CPUSample(usage: user + system, user: user, system: system, coreUsage: coreUsage, coreSystem: coreSystem, loadAverage: load)
     }
 }
 
@@ -142,7 +148,7 @@ enum CPUTopologyReader {
     static func logicalID(_ value: Any?) -> Int? {
         if let number = value as? NSNumber { return number.intValue }
         if let data = value as? Data, data.count >= 4 {
-            return Int(data.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) })
+            return Int(data.bytes.load(fromByteOffset: 0, as: UInt32.self))
         }
         return nil
     }

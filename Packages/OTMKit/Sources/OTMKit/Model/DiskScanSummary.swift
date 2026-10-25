@@ -148,6 +148,7 @@ public struct DiskScanSummary: Sendable, Codable, Equatable {
     }
 
     public let version: Int
+    public let scheduled: DiskScanScheduledOrigin?
     public let scope: DiskScanScope
     public let scannedAt: Date
     public let duration: TimeInterval
@@ -170,8 +171,9 @@ public struct DiskScanSummary: Sendable, Codable, Equatable {
     public init(version: Int = currentVersion, scope: DiskScanScope, scannedAt: Date, duration: TimeInterval = 0,
                 fileCount: Int = 0, folderCount: Int = 0, hardLinkDuplicates: Int = 0, unreadableFolders: Int = 0,
                 unreadablePaths: [String] = [], folders: [Folder], largestFiles: [File] = [], largestFilesCutoff: UInt64 = 0,
-                categories: [DiskCategoryTotal] = []) {
+                categories: [DiskCategoryTotal] = [], scheduled: DiskScanScheduledOrigin? = nil) {
         self.version = version
+        self.scheduled = scheduled
         self.scope = scope
         self.scannedAt = scannedAt
         self.duration = duration
@@ -187,7 +189,7 @@ public struct DiskScanSummary: Sendable, Codable, Equatable {
     }
 
     /// Sums up a scan, keeping its `folderLimit` largest folders.
-    public init(_ usage: DiskUsage, scope: DiskScanScope, folderLimit: Int = folderLimit) {
+    public init(_ usage: DiskUsage, scope: DiskScanScope, folderLimit: Int = folderLimit, scheduled: DiskScanScheduledOrigin? = nil) {
         let items = usage.items
         // The largest folders and packages; on a tie the outer one first, so
         // every folder kept has the one holding it kept too.
@@ -224,7 +226,7 @@ public struct DiskScanSummary: Sendable, Codable, Equatable {
                     File(path: $0, isPackage: file.isPackage, allocatedSize: file.allocatedSize, logicalSize: file.logicalSize)
                 }
             },
-            largestFilesCutoff: usage.largestFilesCutoff, categories: usage.categories
+            largestFilesCutoff: usage.largestFilesCutoff, categories: usage.categories, scheduled: scheduled
         )
     }
 

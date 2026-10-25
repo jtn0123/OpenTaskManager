@@ -5,28 +5,29 @@ import SwiftUI
 struct OpenTaskManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
-    @AppStorage("streamGraphs") private var streamGraphs = true
-
-    init() {
-        // `--args -openPage Processes` picks the starting page. It's copied into the
-        // saved value once, because passing `-page` itself would pin that setting
-        // for the whole run and the sidebar would stop switching pages.
-        if let start = UserDefaults.standard.string(forKey: "openPage"), Page(rawValue: start) != nil {
-            UserDefaults.standard.set(start, forKey: "page")
-        }
-    }
+    @Setting(Settings.showMenuBarExtra) private var showMenuBarExtra: Bool
+    @Setting(Settings.streamGraphs) private var streamGraphs: Bool
 
     var body: some Scene {
         Window("OpenTaskManager", id: "main") {
             ContentView()
+                .samplingDemand(.window)
                 .environment(model)
-                .environment(\.sampleInterval, model.updateSpeed.rawValue)
+                .environment(\.sampleInterval, model.samplingInterval)
                 .environment(\.streamsGraphs, streamGraphs)
-                .frame(minWidth: 820, minHeight: 480)
+                .frame(minWidth: WindowPlacement.minimumSize.width, minHeight: WindowPlacement.minimumSize.height)
+                // Opens the window where it was left, or at a share of the
+                // screen the first time, and keeps it there (`MainWindowFrame`).
+                .background(MainWindowFrameKeeper())
         }
-        .defaultSize(width: 1180, height: 760)
+        // The size the keeper will give it, so SwiftUI's own idea of the
+        // window (which it goes back to after full screen) starts out right.
+        .defaultSize(MainWindowFrame.opening().size)
         .commands {
+            CommandGroup(after: .windowSize) {
+                Divider()
+                Button("Return to Default Size") { MainWindowFrame.returnToDefault() }
+            }
             CommandGroup(after: .newItem) {
                 Button("Open Recording…") { HistoryRecordingStore.shared.chooseRecording() }
                     .keyboardShortcut("o")
@@ -35,23 +36,37 @@ struct OpenTaskManagerApp: App {
             // 900 points hides it by itself (`SidebarVisibility`).
             SidebarCommands()
             PageCommands()
+            MiniMonitorCommands()
+            SoftwareUpdateCommands()
             CommandGroup(after: .toolbar) {
-                Button(model.isPaused ? "Resume Updates" : "Pause Updates") { model.isPaused.toggle() }
+                Button(UpdateControlLabels.liveMenuTitle(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil)) {
+                    model.isPaused.toggle()
+                }
+                    .help(UpdateControlLabels.liveHelp(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil))
+                    .accessibilityLabel(UpdateControlLabels.liveAccessibility(paused: model.isPaused))
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                 Button("Refresh Now") { model.refreshNow() }
                     .keyboardShortcut("r")
             }
         }
 
+        Window("Software Updates", id: "software-updates") {
+            SoftwareUpdateWindow()
+        }
+        .windowResizability(.contentSize)
+
         Settings {
             SettingsView()
+                .samplingDemand(.window)
                 .environment(model)
         }
+        .defaultSize(width: 460, height: 720)
 
         MenuBarExtra(isInserted: $showMenuBarExtra) {
             MenuBarView()
+                .samplingDemand(.window)
                 .environment(model)
-                .environment(\.sampleInterval, model.updateSpeed.rawValue)
+                .environment(\.sampleInterval, model.samplingInterval)
                 .environment(\.streamsGraphs, streamGraphs)
         } label: {
             MenuBarLabel()
@@ -61,41 +76,24 @@ struct OpenTaskManagerApp: App {
     }
 }
 
-enum Page: String, CaseIterable, Identifiable {
-    case overview = "Overview"
-    case processes = "Processes"
-    case performance = "Performance"
-    case history = "History"
-    case connections = "Connections"
-    case startup = "Startup"
-    case apps = "Apps"
-    case users = "Users"
-    case system = "System"
-    case drivers = "Drivers"
-    case storage = "Storage"
-
-    var id: String { rawValue }
-
-    var symbol: String {
-        switch self {
-        case .overview: "gauge.with.dots.needle.67percent"
-        case .processes: "list.bullet.rectangle"
-        case .performance: "waveform.path.ecg"
-        case .history: "clock.arrow.circlepath"
-        case .connections: "point.3.connected.trianglepath.dotted"
-        case .startup: "sunrise"
-        case .apps: "square.grid.3x3"
-        case .users: "person.2"
-        case .system: "info.circle"
-        case .drivers: "puzzlepiece.extension"
-        case .storage: "internaldrive"
+private struct SoftwareUpdateCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { openWindow(id: "software-updates") }
         }
     }
+}
 
-    /// ⌘1 to ⌘9 for the first nine pages, in the View menu and the page menu.
-    var shortcut: KeyboardShortcut? {
-        guard let index = Self.allCases.firstIndex(of: self), index < 9 else { return nil }
-        return KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+/// Window › Mini Monitor, ticked while it's shown.
+private struct MiniMonitorCommands: Commands {
+    @Setting(Settings.miniMonitorShown) private var shown: Bool
+
+    var body: some Commands {
+        CommandGroup(before: .windowArrangement) {
+            Toggle("Mini Monitor", isOn: $shown)
+            Divider()
+        }
     }
 }
 
@@ -103,7 +101,7 @@ enum Page: String, CaseIterable, Identifiable {
 /// first nine: a way between pages that doesn't need the sidebar, which a
 /// window under 900 points hides.
 private struct PageCommands: Commands {
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
 
     var body: some Commands {
         CommandGroup(after: .sidebar) {
@@ -117,15 +115,13 @@ private struct PageCommands: Commands {
     }
 }
 
-/// The toolbar's page menu, there only while the sidebar is hidden: the
-/// page's icon with a chevron, just before the title that names the page,
-/// and every page in its menu, the current one ticked, with its ⌘ shortcut.
-/// A narrow window hides the sidebar, and with it every page that could be
-/// seen; the View menu's list has to be known about. A real toolbar item,
-/// since a menu on the title itself did nothing on macOS 26. The title keeps
-/// the name: taking it out of the toolbar for a menu that carried the name
-/// sent the sidebar's own toggle to the overflow menu, for good, once the
-/// sidebar was shown in a narrow window (macOS 26).
+/// The toolbar's page menu, there only while the sidebar is hidden: the word
+/// "Pages" with a chevron, so the hidden sidebar's replacement reads as one,
+/// opening every page with the current one ticked and its keyboard shortcut.
+/// Not the page's name: the title beside it already says that, and the two
+/// read "Processes ⌄ Processes". Keep the separate navigation title: removing
+/// it once sent the sidebar toggle to overflow permanently after showing the
+/// sidebar in a narrow window on macOS 26. A title menu also did nothing there.
 private struct PageSwitcher: View {
     @Binding var page: Page
 
@@ -138,25 +134,20 @@ private struct PageSwitcher: View {
                 .keyboardShortcut(item.shortcut)
             }
         } label: {
-            Label(page.rawValue, systemImage: page.symbol)
-                .labelStyle(.iconOnly)
+            Text("Pages")
         }
         .fixedSize()
-        .help("Go to another page. ⌘1 to ⌘9 switch from anywhere, and the sidebar, hidden while the window "
-            + "is narrow, lists them too.")
-        .accessibilityLabel("Page")
+        .help("Switch pages")
+        .accessibilityLabel("Pages")
         .accessibilityValue(page.rawValue)
-        .accessibilityHint("Shows the list of pages")
+        .accessibilityHint("Shows the list of pages, which ⌘1 to ⌘9 also switch between")
     }
 }
 
 struct ContentView: View {
-    /// Where the user's own hiding of the sidebar, in a wide window, is kept.
-    private static let sidebarHiddenKey = "sidebarHidden"
-
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// In a window under 900 points the sidebar steps aside, so the page gets
     /// the fifth of the width it took, and comes back when the window
     /// widens; the user's own show or hide wins (`SidebarVisibility` in OTMKit).
@@ -164,16 +155,13 @@ struct ContentView: View {
     /// window that opens narrow never shows it. Hidden only once the window
     /// was measured, it flashed by, and its list, focused by then, passed
     /// the focus on to the toolbar's sidebar button.
-    @State private var sidebar = SidebarVisibility(
-        hiddenByUser: UserDefaults.standard.bool(forKey: Self.sidebarHiddenKey),
-        windowWidth: SidebarVisibility.openingWidth(savedFrame: UserDefaults.standard.string(forKey: "NSWindow Frame main"))
-    )
+    @State private var sidebar = SidebarVisibilityStore()
 
     var body: some View {
         NavigationSplitView(columnVisibility: Binding(
-            get: { sidebar.isShown ? .all : .detailOnly },
+            get: { sidebar.columnVisibility },
             // The toolbar's sidebar button and View > Hide Sidebar.
-            set: { sidebar.userSets(shown: $0 != .detailOnly) }
+            set: { sidebar.columnVisibility = $0 }
         )) {
             List(Page.allCases, selection: Binding(get: { page }, set: { if let new = $0 { page = new } })) { page in
                 Label(page.rawValue, systemImage: page.symbol).tag(page)
@@ -211,15 +199,19 @@ struct ContentView: View {
             // overflows inside the column instead (the window's minimum
             // height never followed the pages either).
             .frame(minHeight: 0, maxHeight: .infinity)
+            .background(GraphColors.shared.retroWash)
+            .environment(\.compactToolbar, sidebar.isNarrow == true)
         }
         // Only crossing the breakpoint matters, not every step of a resize.
         .onGeometryChange(for: Bool.self) { SidebarVisibility.isNarrow(width: $0.size.width) } action: { narrow in
             sidebar.window(isNarrow: narrow)
         }
+        // The retro look lights controls and selections in its tint too, so
+        // the window reads as one display's, not only its graphs.
+        .tint(GraphColors.shared.retroAccent)
         // With the sidebar hidden, the focus goes to the page's main table
         // or nowhere, not to the toolbar's sidebar button.
         .background(PageFocus(page: page, sidebarShown: sidebar.isShown))
-        .onChange(of: sidebar.hiddenByUser) { UserDefaults.standard.set(sidebar.hiddenByUser, forKey: Self.sidebarHiddenKey) }
         // With the sidebar hidden, the title still names the page, and the
         // page menu just before it (`PageSwitcher`) and the View menu (⌘1
         // to ⌘9, `PageCommands`) change it.
@@ -229,21 +221,29 @@ struct ContentView: View {
                 Button {
                     model.isPaused.toggle()
                 } label: {
-                    Label(model.isPaused ? "Resume" : "Pause", systemImage: model.isPaused ? "play.fill" : "pause.fill")
+                    Label(UpdateControlLabels.liveTitle(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil,
+                                                        compact: sidebar.isNarrow == true),
+                          systemImage: model.isPaused ? "play.fill" : "pause.fill")
                 }
-                // Just the icon while the page menu shares a narrow window's
-                // toolbar: the word pushed Startup's, Apps' and Drivers'
-                // Refresh, and System's Copy Summary, into the overflow menu.
-                .labelStyle(showsTitle: sidebar.isShown || sidebar.isNarrow != true)
-                .help(model.isPaused ? "Resume live updates (⇧⌘P)" : "Freeze the display (⇧⌘P)")
+                // Just the icon in a narrow window, whether the page menu or
+                // the sidebar shares it: the word pushed Startup's, Apps' and
+                // Drivers' Refresh, System's Copy Summary and, with the
+                // sidebar shown, Processes' End Task into the overflow menu.
+                .labelStyle(showsTitle: sidebar.isNarrow != true)
+                .help(UpdateControlLabels.liveHelp(paused: model.isPaused, replaying: HistoryRecordingStore.shared.replay != nil))
+                .accessibilityLabel(UpdateControlLabels.liveAccessibility(paused: model.isPaused))
             }
             ToolbarItem(placement: .navigation) {
                 LiveBadge()
             }
             if !sidebar.isShown {
+                // Without a glass capsule of its own, so it sits with the
+                // title it changes rather than reading as one more control
+                // beside the live badge's.
                 ToolbarItem(placement: .navigation) {
                     PageSwitcher(page: $page)
                 }
+                .withoutSharedBackground()
             }
         }
         .alert("Something went wrong", isPresented: Binding(get: { model.lastError != nil }, set: { if !$0 { model.dismissError() } })) {
@@ -255,6 +255,26 @@ struct ContentView: View {
             WindowOpener.openMainWindow = { openWindow(id: "main") }
         }
     }
+}
+
+private extension ToolbarContent {
+    /// The item drawn on the toolbar itself, out of the glass capsule macOS
+    /// 26 puts toolbar items in (earlier versions have none).
+    @ToolbarContentBuilder func withoutSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26, *) {
+            sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
+    }
+}
+
+extension EnvironmentValues {
+    /// Whether the window is narrow (under 900 points, where the page menu
+    /// joins the toolbar), so the pages' toolbar items take their short
+    /// forms: Startup's "Read at" goes to a tooltip, Processes folds Columns
+    /// into its View menu. Without them, items went to the overflow menu.
+    @Entry var compactToolbar = false
 }
 
 private extension View {
@@ -299,7 +319,7 @@ private struct LiveBadge: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(isPaused && !replaying ? Color.orange : Color.primary)
                     if !isPaused {
-                        Text("· " + Format.timeSpan(model.updateSpeed.rawValue))
+                        Text("· " + Format.timeSpan(model.samplingInterval))
                             .foregroundStyle(.secondaryText)
                             .monospacedDigit()
                     }
@@ -326,19 +346,19 @@ private struct LiveBadge: View {
     }
 
     private func help(replaying: Bool) -> String {
-        let every = Format.timeSpan(model.updateSpeed.rawValue)
+        let every = Format.timeSpan(model.samplingInterval)
         guard replaying else {
             let lists = "Startup, Apps and Drivers are lists read when their page opens and on Refresh, which says when."
             return model.isPaused
                 ? "Metrics are frozen. Press ⇧⌘P to resume. \(lists)"
-                : "Metrics (CPU, memory, GPU, disk, network, power) update \(Self.every(model.updateSpeed.rawValue)). "
+                : "Metrics (CPU, memory, GPU, disk, network, power) update \(Self.every(model.samplingInterval)). "
                     + "\(lists) Click to change the speed."
         }
         return model.isPaused
             ? "Collecting this Mac's own figures is paused, so its history gains nothing; the recording replays on its own. "
                 + "Press ⇧⌘P to resume."
             : "This Mac's own figures are still collected every \(every), and its history kept, while the recording replays. "
-                + "Click to change the speed. Pause stops collecting, not the replay."
+                + "Click to change the speed. Pause Live stops collecting; Pause Replay stops the replay."
     }
 
     /// "every second", "every 2 s".
@@ -380,11 +400,30 @@ struct MenuBarLabel: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
+    @State private var tracksIcon = false
+
+    private var diskDescription: String {
+        guard model.diskLights.enabled else { return "" }
+        let lights = model.diskLights.lights
+        if model.diskLights.paused { return "; disk activity paused" }
+        if lights.isEmpty { return "; no selected physical disks connected" }
+        return "; read \(lights.contains(where: \.reading) ? "active" : "idle"), "
+            + "write \(lights.contains(where: \.writing) ? "active" : "idle") during the last sample · "
+            + lights.map(\.name).joined(separator: ", ")
+    }
+
     var body: some View {
-        Image(nsImage: MenuBarIcon.image(history: model.cpuHistory.values, usage: model.snapshot?.cpu.usage ?? 0))
-            .accessibilityLabel("CPU \(Format.percent(model.snapshot?.cpu.usage ?? 0))")
+        Image(nsImage: MenuBarIcon.image(model.menuBarIcon.drawing, disks: model.diskLights.enabled ? model.diskLights.lights : nil))
+            .accessibilityLabel("CPU \(model.menuBarIcon.drawing.text)" + diskDescription)
+            .help("CPU · latest sample, icon refreshed every 2 s or at the chosen slower update speed" + diskDescription)
             .onAppear {
                 WindowOpener.openMainWindow = { openWindow(id: "main") }
+                if !tracksIcon { model.samplingDemand.add(.menuBarIcon) }
+                tracksIcon = true
+            }
+            .onDisappear {
+                if tracksIcon { model.samplingDemand.remove(.menuBarIcon) }
+                tracksIcon = false
             }
     }
 }
@@ -392,9 +431,14 @@ struct MenuBarLabel: View {
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Setting(Settings.miniMonitorShown) private var miniMonitorShown: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if model.diskLights.enabled {
+                DiskActivityMenuRows(store: model.diskLights)
+                Divider()
+            }
             if let snapshot = model.snapshot {
                 meter("CPU", Format.percent(snapshot.cpu.usage), model.cpuHistory.values, Theme.cpu, 1)
                 meter("Memory", "\(Format.bytes(snapshot.memory.used)) · \(snapshot.memory.pressure.rawValue)",
@@ -407,6 +451,8 @@ struct MenuBarView: View {
                     meter("Power", Format.watts(watts), model.powerHistory.values, Theme.power, nil)
                 }
 
+                Divider()
+                SystemPressureSummary(compact: true)
                 Divider()
                 Text("Top processes").font(.subheadline).foregroundStyle(.secondary)
                 ForEach(snapshot.processes.sorted { $0.cpuPercent > $1.cpuPercent }.prefix(5), id: \.pid) { process in
@@ -424,6 +470,15 @@ struct MenuBarView: View {
             }
 
             Divider()
+            // A row of its own: beside the two buttons its title didn't fit.
+            HStack {
+                Text("Mini monitor").font(.callout)
+                Spacer()
+                Toggle("Mini monitor", isOn: $miniMonitorShown)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+            }
             HStack {
                 Button("Open OpenTaskManager") {
                     openWindow(id: "main")
@@ -454,10 +509,11 @@ struct MenuBarView: View {
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
-    @AppStorage("globalHotKeyEnabled") private var globalHotKeyEnabled = true
-    @AppStorage("heatmap") private var heatmap = true
-    @AppStorage("streamGraphs") private var streamGraphs = true
+    @Setting(Settings.showMenuBarExtra) private var showMenuBarExtra: Bool
+    @Setting(Settings.globalHotKeyEnabled) private var globalHotKeyEnabled: Bool
+    @Setting(Settings.heatmap) private var heatmap: Bool
+    @Setting(Settings.streamGraphs) private var streamGraphs: Bool
+    @Setting(Settings.dockGraphMode) private var dockGraphMode: DockGraphMode
 
     var body: some View {
         @Bindable var model = model
@@ -468,6 +524,20 @@ struct SettingsView: View {
                 }
                 Toggle("Scroll graphs smoothly between updates", isOn: $streamGraphs)
             }
+            PercentageGraphSettings()
+            Section("Dock icon") {
+                Picker("Show", selection: $dockGraphMode) {
+                    ForEach(DockGraphMode.allCases) { Text($0.title).tag($0) }
+                }
+                Text("Two minutes of whole-CPU use or used physical memory. Updates at most every two seconds, "
+                     + "or at your slower update speed. Keeps running when the main window closes.")
+                    .font(.explanation).foregroundStyle(.secondaryText)
+            }
+            DiskActivitySettings()
+            SoftwareUpdateSettings()
+            MiniMonitorSettings()
+            GraphColorSettings()
+            RetroDisplaySettings()
             Section("Processes") {
                 Toggle("Include system and other users' processes", isOn: $model.includeSystemProcesses)
                 Toggle("Meter bars behind busy values", isOn: $heatmap)
@@ -476,13 +546,17 @@ struct SettingsView: View {
                     Text("100% per core, like Activity Monitor").tag(false)
                 }
             }
+            SpikeCaptureSettings()
+            StorageScheduleSettings()
             Section("Access") {
                 Toggle("Show in menu bar", isOn: $showMenuBarExtra)
                 Toggle("Open with ⌃⇧⎋ from anywhere", isOn: $globalHotKeyEnabled)
             }
         }
         .formStyle(.grouped)
+        // The form scrolls in a window of a usual height (the scene's default
+        // size): sized to its whole length, it ran past the foot of a laptop's screen.
         .frame(width: 460)
-        .fixedSize()
+        .frame(minHeight: 360, maxHeight: .infinity)
     }
 }

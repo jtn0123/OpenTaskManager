@@ -6,34 +6,29 @@ enum HistoryEventStyle {
     static func symbol(_ kind: HistoryEvent.Kind) -> String {
         switch kind {
         case .appLaunched: "arrow.up.square.fill"
+        case .endedByApp: "xmark.octagon"
         case .appQuit: "xmark.square.fill"
         case .processStarted: "gearshape.fill"
         case .processExited: "gearshape"
         case .networkChanged: "network"
         case .sleep: "moon.zzz.fill"
         case .wake: "sun.max.fill"
+        case .spike: "bolt.fill"
         }
     }
 
-    /// "Xcode launched", "5 × clang started", "Network: Wi-Fi (en0)".
+    /// "Xcode launched", "5 × clang started", "Network: Wi-Fi (en0)", "CPU spike captured".
     static func title(_ event: HistoryEvent) -> String {
-        let name = event.count > 1 ? "\(event.count) × \(event.name)" : event.name
-        return switch event.kind {
-        case .appLaunched: "\(name) launched"
-        case .appQuit: "\(name) quit"
-        case .processStarted: "\(name) started"
-        case .processExited: "\(name) exited"
-        case .networkChanged: event.name.isEmpty ? "Network disconnected" : "Network: \(event.name)"
-        case .sleep: "Mac went to sleep"
-        case .wake: "Mac woke"
-        }
+        HistoryReplayLabels.eventTitle(event)
     }
 
-    /// What there is to say beyond the title: a network's new address, and
-    /// for a background process, that it was busy.
+    /// What there is to say beyond the title: a network's new address, for
+    /// a background process, that it was busy, and for a spike, what crossed.
     static func detail(_ event: HistoryEvent) -> String? {
         switch event.kind {
+        case .endedByApp: event.endAction.map { "PID \($0.identity.pid) · \($0.words)" }
         case .networkChanged: event.detail.isEmpty ? nil : event.detail
+        case .spike: event.detail.isEmpty ? "Listed under Spikes in the toolbar" : "\(event.detail). Listed under Spikes in the toolbar"
         case .processStarted: "A background process that used at least \(Int(ProcessEventTracker.busyPercent))% of a core"
         case .processExited: "A background process that had been busy"
         case .appLaunched, .appQuit, .sleep, .wake: nil
@@ -64,12 +59,14 @@ enum HistoryEventStyle {
         let parts = counts.filter { $0.count > 0 }.map { kind, count in
             let noun = switch kind {
             case .appLaunched: count == 1 ? "app launch" : "app launches"
+            case .endedByApp: count == 1 ? "app ending action" : "app ending actions"
             case .appQuit: count == 1 ? "app quit" : "apps quit"
             case .processStarted: count == 1 ? "process started" : "processes started"
             case .processExited: count == 1 ? "process exited" : "processes exited"
             case .networkChanged: count == 1 ? "network change" : "network changes"
             case .sleep: count == 1 ? "sleep" : "sleeps"
             case .wake: count == 1 ? "wake" : "wakes"
+            case .spike: count == 1 ? "spike captured" : "spikes captured"
             }
             return "\(count) \(noun)"
         }
@@ -89,11 +86,36 @@ enum HistoryEventStyle {
     }
 }
 
-/// The events within the range as markers over the rail's track: one
-/// symbol per kind, those too close to draw apart as one marker with a
-/// count. Hovering one previews its moment and lists what happened in the
-/// tooltip; clicking moves playback there. Takes no room while the range
-/// has none.
+/// An event's marker: its kind's symbol (a stack for several kinds) in a
+/// dark capsule, with a count when it stands for more than one.
+struct HistoryEventMarker: View {
+    let symbol: String
+    let count: Int
+    let picked: Bool
+
+    static let size: CGFloat = 14
+
+    var body: some View {
+        HStack(spacing: 1) {
+            Image(systemName: symbol)
+                .font(.system(size: 8.5, weight: .bold))
+            if count > 1 {
+                Text("\(count)").font(.system(size: 11, weight: .semibold).monospacedDigit())
+            }
+        }
+        .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+        .padding(.horizontal, count > 1 ? 4 : 0)
+        .frame(minWidth: Self.size, minHeight: Self.size)
+        .background(Capsule().fill(picked ? Color.accentColor : Color(nsColor: .labelColor).opacity(0.62)))
+        .fixedSize()
+    }
+}
+
+/// The events within the range as markers in a thin lane of their own over
+/// the rail's track: one symbol per kind, those too close to draw apart as
+/// one marker with a count. Hovering one previews its moment and lists what
+/// happened in the tooltip; clicking moves playback there. Takes no room
+/// while the range has none.
 struct HistoryEventLane: View {
     let scrubber: HistoryScrubber
     let player: HistoryPlayer
@@ -102,7 +124,7 @@ struct HistoryEventLane: View {
     let domain: ClosedRange<Date>
     let bucket: TimeInterval
 
-    private static let size: CGFloat = 15
+    private static let size = HistoryEventMarker.size
 
     var body: some View {
         GeometryReader { geometry in
@@ -111,15 +133,17 @@ struct HistoryEventLane: View {
             let clusters = HistoryEvent.clusters(events.filter { domain.contains($0.time) },
                                                  spacing: Double(Self.size + 3) * span / Double(max(width, 1)))
             ZStack(alignment: .leading) {
-                // Holds the lane's left edge, which the markers are placed from.
-                Color.clear.frame(width: width, height: 1)
+                // The lane's own strip, which also holds its left edge for the markers.
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(Color.primary.opacity(0.05))
+                    .frame(width: width, height: 8)
                 ForEach(clusters, id: \.first?.id) { cluster in
                     marker(cluster, width: width)
                 }
             }
             .frame(width: width, height: geometry.size.height, alignment: .leading)
         }
-        .frame(height: Self.size + 1)
+        .frame(height: Self.size)
     }
 
     private func marker(_ cluster: [HistoryEvent], width: CGFloat) -> some View {
@@ -131,19 +155,9 @@ struct HistoryEventLane: View {
         return Button {
             HistoryEventStyle.select(first, scrubber: scrubber, player: player, points: points, bucket: bucket)
         } label: {
-            HStack(spacing: 1) {
-                Image(systemName: kinds.count == 1 ? HistoryEventStyle.symbol(first.kind) : "square.stack.fill")
-                    .font(.system(size: 9, weight: .bold))
-                if count > 1 {
-                    Text("\(count)").font(.system(size: 11, weight: .semibold).monospacedDigit())
-                }
-            }
-            .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-            .padding(.horizontal, count > 1 ? 4 : 0)
-            .frame(minWidth: Self.size, minHeight: Self.size)
-            .background(Capsule().fill(picked ? Color.accentColor : Color(nsColor: .labelColor).opacity(0.62)))
-            .fixedSize()
-            .contentShape(Capsule())
+            HistoryEventMarker(symbol: kinds.count == 1 ? HistoryEventStyle.symbol(first.kind) : "square.stack.fill", count: count,
+                               picked: picked)
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .onHover { inside in
@@ -221,43 +235,35 @@ struct HistoryMomentEvents: View {
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
-            ForEach(closest) { event in
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: HistoryEventStyle.symbol(event.kind))
-                        .foregroundStyle(event == selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondaryText))
-                        .frame(width: 16)
-                    Text(HistoryEventStyle.title(event))
-                        .fontWeight(event == selected ? .semibold : .regular)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 4)
-                    Text(offset(event))
-                        .foregroundStyle(.secondaryText)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .fixedSize()
+            Grid(alignment: .leading, horizontalSpacing: 6, verticalSpacing: 5) {
+                ForEach(closest) { event in
+                    GridRow(alignment: .firstTextBaseline) {
+                        Image(systemName: HistoryEventStyle.symbol(event.kind))
+                            .foregroundStyle(event == selected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondaryText))
+                            .frame(width: 16)
+                        Text(HistoryEventStyle.title(event))
+                            .fontWeight(event == selected ? .semibold : .regular)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(HistoryReplayLabels.eventOffset(event, at: time, bucket: bucket))
+                            .font(.metadata)
+                            .foregroundStyle(.secondaryText)
+                            .monospacedDigit()
+                            .fixedSize()
+                            .gridColumnAlignment(.trailing)
+                    }
+                    .help(tooltip(event))
                 }
-                .font(.tableText)
-                .help(tooltip(event))
             }
+            .font(.tableText)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if near.count > closest.count {
                 Text("\(near.count - closest.count) more within \(Format.roughDuration(reach))")
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
             }
         }
-    }
-
-    /// "12 s before", "during these 10 s", "about 5 s after".
-    private func offset(_ event: HistoryEvent) -> String {
-        let seconds = event.time.timeIntervalSince(time)
-        let text: String
-        if seconds <= 0, seconds > -bucket {
-            text = "during these \(Format.timeSpan(bucket))"
-        } else {
-            text = "\(Format.timeSpan(abs(seconds).rounded())) \(seconds < 0 ? "before" : "after")"
-        }
-        return event.isApproximate ? "about " + text : text
     }
 
     private func tooltip(_ event: HistoryEvent) -> String {

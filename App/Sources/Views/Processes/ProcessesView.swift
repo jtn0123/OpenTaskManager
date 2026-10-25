@@ -3,13 +3,18 @@ import SwiftUI
 
 struct ProcessesView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("processViewMode") private var mode: ProcessViewMode = .grouped
-    @AppStorage("processSortKey") private var sortKey: ProcessSortKey = .cpu
-    @AppStorage("processSortAscending") private var ascending = false
-    @AppStorage("heatmap") private var heatmap = true
-    @AppStorage("showInspector") private var showInspector = true
-    @AppStorage("hiddenProcessColumns") private var hiddenColumns = HiddenProcessColumns.defaults
+    @Setting(Settings.processViewMode) private var mode: ProcessViewMode
+    @Setting(Settings.processSortKey) private var sortKey: ProcessSortKey
+    @Setting(Settings.processSortAscending) private var ascending: Bool
+    @Setting(Settings.heatmap) private var heatmap: Bool
+    @Setting(Settings.showInspector) private var showInspector: Bool
+    @Setting(Settings.hiddenProcessColumns) private var hiddenColumns: HiddenProcessColumns
+    @Setting(Settings.processNameWidth) private var nameWidth: Double
     @State private var search = ""
+    @State private var showsFindOwner = false
+    @State private var showsRecentlyEnded = LaunchArgument.string("openRecentlyEnded") == "YES"
+    @State private var didOpenFindOwner = false
+    @State private var ownerInitialQuery = ""
     /// By PID and start time, so a selected process that ends never hands
     /// its inspector, or End Task, to a later process given its PID.
     @State private var selection: Set<ProcessIdentity> = []
@@ -25,6 +30,12 @@ struct ProcessesView: View {
     /// selected row shows its own figures or its group's.
     @State private var expandedRows: Set<Int64> = []
     @State private var tableLink = ProcessTableLink()
+    /// What Force Quit would end, and their names, fixed as its confirmation opens.
+    @State private var forceQuitTargets: [ProcessIdentity] = []
+    @State private var forceQuitNames: [String] = []
+    @State private var confirmsForceQuit = false
+    /// A narrow window, where End Task drops its word.
+    @Environment(\.compactToolbar) private var compactToolbar
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,7 +48,7 @@ struct ProcessesView: View {
                     wantsInspector: showInspector && !selection.isEmpty,
                     coversList: $showsFullDetail,
                     isNarrow: $isNarrow,
-                    widthKey: "processInspectorWidth",
+                    widthKey: Settings.processInspectorWidth,
                     backTitle: "Processes"
                 ) {
                     ProcessOutlineView(
@@ -47,7 +58,9 @@ struct ProcessesView: View {
                         ascending: $ascending,
                         model: model,
                         onShowInspector: openDetails,
+                        onForceQuit: requestForceQuit,
                         onToggleColumn: { hiddenColumns.toggle($0, unreported: unreportedColumns) },
+                        onNameWidthChange: { nameWidth = Double($0) },
                         onMinimumWidthChange: { tableMinimum = $0 },
                         onHiddenToFitChange: { hiddenToFit = $0 },
                         link: tableLink,
@@ -57,11 +70,48 @@ struct ProcessesView: View {
                     inspector(group: selectedRowGroup(in: table?.nodes, snapshot: snapshot))
                 }
                 Divider()
-                StatusBar(snapshot: snapshot)
-                    .onAppear(perform: selectRequestedProcess)
+                HStack(spacing: 0) {
+                    StatusBar(snapshot: snapshot)
+                    Button("Ended recently (\(model.recentProcesses.entries.count))…") { showsRecentlyEnded = true }
+                        .font(.explanation)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .buttonStyle(.borderless)
+                        .help("See the last readings of processes no longer observed, retained for about a minute")
+                        .padding(.trailing, 12)
+                }
+                .onAppear(perform: selectRequestedProcess)
             } else {
                 ProgressView("Reading processes…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .samplingDemand(.restrictedProcesses)
+        .sheet(isPresented: $showsRecentlyEnded) { RecentProcessesSheet() }
+        .task(id: model.isPaused) {
+            // Active samples expire entries themselves. While paused, only a
+            // visible page needs a timer; hidden windows create no wakeups.
+            guard model.isPaused else { return }
+            while !Task.isCancelled {
+                await model.samplingDemand.waitUntilVisible()
+                guard !Task.isCancelled else { return }
+                model.recentProcesses.expire(at: ProcessInfo.processInfo.systemUptime, publishes: true)
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .sheet(isPresented: $showsFindOwner, onDismiss: { ownerInitialQuery = "" }, content: {
+            FindOwnerSheet(initialQuery: ownerInitialQuery) { identity in
+                guard model.process(identity) != nil else { return false }
+                select(identity)
+                if isNarrow { showsFullDetail = false }
+                showsFindOwner = false
+                return true
+            }
+        })
+        .onAppear {
+            if !didOpenFindOwner, let query = LaunchArgument.string("openFindOwner") {
+                ownerInitialQuery = query
+                didOpenFindOwner = true
+                showsFindOwner = true
             }
         }
         .onChange(of: isNarrow) {
@@ -70,6 +120,12 @@ struct ProcessesView: View {
             // selection reaches it, so apply the same rule to the selection as it is now.
             if isNarrow, showInspector, !selection.isEmpty { showsFullDetail = true }
         }
+        .confirmationDialog(ForceQuitPrompt.title(names: forceQuitNames), isPresented: $confirmsForceQuit,
+                            titleVisibility: .visible) {
+            Button("Force Quit", role: .destructive) { model.forceQuit(model.livePIDs(Set(forceQuitTargets))) }
+        } message: {
+            Text(ForceQuitPrompt.message(names: forceQuitNames))
+        }
         // Matches names, PIDs, users and paths; a short prompt stays whole in the toolbar.
         .searchable(text: $search, placement: .toolbar, prompt: "Search processes")
         .toolbar {
@@ -77,18 +133,14 @@ struct ProcessesView: View {
             ToolbarItem {
                 modeMenu
             }
+            // Named where there's room. Columns is a submenu of the View
+            // menu, so End Task and the search field both fit beside it.
             ToolbarItem {
-                columnsMenu
-            }
-            ToolbarItem {
-                Button {
-                    model.endTask(model.livePIDs(selection))
-                } label: {
-                    Label("End Task", systemImage: "xmark.octagon")
+                if compactToolbar {
+                    endTaskMenu.labelStyle(.iconOnly)
+                } else {
+                    endTaskMenu.labelStyle(.titleAndIcon)
                 }
-                .disabled(selection.isEmpty)
-                .help(selection.count > 1 ? "End Task: ask the \(selection.count) selected processes to quit (Delete)"
-                    : "End Task: ask the selected process to quit (Delete)")
             }
             ToolbarItem {
                 Button(action: toggleDetails) {
@@ -98,6 +150,43 @@ struct ProcessesView: View {
                 .help(detailsHelp)
             }
         }
+    }
+
+    /// End Task, named, with Force Quit in its menu: the quit that lets a
+    /// process save its work is the button, and the one that loses unsaved
+    /// work is a step away and confirmed. Greyed until a row is selected.
+    private var endTaskMenu: some View {
+        Menu {
+            Button("Force Quit…", action: requestForceQuit)
+        } label: {
+            Label("End Task", systemImage: "xmark.octagon")
+        } primaryAction: {
+            model.endTask(model.livePIDs(selection))
+        }
+        .fixedSize()
+        .disabled(model.livePIDs(selection).isEmpty)
+        .help(endTaskHelp)
+    }
+
+    private var endTaskHelp: String {
+        let forceQuit = "Its menu has Force Quit, which stops at once, losing unsaved work (Option-Delete)"
+        return switch selection.count {
+        case 0: "End Task: select a process to end. It asks the process to quit, so it can save its work first (Delete). "
+            + forceQuit
+        case 1: "End Task: ask the selected process to quit, so it can save its work first (Delete). " + forceQuit
+        default: "End Task: ask the \(selection.count) selected processes to quit, so they can save their work first "
+            + "(Delete). " + forceQuit
+        }
+    }
+
+    /// Toolbar's Force Quit or Option-Delete: asks first, naming what it ends.
+    private func requestForceQuit() {
+        let targets = selection.compactMap { identity in model.process(identity).map { (identity, $0) } }
+            .sorted { $0.0.pid < $1.0.pid }
+        guard !targets.isEmpty else { return }
+        forceQuitTargets = targets.map(\.0)
+        forceQuitNames = targets.map { model.displayName(for: $0.1) }
+        confirmsForceQuit = true
     }
 
     @ViewBuilder private func inspector(group: ProcessRowGroup?) -> some View {
@@ -119,7 +208,9 @@ struct ProcessesView: View {
     }
 
     /// How the rows are arranged, named in the toolbar rather than three
-    /// look-alike icons, with the choices ticked in its menu.
+    /// look-alike icons, with the choices ticked in its menu, and Columns as
+    /// a submenu (also the table header's context menu): a toolbar menu of
+    /// its own left no room for the search field beside a named End Task.
     private var modeMenu: some View {
         Menu {
             Picker("View", selection: $mode) {
@@ -129,42 +220,50 @@ struct ProcessesView: View {
             }
             .pickerStyle(.inline)
             .labelsHidden()
+            Divider()
+            Button("Ended recently (\(model.recentProcesses.entries.count))…") { showsRecentlyEnded = true }
+            Button("Find Owner…") { showsFindOwner = true }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            Divider()
+            Menu {
+                columnItems
+            } label: {
+                Label(hiddenToFit.isEmpty ? "Columns" : "Columns (some hidden to fit)", systemImage: "tablecells")
+            }
         } label: {
             Label(mode.title, systemImage: mode.symbol)
         }
         .labelStyle(.titleAndIcon)
         .fixedSize()
-        .help("View: group helpers under their app (Grouped), show which process started which (Tree), "
-            + "or list every process on its own (Flat)")
+        .help("View: group helpers under their app (Grouped; sorted by name, PID or user, apps, background "
+            + "and system processes are listed apart), show which process started which (Tree), or list every "
+            + "process on its own (Flat); and choose the columns")
     }
 
     /// Optional columns, also in the header's context menu. Hiding one makes
     /// room rather than squeezing the others' headings. A column that's on
     /// but hidden to fit the width stays ticked and says so; one this Mac
     /// doesn't report says that, and shows its dashes once ticked.
-    private var columnsMenu: some View {
-        Menu {
-            let unreported = unreportedColumns
-            ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
-                let title = column.menuTitle(hiddenToFit: hiddenToFit.contains(column), unreported: unreported.contains(column))
-                Toggle(title, isOn: Binding(
-                    get: { hiddenColumns.isOn(column, unreported: unreported) },
-                    set: { isOn in
-                        if isOn != hiddenColumns.isOn(column, unreported: unreported) { hiddenColumns.toggle(column, unreported: unreported) }
-                    }
-                ))
-            }
-            if !hiddenToFit.isEmpty {
-                Divider()
-                Text(ProcessColumn.hiddenToFitNote)
-            }
-            Divider()
-            Button("Default Columns") { hiddenColumns = .defaults }
-        } label: {
-            Label("Columns", systemImage: "tablecells")
+    @ViewBuilder private var columnItems: some View {
+        let unreported = unreportedColumns
+        ForEach(ProcessColumn.allCases.filter { $0 != .name }, id: \.self) { column in
+            let title = column.menuTitle(hiddenToFit: hiddenToFit.contains(column), unreported: unreported.contains(column))
+            Toggle(title, isOn: Binding(
+                get: { hiddenColumns.isOn(column, unreported: unreported) },
+                set: { isOn in
+                    if isOn != hiddenColumns.isOn(column, unreported: unreported) { hiddenColumns.toggle(column, unreported: unreported) }
+                }
+            ))
         }
-        .help(hiddenToFit.isEmpty ? "Columns: choose what the table shows"
-            : "Columns: choose what the table shows. Some are hidden until there's room for them")
+        if !hiddenToFit.isEmpty {
+            Divider()
+            Text(ProcessColumn.hiddenToFitNote)
+        }
+        Divider()
+        Button("Default Columns") {
+            hiddenColumns = .defaults
+            nameWidth = Settings.processNameWidth.defaultValue
+        }
     }
 
     /// Columns with nothing to show on this Mac, such as Power in a VM.
@@ -261,15 +360,17 @@ struct ProcessesView: View {
             filter: search
         )
         // Rows that read the same keep their order, rather than trading places
-        // every tick over differences the CPU column doesn't show.
+        // every tick over differences the CPU column doesn't show. Grouped,
+        // sorted by a figure, ranks every group together.
         return ProcessTableConfiguration(
-            nodes: ProcessTreeBuilder.sort(nodes, by: sortKey, ascending: ascending, cpuStep: model.cpuScale.shownStep),
+            nodes: ProcessTreeBuilder.arrange(nodes, by: sortKey, ascending: ascending, cpuStep: model.cpuScale.shownStep),
             headerTotals: headerTotals(snapshot),
             hiddenColumns: hiddenColumns,
             unreportedColumns: unreportedColumns,
             cpuScale: model.cpuScale,
             heatmap: heatmap,
-            fastTierName: model.topology.tiers.first?.name ?? "P-core"
+            fastTierName: model.topology.tiers.first?.name ?? "P-core",
+            nameWidth: CGFloat(nameWidth)
         )
     }
 

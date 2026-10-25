@@ -5,15 +5,21 @@ import Foundation
 ///
 /// Only entries whose figure reads as something get a row: one that rounds to
 /// "0.0%" would only fill the list with zeros. Below the rows a line says the
-/// rest are idle, so the line takes a row's room while it shows. As apps go
-/// idle and busy the rows come and go from one sample to the next, so the
-/// card keeps room for the most rows the list needed over the last `hold`
-/// seconds: it grows at once but shrinks only once fewer have been enough
-/// for a while, and the page under it doesn't jump every tick.
+/// rest are idle, so the line counts as a row of room while it shows, though
+/// it may be shorter than one (`height`). As apps go idle and busy the rows
+/// come and go from one update to the next, so the card keeps room for the
+/// most rows the list showed over the last `hold` seconds: it shrinks only
+/// once fewer have been enough for a while, and the page under it doesn't
+/// jump every tick. It grows only for rows that last: an entry busy for one
+/// update alone, past the room kept, is left out, so the card never keeps
+/// room for a row it didn't show.
 public struct TopListRoom: Equatable, Sendable {
     private struct Need: Equatable, Sendable {
         let time: TimeInterval
+        /// Rows the update's entries needed.
         let rows: Int
+        /// Rows it needed that the update before needed too: what the room holds.
+        let lasting: Int
     }
 
     /// Rows the list never goes past.
@@ -22,7 +28,9 @@ public struct TopListRoom: Equatable, Sendable {
     public let hold: TimeInterval
     /// Rows of room now, idle line included.
     public private(set) var rows = 0
-    /// Rows needed at each recent update, oldest first, within `hold`.
+    /// Entries the list shows after the last update.
+    public private(set) var shown = 0
+    /// Each recent update's needs, oldest first, within `hold`.
     private var recent: [Need] = []
 
     public init(limit: Int, hold: TimeInterval = 30) {
@@ -49,14 +57,43 @@ public struct TopListRoom: Equatable, Sendable {
         listed >= limit ? limit : max(listed, 0) + 1
     }
 
-    /// The room after an update that lists `listed` entries, at `time` in
-    /// seconds on a steady clock: the most rows needed within `hold`.
+    /// Entries `rows` of room hold: a full list, or the rows over the idle line.
+    public static func entries(rows: Int, limit: Int) -> Int {
+        rows >= limit ? limit : max(rows - 1, 0)
+    }
+
+    /// How tall `rows` of room are, as `update` gives them: a full list's
+    /// rows, or the entries before the idle line and the line, which is
+    /// `idleLine` tall, each `spacing` apart. So a sparse list takes its rows
+    /// and a short footer, not a row's room for the footer.
+    public static func height(rows: Int, limit: Int, row: Double, idleLine: Double, spacing: Double) -> Double {
+        if rows >= limit {
+            return Double(limit) * row + Double(max(limit - 1, 0)) * spacing
+        }
+        let listed = max(rows - 1, 0)
+        return Double(listed) * (row + spacing) + idleLine
+    }
+
+    /// Updates the room for an update whose figures list `listed` entries,
+    /// taken at `time` in seconds, and gives how many of them to show.
+    ///
+    /// The room is the most rows two updates in a row needed within `hold`
+    /// (the first update counts at once), so a row that shows for a moment
+    /// doesn't hold room for the next 30 s. Entries past the room an update
+    /// needs alone aren't shown, the least busy first. A repeat for the same
+    /// `time`, the same sample drawn again, revises that update rather than
+    /// counting as the next.
     @discardableResult
     public mutating func update(listed: Int, at time: TimeInterval) -> Int {
-        let needed = Self.needed(listed: min(listed, limit), limit: limit)
-        recent.removeAll { time - $0.time >= hold }
-        recent.append(Need(time: time, rows: needed))
-        rows = recent.map(\.rows).max() ?? needed
-        return rows
+        let listed = min(max(listed, 0), limit)
+        let needed = Self.needed(listed: listed, limit: limit)
+        if recent.last?.time == time { recent.removeLast() }
+        // A clock that went back starts over rather than holding room for the future.
+        recent.removeAll { time - $0.time >= hold || $0.time > time }
+        let lasting = min(needed, recent.last?.rows ?? needed)
+        recent.append(Need(time: time, rows: needed, lasting: lasting))
+        rows = recent.map(\.lasting).max() ?? lasting
+        shown = min(listed, Self.entries(rows: rows, limit: limit))
+        return shown
     }
 }

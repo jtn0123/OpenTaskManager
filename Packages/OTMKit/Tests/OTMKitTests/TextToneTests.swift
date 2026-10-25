@@ -52,6 +52,24 @@ struct TextToneTests {
     }
 
     @Test(arguments: [false, true])
+    func searchHighlightsKeepTextAtAA(dark: Bool) {
+        for card in Self.cards(dark: dark) {
+            #expect(TextTone.highlightContrast(dark: dark, on: card) >= 4.5, "card \(card)")
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func searchHighlightsStandOutFromTheCard(dark: Bool) {
+        // The wash is meant to be seen: a clear shift from the card in hue
+        // (light mode) or lightness (dark mode), never the card itself.
+        for card in Self.cards(dark: dark) {
+            let wash = ColorContrast.composite(TextTone.highlight, opacity: TextTone.highlightOpacity(dark: dark), over: card)
+            let shift = abs(wash.red - card.red) + abs(wash.green - card.green) + abs(wash.blue - card.blue)
+            #expect(shift >= 0.25, "card \(card)")
+        }
+    }
+
+    @Test(arguments: [false, true])
     func theSystemSecondaryLabelFallsShort(dark: Bool) {
         // Why the app has its own tone: 50% black and 55% white miss AA on some cards.
         let system = dark ? 0.55 : 0.5

@@ -3,7 +3,8 @@ import Foundation
 /// Something that happened on the Mac while the flight recorder ran, kept
 /// beside its records so the History page can line a spike up with what
 /// coincided with it: an app launched or quit, a busy background process
-/// started or exited, the network changed, the Mac went to sleep or woke.
+/// started or exited, the network changed, the Mac went to sleep or woke, a
+/// spike was captured.
 ///
 /// Most times come from notifications and are exact. Process starts and
 /// exits are found by comparing one update's process list with the next
@@ -14,6 +15,8 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
     public enum Kind: String, Sendable, CaseIterable, Codable {
         case appLaunched
         case appQuit
+        /// OpenTaskManager delivered a signal or an app accepted its Quit request.
+        case endedByApp
         /// A background process that became busy (`ProcessEventTracker.busyPercent`).
         case processStarted
         /// A process that had been busy, gone.
@@ -22,9 +25,14 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
         case networkChanged
         case sleep
         case wake
+        /// The spike recorder kept a capture (`SpikeTrigger.event`): the
+        /// kind that crossed as its name, what crossed as its detail.
+        case spike
     }
 
-    public var id: String { "\(time.timeIntervalSince1970) \(kind.rawValue) \(name)" }
+    public var id: String {
+        "\(time.timeIntervalSince1970) \(kind.rawValue) \(name)" + (kind == .endedByApp ? " " + detail : "")
+    }
     public let time: Date
     public let kind: Kind
     /// The app or process; for a network change, the network now in use
@@ -70,6 +78,7 @@ public struct HistoryEvent: Sendable, Hashable, Identifiable {
         var open: [String: Int] = [:]
         for event in events {
             let key = event.kind.rawValue + "\u{1F}" + event.name
+                + (event.kind == .endedByApp ? event.detail : "")
             if let index = open[key], event.time.timeIntervalSince(merged[index].time) < window {
                 let first = merged[index]
                 merged[index] = HistoryEvent(time: first.time, kind: first.kind, name: first.name, detail: first.detail,

@@ -37,11 +37,13 @@ public struct SensorSample: Sendable, Codable {
         public let minimumRPM: Double?
         public let maximumRPM: Double?
 
-        /// How far between its slowest and fastest speed the fan is running,
-        /// 0...1. Nil when the SMC doesn't publish the range.
-        public var fraction: Double? {
-            guard let minimumRPM, let maximumRPM, maximumRPM > minimumRPM else { return nil }
-            return min(max((rpm - minimumRPM) / (maximumRPM - minimumRPM), 0), 1)
+        /// Its speed as a share of its fastest, 0...1: the scale its graph and
+        /// the Thermals table's bar draw it on, from zero. A fan turning at its
+        /// minimum reads above zero, never as stopped. Nil when the SMC doesn't
+        /// publish the maximum.
+        public var shareOfMaximum: Double? {
+            guard let maximumRPM, maximumRPM > 0 else { return nil }
+            return min(max(rpm / maximumRPM, 0), 1)
         }
 
         /// Fans on Apple silicon laptops stop entirely when cool.

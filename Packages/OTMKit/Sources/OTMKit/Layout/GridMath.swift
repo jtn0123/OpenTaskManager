@@ -51,9 +51,14 @@ public enum GridMath {
     /// rows as fit in `width` and spreading the items evenly over them, so
     /// seven readings that fit six across become rows of four and three
     /// rather than six and one. An item wider than the row gets a row alone.
-    public static func flowRows(widths: [Double], width: Double, spacing: Double) -> [Range<Int>] {
+    ///
+    /// Unbalanced, each row takes as many as fit and only what doesn't moves
+    /// down, as in a bar of controls, where a wrapped count shouldn't take the
+    /// menu before it along.
+    public static func flowRows(widths: [Double], width: Double, spacing: Double,
+                                balanced: Bool = true) -> [Range<Int>] {
         let fewest = greedyRows(widths, limit: width, spacing: spacing)
-        guard fewest.count > 1 else { return fewest }
+        guard balanced, fewest.count > 1 else { return fewest }
         // Narrow the limit as far as it goes without needing another row.
         var low = widths.max() ?? 0
         var high = width

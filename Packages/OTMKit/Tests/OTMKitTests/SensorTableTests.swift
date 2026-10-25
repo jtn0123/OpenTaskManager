@@ -59,6 +59,18 @@ struct SensorTableTests {
         #expect(rows.allSatisfy { $0.unit == .celsius && $0.scale == SensorTable.temperatureScale })
     }
 
+    @Test func unorderedReadingsKeepAllFiguresForHistoryAndRanges() {
+        let sensors = SensorSample(temperatures: SensorModel.temperatures(from: [
+            ("PMU tdie1", 61), ("NAND CH0 temp", 38),
+        ]), fans: [SensorSample.Fan(id: 0, rpm: 1_200, minimumRPM: nil, maximumRPM: 5_000)])
+        let power = Self.power(components: Self.components(clusters: [Self.cluster("Super", channel: "PCPU", mhz: 4_000, active: 0.7)]))
+        let ordered = SensorTable.readings(sensors: sensors, power: power, gpus: [Self.gpu(mhz: 300, active: 0.1)])
+        let unordered = SensorTable.readings(sensors: sensors, power: power, gpus: [Self.gpu(mhz: 300, active: 0.1)], ordered: false)
+        #expect(unordered != ordered)
+        #expect(Dictionary(uniqueKeysWithValues: unordered.map { ($0.id, $0) })
+            == Dictionary(uniqueKeysWithValues: ordered.map { ($0.id, $0) }))
+    }
+
     @Test func namesEachOfSeveralBatterySensors() {
         let sensors = SensorSample(temperatures: [Self.temperature("gas gauge battery", 30), Self.temperature("battery 2", 31)], fans: [])
         let rows = SensorTable.readings(sensors: sensors, power: nil, gpus: [])

@@ -72,7 +72,19 @@ public struct CPUSample: Sendable, Codable {
     public let system: Double
     /// Busy fraction per logical CPU, indexed by CPU number.
     public let coreUsage: [Double]
+    /// The part of each CPU's busy fraction spent in the kernel (system
+    /// time), indexed as `coreUsage`; empty where it wasn't read.
+    public let coreSystem: [Double]
     public let loadAverage: [Double]
+
+    public init(usage: Double, user: Double, system: Double, coreUsage: [Double], coreSystem: [Double] = [], loadAverage: [Double]) {
+        self.usage = usage
+        self.user = user
+        self.system = system
+        self.coreUsage = coreUsage
+        self.coreSystem = coreSystem
+        self.loadAverage = loadAverage
+    }
 
     public static let zero = CPUSample(usage: 0, user: 0, system: 0, coreUsage: [], loadAverage: [0, 0, 0])
 }
@@ -151,7 +163,11 @@ public struct VolumeInfo: Sendable, Codable, Identifiable, Hashable {
     public let mountPoint: String
     public let fileSystem: String?
     public let totalBytes: UInt64
+    /// Available for something the user asked for: the free space and what
+    /// macOS clears by itself when it's needed (purgeable), as Finder counts it.
     public let availableBytes: UInt64
+    /// Free right now, without the purgeable space. Nil where it wasn't read.
+    public let freeBytes: UInt64?
     public let isInternal: Bool
     public let isRemovable: Bool
     public let isRoot: Bool
@@ -224,6 +240,17 @@ public enum ThermalState: String, Sendable, Codable {
         case .serious: self = .serious
         case .critical: self = .critical
         @unknown default: self = .nominal
+        }
+    }
+
+    /// The state as a level from 0 (nominal) to 1 (critical), in even steps,
+    /// for a graph or a level bar of how hard macOS is holding back.
+    public var level: Double {
+        switch self {
+        case .nominal: 0
+        case .fair: 1.0 / 3
+        case .serious: 2.0 / 3
+        case .critical: 1
         }
     }
 }
@@ -357,4 +384,9 @@ public struct PowerSample: Sendable, Codable {
     /// Per-component power. nil when IOReport is unavailable and on the first
     /// sample, which has no interval to measure over.
     public var components: PowerComponents?
+    /// Latest media-block power-state residency. nil before an IOReport baseline,
+    /// empty when no media channel has a usable counter.
+    public var mediaEngines: [MediaEngineSample]?
+    /// false when the UI repeats the last reading between media polls.
+    public var mediaEnginesFresh: Bool?
 }

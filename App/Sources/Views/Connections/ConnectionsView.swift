@@ -5,25 +5,35 @@ import SwiftUI
 /// reachable from the network, and who each app is talking to.
 struct ConnectionsView: View {
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
-    @State private var store = ConnectionStore()
+    @CurrentPage private var page
+    /// Lasts the session, so the sockets seen closing survive other pages.
+    private let store = ConnectionStore.shared
     @State private var filter: ConnectionFilter = .all
+    /// Open sockets, or those seen closing.
+    @State private var list: ConnectionList = .open
     @State private var search = ""
-    @State private var selection: Connection.ID?
+    @State private var showsListenerChanges = false
+    @State private var showsHiddenSockets = false
+    /// Open or closed: a socket that closes while selected keeps its details.
+    @State private var selection: ObservedConnection.ID?
     @State private var openedRequest = false
+    /// The page has started its walks; a later `.task` run is a pause or resume.
+    @State private var watching = false
     /// The window is too narrow for the table and the details side by side.
     @State private var isNarrow = false
     /// In a narrow window, the details cover the table.
     @State private var showsFullDetail = false
-    @State private var sortOrder = [KeyPathComparator(\ConnectionRow.processName)]
-    @AppStorage("hiddenConnectionColumns") private var hiddenColumns = HiddenConnectionColumns()
+    /// Each list keeps its own sort; closed sockets start with the latest to go.
+    @State private var openSort = [KeyPathComparator(\ConnectionRow.processName)]
+    @State private var closedSort = [KeyPathComparator(\ConnectionRow.stateOrder)]
+    @Setting(Settings.hiddenConnectionColumns) private var hiddenColumns: HiddenConnectionColumns
     /// Columns that are on but hidden because the table is too narrow. All
     /// that can give way do until the table has measured its room, so it
     /// never starts out wider than that.
     @State private var hiddenToFit = ConnectionColumn.givingWay
     /// Back from the details, the table shows the row they ended on.
-    @State private var scrollTarget: Connection.ID?
-    /// The page is wide enough for the six summary cards in one row.
+    @State private var scrollTarget: ObservedConnection.ID?
+    /// The page is wide enough for the seven summary cards in one row.
     @State private var cardsFit = true
     /// The details are open, so the summary folds into a strip and the
     /// table beside them gets its height.
@@ -31,12 +41,43 @@ struct ConnectionsView: View {
 
     var body: some View {
         Group {
-            if store.hasLoaded {
+            if list == .history {
+                ConnectionHistoryView(search: search)
+            } else if store.hasLoaded {
                 content
             } else {
                 ProgressView("Reading sockets…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker("List", selection: $list) {
+                Text(ConnectionList.open.rawValue).tag(ConnectionList.open)
+                let closed = store.closedRows.count
+                Text(closed > 0 ? "\(ConnectionList.closed.rawValue) · \(closed.formatted())" : ConnectionList.closed.rawValue)
+                    .tag(ConnectionList.closed)
+                Text(ConnectionList.history.rawValue).tag(ConnectionList.history)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .help("""
+            The sockets open now, those seen closing in the last \(Format.timeSpan(ConnectionWatch.closedWindow)) \
+            (the latest \(ConnectionWatch.keptClosed) at most), or the stored lifetimes of the last 7 days
+            """)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .onAppear {
+            if LaunchArgument.string("openListenerChanges") == "YES" { showsListenerChanges = true }
+            if LaunchArgument.string("openHiddenSockets") == "YES" { showsHiddenSockets = true }
+            if LaunchArgument.string("openConnectionList") == "history" { list = .history }
+            if let query = LaunchArgument.string("openConnectionSearch") { search = query; list = .history }
+        }
+        .sheet(isPresented: $showsListenerChanges) {
+            ListenerReviewView(showProcess: showProcess)
+        }
+        .sheet(isPresented: $showsHiddenSockets) {
+            HiddenSocketsSheet()
         }
         .searchable(text: $search, placement: .toolbar, prompt: "Process, address or port")
         .toolbar {
@@ -46,29 +87,44 @@ struct ConnectionsView: View {
         }
         // Runs only while the page is on screen; SwiftUI cancels it when the
         // page goes away, and restarts it when updates are paused or resumed.
-        .task(id: model.isPaused) { await store.run(model: model) }
+        .onChange(of: IncidentNavigation.shared.search, initial: true) { _, requested in
+            if let requested { search = requested; list = .history }
+        }
+        .task(id: model.isPaused) {
+            let opening = !watching
+            watching = true
+            await store.run(model: model, opening: opening)
+        }
+    }
+
+    private var sortOrder: Binding<[KeyPathComparator<ConnectionRow>]> {
+        list == .open ? $openSort : $closedSort
+    }
+
+    private var listedRows: [ConnectionRow] {
+        list == .open ? store.rows : store.closedRows
     }
 
     private var content: some View {
-        let shown = store.rows.filter { filter.matches($0.connection) && $0.matches(search) }.sorted(using: sortOrder)
-        let selected = selection.flatMap { id in store.rows.first { $0.id == id } }
+        let shown = listedRows.filter { filter.matches($0.connection) && $0.matches(search) }.sorted(using: sortOrder.wrappedValue)
+        let selected = selection.flatMap(store.row)
         let covered = isNarrow && showsFullDetail
         return VStack(spacing: 0) {
             // Whose sockets the counts are, so a 0 doesn't read as the whole Mac's.
-            ScopeHeader(hidden: store.hiddenProcesses)
+            ScopeHeader(hidden: store.hiddenProcesses) { showsHiddenSockets = true }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
-            // The five counts and the traffic card: cards in one row while they
+            // The five counts, listener review and the traffic card: cards in one row while they
             // fit it and the table has the page to itself, otherwise a strip of
             // chips (one line beside the details in the default window, two in
             // the narrowest), so the table keeps its height. Only a resize or
             // the details opening switch them, never a tick.
             Group {
                 if cardsFit, !inspectorFolds {
-                    SummaryCards(summary: store.summary)
+                    SummaryCards(summary: store.summary, reviewListeners: { showsListenerChanges = true })
                 } else {
-                    SummaryStrip(summary: store.summary)
+                    SummaryStrip(summary: store.summary, reviewListeners: { showsListenerChanges = true })
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -83,7 +139,7 @@ struct ConnectionsView: View {
                 wantsInspector: selected != nil,
                 coversList: $showsFullDetail,
                 isNarrow: $isNarrow,
-                widthKey: "connectionInspectorWidth",
+                widthKey: Settings.connectionInspectorWidth,
                 backTitle: "Connections",
                 // Over a narrow window's table, step through its rows without going back.
                 backAccessory: covered ? AnyView(SocketStepper(
@@ -94,13 +150,22 @@ struct ConnectionsView: View {
                 VStack(spacing: 0) {
                     // Only as tall as its rows, so no empty stripes follow the
                     // last socket; with more rows than room it fills and scrolls.
-                    ConnectionTable(rows: shown, selection: $selection, sortOrder: $sortOrder,
+                    ConnectionTable(rows: shown, selection: $selection, sortOrder: sortOrder,
                                     userHidden: hiddenColumns.columns, hiddenToFit: $hiddenToFit,
                                     scrollTarget: $scrollTarget, showProcess: showProcess, open: openDetails)
                         .fitsTableToRows(shown.count)
                         .layoutPriority(1)
                     Divider()
-                    tableFooter(shown: shown.count)
+                    if list == .closed, listedRows.isEmpty {
+                        // In place of the footer's count: what the list
+                        // collects, and the way back to the sockets the
+                        // counts above are about.
+                        NoClosedSocketsNote(coverage: store.closedCoverage) { list = .open }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                    } else {
+                        tableFooter(shown: shown.count)
+                    }
                     Spacer(minLength: 0)
                 }
             } detail: {
@@ -109,15 +174,15 @@ struct ConnectionsView: View {
                                      close: covered ? nil : { selection = nil })
                 } else if covered {
                     ContentUnavailableView("Socket closed", systemImage: "xmark.circle", description: Text("""
-                    It closed after it was picked, by its process or the other end. Go back to the list, or step \
-                    to another socket.
+                    It closed after it was picked, and has left the recently closed list since. Go back to the \
+                    list, or step to another socket.
                     """))
                 }
             }
         }
         // The split view sizes the page by asking for its smallest size with
         // no width to offer. Laid out at the table's narrowest instead, the
-        // counts make two rows there, not a column of six too tall for the window.
+        // counts make two rows there, not a column of seven too tall for the window.
         .frame(minWidth: ConnectionColumn.tableMinimum(userHidden: hiddenColumns.columns))
         // A Bool, so only crossing the width the cards need runs this.
         .onGeometryChange(for: Bool.self) { SummaryCards.fitOneRow(width: $0.size.width - 32) } action: { cardsFit = $0 }
@@ -191,35 +256,69 @@ struct ConnectionsView: View {
             model.requestedConnectionFilter = nil
             filter = requested
         }
-        guard !openedRequest, selection == nil, let query = LaunchArgument.string("openConnection") else { return }
+        guard !openedRequest else { return }
         openedRequest = true
-        selection = store.rows.sorted(using: sortOrder).first { $0.matches(query) }?.id
+        // `-openConnectionList closed` starts on the sockets seen closing.
+        if LaunchArgument.string("openConnectionList") == "closed" { list = .closed }
+        guard selection == nil, let query = LaunchArgument.string("openConnection") else { return }
+        selection = listedRows.sorted(using: sortOrder.wrappedValue).first { $0.matches(query) }?.id
     }
 
-    /// The filters. Whose sockets they filter, and how many processes are
-    /// left out, is the header's over the counts.
+    /// The filters, for open sockets and those seen closing alike (the list
+    /// picker sits above the page): Listening with Closed recently lists the
+    /// listeners that went away. Whose sockets they are, and how many
+    /// processes are left out, is the header's over the counts.
     private var filterBar: some View {
-        Picker("Show", selection: $filter) {
-            ForEach(ConnectionFilter.allCases) { Text($0.rawValue).tag($0) }
+        FilterBarLayout(spacing: 12) {
+            Picker("Show", selection: $filter) {
+                ForEach(ConnectionFilter.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
-        .help("Established TCP connections, TCP listeners, sockets other devices can reach, or UDP only")
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Right under the last row: how many sockets show, and how often they're
-    /// read. Detail drops out as the table narrows, so it stays one line.
+    /// read, or for closed ones, how long they're kept. Detail drops out as
+    /// the table narrows, so it stays one line.
     private func tableFooter(shown: Int) -> some View {
-        let total = store.rows.count
-        let sockets = Self.count(total, "socket", "sockets")
-        let count = shown == total ? sockets : shown == 0 ? "None of \(sockets) match" : "\(shown.formatted()) of \(sockets)"
-        let processes = Self.count(store.summary.processesWithSockets, "process", "processes") + " with sockets"
+        let total = listedRows.count
+        let seconds = Int(ConnectionStore.refreshInterval.components.seconds)
+        let since = store.watchingSince.map { " Watching since \(ConnectionClock.time($0))." } ?? ""
+        let count: String
+        let processes: String?
+        let note: (text: String, help: String)
+        switch list {
+        case .open:
+            let sockets = Self.count(total, "socket", "sockets")
+            count = shown == total ? sockets : shown == 0 ? "None of \(sockets) match" : "\(shown.formatted()) of \(sockets)"
+            processes = Self.count(store.summary.processesWithSockets, "process", "processes") + " with sockets"
+            note = ("Updates every \(seconds) s", """
+            Read every \(seconds) s while this page is open. The last walk of every process's sockets took \
+            \(Format.fixed(store.walkDuration * 1000, 1)) ms.\(since)
+            """)
+        case .history:
+            count = "Stored socket lifetimes"
+            processes = nil
+            note = ("7 days", "Only observed lifetimes are stored")
+        case .closed:
+            // An empty list has `NoClosedSocketsNote` in place of this.
+            let closed = Self.count(total, "closed socket", "closed sockets")
+            count = shown == total ? closed : shown == 0 ? "None of \(closed) match" : "\(shown.formatted()) of \(closed)"
+            processes = nil
+            note = ("Last \(Format.timeSpan(ConnectionWatch.closedWindow)) of observations", """
+            Sockets are read every \(seconds) s while this page is open, or once a minute in the background when enabled. \
+            One that opens and closes between reads, or while not watched, isn't seen. Closed sockets stay \
+            \(Format.timeSpan(ConnectionWatch.closedWindow)) after they were last seen, the latest \
+            \(ConnectionWatch.keptClosed) at most.\(since)
+            """)
+        }
         return ViewThatFits(in: .horizontal) {
-            footerLine(count: count, processes: processes, showsCadence: true)
-            footerLine(count: count, processes: nil, showsCadence: true)
-            footerLine(count: count, processes: nil, showsCadence: false)
+            footerLine(count: count, processes: processes, note: note)
+            footerLine(count: count, processes: nil, note: note)
+            footerLine(count: count, processes: nil, note: nil)
         }
         // The counts are read, not scanned: 12 points, like the rows' captions elsewhere.
         .font(.explanation)
@@ -229,17 +328,13 @@ struct ConnectionsView: View {
         .padding(.vertical, 6)
     }
 
-    private func footerLine(count: String, processes: String?, showsCadence: Bool) -> some View {
+    private func footerLine(count: String, processes: String?, note: (text: String, help: String)?) -> some View {
         HStack(spacing: 14) {
             Text(count).foregroundStyle(Color.primary)
             if let processes { Text(processes) }
-            if showsCadence {
+            if let note {
                 Spacer(minLength: 12)
-                Text("Updates every \(Int(ConnectionStore.refreshInterval.components.seconds)) s")
-                    .help("""
-                    Read every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page is open. The last \
-                    walk of every process's sockets took \(Format.fixed(store.walkDuration * 1000, 1)) ms.
-                    """)
+                Text(note.text).help(note.help)
             }
         }
         .lineLimit(1)
@@ -256,26 +351,105 @@ struct ConnectionsView: View {
     }
 }
 
+/// Which sockets the table lists: open now, or seen closing.
+enum ConnectionList: String, CaseIterable {
+    case open = "Open now"
+    case closed = "Closed recently"
+    case history = "History"
+}
+
+/// Under an empty Closed recently list: since when none has been seen
+/// closing, that only this page collects them, and the way back to the open
+/// sockets, which the counts above are about. Its text changes only when the
+/// page comes back after a gap or the list starts covering its window alone,
+/// so it never moves the page with the reads.
+private struct NoClosedSocketsNote: View {
+    var coverage: ConnectionWatch.ClosedCoverage?
+    var showOpen: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Label("\(seen) Closed sockets are collected while this page is open.", systemImage: "clock.arrow.circlepath")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help("""
+                Sockets are read every \(Int(ConnectionStore.refreshInterval.components.seconds)) s while this page \
+                is open, or once a minute in the background when enabled. One that opens and closes between reads, \
+                or while not watched, isn't seen. Closed sockets stay \(Format.timeSpan(ConnectionWatch.closedWindow)) after they were last seen.
+                """)
+            Button("Show Open Sockets", action: showOpen)
+                .controlSize(.small)
+                .fixedSize()
+        }
+    }
+
+    private var seen: String {
+        switch coverage {
+        case let .since(date)?: "No sockets seen closing since \(date.formatted(date: .omitted, time: .shortened))."
+        case .window?: "No sockets seen closing in the last \(Format.timeSpan(ConnectionWatch.closedWindow))."
+        case nil: "No sockets seen closing yet."
+        }
+    }
+}
+
+/// The filter bar's two pickers: the filters at the start and the list at
+/// the end while both fit one line, else the list under the filters. A
+/// `Layout` rather than `ViewThatFits`, which measured both pickers again on
+/// every tick (the traffic card's).
+private struct FilterBarLayout: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let oneLine = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(sizes.count - 1, 0))
+        let width = proposal.width ?? oneLine
+        let height = oneLine <= width ? sizes.map(\.height).max() ?? 0
+            : sizes.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(sizes.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let oneLine = sizes.reduce(0) { $0 + $1.width } + spacing * CGFloat(max(sizes.count - 1, 0)) <= bounds.width
+        var y = bounds.minY
+        for (index, (subview, size)) in zip(subviews, sizes).enumerated() {
+            // On one line, the first at the start and the rest at the end; else one under another.
+            let x = oneLine && index > 0 ? bounds.maxX - sizes[index...].reduce(0) { $0 + $1.width + spacing } + spacing : bounds.minX
+            subview.place(at: CGPoint(x: x, y: oneLine ? bounds.midY - size.height / 2 : y), proposal: ProposedViewSize(size))
+            y += size.height + spacing
+        }
+    }
+}
+
 // MARK: - Summary
 
-/// Over the counts: whose sockets they are, and how many processes macOS
-/// keeps out of them, so "0 connected sockets" reads as none of yours
-/// rather than none on the Mac. The hidden count opens why. One plain row,
+/// Over the counts: that they're of sockets open now, even while the table
+/// lists those seen closing, whose sockets they are, and how many processes
+/// macOS keeps out of them, so "0 connected sockets" reads as none of yours
+/// rather than none on the Mac. The hidden count opens why, and Show
+/// Hidden reads them once with an administrator's password. One plain row,
 /// no `ViewThatFits`: layout passes here come every tick (the traffic card).
 private struct ScopeHeader: View {
     var hidden: Int
+    var showHidden: () -> Void
     @State private var explains = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Label(hidden > 0 ? "Your account's sockets" : "Every process's sockets",
-                  systemImage: hidden > 0 ? "person.crop.circle" : "desktopcomputer")
-                .font(.explanation.weight(.semibold))
-                .foregroundStyle(.secondaryText)
-                .lineLimit(1)
-                .help(hidden > 0
-                    ? "The counts and the table cover the sockets of processes running as \(NSUserName())."
-                    : "Every process's sockets could be read, so the counts cover the whole Mac.")
+            Label {
+                Text("Open now").foregroundStyle(Color.primary)
+                    + Text(hidden > 0 ? " · your account's sockets" : " · every process's sockets")
+            } icon: {
+                Image(systemName: hidden > 0 ? "person.crop.circle" : "desktopcomputer")
+            }
+            .font(.explanation.weight(.semibold))
+            .foregroundStyle(.secondaryText)
+            .lineLimit(1)
+            .help(hidden > 0
+                ? "The counts are the sockets open at the latest read, of processes running as \(NSUserName())."
+                : "The counts are the sockets open at the latest read. Every process's sockets could be read, "
+                    + "so they cover the whole Mac.")
             Spacer(minLength: 8)
             if hidden > 0 {
                 Button {
@@ -300,10 +474,17 @@ private struct ScopeHeader: View {
                 .help("Why other processes' sockets aren't counted")
                 .accessibilityHint("Explains why")
                 .popover(isPresented: $explains, arrowEdge: .bottom) {
-                    HiddenProcessesNote(hidden: hidden)
-                        .padding(16)
-                        .frame(width: 330)
+                    HiddenProcessesNote(hidden: hidden) {
+                        explains = false
+                        showHidden()
+                    }
+                    .padding(16)
+                    .frame(width: 330)
                 }
+                Button("Show Hidden…", action: showHidden)
+                    .controlSize(.small)
+                    .fixedSize()
+                    .help("Read every process's sockets once, with an administrator's password")
             }
         }
     }
@@ -312,6 +493,7 @@ private struct ScopeHeader: View {
 /// Why some processes' sockets are missing, and what shows them.
 private struct HiddenProcessesNote: View {
     var hidden: Int
+    var showHidden: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -326,8 +508,14 @@ private struct HiddenProcessesNote: View {
             An administrator account doesn't change this: the apps you open still run as you, not as root. Running \
             OpenTaskManager itself as root isn't supported.
             """)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("To list every socket now, run this in Terminal:")
+            Text("""
+            To see them, read every process's sockets once with an administrator's password. They open in a list of \
+            their own that doesn't update, and nothing keeps running as root.
+            """)
+            Button("Show Hidden Sockets…", action: showHidden)
+                .buttonStyle(.borderedProminent)
+            HStack(spacing: 6) {
+                Text("Or in Terminal:").foregroundStyle(.secondaryText)
                 Text("sudo lsof -i -n -P")
                     .font(.body.monospaced())
                     .textSelection(.enabled)
@@ -335,8 +523,6 @@ private struct HiddenProcessesNote: View {
                     .padding(.vertical, 3)
                     .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 5))
             }
-            Text("A privileged helper that adds them here is planned.")
-                .foregroundStyle(.secondaryText)
         }
         .font(.body)
         .fixedSize(horizontal: false, vertical: true)
@@ -442,11 +628,12 @@ private struct SummaryCards: View {
     private nonisolated static let minimum: CGFloat = 140
     private nonisolated static let spacing: CGFloat = 12
     /// The counts and the traffic card.
-    private nonisolated static let count = SummaryFigure.allCases.count + 1
+    private nonisolated static let count = SummaryFigure.allCases.count + 2
 
     var summary: ConnectionSummary
+    var reviewListeners: () -> Void
 
-    /// Whether all six cards fit one row `width` wide. Nonisolated, for the
+    /// Whether all seven cards fit one row `width` wide. Nonisolated, for the
     /// page's geometry closure.
     nonisolated static func fitOneRow(width: CGFloat) -> Bool {
         GridMath.rows(count: count, width: Double(width), minimum: Double(minimum), spacing: Double(spacing)).count == 1
@@ -458,6 +645,7 @@ private struct SummaryCards: View {
                 SummaryCard(figure: figure, summary: summary)
             }
             // Reads the model every tick in a view of its own, so the counts and table aren't rebuilt.
+            ListenerReviewEntry(compact: false, open: reviewListeners)
             NetworkTrafficCard(title: "Network traffic", compact: true)
         }
     }
@@ -498,17 +686,19 @@ private struct SummaryCard: View {
     }
 }
 
-/// The same six as a strip of chips, each in its card's colour with the
+/// The same seven as a strip of chips, each in its card's colour with the
 /// number and a word or two: one line while it fits, else even columns
 /// that line up (`GridMath.stripRows`).
 private struct SummaryStrip: View {
     var summary: ConnectionSummary
+    var reviewListeners: () -> Void
 
     var body: some View {
         ChipStrip(spacing: 8) {
             ForEach(SummaryFigure.allCases, id: \.self) { figure in
                 SummaryChip(figure: figure, summary: summary)
             }
+            ListenerReviewEntry(compact: true, open: reviewListeners)
             TrafficChip()
         }
     }
@@ -628,8 +818,8 @@ private struct SummaryChipLook: ViewModifier {
 private struct SocketStepper: View {
     /// Nil when the table doesn't show the socket: a filter or search hides
     /// it, or it closed.
-    var position: ListPosition<Connection.ID>?
-    var select: (Connection.ID) -> Void
+    var position: ListPosition<ObservedConnection.ID>?
+    var select: (ObservedConnection.ID) -> Void
 
     var body: some View {
         HStack(spacing: 10) {

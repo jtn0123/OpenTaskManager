@@ -34,4 +34,26 @@ public enum TextTone {
     public static func contrast(_ level: Level, dark: Bool, on background: ColorContrast.RGB) -> Double {
         ColorContrast.ratio(color(level, dark: dark, over: background), background)
     }
+
+    // MARK: Search highlights
+
+    /// The marker yellow behind the words a search found. Text over it is
+    /// drawn in the primary label's ink (`primaryOpacity`), and bold, so a
+    /// find doesn't rest on the colour alone.
+    public static let highlight = ColorContrast.RGB(red: 1, green: 0.8, blue: 0)
+    /// The primary label's ink: black or white at 85%.
+    public static let primaryOpacity = 0.85
+
+    /// How strongly the highlight is laid over a card: lighter in dark mode,
+    /// where a stronger yellow would take white ink under 4.5:1.
+    public static func highlightOpacity(dark: Bool) -> Double {
+        dark ? 0.2 : 0.45
+    }
+
+    /// Contrast of primary text over the highlight, laid over `card`.
+    public static func highlightContrast(dark: Bool, on card: ColorContrast.RGB) -> Double {
+        let wash = ColorContrast.composite(highlight, opacity: highlightOpacity(dark: dark), over: card)
+        let ink = ColorContrast.composite(dark ? .white : .black, opacity: primaryOpacity, over: wash)
+        return ColorContrast.ratio(ink, wash)
+    }
 }

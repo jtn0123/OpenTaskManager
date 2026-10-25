@@ -26,6 +26,8 @@ struct UsersView: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .samplingDemand(.restrictedProcesses)
+        .samplingDemand(.users)
         .task { await followSessions() }
         .onChange(of: model.users.count, initial: true) {
             openRequestedUser()
@@ -115,9 +117,12 @@ struct UsersView: View {
     /// ten seconds rather than every sample.
     private func followSessions() async {
         while !Task.isCancelled {
+            await model.samplingDemand.waitUntilVisible()
+            guard !Task.isCancelled else { return }
             let (user, list) = await Task.detached(priority: .utility) {
                 (UserAccounts.consoleUser(), UserAccounts.sessions())
             }.value
+            guard !Task.isCancelled, model.samplingDemand.hasVisibleWindow else { continue }
             if user != console { console = user }
             if list != sessions { sessions = list }
             try? await Task.sleep(for: .seconds(10))
@@ -301,7 +306,7 @@ private struct SystemAccountsCard: View {
     var body: some View {
         let totals = UserUsageBuilder.total(users)
         let scale = model.cpuScale
-        let cpuHistory = AppModel.tailSum(users.compactMap { model.userHistory[$0.uid]?.cpu.values }).map(scale.value)
+        let cpuHistory = GraphMath.tailSum(users.compactMap { model.userHistory[$0.uid]?.cpu.values }).map(scale.value)
         Card(tint: UsersText.systemTint, glow: min(totals.cpuPercent / Double(100 * max(scale.logicalCores, 1)), 1)) {
             Button { isOpen.toggle() } label: {
                 HeadingRow(spacing: 12, indent: 82) {

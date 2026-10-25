@@ -48,6 +48,24 @@ struct ProcessTreeTests {
         #expect(Set(nodes[2].children.map(\.id)) == [1, 400])
     }
 
+    /// A helper's helper joins the app at the top of the chain; a cycle of
+    /// responsibility leaves each process heading its own group.
+    @Test func followsResponsibilityChainsAndSurvivesCycles() {
+        let chain = [
+            process(100, name: "App"),
+            process(110, responsible: 100, name: "helper"),
+            process(111, responsible: 110, name: "helper's helper"),
+            process(7, responsible: 8, name: "seven"),
+            process(8, responsible: 7, name: "eight"),
+        ]
+        let nodes = ProcessTreeBuilder.build(chain, mode: .grouped, appPIDs: [100], currentUID: Self.me)
+        #expect(nodes.map(\.section) == [.apps, .background])
+        #expect(nodes[0].children.map(\.id) == [100])
+        #expect(Set(nodes[0].children[0].children.map(\.id)) == [110, 111])
+        #expect(Set(nodes[1].children.map(\.id)) == [7, 8])
+        #expect(nodes[1].children.map(\.children.count) == [0, 0])
+    }
+
     @Test func omitsEmptySections() {
         let nodes = ProcessTreeBuilder.build([process(5, name: "solo")], mode: .grouped, appPIDs: [], currentUID: Self.me)
         #expect(nodes.map(\.section) == [.background])
@@ -92,6 +110,30 @@ struct ProcessTreeTests {
 
         let byName = ProcessTreeBuilder.sort(nodes, by: .name, ascending: true)
         #expect(byName[0].children.map(\.id) == [200, 100])
+    }
+
+    /// Sorted by a figure, Grouped ranks every group in one list, so a busy
+    /// system process isn't buried under idle background ones; sorted by
+    /// name, PID or user it keeps its sections.
+    @Test func groupedRanksAcrossSectionsWhenSortedByAFigure() {
+        let nodes = ProcessTreeBuilder.build(sample, mode: .grouped, appPIDs: [100, 200], currentUID: Self.me)
+        let byCPU = ProcessTreeBuilder.arrange(nodes, by: .cpu, ascending: false)
+        #expect(byCPU.allSatisfy { $0.section == nil })
+        // Mail and the agent both read 2%: Mail has the larger memory.
+        #expect(byCPU.map(\.id) == [100, 400, 200, 300, 1])
+        #expect(byCPU[0].children.map(\.id) == [101, 102], "helpers stay under their app, sorted too")
+        #expect(ProcessTreeBuilder.arrange(nodes, by: .cpu, ascending: true).map(\.id) == [1, 300, 200, 400, 100])
+
+        for key in [ProcessSortKey.name, .pid, .user] {
+            #expect(!key.ranksAcrossSections)
+            #expect(ProcessTreeBuilder.arrange(nodes, by: key, ascending: true).map(\.section) == [.apps, .background, .system])
+        }
+        #expect(ProcessTreeBuilder.arrange(nodes, by: .name, ascending: true)[0].children.map(\.id) == [200, 100])
+
+        // Tree and Flat have no sections: arranging is sorting.
+        let flat = ProcessTreeBuilder.build(sample, mode: .flat, appPIDs: [100, 200])
+        #expect(ProcessTreeBuilder.arrange(flat, by: .cpu, ascending: false).map(\.id)
+            == ProcessTreeBuilder.sort(flat, by: .cpu, ascending: false).map(\.id))
     }
 
     @Test func groupTotalsKnowWhetherPowerWasMeasured() {

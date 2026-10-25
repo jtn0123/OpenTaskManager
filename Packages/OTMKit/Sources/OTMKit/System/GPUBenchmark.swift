@@ -87,19 +87,23 @@ public struct GPUBenchmarkConfiguration: Sendable, Codable, Equatable {
 public struct GPUBenchmarkMeasurement: Sendable, Codable, Equatable {
     /// Work per second of GPU time in each timed repeat, in the workload's measure.
     public var repeats: [Double]
-    /// Each repeat's GPU time: its command buffer's gpuEndTime − gpuStartTime.
+    /// Each repeat's measured GPU time: render-pass counters for fill when available, otherwise command-buffer time.
     public var gpuSeconds: [Double]
     /// Each repeat from commit until the CPU saw it finish: the GPU time,
     /// plus scheduling and the wake-up.
     public var wallSeconds: [Double]
     /// Units of work (dispatches or render passes) in each repeat, sized from the warm-up.
     public var unitsPerRepeat: Int
+    /// Per-repeat clock evidence; nil in results saved before workload protocol v2.
+    public var timingEvidence: [GPUTimingEvidence]?
 
-    public init(repeats: [Double], gpuSeconds: [Double], wallSeconds: [Double], unitsPerRepeat: Int) {
+    public init(repeats: [Double], gpuSeconds: [Double], wallSeconds: [Double], unitsPerRepeat: Int,
+                timingEvidence: [GPUTimingEvidence]? = nil) {
         self.repeats = repeats
         self.gpuSeconds = gpuSeconds
         self.wallSeconds = wallSeconds
         self.unitsPerRepeat = unitsPerRepeat
+        self.timingEvidence = timingEvidence
     }
 
     /// The middle repeat: the figure to quote.
@@ -114,17 +118,27 @@ public struct GPUBenchmarkMeasurement: Sendable, Codable, Equatable {
     /// A repeat's GPU time, the middle one.
     public var medianGPUSeconds: Double { Self.median(gpuSeconds) }
 
+    /// Command-buffer duration, separate from a fill repeat's narrower render interval.
+    public var medianCommandBufferSeconds: Double {
+        timingEvidence.map { Self.median($0.compactMap { $0.commandBufferInterval?.seconds }) } ?? medianGPUSeconds
+    }
+
     /// A repeat from commit to completion, the middle one.
     public var medianWallSeconds: Double { Self.median(wallSeconds) }
 
-    /// Whether the GPU's own time for a repeat fell well short of the time
+    /// Whether a repeat's command-buffer time fell well short of the time
     /// from commit to completion (over 5%, and over 5 ms). Normally they're
     /// within a millisecond. A virtual machine's GPU can under-report its
     /// time, which makes the figure read high; other apps' GPU work can also
-    /// hold up a start.
+    /// hold up a start. Older results without evidence use the medians.
     public var gpuTimeLooksShort: Bool {
-        let gap = medianWallSeconds - medianGPUSeconds
-        return gap > 0.005 && gap > 0.05 * medianWallSeconds
+        if let timingEvidence {
+            return timingEvidence.contains { evidence in
+                guard let gpu = evidence.commandBufferInterval, let wall = evidence.wallInterval else { return false }
+                return GPUTimingEvidence.gpuTimeLooksShort(gpu: gpu.seconds, wall: wall.seconds)
+            }
+        }
+        return GPUTimingEvidence.gpuTimeLooksShort(gpu: medianGPUSeconds, wall: medianWallSeconds)
     }
 
     static func median(_ values: [Double]) -> Double {
@@ -216,10 +230,16 @@ public struct GPUBenchmarkResult: SpeedTestRecord, Equatable, Identifiable {
     /// The whole run, compiling and checking included.
     public var seconds: Double
     public var workloads: [GPUWorkloadResult]
+    /// The Mac's state as the run started and ended; nil in runs saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
+    /// The guided protocol that measured this repeat; nil in older results.
+    public var session: BenchmarkSession?
 
     public init(date: Date, suiteVersion: Int, configuration: GPUBenchmarkConfiguration, device: GPUBenchmarkDevice, osVersion: String,
                 appVersion: String, optimized: Bool, thermalStateAtStart: ThermalState, thermalStateAtEnd: ThermalState,
-                lowPowerMode: Bool, seconds: Double, workloads: [GPUWorkloadResult]) {
+                lowPowerMode: Bool, seconds: Double, workloads: [GPUWorkloadResult], context: BenchmarkContext? = nil) {
+        self.context = context
         self.date = date
         self.suiteVersion = suiteVersion
         self.configuration = configuration
@@ -253,7 +273,7 @@ public struct GPUBenchmarkResult: SpeedTestRecord, Equatable, Identifiable {
         guard !short.isEmpty else { return nil }
         let parts = short.map { result in
             let measurement = result.measurement
-            return "\(result.workload.title.lowercased()) at \(Format.fixed(measurement.medianGPUSeconds * 1000, 0)) ms a repeat, "
+            return "\(result.workload.title.lowercased()) at \(Format.fixed(measurement.medianCommandBufferSeconds * 1000, 0)) ms a repeat, "
                 + "against \(Format.fixed(measurement.medianWallSeconds * 1000, 0)) ms from commit to completion"
         }
         return "The GPU timed " + parts.joined(separator: ", and ") + ". A virtual machine's GPU can under-report its time, "
@@ -316,27 +336,46 @@ public enum GPUBenchmarkError: Error, Equatable, Sendable {
 
 /// Stops a running benchmark from another thread; it stops before its next submission.
 public final class GPUBenchmarkCancellation: Sendable {
-    private let flag = OSAllocatedUnfairLock(initialState: false)
+    private struct State {
+        var cancelled = false
+        var heldBackSubmissions = 0
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init() {}
 
     public func cancel() {
-        flag.withLock { $0 = true }
+        state.withLock { $0.cancelled = true }
     }
 
-    public var isCancelled: Bool { flag.withLock { $0 } }
+    public var isCancelled: Bool { state.withLock { $0.cancelled } }
+
+    /// Command buffers the run didn't send because it was cancelled: 1 once
+    /// a cancel has stopped it before a submission. Tests read it to tell a
+    /// stop before the next submission from one after it.
+    var heldBackSubmissions: Int { state.withLock { $0.heldBackSubmissions } }
+
+    /// Whether the run is cancelled, so the command buffer about to be sent
+    /// is held back; counts it if so.
+    func holdsBackSubmission() -> Bool {
+        state.withLock { state in
+            if state.cancelled { state.heldBackSubmissions += 1 }
+            return state.cancelled
+        }
+    }
 }
 
 /// A GPU benchmark the user starts: FP32 compute, memory and fill-rate
 /// workloads in Metal (see `GPUBenchmarkKernels`), compiled from source when
 /// the run starts. Each workload warms up, then times a few repeats, each a
 /// command buffer of units sized from the warm-up, on the GPU's own clock
-/// (`gpuStartTime` to `gpuEndTime`). Every output is checked after every
+/// (render-pass counters for fill where available, command-buffer time otherwise). Every output is checked after every
 /// command buffer, warm-up included.
 public enum GPUBenchmark {
     /// The workloads' version. Bump it whenever their shaders, inputs, sizes
-    /// or arithmetic change, so old results aren't compared with new ones.
-    public static let suiteVersion = 1
+    /// arithmetic or measured interval change, so old results aren't compared with new ones.
+    public static let suiteVersion = 2
 
     /// Warm-up command buffers hold about this much GPU time, so a cancel lands quickly.
     static let warmUpBatchSeconds = 0.1
@@ -389,7 +428,14 @@ public enum GPUBenchmark {
     public static func measure(configuration: GPUBenchmarkConfiguration = .standard, appVersion: String,
                                progress: @escaping @Sendable (GPUBenchmarkProgress) -> Void) async throws(GPUBenchmarkError)
         -> GPUBenchmarkResult {
-        let cancellation = GPUBenchmarkCancellation()
+        try await measure(configuration: configuration, appVersion: appVersion, cancellation: GPUBenchmarkCancellation(), progress: progress)
+    }
+
+    /// `measure`, with the cancellation that cancelling the task sets, so a
+    /// test can see how the run stopped.
+    static func measure(configuration: GPUBenchmarkConfiguration, appVersion: String, cancellation: GPUBenchmarkCancellation,
+                        progress: @escaping @Sendable (GPUBenchmarkProgress) -> Void) async throws(GPUBenchmarkError)
+        -> GPUBenchmarkResult {
         let outcome: Result<GPUBenchmarkResult, GPUBenchmarkError> = await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 Thread.detachNewThread {
@@ -439,37 +485,49 @@ public enum GPUBenchmark {
         }
         done(1 / steps)
         let units = units(forSeconds: configuration.repeatSeconds, unitSeconds: unitSeconds, limit: runner.maximumUnits)
-        var measurement = GPUBenchmarkMeasurement(repeats: [], gpuSeconds: [], wallSeconds: [], unitsPerRepeat: units)
+        var measurement = GPUBenchmarkMeasurement(repeats: [], gpuSeconds: [], wallSeconds: [], unitsPerRepeat: units, timingEvidence: [])
         for index in 0..<configuration.repeats {
             let timed = try submit(runner, units: units, context: context, cancellation: cancellation)
             measurement.repeats.append(Double(units) * runner.workPerUnit / timed.gpu)
             measurement.gpuSeconds.append(timed.gpu)
             measurement.wallSeconds.append(timed.wall)
+            measurement.timingEvidence?.append(timed.evidence)
             done(Double(index + 2) / steps)
         }
         return measurement
+    }
+
+    struct Submission {
+        var gpu: Double
+        var wall: Double
+        var evidence: GPUTimingEvidence
     }
 
     /// One command buffer of `units`: cleared outputs, the GPU's own timing,
     /// and every output checked afterwards. Its command buffers are let go
     /// at once, rather than when the thread ends.
     static func submit(_ runner: any GPUWorkloadRunner, units: Int, context: GPUBenchmarkContext,
-                       cancellation: GPUBenchmarkCancellation?) throws(GPUBenchmarkError) -> (gpu: Double, wall: Double) {
-        if cancellation?.isCancelled == true { throw .cancelled }
+                       cancellation: GPUBenchmarkCancellation?) throws(GPUBenchmarkError) -> Submission {
+        if cancellation?.holdsBackSubmission() == true { throw .cancelled }
         return try autoreleasepool {
-            Result { () throws(GPUBenchmarkError) -> (gpu: Double, wall: Double) in
+            Result { () throws(GPUBenchmarkError) -> Submission in
                 runner.reset()
                 guard let buffer = context.queue.makeCommandBuffer() else {
                     throw .failed(runner.workload, "it couldn't make a command buffer")
                 }
                 try runner.encode(units: units, into: buffer)
+                runner.beginTiming()
                 let start = BenchmarkClock.now
                 try context.finish(buffer, runner.workload)
                 let wall = BenchmarkClock.seconds(since: start)
+                let counter = runner.endTiming()
                 let gpu = buffer.gpuEndTime - buffer.gpuStartTime
                 guard buffer.gpuStartTime > 0, gpu > 0, gpu.isFinite else { throw .noTiming }
                 guard try runner.verify(units: units) else { throw .verificationFailed(runner.workload) }
-                return (gpu, wall)
+                let evidence = GPUTimingEvidence(counterInterval: counter,
+                    commandBufferInterval: .init(start: buffer.gpuStartTime, end: buffer.gpuEndTime),
+                    wallInterval: .init(start: 0, end: wall), unavailableReason: runner.timingUnavailableReason)
+                return Submission(gpu: counter?.seconds ?? gpu, wall: wall, evidence: evidence)
             }
         }.get()
     }

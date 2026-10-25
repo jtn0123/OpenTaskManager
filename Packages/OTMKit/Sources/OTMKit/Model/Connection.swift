@@ -30,6 +30,9 @@ public struct Connection: Sendable, Hashable, Codable, Identifiable {
 
     public let id: SocketID
     public let processName: String
+    /// When the process started, read with its descriptors; nil where it
+    /// couldn't be. With the PID, it tells a reused PID's sockets apart.
+    public let processStart: Date?
     public let transport: Transport
     public let family: Family
     public let local: Endpoint
@@ -40,9 +43,10 @@ public struct Connection: Sendable, Hashable, Codable, Identifiable {
     public let kind: ConnectionKind
 
     public init(id: SocketID, processName: String, transport: Transport, family: Family,
-                local: Endpoint, remote: Endpoint?, tcpState: TCPState?) {
+                local: Endpoint, remote: Endpoint?, tcpState: TCPState?, processStart: Date? = nil) {
         self.id = id
         self.processName = processName
+        self.processStart = processStart
         self.transport = transport
         self.family = family
         self.local = local
@@ -52,6 +56,9 @@ public struct Connection: Sendable, Hashable, Codable, Identifiable {
     }
 
     public var pid: Int32 { id.pid }
+
+    /// The process holding the socket, by PID and start time.
+    public var process: ProcessIdentity { ProcessIdentity(pid: id.pid, startTime: processStart) }
 
     /// Where traffic on this socket can come from or go to: the remote end's
     /// scope when connected, otherwise the address it's bound to.
@@ -144,15 +151,16 @@ public enum AddressScope: String, Sendable, Codable, CaseIterable {
     /// Classifies a numeric IPv4 or IPv6 address. A zone suffix (`%en0`) is
     /// ignored, and text that isn't an address counts as the internet.
     public init(address: String) {
+        // inet_pton writes the matching IPv4 or IPv6 local record; its bytes are copied while the record is borrowed.
         let host = address.split(separator: "%", maxSplits: 1).first.map(String.init) ?? address
         var v4 = in_addr()
-        if inet_pton(AF_INET, host, &v4) == 1 {
+        if unsafe inet_pton(AF_INET, host, &v4) == 1 {
             self = Self.classify(ipv4: UInt32(bigEndian: v4.s_addr))
             return
         }
         var v6 = in6_addr()
-        if inet_pton(AF_INET6, host, &v6) == 1 {
-            self = Self.classify(ipv6: withUnsafeBytes(of: v6) { Array($0) })
+        if unsafe inet_pton(AF_INET6, host, &v6) == 1 {
+            self = Self.classify(ipv6: withUnsafeBytes(of: v6) { unsafe Array($0) })
             return
         }
         self = .internet

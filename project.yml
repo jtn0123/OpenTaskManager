@@ -1,5 +1,8 @@
 name: OpenTaskManager
 options:
+  # Keep the project presets, including warnings. Target presets add a
+  # BUNDLE_LOADER to unit tests, so the macOS paths below are explicit.
+  settingPresets: project
   bundleIdPrefix: io.github.jtn0123
   deploymentTarget:
     macOS: "14.0"
@@ -68,6 +71,38 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: YES
         ENABLE_HARDENED_RUNTIME: NO
+        SDKROOT: macosx
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/../Frameworks"]
+
+  OpenTaskManagerLogicTests:
+    type: bundle.unit-test
+    platform: macOS
+    # Compile the stores themselves without an application dependency or a test host.
+    sources:
+      - App/Tests
+      - App/Sources/Support/PageSelection.swift
+      - App/Sources/Support/PagePresentation.swift
+      - App/Sources/Support/LaunchArgument.swift
+      - App/Sources/Support/SidebarVisibilityStore.swift
+      - App/Sources/Support/MainWindowFrame.swift
+      - App/Sources/SamplingDemandStore.swift
+      - App/Sources/MenuBarIconStore.swift
+      - App/Sources/DockIconController.swift
+      - App/Sources/UpdateCheckStore.swift
+      - App/Sources/DiskActivityStore.swift
+      - App/Sources/MiniMonitorStore.swift
+      - App/Sources/RecentProcessStore.swift
+      - App/Sources/UserUsageStore.swift
+    dependencies:
+      - package: OTMKit
+        product: OTMKit
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SDKROOT: macosx
+        COMBINE_HIDPI_IMAGES: YES
+        LD_RUNPATH_SEARCH_PATHS: ["$(inherited)", "@executable_path/../Frameworks", "@loader_path/../Frameworks"]
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.jtn0123.OpenTaskManagerLogicTests
 
 schemes:
   OpenTaskManager:
@@ -78,3 +113,11 @@ schemes:
       config: Debug
     archive:
       config: Release
+  OpenTaskManagerLogicTests:
+    build:
+      targets:
+        OpenTaskManagerLogicTests: all
+    test:
+      config: Debug
+      targets:
+        - OpenTaskManagerLogicTests

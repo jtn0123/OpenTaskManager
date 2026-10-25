@@ -58,6 +58,10 @@ public enum ExtensionStatus: Sendable, Codable, Hashable, Comparable {
     case uninstalling
     /// Any other state, already made readable.
     case other(String)
+    /// A copy on disk, and whether macOS uses it couldn't be told.
+    case useUnknown
+    /// A copy on disk that macOS hasn't registered or loaded, so it doesn't run.
+    case notInUse
 
     public var title: String {
         switch self {
@@ -69,7 +73,14 @@ public enum ExtensionStatus: Sendable, Codable, Hashable, Comparable {
         case .disabled: "Turned off"
         case .uninstalling: "Uninstalls at restart"
         case let .other(text): text
+        case .useUnknown: "Unknown"
+        case .notInUse: "Installed, not in use"
         }
+    }
+
+    /// For a narrow column: "Not in use", the rest as they are.
+    public var shortTitle: String {
+        self == .notInUse ? "Not in use" : title
     }
 
     /// Something only the person at the Mac can resolve.
@@ -94,8 +105,15 @@ public enum ExtensionStatus: Sendable, Codable, Hashable, Comparable {
             "Its app asked for it to be removed. It stays until the next restart, then macOS deletes it."
         case .other:
             "macOS is part-way through installing, checking or removing it."
+        case .useUnknown:
+            "It's on disk, but whether macOS uses it couldn't be told."
+        case .notInUse:
+            "It's on disk, but macOS hasn't registered or loaded it, so it doesn't run. That alone isn't a problem."
         }
     }
+
+    /// A copy found on disk rather than something macOS reported.
+    public var isDiskCopy: Bool { self == .notInUse || self == .useUnknown }
 
     // Coded as one string, the case name or the text of `.other`, so the
     // JSON from `otm drivers` reads "status": "active".
@@ -103,6 +121,7 @@ public enum ExtensionStatus: Sendable, Codable, Hashable, Comparable {
     private static let codes: [(code: String, status: Self)] = [
         ("needsApproval", .needsApproval), ("active", .active), ("loaded", .loaded), ("notStarted", .notStarted),
         ("enabled", .enabled), ("disabled", .disabled), ("uninstalling", .uninstalling),
+        ("useUnknown", .useUnknown), ("notInUse", .notInUse),
     ]
 
     public init(from decoder: any Decoder) throws {
@@ -142,6 +161,9 @@ public struct SystemExtension: Sendable, Codable, Hashable {
     public let state: String
     /// The app that installed it, when the system extension database says.
     public var appPath: String?
+    /// The copy macOS installed this version from, when the database says:
+    /// usually inside `appPath`.
+    public var originPath: String?
 
     public var category: ExtensionCategory { ExtensionCategory(systemCategory: categoryIdentifier) }
 
@@ -213,8 +235,9 @@ public struct KernelExtension: Sendable, Codable, Hashable {
     }
 }
 
-/// A system or kernel extension, as a row of the Drivers page. Exactly one
-/// of `systemExtension` and `kernelExtension` is set.
+/// A system or kernel extension, as a row of the Drivers page: one macOS
+/// reported (`systemExtension` or `kernelExtension`), with the copy found
+/// on disk for it when there is one, or a copy on disk alone (`bundle`).
 public struct ExtensionItem: Sendable, Codable, Hashable, Identifiable {
     public let id: String
     public let name: String
@@ -226,6 +249,14 @@ public struct ExtensionItem: Sendable, Codable, Hashable, Identifiable {
     public let status: ExtensionStatus
     public let systemExtension: SystemExtension?
     public let kernelExtension: KernelExtension?
+    /// The copy on disk: the row itself when macOS hasn't registered or
+    /// loaded it, or the copy matched to one it has.
+    public internal(set) var bundle: ExtensionBundle?
+    /// Why it can't be told whether macOS uses this copy (`.useUnknown`).
+    public let unknownReason: ExtensionUseUnknown?
+    /// For a copy not in use, the versions of the same extension macOS has
+    /// registered (system extensions) or loaded (kexts); nil when none.
+    public let registeredVersions: [String]?
 
     /// The kernel interfaces (`com.apple.kpi.*`) are part of the kernel, not
     /// something that was added to it.
@@ -233,6 +264,15 @@ public struct ExtensionItem: Sendable, Codable, Hashable, Identifiable {
 
     /// The category's name, except that kernel interfaces say what they are.
     public var kind: String { isKernelInterface ? "Kernel interface" : category.title }
+
+    /// The app it came with: the installer the system extension database
+    /// names, or the app its copy on disk is inside.
+    public var appPath: String? { systemExtension?.appPath ?? bundle?.appPath }
+
+    /// Where it is on disk: the copy found, or the path the kernel gives.
+    public var diskPath: String? { bundle?.path ?? kernelExtension?.path }
+
+    public var teamID: String? { systemExtension?.teamID ?? bundle?.teamID }
 
     public init(_ item: SystemExtension, id: String) {
         self.id = id
@@ -244,6 +284,8 @@ public struct ExtensionItem: Sendable, Codable, Hashable, Identifiable {
         status = item.status
         systemExtension = item
         kernelExtension = nil
+        unknownReason = nil
+        registeredVersions = nil
     }
 
     public init(_ item: KernelExtension) {
@@ -256,28 +298,55 @@ public struct ExtensionItem: Sendable, Codable, Hashable, Identifiable {
         status = item.isStarted ? .loaded : .notStarted
         systemExtension = nil
         kernelExtension = item
+        unknownReason = nil
+        registeredVersions = nil
+    }
+
+    /// A copy on disk that matched nothing macOS reported: not in use, or,
+    /// given a reason, unknown.
+    public init(_ bundle: ExtensionBundle, unknown reason: ExtensionUseUnknown? = nil, registeredVersions: [String] = []) {
+        id = "disk:" + bundle.path
+        name = bundle.name
+        bundleID = bundle.bundleID ?? ""
+        version = bundle.reportedVersion ?? ""
+        category = bundle.category
+        publisher = Extensions.publisher(bundleID: bundle.bundleID ?? "", path: bundle.path)
+        status = reason == nil ? .notInUse : .useUnknown
+        systemExtension = nil
+        kernelExtension = nil
+        self.bundle = bundle
+        unknownReason = reason
+        self.registeredVersions = registeredVersions.isEmpty ? nil : registeredVersions
     }
 
     public func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return true }
-        let fields = [name, bundleID, category.title, systemExtension?.teamID ?? "", kernelExtension?.path ?? ""]
+        let fields = [name, bundleID, category.title, teamID ?? "", diskPath ?? "", appPath.map(Extensions.appName) ?? ""]
         return fields.contains { $0.localizedCaseInsensitiveContains(query) }
     }
 }
 
 /// The counts across the top of the Drivers page.
 public struct ExtensionSummary: Sendable, Codable, Hashable {
+    /// Registered with macOS, in any state.
     public let systemExtensions: Int
+    /// Loaded, from developers other than Apple.
     public let thirdPartyKernelExtensions: Int
     public let loadedKernelExtensions: Int
     public let needsAttention: Int
+    /// Copies on disk that macOS hasn't registered or loaded.
+    public let notInUse: Int
+    /// Copies on disk whose use couldn't be told.
+    public let useUnknown: Int
 
     public init(_ items: [ExtensionItem]) {
-        systemExtensions = items.filter(\.category.isSystemExtension).count
-        thirdPartyKernelExtensions = items.filter { $0.category == .kernel && $0.publisher == .thirdParty }.count
-        loadedKernelExtensions = items.filter { $0.category == .kernel }.count
+        systemExtensions = items.filter { $0.systemExtension != nil }.count
+        thirdPartyKernelExtensions = items.filter { $0.kernelExtension != nil && $0.publisher == .thirdParty }.count
+        loadedKernelExtensions = items.filter { $0.kernelExtension != nil }.count
         needsAttention = items.filter(\.status.needsAttention).count
+        notInUse = items.filter { $0.status == .notInUse }.count
+        useUnknown = items.filter { $0.status == .useUnknown }.count
     }
 }
 
@@ -312,21 +381,33 @@ public struct ExtensionScan: Sendable, Codable, Hashable {
     private var kernelExtensions: [KernelExtension] { items.compactMap(\.kernelExtension) }
 }
 
-/// Reads the system extensions macOS has allowed and the kexts loaded in the
-/// kernel. Neither needs administrator rights.
+/// Reads the system extensions macOS has allowed, the kexts loaded in the
+/// kernel, and the extension bundles on disk. None needs administrator rights.
 public enum Extensions {
-    /// Runs systemextensionsctl and asks the kernel for its kexts, which takes
-    /// a few hundredths of a second, so call it off the main actor.
-    public static func scan() -> ExtensionScan {
+    /// Runs systemextensionsctl, asks the kernel for its kexts and reads the
+    /// extension bundles in `folders`, which takes a few hundredths of a
+    /// second, so call it off the main actor. Each bundle is matched to what
+    /// macOS reported, and the rest are rows of their own.
+    public static func scan(folders: ExtensionFolders = .standard()) -> ExtensionScan {
         let listing = CommandRunner.run("/usr/bin/systemextensionsctl", ["list"], timeout: 5)
         var systemExtensions = listing.map(SystemExtensionList.parse) ?? []
         if !systemExtensions.isEmpty, let database = try? Data(contentsOf: URL(fileURLWithPath: SystemExtensionList.databasePath)) {
             systemExtensions = SystemExtensionList.attachApps(systemExtensions, database: database)
         }
         let kexts = KernelExtensionList.read()
-        return ExtensionScan(items: items(systemExtensions: systemExtensions, kernelExtensions: kexts ?? []),
-                             readSystemExtensions: listing.map(SystemExtensionList.isListing) ?? false,
+        let readSystemExtensions = listing.map(SystemExtensionList.isListing) ?? false
+        let reported = items(systemExtensions: systemExtensions, kernelExtensions: kexts ?? [])
+        return ExtensionScan(items: ExtensionMatching.merge(reported, bundles: ExtensionBundles.scan(folders),
+                                                            readSystemExtensions: readSystemExtensions,
+                                                            readKernelExtensions: kexts != nil),
+                             readSystemExtensions: readSystemExtensions,
                              readKernelExtensions: kexts != nil)
+    }
+
+    /// An app's name from its path, without ".app".
+    public static func appName(_ path: String) -> String {
+        let file = (path as NSString).lastPathComponent
+        return file.lowercased().hasSuffix(".app") ? String(file.dropLast(4)) : file
     }
 
     /// System extensions first, in listing order, then kexts by load tag.
