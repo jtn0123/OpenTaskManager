@@ -110,11 +110,10 @@ fn node(key: &str, value: Value, children: &[Vec<u8>]) -> Vec<u8> {
 }
 
 fn version_info(version: &str) -> Vec<u8> {
-    let parts: Vec<u16> = version.split(['.', '-']).filter_map(|part| part.parse().ok()).chain([0; 4]).take(4).collect();
-    let (high, low) = (
-        u32::from(parts[0]) << 16 | u32::from(parts[1]),
-        u32::from(parts[2]) << 16 | u32::from(parts[3]),
-    );
+    let parts: Vec<u16> =
+        version.split(['.', '-']).filter_map(|part| part.parse().ok()).chain([0; 4]).take(4).collect();
+    let (high, low) =
+        (u32::from(parts[0]) << 16 | u32::from(parts[1]), u32::from(parts[2]) << 16 | u32::from(parts[3]));
     let mut fixed = Vec::new();
     for field in [0xFEEF_04BDu32, 0x0001_0000, high, low, high, low, 0x3F, 0, 0x0004_0004, 1, 0, 0, 0] {
         fixed.extend(field.to_le_bytes());
