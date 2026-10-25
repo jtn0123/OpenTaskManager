@@ -332,6 +332,10 @@ Verified on Windows: the core's 65 tests run natively. They cover:
 All 62 smoke checks pass, and Windows registered the tray icon. The Startup
 page's enabled and disabled states match the marks Task Manager keeps.
 
+The Linux smoke test's 33 checks pass on CI's Ubuntu (keyboard and tray
+included) and in WSL. CI runs both smoke tests, both test suites and the
+packages' install checks on every pull request that touches `cross/`.
+
 On Linux (WSL) the core's 64 tests pass, including SIGTERM and SIGKILL on
 real processes, PID 1 refused to an ordinary account, and `fdinfo` parsing
 for amdgpu and xe.
