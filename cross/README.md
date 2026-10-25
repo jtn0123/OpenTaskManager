@@ -24,6 +24,8 @@ It's an early slice, not a release:
 - A Startup page: what starts at sign-in, from the same places Task Manager
   and the desktop read, each with a switch that turns it on or off the way
   they do.
+- A History page: what the machine did over the last hour, 6 hours, day or
+  week, from a record kept every 10 s, with what was busiest at any moment.
 - A details panel for the selection: program file, command line, what
   started it, how long it has run, its account and its group.
 - End Task and Force Quit for the selected process, or a whole group from
@@ -125,6 +127,26 @@ Per-process network use isn't shown: neither system gives it without
 administrator rights (event tracing on Windows, packet capture on Linux),
 and a column of dashes would say nothing.
 
+## History
+
+The recorder (`otm_core::recorder`) keeps a record every 10 s of wall-clock
+time: CPU (mean and peak), memory, disk, network and GPU averaged over the
+span, and the five busiest processes by CPU and by memory at the span's
+last process reading. Records are lines in a text file per UTC day
+(`%LOCALAPPDATA%\OpenTaskManager\history` on Windows,
+`~/.local/share/opentaskmanager/history` on Linux), kept 7 days. While the
+window is closed, processes are read once a record rather than each tick;
+readings that close together carry on, so their rates cover the 10 s since
+the last. Time the app wasn't running, or the machine slept, has no
+record, and History draws it as a gap, never a zero.
+
+The History page reads the range's records when it opens or the range
+changes, then adds new ones while it's shown. A moment is picked on the
+graphs or with the slider under them (which UI Automation can set); the
+panel below gives its figures and its busiest processes, in local time
+(the system's own offset for that moment, so summer time is right).
+Record history, on the page, turns the recorder off and on.
+
 ## Ending a process
 
 | | End Task | Force Quit |
@@ -163,12 +185,14 @@ notice counts what was ended and why the rest weren't.
 crates/otm-core/   Sampling (sysinfo), figures, formatting, table rules, axis scaling, tray icon pixels,
                    ending a process (actions.rs: rustix on Linux, windows-sys on Windows),
                    settings, one running copy (instance.rs) and start at sign-in (autostart.rs),
-                   grouping by app (groups.rs), a process's details (details.rs), GPU load (gpu.rs)
-                   and what starts at sign-in (startup.rs)
+                   grouping by app (groups.rs), a process's details (details.rs), GPU load (gpu.rs),
+                   what starts at sign-in (startup.rs), the history recorder (recorder.rs) and
+                   local time (clock.rs)
 app/ui/app.slint   The window: page tabs, graph cards, End Task and Force Quit, process table,
-                   details panel, Startup page, status bar
+                   details panel, Startup and History pages, status bar
 app/src/main.rs    The view: sampler thread, window life, graphs, settings, callbacks
 app/src/table.rs   The table's rows, selection, details panel and ending what's selected
+app/src/history.rs The History page: reading the recorder's files, graphs and the chosen moment
 app/src/graph.rs   Graph lines as path commands in the graph's own pixels
 app/src/tray.rs    The tray: ksni on Linux, tray-icon elsewhere
 ```
@@ -242,7 +266,9 @@ window survive `--quit` and a relaunch. Along the way it checks a protected
 process still gets a GPU share, and that the Startup page lists the test
 instance's own sign-in entry while it's on, that its switch turns it off
 and on with Task Manager's mark (leaving the Run value), and that it's gone
-after Refresh once sign-in is off. It runs as its own instance and
+after Refresh once sign-in is off. On History it checks the recorded
+time, the busiest processes at now, a gap (not zeros) at the hour's start,
+turning recording off and on, and that the records outlive a relaunch. It runs as its own instance and
 removes that instance's settings and Run value at the end:
 `powershell -ExecutionPolicy Bypass -File scripts\smoke-windows.ps1 -Exe <path to opentaskmanager.exe>`.
 
@@ -263,7 +289,9 @@ With the window closed both read too little for this machine's background
 load to tell apart: the same build ranged from 0.00% to 1.32% across runs.
 The window open costs about a quarter of a point more, for the GPU
 counters, the fifth graph, grouping and the details panel. One GPU read
-takes about 2 ms.
+takes about 2 ms. Recording history with the window closed (a process
+reading every 10 s) measured 0.36–0.47% of a core against 0.23–0.36%
+with it off, again within the noise, and about 1 MB more.
 
 Linux, in WSL 2 (Ubuntu 26.04, 16 logical CPUs, no GPU, about 50
 processes), before process actions:
@@ -276,7 +304,7 @@ processes), before process actions:
 For comparison, the Tauri prototype took 9% and 455 MB with its window open,
 and the C++/Qt one 0.83% and 31 MB (see COMPARISON.md).
 
-Verified on Windows: the core's 55 tests run natively. They cover:
+Verified on Windows: the core's 65 tests run natively. They cover:
 
 - no process Windows won't open showing 0 bytes;
 - End Task and Force Quit on real processes, one of them closed through an
@@ -288,10 +316,10 @@ Verified on Windows: the core's 55 tests run natively. They cover:
 - this machine's GPU counters read after priming (the engine totals were
   also checked by hand against `Get-Counter`).
 
-All 51 smoke checks pass, and Windows registered the tray icon. The Startup
+All 62 smoke checks pass, and Windows registered the tray icon. The Startup
 page's enabled and disabled states match the marks Task Manager keeps.
 
-On Linux (WSL) the core's 54 tests pass, including SIGTERM and SIGKILL on
+On Linux (WSL) the core's 64 tests pass, including SIGTERM and SIGKILL on
 real processes, PID 1 refused to an ordinary account, and `fdinfo` parsing
 for amdgpu and xe.
 
@@ -311,6 +339,7 @@ Not verified yet:
 - A real sign-in: the Run value and the Linux autostart entry are checked as
   written, not by signing in again.
 
-Known gaps: no multiple selection, no history recording, no sensors or
-per-process network.
+Known gaps: no multiple selection, no sensors or per-process network, and
+History reads a week's records on the window's thread when that range is
+picked (a short pause on a busy week).
 macOS hasn't been built; the Swift app covers it.

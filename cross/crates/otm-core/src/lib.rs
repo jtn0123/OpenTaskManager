@@ -6,6 +6,7 @@
 
 pub mod actions;
 pub mod autostart;
+pub mod clock;
 pub mod details;
 pub mod format;
 pub mod gpu;
@@ -14,6 +15,7 @@ pub mod history;
 pub mod icon;
 pub mod instance;
 pub mod model;
+pub mod recorder;
 #[cfg(windows)]
 pub mod registry;
 pub mod rows;

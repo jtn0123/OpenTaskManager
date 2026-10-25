@@ -2,7 +2,7 @@
 // Graph lines are path commands from Rust in the graph's logical pixels: the
 // window reports the graphs' size, and Rust redraws them when it changes.
 
-import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, Switch } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, Slider, Switch } from "std-widgets.slint";
 
 export struct CardData {
     value: string,
@@ -39,6 +39,19 @@ export struct StartupCells {
     status: string,
     source: string,
     command: string,
+}
+
+// One graph on the History page: path commands in the plot's pixels.
+export struct HistoryGraph {
+    title: string,
+    accent: color,
+    // The figure at the chosen moment, and the axis's top.
+    value: string,
+    top-label: string,
+    grid: string,
+    area: string,
+    line: string,
+    dashed: string,
 }
 
 // One line of the details panel.
@@ -692,6 +705,193 @@ component StartupPage inherits Rectangle {
     }
 }
 
+// What was recorded over the last hour to week: graphs, a moment picked
+// on them (or with the slider), and what was busiest then.
+component HistoryPage inherits Rectangle {
+    in property <[HistoryGraph]> graphs;
+    in property <string> summary;
+    in property <int> range;
+    in property <string> start-label;
+    in property <string> moment-title;
+    in property <[string]> moment-lines;
+    // 0 is the range's start, 1000 now.
+    in-out property <float> moment: 1000;
+    in-out property <bool> recording;
+    out property <length> plot-width: root.width - 170px;
+    out property <length> plot-height: 42px;
+    callback range-chosen(int);
+    callback moment-moved(float);
+    callback recording-toggled(bool);
+
+    VerticalLayout {
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 4px;
+            for title[index] in ["Hour", "6 hours", "Day", "Week"]: PageTab {
+                title: title;
+                selected: root.range == index;
+                chosen => {
+                    root.range-chosen(index);
+                }
+            }
+            Text {
+                text: root.summary;
+                font-size: 12px;
+                color: Look.muted;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                horizontal-alignment: right;
+                overflow: elide;
+                min-width: 60px;
+                preferred-width: 60px;
+            }
+            CheckBox {
+                text: "Record history";
+                checked <=> root.recording;
+                toggled => {
+                    root.recording-toggled(self.checked);
+                }
+            }
+        }
+        for graph in root.graphs: HorizontalLayout {
+            spacing: 10px;
+            height: root.plot-height;
+            VerticalLayout {
+                width: 160px;
+                alignment: center;
+                Text {
+                    text: graph.title;
+                    color: graph.accent;
+                    font-size: 12px;
+                    font-weight: 650;
+                }
+                Text {
+                    text: graph.value;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+            }
+            plot := Rectangle {
+                background: Look.panel;
+                border-radius: 4px;
+                clip: true;
+                accessible-role: image;
+                accessible-label: graph.title + " over the range, " + graph.value + " at the chosen moment";
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.grid;
+                    stroke: #ffffff17;
+                    stroke-width: 1px;
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.area;
+                    fill: graph.accent.with-alpha(0.2);
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.line;
+                    stroke: graph.accent;
+                    stroke-width: 1.5px;
+                }
+                Path {
+                    width: 100%;
+                    height: 100%;
+                    viewbox-width: self.width / 1px;
+                    viewbox-height: self.height / 1px;
+                    commands: graph.dashed;
+                    stroke: graph.accent;
+                    stroke-width: 1.5px;
+                }
+                Text {
+                    x: 4px;
+                    y: 2px;
+                    text: graph.top-label;
+                    color: #ffffffb3;
+                    font-size: 10px;
+                }
+                // The chosen moment.
+                Rectangle {
+                    x: Math.clamp(root.moment / 1000 * parent.width, 0px, parent.width - 1px);
+                    width: 1px;
+                    background: #ffffffcc;
+                }
+                TouchArea {
+                    mouse-cursor: crosshair;
+                    clicked => {
+                        root.moment-moved(Math.clamp(self.mouse-x / self.width * 1000, 0, 1000));
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.moment-moved(Math.clamp(self.mouse-x / self.width * 1000, 0, 1000));
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 170px;
+            Text {
+                text: root.start-label;
+                font-size: 11px;
+                color: Look.muted;
+            }
+            Text {
+                text: "now";
+                font-size: 11px;
+                color: Look.muted;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+            }
+        }
+        HorizontalLayout {
+            padding-left: 164px;
+            Slider {
+                minimum: 0;
+                maximum: 1000;
+                value <=> root.moment;
+                changed(value) => {
+                    root.moment-moved(value);
+                }
+            }
+        }
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 8px;
+            vertical-stretch: 1;
+            VerticalLayout {
+                padding: 9px;
+                padding-left: 12px;
+                spacing: 3px;
+                Text {
+                    text: root.moment-title;
+                    font-size: 13px;
+                    font-weight: 650;
+                    overflow: elide;
+                    accessible-live-region: polite;
+                }
+                for line in root.moment-lines: Text {
+                    text: line;
+                    font-size: 12px;
+                    overflow: elide;
+                }
+                Rectangle { }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "OpenTaskManager";
     icon: @image-url("../icons/opentaskmanager-64.png");
@@ -711,6 +911,17 @@ export component AppWindow inherits Window {
     in-out property <int> page;
     in property <[StartupCells]> startup;
     in property <string> startup-summary;
+    in property <[HistoryGraph]> history-graphs;
+    in property <string> history-summary;
+    in property <int> history-range;
+    in property <string> history-start;
+    in property <string> history-moment-title;
+    in property <[string]> history-moment-lines;
+    in-out property <float> history-moment: 1000;
+    in-out property <bool> recording;
+    // The History plots' size, for drawing; changes when the window does.
+    out property <length> history-plot-width: root.width - 24px - 170px;
+    out property <length> history-plot-height: 42px;
     in property <[ProcessCells]> rows;
     in property <int> sort-column;
     in property <bool> sort-descending;
@@ -745,12 +956,18 @@ export component AppWindow inherits Window {
     callback grouped-toggled(bool);
     callback page-chosen(int);
     callback startup-refresh();
+    callback history-range-chosen(int);
+    callback history-moment-moved(float);
+    callback recording-toggled(bool);
     callback startup-toggled(int, bool);
     callback toggle-group(int);
     callback expand-group(int);
     callback expand-selection(bool);
 
     changed graph-width => {
+        root.graphs-resized();
+    }
+    changed history-plot-width => {
         root.graphs-resized();
     }
 
@@ -786,6 +1003,13 @@ export component AppWindow inherits Window {
                         root.page-chosen(1);
                     }
                 }
+                PageTab {
+                    title: "History";
+                    selected: root.page == 2;
+                    chosen => {
+                        root.page-chosen(2);
+                    }
+                }
             }
             Rectangle { }
             Button {
@@ -805,7 +1029,7 @@ export component AppWindow inherits Window {
             }
             LineEdit {
                 width: 320px;
-                placeholder-text: root.page == 0 ? "Search by name, PID or user" : "Search by name or command";
+                placeholder-text: root.page == 0 ? "Search by name, PID or user" : root.page == 1 ? "Search by name or command" : "Search applies to Processes and Startup";
                 edited(text) => {
                     root.search-edited(text);
                 }
@@ -924,6 +1148,25 @@ export component AppWindow inherits Window {
                 }
                 toggled(row, on) => {
                     root.startup-toggled(row, on);
+                }
+            }
+            if root.page == 2: HistoryPage {
+                graphs: root.history-graphs;
+                summary: root.history-summary;
+                range: root.history-range;
+                start-label: root.history-start;
+                moment-title: root.history-moment-title;
+                moment-lines: root.history-moment-lines;
+                moment <=> root.history-moment;
+                recording <=> root.recording;
+                range-chosen(index) => {
+                    root.history-range-chosen(index);
+                }
+                moment-moved(value) => {
+                    root.history-moment-moved(value);
+                }
+                recording-toggled(on) => {
+                    root.recording-toggled(on);
                 }
             }
         }

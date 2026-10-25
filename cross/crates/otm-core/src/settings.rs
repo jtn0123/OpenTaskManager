@@ -22,11 +22,20 @@ pub struct Settings {
     pub grouped: bool,
     /// One of `UPDATE_SECONDS`.
     pub update_seconds: u64,
+    /// Whether the history recorder keeps a record every 10 s.
+    pub record_history: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { window: None, sort: Column::Cpu, descending: true, grouped: true, update_seconds: 1 }
+        Self {
+            window: None,
+            sort: Column::Cpu,
+            descending: true,
+            grouped: true,
+            update_seconds: 1,
+            record_history: true,
+        }
     }
 }
 
@@ -55,6 +64,11 @@ impl Settings {
                     "flat" => settings.grouped = false,
                     _ => {}
                 },
+                "record-history" => match value {
+                    "on" => settings.record_history = true,
+                    "off" => settings.record_history = false,
+                    _ => {}
+                },
                 "update-seconds" => {
                     if let Some(seconds) = value.parse().ok().filter(|seconds| UPDATE_SECONDS.contains(seconds)) {
                         settings.update_seconds = seconds;
@@ -73,11 +87,12 @@ impl Settings {
             text += &format!("window-width = {}\nwindow-height = {}\n", width.round(), height.round());
         }
         text += &format!(
-            "sort-column = {}\nsort-order = {}\nview = {}\nupdate-seconds = {}\n",
+            "sort-column = {}\nsort-order = {}\nview = {}\nupdate-seconds = {}\nrecord-history = {}\n",
             self.sort.key(),
             if self.descending { "descending" } else { "ascending" },
             if self.grouped { "grouped" } else { "flat" },
-            self.update_seconds
+            self.update_seconds,
+            if self.record_history { "on" } else { "off" }
         );
         text
     }
@@ -146,6 +161,7 @@ mod tests {
             descending: false,
             grouped: false,
             update_seconds: 5,
+            record_history: false,
         };
         assert_eq!(Settings::parse(&settings.to_text()), settings);
         assert_eq!(Settings::parse(&Settings::default().to_text()), Settings::default());

@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod graph;
+mod history;
 mod table;
 mod tray;
 
@@ -24,6 +25,7 @@ use otm_core::groups::Grouping;
 use otm_core::history::Ring;
 use otm_core::instance::{self, Claim, Message};
 use otm_core::model::{ProcessKey, ProcessRow, Snapshot};
+use otm_core::recorder::{Accumulator, Record, Store};
 use otm_core::rows::Column;
 use otm_core::sampler::Sampler;
 use otm_core::scale::AutoScale;
@@ -77,6 +79,17 @@ struct View {
     startup_shown: Vec<usize>,
     /// Why the last switch didn't take, until the page is read again.
     startup_problem: Option<String>,
+    /// Whether the recorder keeps a record every 10 s, read by the sampler thread.
+    recording: Arc<AtomicBool>,
+    /// The History page: the recorder's files, the range shown and its records.
+    history_store: Option<Store>,
+    history_range: usize,
+    history: Vec<Record>,
+    history_loaded: Option<Instant>,
+    history_size: u64,
+    /// The moment picked, 0 (the range's start) to 1000 (now).
+    history_moment: f32,
+    history_graphs: Rc<VecModel<HistoryGraph>>,
     /// What the last End Task or Force Quit did, until dismissed.
     notice: String,
     showing: Arc<AtomicBool>,
@@ -203,10 +216,10 @@ impl View {
 
     fn show_page(&mut self, page: i32) {
         self.page = page;
-        if page == 1 {
-            self.read_startup();
-        } else {
-            self.redraw_table();
+        match page {
+            1 => self.read_startup(),
+            2 => self.load_history(),
+            _ => self.redraw_table(),
         }
         if let Some(window) = self.window.clone_strong() {
             window.set_page(page);
@@ -281,6 +294,7 @@ impl View {
             descending: self.sort.1,
             grouped: self.grouped,
             update_seconds: self.update_seconds.load(Ordering::Relaxed),
+            record_history: self.recording.load(Ordering::Relaxed),
         };
         if let Err(error) = settings.save(path) {
             eprintln!("Couldn't save settings to {}: {error}", path.display());
@@ -325,6 +339,7 @@ impl View {
         if let Some(window) = self.window.clone_strong() {
             self.draw_graphs(&window);
             self.draw_table(&window);
+            self.draw_history();
         }
     }
 
@@ -361,6 +376,7 @@ impl View {
             self.processes = Some(processes);
             self.draw_table(&window);
         }
+        self.top_up_history();
     }
 }
 
@@ -396,6 +412,12 @@ fn open_window() {
         window.on_page_chosen(|page| with_view(|view| view.show_page(page)));
         window.on_startup_refresh(|| with_view(View::read_startup));
         window.on_startup_toggled(|index, on| with_view(|view| view.toggle_startup(index, on)));
+        window.set_history_graphs(ModelRc::from(view.history_graphs.clone()));
+        window.set_recording(view.recording.load(Ordering::Relaxed));
+        window.set_history_moment(view.history_moment);
+        window.on_history_range_chosen(|index| with_view(|view| view.choose_history_range(index)));
+        window.on_history_moment_moved(|moment| with_view(|view| view.move_history_moment(moment)));
+        window.on_recording_toggled(|on| with_view(|view| view.set_recording(on)));
         // Deferred: the size can change while the view is busy showing the window.
         window.on_graphs_resized(|| {
             let _ = slint::invoke_from_event_loop(|| with_view(View::redraw));
@@ -553,6 +575,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let settings_path = settings::path(&instance);
     let saved = settings_path.as_deref().map(Settings::load).unwrap_or_default();
     let update_seconds = Arc::new(AtomicU64::new(saved.update_seconds));
+    let recording = Arc::new(AtomicBool::new(saved.record_history));
     let showing = Arc::new(AtomicBool::new(false));
     let history: tray::CpuHistory = Arc::new(Mutex::new(Vec::new()));
     let mut sampler = Sampler::new();
@@ -582,6 +605,14 @@ fn main() -> Result<(), slint::PlatformError> {
             startup_rows: Rc::new(VecModel::default()),
             startup_shown: Vec::new(),
             startup_problem: None,
+            recording: recording.clone(),
+            history_store: Store::for_instance(&instance),
+            history_range: 0,
+            history: Vec::new(),
+            history_loaded: None,
+            history_size: 0,
+            history_moment: 1000.0,
+            history_graphs: Rc::new(VecModel::default()),
             notice: String::new(),
             showing: showing.clone(),
             instance: instance.clone(),
@@ -602,9 +633,14 @@ fn main() -> Result<(), slint::PlatformError> {
         open_window();
     }
 
+    let store = Store::for_instance(&instance);
+    let logical_cpus = sampler.logical_cpus().max(1);
     let sampler_thread = thread::Builder::new()
         .name("sampler".into())
         .spawn(move || {
+            let mut accumulator = Accumulator::default();
+            let mut processes_read: Option<Instant> = None;
+            let mut pruned_day = None;
             let mut next = Instant::now();
             loop {
                 let seconds = update_seconds.load(Ordering::Relaxed);
@@ -621,7 +657,32 @@ fn main() -> Result<(), slint::PlatformError> {
                         break;
                     }
                 }
-                let Some((snapshot, processes)) = sampler.sample(showing.load(Ordering::Relaxed)) else { continue };
+                // The table needs processes each tick while it shows; the
+                // recorder needs them once a record, window or not.
+                let on_screen = showing.load(Ordering::Relaxed);
+                let recording = recording.load(Ordering::Relaxed);
+                let due = processes_read.is_none_or(|at| at.elapsed() >= Duration::from_millis(9_500));
+                let read_processes = on_screen || (recording && due);
+                let Some((snapshot, processes)) = sampler.sample(read_processes) else { continue };
+                if read_processes {
+                    processes_read = Some(Instant::now());
+                }
+                match (&store, recording) {
+                    (Some(store), true) => {
+                        if let Some(record) = accumulator.add(&snapshot, processes.as_deref(), logical_cpus)
+                            && let Err(error) = store.append(&record)
+                        {
+                            eprintln!("Couldn't record history in {}: {error}", store.folder().display());
+                        }
+                        let day = snapshot.time_ms / 86_400_000;
+                        if pruned_day != Some(day) {
+                            let _ = store.prune(snapshot.time_ms);
+                            pruned_day = Some(day);
+                        }
+                    }
+                    _ => accumulator = Accumulator::default(),
+                }
+                let processes = if on_screen { processes } else { None };
                 if let Ok(mut values) = history.lock() {
                     values.push(snapshot.cpu);
                     let excess = values.len().saturating_sub(SPAN);

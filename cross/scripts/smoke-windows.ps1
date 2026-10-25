@@ -37,7 +37,9 @@ function Clean {
     Remove-Item -LiteralPath $Settings -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $RunKey -Name $RunValue -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $ApprovedKey -Name $RunValue -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -LiteralPath $History -ErrorAction SilentlyContinue
 }
+$History = Join-Path $env:LOCALAPPDATA "OpenTaskManager\history-$Instance"
 function Launch([string[]]$More = @()) {
     Start-Process -FilePath $Exe -ArgumentList (@('--instance', $Instance) + $More) -PassThru
 }
@@ -308,6 +310,33 @@ try {
         Write-Output "skipped: the search field offers no value pattern to type into"
     }
 
+    # History: by now the recorder has kept a record every 10 s.
+    $selectTab = [System.Windows.Automation.SelectionItemPattern]::Pattern
+    function OpenPage([string]$name) {
+        (Elements $Type::TabItem | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1).GetCurrentPattern($selectTab).Select()
+        Start-Sleep -Milliseconds 1200
+    }
+    OpenPage 'History'
+    Check ((Texts '^\S.* recorded in this range').Count -eq 1) "History shows what was recorded ($((Texts 'recorded in this range') -join ''))"
+    Check ((Texts '^\d\d:\d\d . CPU [\d.]+% . memory ').Count -eq 1) "at now it gives the time, CPU and memory"
+    Check ((Texts '\(PID \d+\) . CPU ').Count -ge 3) "and the busiest processes then"
+    Check ((Test-Path $History) -and @(Get-ChildItem $History -Filter '*.history').Count -ge 1) "in a file per day"
+    $moment = (Elements $Type::Slider | Select-Object -First 1).GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+    $moment.SetValue(0)
+    Start-Sleep -Milliseconds 800
+    Check ((Texts '^Nothing recorded at ').Count -eq 1) "the hour's start, before the app ran, is a gap, not zeros"
+    $moment.SetValue(1000)
+    Start-Sleep -Milliseconds 800
+    $recordBox = Elements $Type::CheckBox | Where-Object { $_.Current.Name -eq 'Record history' } | Select-Object -First 1
+    $recordSwitch = $recordBox.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    $recordSwitch.Toggle()
+    Start-Sleep -Milliseconds 800
+    Check ((Texts 'recording is off').Count -eq 1) "turning recording off says so"
+    $recordSwitch.Toggle()
+    Start-Sleep -Milliseconds 800
+    Check ((Texts 'recording is off').Count -eq 0 -and $recordSwitch.Current.ToggleState -eq 'On') "and it turns back on"
+    OpenPage 'Processes'
+
     # One copy: a second launch hands over to the first and exits.
     $second = Launch
     Check ($second.WaitForExit(10000) -and $second.ExitCode -eq 0) "a second launch hands over and exits"
@@ -384,6 +413,9 @@ try {
     $window = WindowOf $again
     for ($i = 0; $i -lt 20 -and (Rows).Count -eq 0; $i++) { Start-Sleep -Milliseconds 500 }
     Check ((Header 'Name').Current.Name -eq 'Name, sorted lowest first') "reopened, it still sorts by name"
+    OpenPage 'History'
+    Check ((Texts '^\S.* recorded in this range').Count -eq 1) "and History still has the earlier run's records"
+    OpenPage 'Processes'
     $reopened = $window.Current.BoundingRectangle
     Check ([math]::Abs($reopened.Width - $size.Width) -le 2 -and [math]::Abs($reopened.Height - $size.Height) -le 2) "and opens at the size it closed at ($($reopened.Width)x$($reopened.Height))"
     Check (Quit $again) "--quit closes it again"

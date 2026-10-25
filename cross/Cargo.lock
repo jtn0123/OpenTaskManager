@@ -3581,6 +3581,7 @@ dependencies = [
 name = "otm-core"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "rustix 1.1.5",
  "sysinfo",
  "windows-sys 0.61.2",

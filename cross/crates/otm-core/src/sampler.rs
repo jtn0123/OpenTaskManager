@@ -4,7 +4,7 @@
 //! from it rather than a zero the system never measured.
 
 use std::collections::HashSet;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sysinfo::{
     CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, Networks, Process, ProcessRefreshKind,
@@ -21,15 +21,17 @@ pub struct Sampler {
     users: Users,
     /// When the previous reading was taken.
     last: Option<Instant>,
-    /// The processes seen at the previous reading, or None when processes
-    /// weren't read then and their counters need priming again.
-    seen: Option<HashSet<ProcessKey>>,
+    /// The processes seen at the last process reading, and when it was.
+    /// Readings at most `process_gap` apart carry on (the recorder reads
+    /// every 10 s while the window is closed); after a longer pause the
+    /// counters prime again.
+    seen: Option<(HashSet<ProcessKey>, Instant)>,
+    process_gap: Duration,
     me: Option<Uid>,
     superuser: bool,
     /// Whether this system offers a GPU reading at all.
     gpu_readable: bool,
-    /// The GPU reader, open only while processes are read: on Windows an
-    /// open counter query costs CPU even when nothing collects from it.
+    /// The GPU reader, open only while processes are being read.
     gpu: Option<GpuReader>,
 }
 
@@ -59,6 +61,7 @@ impl Sampler {
             users: Users::new_with_refreshed_list(),
             last: None,
             seen: None,
+            process_gap: Duration::from_secs(15),
             me,
             superuser,
             gpu_readable: GpuReader::new().is_some(),
@@ -77,8 +80,9 @@ impl Sampler {
 
     /// Reads the machine, and its processes and GPU when `with_processes` is set.
     /// Returns None from the very first call, which only primes the
-    /// counters. The process list is None on the first interval processes
-    /// are read after a pause, for the same reason.
+    /// counters. The process list is None the first time processes are
+    /// read after a pause, for the same reason; their rates cover the time
+    /// since processes were last read.
     pub fn sample(&mut self, with_processes: bool) -> Option<(Snapshot, Option<Vec<ProcessRow>>)> {
         let now = Instant::now();
         let previous = self.last.replace(now);
@@ -87,14 +91,17 @@ impl Sampler {
         self.disks.refresh_specifics(true, DiskRefreshKind::nothing().with_io_usage());
         self.networks.refresh(true);
         let interval = previous.map(|previous| now.duration_since(previous).as_secs_f64());
-        // Read only while the window shows it, from a reader opened for that
-        // and closed after; a newly opened one primes first.
-        if with_processes && self.gpu_readable && self.gpu.is_none() {
-            self.gpu = GpuReader::new();
-        } else if !with_processes {
+        // A pause ends the run of process readings, and the GPU reader with it.
+        if self.seen.as_ref().is_some_and(|(_, at)| now.duration_since(*at) > self.process_gap) {
+            self.seen = None;
             self.gpu = None;
         }
-        let gpu = self.gpu.as_mut().and_then(GpuReader::read);
+        // GPU load is read with processes, from a reader opened for them; a
+        // new one primes first.
+        if with_processes && self.gpu_readable && self.gpu.is_none() {
+            self.gpu = GpuReader::new();
+        }
+        let gpu = if with_processes { self.gpu.as_mut().and_then(GpuReader::read) } else { None };
         let processes = if with_processes {
             self.system.refresh_processes_specifics(
                 ProcessesToUpdate::All,
@@ -108,15 +115,13 @@ impl Sampler {
                     // Threads aren't processes; Linux would otherwise list each one.
                     .without_tasks(),
             );
-            let seen = self.seen.take();
-            let rows = match (seen, interval) {
-                (Some(seen), Some(interval)) => Some(self.rows(&seen, interval, gpu.as_ref())),
-                _ => None,
-            };
-            self.seen = Some(self.keys());
+            let rows = self.seen.take().map(|(seen, at)| {
+                let since = now.duration_since(at).as_secs_f64();
+                self.rows(&seen, since, gpu.as_ref())
+            });
+            self.seen = Some((self.keys(), now));
             rows
         } else {
-            self.seen = None;
             None
         };
         let interval = interval?;
@@ -323,8 +328,12 @@ mod tests {
 
         sleep(Duration::from_millis(300));
         let (_, processes) = sampler.sample(true).expect("a snapshot");
-        assert!(processes.is_none(), "after a pause, process counters prime again");
+        assert!(processes.is_some(), "processes read again soon carry on");
+        sampler.process_gap = Duration::from_millis(100);
         sleep(Duration::from_millis(300));
+        let (_, processes) = sampler.sample(true).expect("a snapshot");
+        assert!(processes.is_none(), "after a pause, process counters prime again");
+        sleep(Duration::from_millis(50));
         let (_, processes) = sampler.sample(true).expect("a snapshot");
         let processes = processes.expect("processes on their second reading");
         let me = std::process::id();
