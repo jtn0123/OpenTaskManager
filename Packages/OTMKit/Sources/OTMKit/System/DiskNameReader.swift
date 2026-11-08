@@ -30,17 +30,18 @@ enum DiskNameReader {
 
     /// Every volume mounted from a disk device, with its name and the whole disk under it.
     static func mountedVolumes() -> [DiskNaming.Volume] {
+        // getfsstat receives the array's byte capacity; mount strings are decoded within their fixed C tuples.
         let count = Int(getfsstat(nil, 0, MNT_NOWAIT))
         guard count > 0 else { return [] }
         // Room for a mount or two arriving between the calls.
         var mounts = Array(repeating: statfs(), count: count + 4)
         let stride = MemoryLayout.stride(ofValue: mounts[0])
         let filled = mounts.withUnsafeMutableBufferPointer { buffer in
-            Int(getfsstat(buffer.baseAddress, Int32(buffer.count * stride), MNT_NOWAIT))
+            unsafe Int(getfsstat(buffer.baseAddress, Int32(buffer.count * stride), MNT_NOWAIT))
         }
         return mounts.prefix(max(filled, 0)).compactMap { mount -> DiskNaming.Volume? in
-            let source = withUnsafeBytes(of: mount.f_mntfromname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            let path = withUnsafeBytes(of: mount.f_mntonname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            let source = withUnsafeBytes(of: mount.f_mntfromname) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            let path = withUnsafeBytes(of: mount.f_mntonname) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
             guard let device = VolumeReader.bsdName(mountSource: source),
                   let disk = IORegistry.physicalDisk(forBSDName: device) else { return nil }
             let url = URL(fileURLWithPath: path, isDirectory: true)
@@ -55,11 +56,12 @@ enum DiskNameReader {
     /// keeps it on the device's ancestors as "image-path" (bytes); nil for
     /// a drive.
     static func imagePath(forBSDName bsdName: String) -> String? {
-        let media = IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
+        // IOKit consumes the matching dictionary; the service stays live until its retained property has been copied.
+        let media = unsafe IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
         guard media != 0 else { return nil }
         defer { IOObjectRelease(media) }
         let options = IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
-        guard let value = IORegistryEntrySearchCFProperty(media, kIOServicePlane, "image-path" as CFString, kCFAllocatorDefault, options)
+        guard let value = unsafe IORegistryEntrySearchCFProperty(media, kIOServicePlane, "image-path" as CFString, kCFAllocatorDefault, options)
         else { return nil }
         if let path = value as? String { return path.isEmpty ? nil : path }
         guard let data = value as? Data else { return nil }

@@ -11,9 +11,23 @@ import Foundation
 final class ProcessSampler {
     var includeRestricted = true
 
+    private struct Tick {
+        let interval: TimeInterval
+        let gpuTime: [Int32: UInt64]
+        let restrictedLive: Bool
+        let details: Bool
+    }
+
     private struct Key: Hashable {
         let pid: Int32
         let start: Int64
+    }
+
+    private struct Lasting {
+        /// Nil until the path has been read; macOS won't give some.
+        let path: String?
+        let name: String?
+        let responsiblePID: Int32
     }
 
     private struct Counters {
@@ -27,16 +41,22 @@ final class ProcessSampler {
     }
 
     private var previous: [Key: Counters] = [:]
-    private var paths: [Key: String] = [:]
+    /// What a process keeps for its life, read once rather than every tick:
+    /// its executable's path and name, and the process responsible for it.
+    private var lasting: [Key: Lasting] = [:]
     private var userNames: [UInt32: String] = [:]
-    private var restrictedThreads: [Int32: Int] = [:]
-    private var restrictedThreadsRead = Date.distantPast
+    private var restrictedCadence = SamplingCadence(primingReads: 2)
+    /// `ps -M` lists one line per thread, too much output to parse every
+    /// tick, so thread counts stay at most every 5 s, live or not.
+    private var threadCadence = SamplingCadence()
+    private var restrictedCache = RestrictedProcessCache()
     private lazy var supportsV6: Bool = {
         var usage = rusage_info_v6()
         return Self.rusage(getpid(), &usage, flavor: RUSAGE_INFO_V6)
     }()
 
-    func sample(interval: TimeInterval, gpuTime: [Int32: UInt64]) -> [ProcessSample] {
+    func sample(interval: TimeInterval, gpuTime: [Int32: UInt64], restrictedLive: Bool = true,
+                details: Bool = true) -> [ProcessSample] {
         let kernelList = Self.listProcesses()
         var samples: [ProcessSample] = []
         samples.reserveCapacity(kernelList.count)
@@ -45,7 +65,7 @@ final class ProcessSampler {
 
         for (index, info) in kernelList.enumerated() {
             let key = Key(pid: info.pid, start: info.startMicroseconds)
-            guard let native = readNative(info.pid) else {
+            guard let native = readNative(info.pid, details: details) else {
                 restricted.append(index)
                 continue
             }
@@ -76,31 +96,16 @@ final class ProcessSampler {
         }
 
         if includeRestricted, !restricted.isEmpty {
-            let fallback = PSReader.read()
-            let threads = restrictedThreadCounts()
-            for index in restricted {
-                let info = kernelList[index]
-                let key = Key(pid: info.pid, start: info.startMicroseconds)
-                var sample = makeSample(info, key: key, restricted: true)
-                if let row = fallback[info.pid] {
-                    let counters = Counters(
-                        cpuSeconds: row.cpuSeconds, topTierSeconds: nil, energyNanojoules: nil,
-                        diskRead: 0, diskWrite: 0, wakeups: nil, gpuNanoseconds: gpuTime[info.pid]
-                    )
-                    current[key] = counters
-                    sample.cpuTime = row.cpuSeconds
-                    sample.memory = row.residentBytes
-                    sample.residentMemory = row.residentBytes
-                    if let state = row.state, sample.state != .zombie { sample.state = state }
-                    apply(counters, before: previous[key], interval: interval, to: &sample)
-                }
-                sample.threadCount = threads[info.pid] ?? 0
-                samples.append(sample)
-            }
+            let tick = Tick(interval: interval, gpuTime: gpuTime, restrictedLive: restrictedLive, details: details)
+            appendRestricted(kernelList, indices: restricted, tick: tick,
+                             current: &current, samples: &samples)
+        } else {
+            restrictedCache = RestrictedProcessCache()
+            restrictedCadence = SamplingCadence(primingReads: 2)
         }
 
         previous = current
-        paths = paths.filter { current[$0.key] != nil }
+        lasting = lasting.filter { current[$0.key] != nil }
         return samples
     }
 
@@ -138,16 +143,16 @@ final class ProcessSampler {
     // MARK: - Building samples
 
     private func makeSample(_ info: KernelProcess, key: Key, restricted: Bool) -> ProcessSample {
-        let path = executablePath(for: key)
-        let name = path.map { ($0 as NSString).lastPathComponent } ?? Self.shortName(info.pid) ?? info.command
+        let known = lastingFacts(for: key)
+        let name = known.name ?? Self.shortName(info.pid) ?? info.command
         return ProcessSample(
             pid: info.pid,
             parentPID: info.parentPID,
-            responsiblePID: Responsibility.responsiblePID(for: info.pid),
+            responsiblePID: known.responsiblePID,
             uid: info.uid,
             userName: userName(for: info.uid),
             name: info.pid == 0 ? "kernel_task" : name,
-            executablePath: path,
+            executablePath: known.path,
             state: info.state,
             nice: info.nice,
             startTime: ProcessIdentity.startTime(microseconds: info.startMicroseconds),
@@ -165,30 +170,62 @@ final class ProcessSampler {
         )
     }
 
-    private func executablePath(for key: Key) -> String? {
-        if let cached = paths[key] { return cached }
+    /// A path that can't be read is tried again next tick, as before, and the
+    /// name then comes from `proc_name`, which can change on exec.
+    private func lastingFacts(for key: Key) -> Lasting {
+        // The path buffer is borrowed for proc_pidpath, which receives its full byte capacity.
+        if let cached = lasting[key], cached.path != nil { return cached }
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(key.pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        let path = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        paths[key] = path
-        return path
+        let path = unsafe proc_pidpath(key.pid, &buffer, UInt32(buffer.count)) > 0
+            ? String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            : nil
+        let facts = Lasting(path: path, name: path.map { ($0 as NSString).lastPathComponent },
+                            responsiblePID: lasting[key]?.responsiblePID ?? Responsibility.responsiblePID(for: key.pid))
+        lasting[key] = facts
+        return facts
     }
 
     private func userName(for uid: UInt32) -> String {
+        // getpwuid's string is copied before another directory lookup can replace its storage.
         if let cached = userNames[uid] { return cached }
-        let name = getpwuid(uid).map { String(cString: $0.pointee.pw_name) } ?? String(uid)
+        let name = unsafe getpwuid(uid).map { unsafe String(cString: $0.pointee.pw_name) } ?? String(uid)
         userNames[uid] = name
         return name
     }
 
-    /// Thread counts for processes we cannot read natively. `ps -M` lists one
-    /// line per thread, which is too much output to parse every tick.
-    private func restrictedThreadCounts() -> [Int32: Int] {
-        if Date().timeIntervalSince(restrictedThreadsRead) > 5 {
-            restrictedThreads = PSReader.readThreadCounts()
-            restrictedThreadsRead = Date()
+    /// The figures' walk keeps the live cadence; the thread walk rides along
+    /// on one of its reads at most every 5 s. The native process list still
+    /// tells us about exits each tick, so held rows never keep an ended
+    /// process alive.
+    private func appendRestricted(_ list: [KernelProcess], indices: [Int], tick: Tick,
+                                  current: inout [Key: Counters], samples: inout [ProcessSample]) {
+        let time = ProcessInfo.processInfo.systemUptime
+        let reads = restrictedCadence.shouldRead(at: time, live: tick.restrictedLive)
+        let fallback = reads ? PSReader.read() : [:]
+        let threads = reads && tick.details && threadCadence.shouldRead(at: time, live: false) ? PSReader.readThreadCounts() : [:]
+        var identities: Set<ProcessIdentity> = []
+        for index in indices {
+            let info = list[index]
+            let key = Key(pid: info.pid, start: info.startMicroseconds)
+            var sample = makeSample(info, key: key, restricted: true)
+            identities.insert(sample.identity)
+            if reads { restrictedCache.update(sample.identity, row: fallback[info.pid], threads: threads[info.pid], at: time) }
+            if let row = restrictedCache.reading(for: sample.identity) {
+                let counters = Counters(cpuSeconds: row.cpuSeconds, topTierSeconds: nil, energyNanojoules: nil,
+                                        diskRead: 0, diskWrite: 0, wakeups: nil, gpuNanoseconds: tick.gpuTime[info.pid])
+                current[key] = counters
+                sample.cpuTime = row.cpuSeconds
+                sample.memory = row.residentBytes
+                sample.residentMemory = row.residentBytes
+                sample.threadCount = row.threads
+                if let state = row.state, sample.state != .zombie { sample.state = state }
+                // GPU counters still arrive each tick. CPU uses ps's own interval.
+                apply(counters, before: previous[key], interval: tick.interval, to: &sample)
+                sample.cpuPercent = row.cpuPercent
+            }
+            samples.append(sample)
         }
-        return restrictedThreads
+        restrictedCache.retain(identities)
     }
 
     // MARK: - Native reads
@@ -208,10 +245,14 @@ final class ProcessSampler {
         var neuralMemoryPeak: UInt64?
     }
 
-    private func readNative(_ pid: Int32) -> Native? {
+    private func readNative(_ pid: Int32, details: Bool) -> Native? {
+        // Each local C record has the flavor's exact size and stays live until the synchronous kernel call returns.
         var task = proc_taskinfo()
         let size = Int32(MemoryLayout<proc_taskinfo>.size)
-        guard pid > 0, proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) == size else { return nil }
+        guard pid > 0 else { return nil }
+        // History and spikes need the rusage figures, not a second kernel
+        // call for resident memory, running threads and thread counts.
+        if details, unsafe proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, size) != size { return nil }
 
         if supportsV6 {
             var usage = rusage_info_v6()
@@ -252,16 +293,18 @@ final class ProcessSampler {
     }
 
     private static func rusage<T>(_ pid: Int32, _ usage: inout T, flavor: Int32) -> Bool {
+        // The caller supplies the flavor's aligned rusage record; rebinding covers only the call, which writes the record, not a pointer.
         withUnsafeMutablePointer(to: &usage) { pointer in
-            pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
-                proc_pid_rusage(pid, flavor, $0) == 0
+            unsafe pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+                unsafe proc_pid_rusage(pid, flavor, $0) == 0
             }
         }
     }
 
     private static func shortName(_ pid: Int32) -> String? {
+        // proc_name receives the byte capacity of the local buffer and finishes before it is decoded.
         var buffer = [CChar](repeating: 0, count: 256)
-        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        guard unsafe proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
         let name = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         return name.isEmpty ? nil : name
     }
@@ -281,29 +324,30 @@ final class ProcessSampler {
 
     /// One sysctl that returns every process, including ones we cannot inspect.
     static func listProcesses() -> [KernelProcess] {
+        // The kernel receives the allocated byte capacity; only complete returned C records and their bounded command tuples are read.
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var processes: [kinfo_proc] = []
+        var processes: [kinfo_proc] = unsafe []
         for _ in 0..<4 {
             var size = 0
-            guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [] }
+            guard unsafe sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [] }
             // Processes can spawn between the two calls; leave headroom.
             size += size / 8
-            processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
-            let result = processes.withUnsafeMutableBytes { sysctl(&mib, 4, $0.baseAddress, &size, nil, 0) }
+            unsafe processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+            let result = processes.withUnsafeMutableBytes { unsafe sysctl(&mib, 4, $0.baseAddress, &size, nil, 0) }
             if result == 0 {
-                processes.removeLast(processes.count - size / MemoryLayout<kinfo_proc>.stride)
+                unsafe processes.removeLast(processes.count - size / MemoryLayout<kinfo_proc>.stride)
                 break
             }
             guard errno == ENOMEM else { return [] }
         }
 
-        return processes.map { process in
-            let proc = process.kp_proc
-            let start = proc.p_un.__p_starttime
-            let command = withUnsafeBytes(of: proc.p_comm) { raw in
-                String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        return unsafe processes.map { process in
+            let proc = unsafe process.kp_proc
+            let start = unsafe proc.p_un.__p_starttime
+            let command = unsafe withUnsafeBytes(of: proc.p_comm) { raw in
+                unsafe String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
             }
-            return KernelProcess(
+            return unsafe KernelProcess(
                 pid: proc.p_pid,
                 parentPID: process.kp_eproc.e_ppid,
                 uid: process.kp_eproc.e_ucred.cr_uid,
@@ -336,9 +380,10 @@ enum Responsibility {
     private typealias Lookup = @convention(c) (pid_t) -> pid_t
 
     private static let lookup: Lookup? = {
-        let defaultHandle = UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
-        guard let symbol = dlsym(defaultHandle, "responsibility_get_pid_responsible_for_pid") else { return nil }
-        return unsafeBitCast(symbol, to: Lookup.self)
+        // RTLD_DEFAULT keeps the system symbol loaded, and Lookup matches its C signature.
+        let defaultHandle = unsafe UnsafeMutableRawPointer(bitPattern: -2) // RTLD_DEFAULT
+        guard let symbol = unsafe dlsym(defaultHandle, "responsibility_get_pid_responsible_for_pid") else { return nil }
+        return unsafe unsafeBitCast(symbol, to: Lookup.self)
     }()
 
     static func responsiblePID(for pid: Int32) -> Int32 {

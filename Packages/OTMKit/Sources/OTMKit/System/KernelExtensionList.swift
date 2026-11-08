@@ -16,7 +16,8 @@ enum KernelExtensionList {
     /// takes about 20 ms and also gives each kext's path. If that call ever
     /// fails, `kmutil showloaded` has the rest. Nil when neither works.
     static func read() -> [KernelExtension]? {
-        if let info = KextManagerCopyLoadedKextInfo(nil, infoKeys as CFArray)?.takeRetainedValue() as? [String: Any],
+        // Copy transfers the returned dictionary's retain to Swift; its inputs are borrowed for the call.
+        if let info = unsafe KextManagerCopyLoadedKextInfo(nil, infoKeys as CFArray)?.takeRetainedValue() as? [String: Any],
            !info.isEmpty {
             return parse(loadedInfo: info)
         }

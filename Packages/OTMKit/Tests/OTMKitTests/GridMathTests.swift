@@ -80,6 +80,14 @@ struct GridMathTests {
         }
     }
 
+    @Test func unbalancedFlowWrapsOnlyWhatDoesntFit() {
+        // A filter bar: the picker and menu stay together, the count wraps alone.
+        let bar: [Double] = [320, 140, 220]
+        #expect(GridMath.flowRows(widths: bar, width: 600, spacing: 12, balanced: false) == [0..<2, 2..<3])
+        #expect(GridMath.flowRows(widths: bar, width: 600, spacing: 12) == [0..<1, 1..<3])
+        #expect(GridMath.flowRows(widths: bar, width: 800, spacing: 12, balanced: false) == [0..<3])
+    }
+
     @Test func flowGivesAnOversizedItemARowOfItsOwn() {
         #expect(GridMath.flowRows(widths: [50, 500, 50], width: 300, spacing: 10) == [0..<1, 1..<2, 2..<3])
     }

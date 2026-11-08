@@ -51,35 +51,56 @@ enum IconCache {
 /// figure, drawn as a template so it follows the menu bar's appearance.
 @MainActor
 enum MenuBarIcon {
-    private static let bars = 14
+    private static let bars = MenuBarDrawing.bars
     private static let barWidth: CGFloat = 2
     private static let gap: CGFloat = 1
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    private static var lastDrawing: MenuBarDrawing?
+    private static var lastImage: NSImage?
+    private static var lastDisks: [DiskActivityLight]?
 
-    static func image(history: [Double], usage: Double) -> NSImage {
+    static func image(_ drawing: MenuBarDrawing, disks: [DiskActivityLight]? = nil) -> NSImage {
+        if lastDrawing == drawing, lastDisks == disks, let lastImage { return lastImage }
         let height: CGFloat = 16
+        let heights = drawing.heights.map { CGFloat($0) }
+        let label = drawing.text
         let graphWidth = CGFloat(bars) * (barWidth + gap) - gap
-        let text = Format.percent(usage) as NSString
+        let text = label as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         // Reserve room for "99%" so the item doesn't jiggle as the number changes.
         let textWidth = ceil(max(text.size(withAttributes: attributes).width, ("99%" as NSString).size(withAttributes: attributes).width))
-        let size = NSSize(width: graphWidth + 4 + textWidth, height: height)
-        let values = Array(history.suffix(bars))
+        let cpuWidth = graphWidth + 4 + textWidth
+        let size = NSSize(width: cpuWidth + (disks == nil ? 0 : 52), height: height)
 
         let image = NSImage(size: size, flipped: false) { _ in
             NSColor.black.withAlphaComponent(0.3).setFill()
             NSRect(x: 0, y: 1, width: graphWidth, height: 1).fill()
             NSColor.black.setFill()
-            for (index, value) in values.enumerated() {
-                let x = CGFloat(bars - values.count + index) * (barWidth + gap)
-                let barHeight = max(1, CGFloat(min(max(value, 0), 1)) * (height - 2))
+            for (index, barHeight) in heights.enumerated() {
+                let x = CGFloat(bars - heights.count + index) * (barWidth + gap)
                 NSBezierPath(roundedRect: NSRect(x: x, y: 1, width: barWidth, height: barHeight), xRadius: 0.5, yRadius: 0.5).fill()
             }
             let textSize = text.size(withAttributes: attributes)
-            text.draw(at: NSPoint(x: size.width - textSize.width, y: (height - textSize.height) / 2), withAttributes: attributes)
+            text.draw(at: NSPoint(x: cpuWidth - textSize.width, y: (height - textSize.height) / 2), withAttributes: attributes)
+            if let disks {
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor.black
+                ]
+                let states = [disks.contains(where: \.reading), disks.contains(where: \.writing)]
+                for (index, letter) in ["R", "W"].enumerated() {
+                    let x = cpuWidth + 7 + CGFloat(index) * 25
+                    (letter as NSString).draw(at: NSPoint(x: x, y: 2), withAttributes: attributes)
+                    let circle = NSBezierPath(ovalIn: NSRect(x: x + 10, y: 5, width: 5, height: 5))
+                    circle.lineWidth = 1
+                    if states[index] { circle.fill() } else { circle.stroke() }
+                }
+            }
             return true
         }
         image.isTemplate = true
+        lastDrawing = drawing
+        lastDisks = disks
+        lastImage = image
         return image
     }
 }
@@ -93,8 +114,12 @@ enum WindowOpener {
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
             window.makeKeyAndOrderFront(nil)
-        } else {
-            openMainWindow?()
+        } else if let openMainWindow {
+            openMainWindow()
+        } else if let menu = NSApp.windowsMenu, let index = menu.items.firstIndex(where: { $0.title == "OpenTaskManager" }) {
+            // Neither the window nor the menu bar item has shown this run, so
+            // SwiftUI hasn't handed over its opener; the Window menu still lists it.
+            menu.performActionForItem(at: index)
         }
     }
 }
@@ -136,18 +161,49 @@ final class GlobalHotKey {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task {
+            await ConnectionStore.shared.finishHistory()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     private var hotKey: GlobalHotKey?
+
+    /// Before any window opens: the main window's frame is the app's own
+    /// (`MainWindowFrame`), so neither AppKit's autosaved copy nor window
+    /// state macOS saved for an earlier run gets to place it.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainWindowFrame.ignoreSavedWindowState()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         updateHotKey()
+        Task { await UpdateCheckStore.shared.check(automatic: true) }
+        if !AppModel.usesIncidentFixture { StorageScheduler.shared.start() }
         HistoryRecordingStore.shared.handleLaunchArguments()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateHotKey() }
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { await UpdateCheckStore.shared.check(automatic: true) }
+    }
+
+    /// Closing the main window quits, as SwiftUI has a lone Window scene do;
+    /// but a mini monitor, live Dock icon or disk lights keep the app running.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        !Settings.miniMonitorShown.get() && Settings.dockGraphMode.get() == .off
+            && !(Settings.diskActivityLights.get() && Settings.showMenuBarExtra.get())
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
-        if !hasVisibleWindows { WindowOpener.showMainWindow() }
+        // The mini monitor is a window too, but not one the Dock icon should stop at.
+        if !hasVisibleWindows || !sender.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) {
+            WindowOpener.showMainWindow()
+        }
         return true
     }
 
@@ -161,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// ⌃⇧⎋, the shortcut Windows users already have in their fingers.
     private func updateHotKey() {
-        let enabled = UserDefaults.standard.object(forKey: "globalHotKeyEnabled") as? Bool ?? true
+        let enabled = Settings.globalHotKeyEnabled.get()
         if enabled, hotKey == nil {
             hotKey = GlobalHotKey(keyCode: kVK_Escape, modifiers: controlKey | shiftKey) {
                 WindowOpener.showMainWindow()

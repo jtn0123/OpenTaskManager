@@ -60,7 +60,7 @@ public struct USBDevice: Sendable, Hashable, Encodable {
     /// "0781:55fd", the vendor and product IDs as they're usually looked up.
     public var idPair: String? {
         guard let vendorID, let productID else { return nil }
-        return String(format: "%04x:%04x", vendorID, productID)
+        return Format.hexadecimal(vendorID, width: 4) + ":" + Format.hexadecimal(productID, width: 4)
     }
 }
 

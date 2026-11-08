@@ -4,9 +4,7 @@ import SwiftUI
 
 /// Columns of the process table. The raw value doubles as the column
 /// identifier and, where sortable, the `ProcessSortKey`.
-enum ProcessColumn: String, CaseIterable {
-    case name, pid, cpu, memory, power, gpu, neuralMemory, disk, threads, topTier, wakeups, user, kind
-
+extension ProcessColumn {
     var title: String {
         switch self {
         case .name: "Name"
@@ -27,10 +25,11 @@ enum ProcessColumn: String, CaseIterable {
 
     /// Starting width: room for the longest usual value ("1023 KB/s",
     /// "100.0%") and for the header's name in bold beside the sort chevron.
-    /// Name takes whatever the others leave.
+    /// Name's is its width where there's room, until the user drags it
+    /// (`Settings.processNameWidth`).
     var width: CGFloat {
         switch self {
-        case .name: 240
+        case .name: CGFloat(Settings.processNameWidth.defaultValue)
         case .pid: 54
         case .cpu: 68
         case .memory, .threads: 72
@@ -40,7 +39,8 @@ enum ProcessColumn: String, CaseIterable {
         case .disk: 80
         case .topTier: 70
         case .wakeups: 76
-        case .user: 76
+        // Service accounts' names whole: "_windowserver", "_softwareupdate".
+        case .user: 116
         case .kind: 56
         }
     }
@@ -115,7 +115,8 @@ enum ProcessColumn: String, CaseIterable {
     var headerHelp: String? {
         switch self {
         case .memory: MemoryMeasure.column
-        case .gpu: "GPU: the share of the GPU's time each process used. \"—\" for a process that hasn't used the GPU."
+        case .gpu: "GPU: each process's GPU time ÷ elapsed time (10% is 0.1 s of GPU work each second). "
+            + "\"—\" for a process that hasn't used the GPU."
         case .neuralMemory: MemoryMeasure.neuralColumn
         default: nil
         }
@@ -135,24 +136,20 @@ enum ProcessColumn: String, CaseIterable {
         self != .name && self != .user && self != .kind
     }
 
-    /// Colour of the meter bar behind busy values, matching the Performance page.
-    @MainActor var meterColor: NSColor? {
+    /// Colour of the meter bar behind busy values, matching the Performance
+    /// page. The meters sit behind the numbers, so they keep the pastel fill
+    /// shade; a palette change shows at the next restyle.
+    var meterColor: NSColor? {
         switch self {
-        case .cpu: Self.colors.cpu
-        case .memory: Self.colors.memory
-        case .power: Self.colors.power
-        case .gpu: Self.colors.gpu
-        case .disk: Self.colors.disk
-        case .wakeups: Self.colors.wakeups
+        case .cpu: GraphColors.shared.fill(.cpu)
+        case .memory: GraphColors.shared.fill(.memory)
+        case .power: GraphColors.shared.fill(.power)
+        case .gpu: GraphColors.shared.fill(.gpu)
+        case .disk: GraphColors.shared.fill(.disk)
+        case .wakeups: GraphColors.shared.fill(.network)
         default: nil
         }
     }
-
-    /// The meters sit behind the numbers, so they keep the pastel fill shade.
-    @MainActor private static let colors = (
-        cpu: NSColor(Theme.cpu).fillShade, memory: NSColor(Theme.memory).fillShade, power: NSColor(Theme.power).fillShade,
-        gpu: NSColor(Theme.gpu).fillShade, disk: NSColor(Theme.disk).fillShade, wakeups: NSColor(Theme.network).fillShade
-    )
 
     /// Gap between columns, narrower than AppKit's 17 so every default
     /// column fits beside the inspector in the default window.
@@ -184,50 +181,4 @@ enum MemoryMeasure {
     static let neural = "Neural Engine memory: what this process holds for the Neural Engine now, such as models it has "
         + "loaded, and the most it has held. macOS keeps it apart from the footprint. It's memory, not how busy the Neural "
         + "Engine is."
-}
-
-/// The columns switched off in the Columns menu, and the ones this Mac can't
-/// fill that were switched on anyway, saved as "kind,threads,+power".
-struct HiddenProcessColumns: RawRepresentable, Equatable {
-    var columns: Set<ProcessColumn>
-    /// Unreported columns (see `ProcessColumn.unreported`) the user turned
-    /// on, to see the dashes. The others stay hidden.
-    var shownAnyway: Set<ProcessColumn> = []
-
-    static let defaults = HiddenProcessColumns(columns: Set(ProcessColumn.allCases.filter(\.hiddenByDefault)))
-
-    init(columns: Set<ProcessColumn>) {
-        self.columns = columns
-    }
-
-    init?(rawValue: String) {
-        let entries = rawValue.split(separator: ",")
-        columns = Set(entries.compactMap { ProcessColumn(rawValue: String($0)) })
-        shownAnyway = Set(entries.compactMap { $0.first == "+" ? ProcessColumn(rawValue: String($0.dropFirst())) : nil })
-    }
-
-    var rawValue: String {
-        (columns.map(\.rawValue) + shownAnyway.map { "+" + $0.rawValue }).sorted().joined(separator: ",")
-    }
-
-    /// Hidden by choice, or because this Mac doesn't report it.
-    func hidden(unreported: Set<ProcessColumn>) -> Set<ProcessColumn> {
-        columns.union(unreported.subtracting(shownAnyway))
-    }
-
-    func isOn(_ column: ProcessColumn, unreported: Set<ProcessColumn>) -> Bool {
-        !hidden(unreported: unreported).contains(column)
-    }
-
-    /// Switches a column on or off. An unreported column switched off goes
-    /// back to hiding by itself, so it shows again on a Mac that reports it.
-    mutating func toggle(_ column: ProcessColumn, unreported: Set<ProcessColumn>) {
-        guard column != .name else { return }
-        if isOn(column, unreported: unreported) {
-            if unreported.contains(column) { shownAnyway.remove(column) } else { columns.insert(column) }
-        } else {
-            columns.remove(column)
-            if unreported.contains(column) { shownAnyway.insert(column) }
-        }
-    }
 }

@@ -138,7 +138,7 @@ final class PowerSampler {
 
     /// - Parameter includeComponents: read IOReport. Turning it off drops the
     ///   subscription; turning it back on starts a fresh baseline.
-    func sample(includeComponents: Bool = true) -> Result {
+    func sample(includeComponents: Bool = true, mediaActivityLive: Bool = false) -> Result {
         var reading: BatteryReading?
         IORegistry.forEachService(matching: "AppleSmartBattery") { service in
             reading = BatteryReading.parse(IORegistry.properties(of: service))
@@ -154,7 +154,7 @@ final class PowerSampler {
             soc = nil
             socCreated = false
         }
-        let soc = soc?.sample(systemWatts: system?.watts) { [smc] in smc?.double(Self.smcCPUKey) }
+        let soc = soc?.sample(systemWatts: system?.watts, mediaActivityLive: mediaActivityLive) { [smc] in smc?.double(Self.smcCPUKey) }
 
         let info = ProcessInfo.processInfo
         let power = PowerSample(
@@ -164,7 +164,9 @@ final class PowerSampler {
             thermalState: ThermalState(info.thermalState),
             adapter: PowerSourceSelection.adapter(reading: reading, smcInput: smcInput),
             systemWattsSource: system?.source,
-            components: soc?.components
+            components: soc?.components,
+            mediaEngines: soc?.mediaEngines,
+            mediaEnginesFresh: soc?.mediaEnginesFresh
         )
         return Result(power: power, gpus: soc?.gpus ?? [:])
     }

@@ -239,17 +239,18 @@ public enum NetworkVolumeReader {
     /// read, and no request reaches any server. Capacities are the server's
     /// last answer.
     public static func read() -> [NetworkVolume] {
+        // getfsstat receives the array's byte capacity; returned mount strings are decoded within their fixed C tuples.
         let count = Int(getfsstat(nil, 0, MNT_NOWAIT))
         guard count > 0 else { return [] }
         // Room for a mount or two arriving between the calls.
         var mounts = Array(repeating: statfs(), count: count + 4)
         let stride = MemoryLayout.stride(ofValue: mounts[0])
         let filled = mounts.withUnsafeMutableBufferPointer { buffer in
-            Int(getfsstat(buffer.baseAddress, Int32(buffer.count * stride), MNT_NOWAIT))
+            unsafe Int(getfsstat(buffer.baseAddress, Int32(buffer.count * stride), MNT_NOWAIT))
         }
         return mounts.prefix(max(filled, 0)).compactMap { mount in
             func text<T>(_ field: T) -> String {
-                withUnsafeBytes(of: field) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+                withUnsafeBytes(of: field) { unsafe String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
             }
             return NetworkVolume.parse(NetworkVolume.MountRecord(
                 fileSystemType: text(mount.f_fstypename), source: text(mount.f_mntfromname), mountPoint: text(mount.f_mntonname),

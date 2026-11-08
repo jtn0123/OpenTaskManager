@@ -1,4 +1,5 @@
 import AppKit
+import OTMKit
 import SwiftUI
 
 /// A value someone may want to paste elsewhere (a path, an address, an
@@ -9,17 +10,25 @@ import SwiftUI
 struct CopyableText: View {
     var value: String
     var monospaced = true
-    /// One line, cut in the middle so the start and the file name both show,
-    /// with the whole value in a tooltip: for paths in a details pane, where
-    /// wrapped paths made the details too long to take in.
+    /// One line, cut in the middle, with the whole value in a tooltip: for
+    /// identifiers too long for their line (a UUID) and paths in lists.
     var truncatesMiddle = false
+    /// A file path as its name, prominent, over the folder that holds it
+    /// (`PathParts`), with a folder preview on at most two lines. Expanding
+    /// keeps the whole folder selectable; the tooltip and Copy always use
+    /// the whole path.
+    var splitsPath = false
     /// The value broken over more and more lines where it reads best (an
     /// address between its groups, never before its prefix; see
     /// `AddressBreaks`), for when it doesn't fit on its own lines. The first
     /// form that fits shows; copying always takes `value`.
     var forms: [String] = []
+    /// A search's words (the System page's), marked wherever the value holds them.
+    @Environment(\.searchTerms) private var searchTerms
+    @Environment(\.isCurrentSearchMatch) private var isCurrentMatch
     @State private var isHovering = false
     @State private var copied = false
+    @State private var showsFullPath = false
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -38,16 +47,45 @@ struct CopyableText: View {
                     .foregroundStyle(copied ? Color.green : Color.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Copy")
-            .accessibilityLabel("Copy")
+            .help(splitsPath ? "Copy Path" : "Copy")
+            .accessibilityLabel(splitsPath ? "Copy Path" : "Copy")
             // Hidden rather than removed, so the text doesn't reflow on hover.
             .opacity(isHovering || copied ? 1 : 0)
         }
         .onHover { isHovering = $0 }
+        .onChange(of: value) { showsFullPath = false }
     }
 
     @ViewBuilder private var text: some View {
-        if truncatesMiddle {
+        if splitsPath {
+            let parts = PathParts(value)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(parts.name)
+                    .fontWeight(.medium)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let folder = parts.folder {
+                    let preview = parts.compactFolder() ?? folder
+                    if showsFullPath {
+                        styled(value)
+                            .foregroundStyle(.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        styled(preview)
+                            .foregroundStyle(.secondaryText)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    // Only a folder the preview cut has more to show.
+                    if preview != folder {
+                        Button(showsFullPath ? "Hide full path" : "Show full path") { showsFullPath.toggle() }
+                            .linkButtonStyle()
+                            .font(.metadata)
+                    }
+                }
+            }
+            .help(value)
+        } else if truncatesMiddle {
             styled(value).lineLimit(1).truncationMode(.middle).help(value)
         } else if let last = forms.last {
             ViewThatFits(in: .horizontal) {
@@ -62,6 +100,14 @@ struct CopyableText: View {
     }
 
     private func styled(_ text: String) -> some View {
-        Text(text).monospaced(monospaced).textSelection(.enabled)
+        marked(text).monospaced(monospaced).textSelection(.enabled)
+    }
+
+    /// `text` (the value, or a form of it) with a search's finds in the
+    /// value marked, across a form's line breaks too.
+    private func marked(_ text: String) -> Text {
+        guard !searchTerms.isEmpty else { return Text(text) }
+        let ranges = SystemReportSearch.highlights(of: searchTerms, in: value, shownAs: text)
+        return Text(SearchMarks.attributed(text, marking: ranges, current: isCurrentMatch))
     }
 }

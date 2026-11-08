@@ -21,6 +21,7 @@ public enum NetworkConfigurationReader {
     ]
 
     public static func read() -> NetworkConfiguration {
+        // The interface-name output has IF_NAMESIZE bytes plus a terminator and is borrowed only for the C call.
         var values: [String: Any] = [:]
         var proxies: [String: Any] = [:]
         if let store = SCDynamicStoreCreate(nil, "OpenTaskManager" as CFString, nil, nil) {
@@ -30,7 +31,7 @@ public enum NetworkConfigurationReader {
         let routes = Sysctl.bytes([CTL_NET, PF_ROUTE, 0, 0, NET_RT_DUMP, 0]).map { buffer in
             DefaultRoute.parse(routingTable: buffer) { index in
                 var name = [CChar](repeating: 0, count: Int(IF_NAMESIZE) + 1)
-                guard index > 0, if_indextoname(UInt32(index), &name) != nil else { return nil }
+                guard index > 0, unsafe if_indextoname(UInt32(index), &name) != nil else { return nil }
                 return String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             }
         } ?? []
@@ -48,11 +49,12 @@ public enum NetworkConfigurationReader {
 
     /// Every interface with its flags, MTU, media and addresses, in `getifaddrs` order.
     static func readInterfaces() -> [NetworkInterfaceDetails] {
+        // The ifaddrs list and its strings stay live until freeifaddrs; the family selects the address and data layouts.
         var order: [String] = []
         var partials: [String: Partial] = [:]
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return [] }
-        defer { freeifaddrs(head) }
+        guard unsafe getifaddrs(&head) == 0, let first = unsafe head else { return [] }
+        defer { unsafe freeifaddrs(head) }
         let socket4 = socket(AF_INET, SOCK_DGRAM, 0)
         let socket6 = socket(AF_INET6, SOCK_DGRAM, 0)
         defer {
@@ -60,23 +62,23 @@ public enum NetworkConfigurationReader {
             if socket6 >= 0 { close(socket6) }
         }
 
-        var cursor: UnsafeMutablePointer<ifaddrs>? = first
-        while let entry = cursor {
-            defer { cursor = entry.pointee.ifa_next }
-            let name = String(cString: entry.pointee.ifa_name)
+        var cursor: UnsafeMutablePointer<ifaddrs>? = unsafe first
+        while let entry = unsafe cursor {
+            defer { unsafe cursor = entry.pointee.ifa_next }
+            let name = unsafe String(cString: entry.pointee.ifa_name)
             if partials[name] == nil {
                 order.append(name)
                 partials[name] = Partial()
             }
-            partials[name]?.flags = entry.pointee.ifa_flags
-            guard let address = entry.pointee.ifa_addr else { continue }
-            switch Int32(address.pointee.sa_family) {
+            partials[name]?.flags = unsafe entry.pointee.ifa_flags
+            guard let address = unsafe entry.pointee.ifa_addr else { continue }
+            switch unsafe Int32(address.pointee.sa_family) {
             case AF_LINK:
-                if let data = entry.pointee.ifa_data?.assumingMemoryBound(to: if_data.self) {
-                    partials[name]?.mtu = Int(data.pointee.ifi_mtu)
+                if let data = unsafe entry.pointee.ifa_data?.assumingMemoryBound(to: if_data.self) {
+                    partials[name]?.mtu = unsafe Int(data.pointee.ifi_mtu)
                 }
             case AF_INET, AF_INET6:
-                if let parsed = interfaceAddress(entry.pointee, name: name, socket6: socket6) {
+                if let parsed = unsafe interfaceAddress(entry.pointee, name: name, socket6: socket6) {
                     partials[name]?.addresses.append(parsed)
                 }
             default:
@@ -92,24 +94,25 @@ public enum NetworkConfigurationReader {
     }
 
     private static func interfaceAddress(_ entry: ifaddrs, name: String, socket6: Int32) -> InterfaceAddress? {
-        guard let address = entry.ifa_addr else { return nil }
-        let isIPv4 = Int32(address.pointee.sa_family) == AF_INET
+        // The caller holds the ifaddrs list; family selects the layout, and netmask byte reads stay within sa_len.
+        guard let address = unsafe entry.ifa_addr else { return nil }
+        let isIPv4 = unsafe Int32(address.pointee.sa_family) == AF_INET
         var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         let length = socklen_t(isIPv4 ? MemoryLayout<sockaddr_in>.size : MemoryLayout<sockaddr_in6>.size)
-        guard getnameinfo(address, length, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { return nil }
+        guard unsafe getnameinfo(address, length, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { return nil }
         let text = String(decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         let plain = text.split(separator: "%").first.map(String.init) ?? text
-        let prefix = entry.ifa_netmask.flatMap { mask -> Int? in
+        let prefix = unsafe entry.ifa_netmask.flatMap { mask -> Int? in
             let raw = UnsafeRawPointer(mask)
             let start = isIPv4 ? 4 : 8
             let count = isIPv4 ? 4 : 16
             // The kernel cuts a netmask short after its last non-zero byte.
-            let available = Int(mask.pointee.sa_len)
-            let bytes = (0..<count).map { start + $0 < available ? raw.load(fromByteOffset: start + $0, as: UInt8.self) : 0 }
+            let available = unsafe Int(mask.pointee.sa_len)
+            let bytes = (0..<count).map { unsafe start + $0 < available ? raw.load(fromByteOffset: start + $0, as: UInt8.self) : 0 }
             return InterfaceAddress.prefixLength(mask: bytes)
         }
         if isIPv4 { return InterfaceAddress(family: .ipv4, address: plain, prefixLength: prefix) }
-        let flags = ipv6Flags(address, name: name, socket: socket6)
+        let flags = unsafe ipv6Flags(address, name: name, socket: socket6)
         return InterfaceAddress(family: .ipv6, address: plain, prefixLength: prefix, isTemporary: flags & IN6_IFF_TEMPORARY != 0,
                                 isDeprecated: flags & IN6_IFF_DEPRECATED != 0)
     }
@@ -120,29 +123,32 @@ public enum NetworkConfigurationReader {
     }
 
     private static func copyName(_ name: String, into tuple: UnsafeMutableRawBufferPointer) {
-        for (index, byte) in name.utf8.prefix(tuple.count - 1).enumerated() { tuple[index] = byte }
+        // The name is clipped to leave a NUL byte inside the zeroed destination tuple.
+        for (index, byte) in name.utf8.prefix(tuple.count - 1).enumerated() { unsafe tuple[index] = byte }
     }
 
     /// An IPv6 address's flags (temporary, deprecated, secured…) from `SIOCGIFAFLAG_IN6`.
     private static func ipv6Flags(_ address: UnsafeMutablePointer<sockaddr>, name: String, socket: Int32) -> Int32 {
+        // The caller provides an IPv6 sockaddr; the local, aligned request stays live for the synchronous ioctl.
         guard socket >= 0 else { return 0 }
-        var request = in6_ifreq()
-        withUnsafeMutableBytes(of: &request.ifr_name) { copyName(name, into: $0) }
-        request.ifr_ifru.ifru_addr = address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
-        let code = readWriteRequest(UInt8(ascii: "i"), 73, size: MemoryLayout<in6_ifreq>.size) // SIOCGIFAFLAG_IN6
-        guard ioctl(socket, code, &request) == 0 else { return 0 }
-        return request.ifr_ifru.ifru_flags6
+        var request = unsafe in6_ifreq()
+        unsafe withUnsafeMutableBytes(of: &request.ifr_name) { unsafe copyName(name, into: $0) }
+        unsafe request.ifr_ifru.ifru_addr = address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { unsafe $0.pointee }
+        let code = unsafe readWriteRequest(UInt8(ascii: "i"), 73, size: MemoryLayout<in6_ifreq>.size) // SIOCGIFAFLAG_IN6
+        guard unsafe ioctl(socket, code, &request) == 0 else { return 0 }
+        return unsafe request.ifr_ifru.ifru_flags6
     }
 
     /// The media words from `SIOCGIFXMEDIA`, which (unlike `SIOCGIFMEDIA`)
     /// keeps Ethernet's extended types. nil where there are no media.
     private static func readMedia(_ name: String, socket: Int32) -> NetworkMedia? {
+        // The zeroed, aligned request stays live for ioctl, with no media-list pointer or count supplied.
         guard socket >= 0 else { return nil }
-        var request = ifmediareq()
-        withUnsafeMutableBytes(of: &request.ifm_name) { copyName(name, into: $0) }
-        let code = readWriteRequest(UInt8(ascii: "i"), 72, size: MemoryLayout<ifmediareq>.size) // SIOCGIFXMEDIA
-        guard ioctl(socket, code, &request) == 0 else { return nil }
-        return NetworkMedia(current: request.ifm_current, active: request.ifm_active, status: request.ifm_status)
+        var request = unsafe ifmediareq()
+        unsafe withUnsafeMutableBytes(of: &request.ifm_name) { unsafe copyName(name, into: $0) }
+        let code = unsafe readWriteRequest(UInt8(ascii: "i"), 72, size: MemoryLayout<ifmediareq>.size) // SIOCGIFXMEDIA
+        guard unsafe ioctl(socket, code, &request) == 0 else { return nil }
+        return unsafe NetworkMedia(current: request.ifm_current, active: request.ifm_active, status: request.ifm_status)
     }
 
     // MARK: - Wi-Fi

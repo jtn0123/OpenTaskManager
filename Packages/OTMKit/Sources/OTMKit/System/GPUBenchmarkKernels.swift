@@ -2,7 +2,7 @@ import Foundation
 import Metal
 
 // The GPU benchmark's three workloads. Their shaders, inputs, sizes and
-// arithmetic are part of `GPUBenchmark.suiteVersion`: change any of them and
+// arithmetic and measured intervals are part of `GPUBenchmark.suiteVersion`: change any of them and
 // bump it, or results stop comparing with the ones already saved. A test
 // pins each workload's answers for the standard configuration to catch that.
 //
@@ -150,19 +150,17 @@ struct GPUComputeReference: Sendable {
     }
 
     /// Whether every thread's result is `units` times its group's answer.
-    func verify(_ results: UnsafeBufferPointer<UInt32>, units: Int) -> Bool {
+    func verify(_ results: Span<UInt32>, units: Int) -> Bool {
         let scale = UInt32(truncatingIfNeeded: units)
         let wanted = expected.map { $0 &* scale }
         let groups = wanted.count
-        return wanted.withUnsafeBufferPointer { wanted in
-            var group = 0
-            for value in results {
-                if value != wanted[group] { return false }
-                group += 1
-                if group == groups { group = 0 }
-            }
-            return true
+        var group = 0
+        for index in results.indices {
+            if results[index] != wanted[group] { return false }
+            group += 1
+            if group == groups { group = 0 }
         }
+        return true
     }
 }
 
@@ -218,13 +216,11 @@ struct GPUMemoryReference: Sendable {
     }
 
     /// Whether every lane's sums are `units` times its total.
-    func verify(_ sums: UnsafeBufferPointer<UInt32>, units: Int) -> Bool {
+    func verify(_ sums: Span<UInt32>, units: Int) -> Bool {
         guard sums.count == expected.count else { return false }
         let scale = UInt32(truncatingIfNeeded: units)
-        return expected.withUnsafeBufferPointer { expected in
-            for index in 0..<expected.count where sums[index] != expected[index] &* scale { return false }
-            return true
-        }
+        for index in expected.indices where sums[index] != expected[index] &* scale { return false }
+        return true
     }
 }
 
@@ -235,9 +231,9 @@ enum GPUFillReference {
         max((1 << 24) / max(layers, 1), 1)
     }
 
-    static func verify(_ pixels: UnsafeBufferPointer<Float>, units: Int, layers: Int) -> Bool {
+    static func verify(_ pixels: Span<Float>, units: Int, layers: Int) -> Bool {
         let wanted = Float(units * layers)
-        for pixel in pixels where pixel != wanted { return false }
+        for index in pixels.indices where pixels[index] != wanted { return false }
         return true
     }
 }
@@ -341,6 +337,15 @@ protocol GPUWorkloadRunner: AnyObject {
     func reset()
     func encode(units: Int, into buffer: any MTLCommandBuffer) throws(GPUBenchmarkError)
     func verify(units: Int) throws(GPUBenchmarkError) -> Bool
+    var timingUnavailableReason: GPUTimingEvidence.Qualification { get }
+    func beginTiming()
+    func endTiming() -> GPUTimingEvidence.Interval?
+}
+
+extension GPUWorkloadRunner {
+    var timingUnavailableReason: GPUTimingEvidence.Qualification { .noCounterSampling }
+    func beginTiming() {}
+    func endTiming() -> GPUTimingEvidence.Interval? { nil }
 }
 
 /// FP32 compute: `otm_fma` over every thread, once per unit.
@@ -360,7 +365,7 @@ final class GPUComputeRunner: GPUWorkloadRunner {
         let width = GPUBenchmarkContext.groupWidth(context.fma)
         threads = max(configuration.computeThreads / width, 1) * width
         let seeds = try context.buffer(reference.seeds.count * 4)
-        reference.seeds.withUnsafeBytes { seeds.contents().copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
+        reference.seeds.withUnsafeBytes { unsafe seeds.contents().copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
         self.seeds = seeds
         results = try context.buffer(threads * 4)
     }
@@ -370,17 +375,19 @@ final class GPUComputeRunner: GPUWorkloadRunner {
     var maximumUnits: Int { 1 << 20 }
 
     func reset() {
-        results.contents().initializeMemory(as: UInt8.self, repeating: 0, count: threads * 4)
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
+        unsafe results.contents().initializeMemory(as: UInt8.self, repeating: 0, count: threads * 4)
     }
 
     func encode(units: Int, into buffer: any MTLCommandBuffer) throws(GPUBenchmarkError) {
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
         guard let encoder = buffer.makeComputeCommandEncoder() else { throw .failed(workload, "it couldn't start a compute pass") }
         var params = (UInt32(reference.iterations), UInt32(reference.expected.count),
                       GPUComputeReference.multiplier, GPUComputeReference.addend)
         encoder.setComputePipelineState(context.fma)
         encoder.setBuffer(seeds, offset: 0, index: 0)
         encoder.setBuffer(results, offset: 0, index: 1)
-        withUnsafeBytes(of: &params) { encoder.setBytes($0.baseAddress!, length: $0.count, index: 2) }
+        withUnsafeBytes(of: &params) { unsafe encoder.setBytes($0.baseAddress!, length: $0.count, index: 2) }
         let width = GPUBenchmarkContext.groupWidth(context.fma)
         for _ in 0..<units {
             encoder.dispatchThreadgroups(MTLSize(width: threads / width, height: 1, depth: 1),
@@ -390,7 +397,8 @@ final class GPUComputeRunner: GPUWorkloadRunner {
     }
 
     func verify(units: Int) -> Bool {
-        reference.verify(UnsafeBufferPointer(start: results.contents().assumingMemoryBound(to: UInt32.self), count: threads),
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
+        unsafe reference.verify(Span(_unsafeStart: results.contents().assumingMemoryBound(to: UInt32.self), count: threads),
                          units: units)
     }
 }
@@ -405,6 +413,7 @@ final class GPUMemoryRunner: GPUWorkloadRunner {
     private let sums: any MTLBuffer
 
     init(context: GPUBenchmarkContext, configuration: GPUBenchmarkConfiguration) throws(GPUBenchmarkError) {
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
         self.context = context
         let width = min(GPUBenchmarkContext.groupWidth(context.read), GPUBenchmarkContext.groupWidth(context.fill))
         reference = GPUMemoryReference(bytes: configuration.memoryBytes, lanes: max(configuration.memoryLanes / width, 1) * width,
@@ -417,7 +426,7 @@ final class GPUMemoryRunner: GPUWorkloadRunner {
         var params = parameters
         encoder.setComputePipelineState(context.fill)
         encoder.setBuffer(data, offset: 0, index: 0)
-        withUnsafeBytes(of: &params) { encoder.setBytes($0.baseAddress!, length: $0.count, index: 1) }
+        withUnsafeBytes(of: &params) { unsafe encoder.setBytes($0.baseAddress!, length: $0.count, index: 1) }
         encoder.dispatchThreadgroups(MTLSize(width: reference.lanes * reference.rows / width, height: 1, depth: 1),
                                      threadsPerThreadgroup: MTLSize(width: width, height: 1, depth: 1))
         encoder.endEncoding()
@@ -433,16 +442,18 @@ final class GPUMemoryRunner: GPUWorkloadRunner {
     var maximumUnits: Int { 1 << 20 }
 
     func reset() {
-        sums.contents().initializeMemory(as: UInt8.self, repeating: 0, count: reference.lanes * 16)
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
+        unsafe sums.contents().initializeMemory(as: UInt8.self, repeating: 0, count: reference.lanes * 16)
     }
 
     func encode(units: Int, into buffer: any MTLCommandBuffer) throws(GPUBenchmarkError) {
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
         guard let encoder = buffer.makeComputeCommandEncoder() else { throw .failed(workload, "it couldn't start a compute pass") }
         var params = parameters
         encoder.setComputePipelineState(context.read)
         encoder.setBuffer(data, offset: 0, index: 0)
         encoder.setBuffer(sums, offset: 0, index: 1)
-        withUnsafeBytes(of: &params) { encoder.setBytes($0.baseAddress!, length: $0.count, index: 2) }
+        withUnsafeBytes(of: &params) { unsafe encoder.setBytes($0.baseAddress!, length: $0.count, index: 2) }
         let width = GPUBenchmarkContext.groupWidth(context.read)
         for _ in 0..<units {
             encoder.dispatchThreadgroups(MTLSize(width: reference.lanes / width, height: 1, depth: 1),
@@ -452,7 +463,8 @@ final class GPUMemoryRunner: GPUWorkloadRunner {
     }
 
     func verify(units: Int) -> Bool {
-        reference.verify(UnsafeBufferPointer(start: sums.contents().assumingMemoryBound(to: UInt32.self), count: reference.lanes * 4),
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
+        unsafe reference.verify(Span(_unsafeStart: sums.contents().assumingMemoryBound(to: UInt32.self), count: reference.lanes * 4),
                          units: units)
     }
 }
@@ -467,10 +479,12 @@ final class GPUFillRunner: GPUWorkloadRunner {
     private let layers: Int
     private let target: any MTLTexture
     private let readback: any MTLBuffer
+    private let timing: GPUFillTiming
 
     init(context: GPUBenchmarkContext, configuration: GPUBenchmarkConfiguration) throws(GPUBenchmarkError) {
         self.context = context
         pipeline = try context.layers.get()
+        timing = GPUFillTiming(device: context.device)
         size = max(configuration.fillSize, 16)
         layers = max(configuration.fillLayers, 1)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: GPUBenchmarkContext.fillFormat, width: size, height: size,
@@ -489,6 +503,10 @@ final class GPUFillRunner: GPUWorkloadRunner {
 
     func reset() {}
 
+    var timingUnavailableReason: GPUTimingEvidence.Qualification { timing.unavailableReason }
+    func beginTiming() { timing.begin() }
+    func endTiming() -> GPUTimingEvidence.Interval? { timing.end() }
+
     func encode(units: Int, into buffer: any MTLCommandBuffer) throws(GPUBenchmarkError) {
         for unit in 0..<units {
             let pass = MTLRenderPassDescriptor()
@@ -496,6 +514,7 @@ final class GPUFillRunner: GPUWorkloadRunner {
             pass.colorAttachments[0].loadAction = unit == 0 ? .clear : .load
             pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
             pass.colorAttachments[0].storeAction = .store
+            timing.attach(to: pass, first: unit == 0, last: unit == units - 1)
             guard let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) else {
                 throw .failed(workload, "it couldn't start a render pass")
             }
@@ -507,6 +526,7 @@ final class GPUFillRunner: GPUWorkloadRunner {
 
     /// Copies the target out in a command buffer of its own, so the copy isn't timed.
     func verify(units: Int) throws(GPUBenchmarkError) -> Bool {
+        // Metal owns these aligned buffers for the whole call; byte counts match their allocation and verification follows GPU completion.
         guard let buffer = context.queue.makeCommandBuffer(), let blit = buffer.makeBlitCommandEncoder() else {
             throw .failed(workload, "it couldn't copy the image back")
         }
@@ -515,7 +535,7 @@ final class GPUFillRunner: GPUWorkloadRunner {
                   destinationBytesPerRow: size * 4, destinationBytesPerImage: size * size * 4)
         blit.endEncoding()
         try context.finish(buffer, workload)
-        return GPUFillReference.verify(UnsafeBufferPointer(start: readback.contents().assumingMemoryBound(to: Float.self),
+        return unsafe GPUFillReference.verify(Span(_unsafeStart: readback.contents().assumingMemoryBound(to: Float.self),
                                                            count: size * size), units: units, layers: layers)
     }
 }

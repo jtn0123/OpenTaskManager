@@ -11,18 +11,23 @@ struct SensorsDetail: View {
     private static let searchThreshold = 12
 
     @Environment(AppModel.self) private var model
+    @Environment(\.detailPaneHeight) private var pane
     @State private var query = ""
     /// nil on a Mac (or VM) that reports no temperatures or fans.
     var sensors: SensorSample?
     var snapshot: SystemSnapshot
 
+    /// The hottest die's reading lights the level bar on this scale.
+    private static let levelScale = 100.0
+
     var body: some View {
         let thermalState = snapshot.power.thermalState
         VStack(alignment: .leading, spacing: 16) {
-            DetailHeader(title: "Thermals", subtitle: "Thermal pressure \(thermalState.rawValue)")
-            stats(thermalState)
+            DeviceHeader(title: "Thermals", subtitle: subtitle(thermalState), level: level(thermalState))
             if let sensors, !sensors.temperatures.isEmpty {
-                temperatures(sensors)
+                temperatures(sensors, thermalState: thermalState)
+            } else {
+                pressure(thermalState)
             }
             if let sensors, !sensors.fans.isEmpty {
                 FillGrid(minimum: 280) {
@@ -30,39 +35,74 @@ struct SensorsDetail: View {
                 }
             }
             sensorTable(thermalState)
+                .samplingDemand(.sensorTable)
+        }
+        .samplingDemand(.sensors)
+    }
+
+    /// The thermal pressure, where the level bar gives the hottest die; with
+    /// no temperatures the bar gives the pressure, so this says why.
+    private func subtitle(_ thermalState: ThermalState) -> String {
+        sensors?.hottest(.chip) == nil ? "No temperature sensors reported" : "Thermal pressure \(thermalState.rawValue)"
+    }
+
+    /// The hottest die on a 0 to 100 °C scale, or, with no temperatures,
+    /// how far macOS's thermal pressure has risen.
+    private func level(_ thermalState: ThermalState) -> LevelRow {
+        if let chip = sensors?.hottest(.chip) {
+            return LevelRow(fraction: min(max(chip / Self.levelScale, 0), 1), color: Theme.thermal, value: chip, format: Format.celsius,
+                            caption: "hottest die", label: "Hottest die temperature", figureWidth: 72)
+        }
+        return LevelRow(fraction: thermalState.level, color: Theme.thermal, text: thermalState.title, caption: "thermal pressure",
+                        label: "Thermal pressure", figureWidth: 0)
+    }
+
+    @ViewBuilder
+    private func figures(_ thermalState: ThermalState) -> some View {
+        if let chip = sensors?.hottest(.chip) {
+            Stat(label: "Hottest die", number: chip, color: Theme.thermal, format: Format.celsius)
+        }
+        if let average = sensors?.average(.chip) {
+            Stat(label: "Chip average", number: average, format: Format.celsius)
+        }
+        if let storage = sensors?.hottest(.storage) {
+            Stat(label: "SSD", number: storage, color: Theme.sensor(.storage), format: Format.celsius)
+        }
+        if let battery = sensors?.hottest(.battery) {
+            Stat(label: "Battery", number: battery, color: Theme.sensor(.battery), format: Format.celsius)
+        }
+        Stat(label: "Thermal pressure", value: thermalState.title, color: thermalState.color)
+            .help(ThermalState.explanation)
+        if sensors?.temperatures.isEmpty ?? true {
+            CapabilityNote(label: "Temperatures", text: "Not reported",
+                           detail: "macOS shares no temperature sensors on this Mac.")
         }
     }
 
-    private func stats(_ thermalState: ThermalState) -> some View {
-        MetricStrip(tint: Theme.thermal) {
-            if let chip = sensors?.hottest(.chip) {
-                Stat(label: "Hottest die", number: chip, color: Theme.thermal, format: Format.celsius)
-            }
-            if let average = sensors?.average(.chip) {
-                Stat(label: "Chip average", number: average, format: Format.celsius)
-            }
-            if let storage = sensors?.hottest(.storage) {
-                Stat(label: "SSD", number: storage, color: Theme.sensor(.storage), format: Format.celsius)
-            }
-            if let battery = sensors?.hottest(.battery) {
-                Stat(label: "Battery", number: battery, color: Theme.sensor(.battery), format: Format.celsius)
-            }
-            Stat(label: "Thermal pressure", value: thermalState.title, color: thermalState.color)
-                .help(ThermalState.explanation)
-            if sensors?.temperatures.isEmpty ?? true {
-                CapabilityNote(label: "Temperatures", text: "Not reported",
-                               detail: "macOS shares no temperature sensors on this Mac.")
-            }
+    /// With no temperatures to graph (a virtual machine), macOS's thermal
+    /// pressure over the same minutes, its four levels marked by the grid.
+    private func pressure(_ thermalState: ThermalState) -> some View {
+        DeviceCard(tint: Theme.thermal, footnote: "Nominal at the foot, fair and serious at the grid's lines, critical at the top: how hard "
+                   + "macOS is holding back to stay cool. A level, not a temperature.") {
+            DeviceCaption(title: "Thermal pressure", trailing: thermalState.title)
+        } plot: {
+            GraphView(series: [GraphSeries(values: model.thermalPressureHistory.values, color: Theme.thermal)], maxValue: 1,
+                      glows: true, cornerRadius: 8, squeeze: model.squeeze([.thermalPressure]))
+                .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.thermal, rows: 3)
+        } figures: {
+            figures(thermalState)
         }
     }
 
-    private func temperatures(_ sensors: SensorSample) -> some View {
+    private func temperatures(_ sensors: SensorSample, thermalState: ThermalState) -> some View {
         let history = model.sensorHistory
         var series: [GraphSeries] = []
+        var lines: [OlderSeries] = []
         var legend: [LegendItem] = []
         if let chip = sensors.hottest(.chip) {
             series.append(GraphSeries(values: history.hottest[.chip]?.values ?? [], color: Theme.thermal))
             series.append(GraphSeries(values: history.chipAverage.values, color: Theme.thermal.opacity(0.7), fill: false, dashed: true))
+            lines += [.hottest(.chip), .chipAverage]
             legend.append(LegendItem(name: "Chip, hottest die", color: Theme.thermal, value: Format.celsius(chip)))
             let average = sensors.average(.chip).map(Format.celsius) ?? "—"
             legend.append(LegendItem(name: "Chip, average", color: Theme.thermal.opacity(0.7), value: average))
@@ -70,21 +110,30 @@ struct SensorsDetail: View {
         for kind in [SensorKind.storage, .battery] {
             guard let celsius = sensors.hottest(kind) else { continue }
             series.append(GraphSeries(values: history.hottest[kind]?.values ?? [], color: Theme.sensor(kind), fill: false))
+            lines.append(.hottest(kind))
             legend.append(LegendItem(name: kind.title, color: Theme.sensor(kind), value: Format.celsius(celsius)))
         }
-        return ChartCard(title: "Temperatures", trailing: sensors.hottest(.chip).map { "chip \(Format.celsius($0))" } ?? "",
-                         tint: Theme.thermal, legend: legend) {
-            GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8)
-                .chartFrame(height: DetailGraph.primary, tint: Theme.thermal)
+        return DeviceCard(tint: Theme.thermal, legend: legend) {
+            DeviceCaption(title: "Temperatures", trailing: sensors.hottest(.chip).map { "chip \(Format.celsius($0))" } ?? "")
+        } plot: {
+            GraphView(series: series, glows: true, minimumCeiling: 60, axis: Format.celsius, cornerRadius: 8,
+                      squeeze: model.squeeze(lines))
+                .heroPlot(height: Hero.height(pane: pane, extra: 2 * Hero.legendLine), tint: Theme.thermal)
+        } figures: {
+            figures(thermalState)
         }
     }
 
+    /// The speed in rpm first, then its share of the fan's maximum, the
+    /// scale the graph and the Thermals table draw it on, so a fan at its
+    /// minimum never reads as stopped.
     private func fanCard(_ fan: SensorSample.Fan, count: Int) -> some View {
         let range = [fan.minimumRPM, fan.maximumRPM].compactMap { $0 }.map(Format.rpm).joined(separator: " – ")
+        let share = fan.shareOfMaximum.map { " · \(Format.percent($0)) of maximum" } ?? ""
         return ChartCard(title: count > 1 ? "Fan \(fan.id + 1)" : "Fan",
                          trailing: fan.isStopped ? "stopped" : Format.rpm(fan.rpm), tint: Theme.fan,
                          legend: [
-                             LegendItem(name: "Speed", color: Theme.fan, value: fan.fraction.map { "\(Format.percent($0)) of range" } ?? "—"),
+                             LegendItem(name: "Speed", color: Theme.fan, value: fan.isStopped ? "Stopped" : Format.rpm(fan.rpm) + share),
                              LegendItem(name: "Range", color: Theme.other, value: range.isEmpty ? "—" : range),
                          ]) {
             GraphView(series: [GraphSeries(values: model.sensorHistory.fans[fan.id]?.values ?? [], color: Theme.fan)],
@@ -113,7 +162,7 @@ struct SensorsDetail: View {
             // top of the page with the column titles.
             SensorReadingTable(rows: rows, extremes: model.sensorExtremes, thermalState: pressure ? thermalState : nil,
                                since: "Lowest and highest since \(Self.time(model.sensorExtremes.since))",
-                               sinceHelp: "Every reading counts toward the range, one each \(Format.timeSpan(model.updateSpeed.rawValue)). "
+                               sinceHelp: "Every reading counts toward the range, one each \(Format.timeSpan(model.samplingInterval)). "
                                    + "A sensor that gives no reading leaves its range alone.") {
                 model.resetSensorExtremes()
             }

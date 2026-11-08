@@ -101,7 +101,7 @@ struct HistoryTimelineControls: View {
     var body: some View {
         let naming = scrubber.draft?.end != nil
         HStack(spacing: 8) {
-            if scrubber.compare != nil {
+            if scrubber.comparing {
                 // Comparing takes the row.
                 HistoryCompareControls(scrubber: scrubber)
             } else {
@@ -117,7 +117,7 @@ struct HistoryTimelineControls: View {
                     .font(.callout)
                     .foregroundStyle(.secondaryText)
                     .help("A recording file opens read-only: sessions can't be marked in it.")
-                    compareButton(nil)
+                    HistoryCompareToggle(scrubber: scrubber)
                 }
                 Spacer(minLength: 0)
                 // Naming a session takes the row.
@@ -128,20 +128,6 @@ struct HistoryTimelineControls: View {
         }
         .controlSize(.small)
         .frame(minHeight: 22)
-    }
-
-    /// Opens a comparison with `selection` (a picked session) as A, else
-    /// with A still to pick.
-    private func compareButton(_ selection: ClosedRange<Date>?) -> some View {
-        Button {
-            scrubber.draft = nil
-            scrubber.compare = HistoryCompareDraft(selection: selection)
-        } label: {
-            Label("Compare", systemImage: "rectangle.split.2x1")
-        }
-        .fixedSize()
-        .help(selection == nil ? "Compare two stretches of the timeline: drag along it to pick A, then B or the same length before A"
-            : "Compare this session with the same length just before it, or with another stretch you drag along the timeline")
     }
 
     @ViewBuilder private func sessionControls(_ recorder: FlightRecorder) -> some View {
@@ -178,7 +164,7 @@ struct HistoryTimelineControls: View {
                 .lineLimit(1)
                 .layoutPriority(-1)
                 .help("\(HistorySessionStyle.title(session)), \(HistorySessionStyle.span(session.start, session.end))")
-            compareButton(session.start...session.end)
+            HistoryCompareToggle(scrubber: scrubber, selection: session.start...session.end)
             Button("Export…") { Task { await store.export(session, from: recorder) } }
                 .fixedSize()
                 .help("Save this session as a recording file, to open later or on another Mac")
@@ -208,7 +194,7 @@ struct HistoryTimelineControls: View {
             }
             .font(.explanation)
             .foregroundStyle(.secondaryText)
-            compareButton(nil)
+            HistoryCompareToggle(scrubber: scrubber)
         }
     }
 
@@ -230,7 +216,7 @@ struct HistoryTimelineControls: View {
 }
 
 /// Play or pause, the speed, and a word while playback jumps a gap.
-private struct HistoryTransport: View {
+struct HistoryTransport: View {
     let scrubber: HistoryScrubber
     let player: HistoryPlayer
 
@@ -256,7 +242,7 @@ private struct HistoryTransport: View {
     }
 }
 
-/// Play, Pause, or Resume where playback paused. For a recording file,
+/// Play Replay, Pause Replay, or Resume Replay where playback paused. For a recording file,
 /// replay is what the page is for, so it's the prominent button, in the
 /// replay's tint. A view of its own, as it reads the playhead: each step
 /// redraws it and not the speed picker.
@@ -282,12 +268,12 @@ private struct HistoryPlayButton: View {
                 player.play(scrubber, within: scrubber.session)
             }
         } label: {
-            Label(player.isPlaying ? "Pause" : scrubber.playhead != nil ? "Resume" : "Play",
+            Label(UpdateControlLabels.replayTitle(playing: player.isPlaying, hasPlayhead: scrubber.playhead != nil),
                   systemImage: player.isPlaying ? "pause.fill" : "play.fill")
                 .frame(minWidth: 52)
         }
         .fixedSize()
-        .help(player.isPlaying ? "Pause playback where it is (the toolbar's Pause stops live updates instead)"
-            : "Play the timeline back from the pinned moment, else where it paused (or the picked session), skipping what wasn't recorded")
+        .help(UpdateControlLabels.replayHelp(playing: player.isPlaying))
+        .accessibilityLabel(UpdateControlLabels.replayTitle(playing: player.isPlaying, hasPlayhead: scrubber.playhead != nil))
     }
 }

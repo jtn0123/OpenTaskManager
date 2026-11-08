@@ -183,6 +183,7 @@ public extension LaunchItem {
     /// Enabled, and started by launchd itself rather than at another process's request.
     var startsOnItsOwn: Bool {
         guard !isMissingLabel, !isUnreadable, !isDisabled else { return false }
+        if source == .loginItem { return job != nil }
         return timing != .onDemand && timing != .unknown
     }
 }

@@ -9,13 +9,14 @@ final class GPUSampler {
     }
 
     func sample(includeProcesses: Bool) -> Result {
+        // IOKit consumes the matching dictionary and each service remains live while its properties are copied.
         var gpus: [GPUSample] = []
         var processTime: [Int32: UInt64] = [:]
 
         IORegistry.forEachService(matching: "IOAccelerator") { accelerator in
             let properties = IORegistry.properties(of: accelerator)
             var registryID: UInt64 = 0
-            IORegistryEntryGetRegistryEntryID(accelerator, &registryID)
+            unsafe IORegistryEntryGetRegistryEntryID(accelerator, &registryID)
 
             let stats = properties.dictionary("PerformanceStatistics") ?? [:]
             gpus.append(GPUSample(

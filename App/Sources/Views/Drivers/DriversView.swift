@@ -1,42 +1,33 @@
 import OTMKit
 import SwiftUI
 
-/// Which extensions the Drivers table shows. Third party comes first: on most
-/// Macs everything else is part of macOS.
-enum DriversFilter: String, CaseIterable, Identifiable {
-    case thirdParty = "Third party"
-    case apple = "Apple"
-    case all = "All"
-
-    var id: String { rawValue }
-
-    func includes(_ item: ExtensionItem) -> Bool {
-        switch self {
-        case .thirdParty: item.publisher == .thirdParty
-        case .apple: item.publisher == .apple
-        case .all: true
-        }
-    }
-
+extension DriversFilter {
     /// Whether rows can differ in publisher. Under Apple or Third party the
     /// column would say the same thing on every row, so it gives its room to Name.
     var showsPublisher: Bool { self == .all }
 }
 
 /// What's been added to macOS below the app level: system extensions (network
-/// filters and VPNs, DriverKit drivers, endpoint security) and the kernel
-/// extensions loaded into the kernel.
+/// filters and VPNs, DriverKit drivers, endpoint security), the kernel
+/// extensions loaded into the kernel, and the copies of either on disk that
+/// macOS hasn't registered or loaded (in /Library/Extensions and the apps).
 ///
 /// Like the Startup page, it reads once off the main actor when the page
 /// opens and again on Refresh. It never follows the sampling tick, and reads
 /// nothing from `AppModel`, so it costs nothing while it sits open.
 struct DriversView: View {
-    @AppStorage("driversFilter") private var filter: DriversFilter = .thirdParty
-    @AppStorage("showDriversInspector") private var showInspector = true
+    @Setting(Settings.driversFilter) private var filter: DriversFilter
+    @Setting(Settings.showDriversInspector) private var showInspector: Bool
     @State private var scan: ExtensionScan?
     @State private var scannedAt: Date?
     @State private var isScanning = false
+    /// The columns' widths from what the last scan found, measured once per scan.
+    @State private var columnWidths: DriverTable.Widths?
     @State private var search = ""
+    @State private var status: DriversStatusFilter = .all
+    @State private var summaryFilter: DriverSummaryFilter?
+    /// The vendor a summary card widened, put back when the card is turned off.
+    @State private var vendorBeforeSummary: DriversFilter?
     @State private var selection: ExtensionItem.ID?
     @State private var openedRequest = false
     /// A row to bring into view once, for `-openDriver`.
@@ -61,7 +52,8 @@ struct DriversView: View {
         }
         .toolbar {
             ToolbarItem {
-                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Ask the kernel and systemextensionsctl again") {
+                InventoryRefresh(readAt: scannedAt, isReading: isScanning,
+                                 help: "Ask the kernel and systemextensionsctl again, and look for extensions on disk") {
                     Task { await rescan() }
                 }
             }
@@ -77,7 +69,7 @@ struct DriversView: View {
         .task {
             if scan == nil { await rescan() }
         }
-        .onChange(of: filter) {
+        .onChange(of: DriverFilterChoice(vendor: filter, status: status, summary: summaryFilter)) {
             // Drop a selection the filter hides, so its details go with it.
             guard let scan else { return }
             if !visibleRows(scan.items).contains(where: { $0.id == selection }) { selection = nil }
@@ -88,13 +80,28 @@ struct DriversView: View {
         let rows = visibleRows(scan.items)
         return VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 12) {
-                DriverSummaryCards(scan: scan)
-                Picker("Show", selection: $filter) {
-                    ForEach(DriversFilter.allCases) { Text($0.rawValue).tag($0) }
+                DriverSummaryCards(scan: scan, selected: summaryFilter, apply: applySummary)
+                FlowRow(spacing: 16, lineSpacing: 8, spreads: false, centresRows: true, balancesRows: false) {
+                    // Each with its count, so a narrowed table says how much it leaves out.
+                    Picker("Vendor", selection: Binding(get: { filter }, set: {
+                        summaryFilter = nil
+                        vendorBeforeSummary = nil
+                        filter = $0
+                    })) {
+                        ForEach(DriversFilter.allCases) { Text($0.title(in: scan.items)).tag($0) }
+                    }
+                    .fixedSize()
+                    Picker("Status", selection: Binding(get: { status }, set: {
+                        summaryFilter = nil
+                        vendorBeforeSummary = nil
+                        status = $0
+                    })) {
+                        ForEach(DriversStatusFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .fixedSize()
+                    FilteredCount(shown: rows.count, total: scan.items.count, noun: "extensions", showAll: showAll)
                 }
                 .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -111,7 +118,7 @@ struct DriversView: View {
                 content(rows, scan: scan)
             }
             Divider()
-            DriversStatusBar(shown: rows.count, scan: scan, scannedAt: scannedAt, isScanning: isScanning)
+            DriversStatusBar(scan: scan, scannedAt: scannedAt, isScanning: isScanning)
         }
     }
 
@@ -124,12 +131,19 @@ struct DriversView: View {
             wantsInspector: showInspector && selected != nil,
             coversList: $showsFullDetail,
             isNarrow: $isNarrow,
-            widthKey: "driversInspectorWidth",
+            widthKey: Settings.driversInspectorWidth,
             backTitle: "Drivers"
         ) {
-            DriverTable(rows: rows, showsPublisher: filter.showsPublisher, selection: $selection, sortOrder: $sortOrder,
-                        scrollTarget: $scrollTarget, focus: $tableFocused, open: openDetails)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                // Only as tall as its rows, so a short list (the third-party
+                // ones, those not in use) isn't followed by empty stripes.
+                DriverTable(rows: rows, widths: columnWidths ?? DriverTable.Widths(scan.items), showsPublisher: filter.showsPublisher,
+                            selection: $selection, sortOrder: $sortOrder, scrollTarget: $scrollTarget, focus: $tableFocused,
+                            open: openDetails)
+                    .fitsTableToRows(rows.count)
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
+            }
         } detail: {
             if let selected {
                 DriverDetail(item: selected, scan: scan)
@@ -158,6 +172,14 @@ struct DriversView: View {
     private func emptyState(_ scan: ExtensionScan) -> some View {
         if !search.trimmingCharacters(in: .whitespaces).isEmpty {
             ContentUnavailableView.search(text: search)
+        } else if status != .all || summaryFilter != nil {
+            EmptyNote(symbol: "line.3.horizontal.decrease.circle", tint: Theme.other, title: "No matching extensions",
+                      detail: "No extensions match the selected vendor and status.") {
+                Button("Show All Statuses") {
+                    status = .all
+                    summaryFilter = nil
+                }
+            }
         } else if filter == .thirdParty {
             let apple = scan.items.filter { $0.publisher == .apple }.count
             EmptyNote(symbol: "checkmark.seal.fill", tint: Theme.disk,
@@ -176,12 +198,43 @@ struct DriversView: View {
     }
 
     private func visibleRows(_ items: [ExtensionItem]) -> [ExtensionItem] {
-        items.filter { filter.includes($0) && $0.matches(search) }.sorted(using: sortOrder)
+        items.filter {
+            filter.includes($0) && status.includes($0.status) && (summaryFilter?.includes($0) ?? true) && $0.matches(search)
+        }.sorted(using: sortOrder)
+    }
+
+    /// Every extension again: the cards, filters and search cleared.
+    private func showAll() {
+        summaryFilter = nil
+        vendorBeforeSummary = nil
+        filter = .all
+        status = .all
+        search = ""
+    }
+
+    /// A card lists the rows its count counts, widening the vendor if it has
+    /// to (most count Apple's too); turning it off puts the vendor back.
+    private func applySummary(_ summary: DriverSummaryFilter) {
+        if summaryFilter == summary {
+            summaryFilter = nil
+            status = .all
+            if let before = vendorBeforeSummary { filter = before }
+            vendorBeforeSummary = nil
+        } else {
+            summaryFilter = summary
+            status = summary.status
+            if !filter.covers(summary.vendor) {
+                vendorBeforeSummary = vendorBeforeSummary ?? filter
+                filter = summary.vendor
+            }
+        }
     }
 
     private func rescan() async {
         isScanning = true
         let scanned = await Task.detached(priority: .userInitiated) { Extensions.scan() }.value
+        // Before the rows, so a first table starts at these widths.
+        columnWidths = DriverTable.Widths(scanned.items)
         scan = scanned
         scannedAt = .now
         isScanning = false
@@ -195,6 +248,10 @@ struct DriversView: View {
         }) {
             // The filter first, since it can swap tables.
             if !filter.includes(requested) { filter = requested.publisher == .apple ? .apple : .thirdParty }
+            if !status.includes(requested.status) || !(summaryFilter?.includes(requested) ?? true) {
+                status = .all
+                summaryFilter = nil
+            }
             await LaunchArgument.afterTableLayout()
             selection = requested.id
             scrollTarget = requested.id
@@ -210,34 +267,63 @@ struct DriversView: View {
 
 private struct DriverSummaryCards: View {
     var scan: ExtensionScan
+    var selected: DriverSummaryFilter?
+    var apply: (DriverSummaryFilter) -> Void
 
+    /// Five fit one row of the narrowest window (820 points, sidebar hidden).
     var body: some View {
         let summary = scan.summary
-        FillGrid(minimum: 150, spacing: 12) {
+        FillGrid(minimum: 140, spacing: 12) {
             DriverSummaryCard(title: "System extensions", value: summary.systemExtensions, symbol: "puzzlepiece.extension",
                               tint: Theme.gpu, detail: systemDetail,
                               explanation: "Network filters and VPNs, DriverKit drivers and security tools that apps installed "
-                                  + "and macOS allowed. They run outside the kernel.")
-            DriverSummaryCard(title: "Third-party kexts", value: summary.thirdPartyKernelExtensions, symbol: "shippingbox",
+                                  + "and macOS allowed. They run outside the kernel.",
+                              isSelected: selected == .system, action: { apply(.system) })
+            DriverSummaryCard(title: "Third-party kernel extensions", value: summary.thirdPartyKernelExtensions, symbol: "shippingbox",
                               tint: Theme.memory,
-                              detail: summary.thirdPartyKernelExtensions == 0 ? "None loaded" : "Running inside the kernel",
-                              explanation: "Kernel extensions from developers other than Apple. They run inside the kernel "
-                                  + "with full access to the Mac.")
-            DriverSummaryCard(title: "Loaded kexts", value: summary.loadedKernelExtensions, symbol: "cpu",
+                              detail: summary.thirdPartyKernelExtensions == 0 ? "None loaded" : "In the kernel now",
+                              explanation: "Kernel extensions from developers other than Apple, loaded now. They run inside the "
+                                  + "kernel with full access to the Mac.",
+                              isSelected: selected == .thirdPartyKernel, action: { apply(.thirdPartyKernel) })
+            DriverSummaryCard(title: "Loaded kernel extensions", value: summary.loadedKernelExtensions, symbol: "cpu",
                               tint: Theme.cpu, detail: wiredDetail,
-                              explanation: "Every kernel extension loaded now, Apple's included, and the memory their code keeps wired.")
+                              explanation: "Every kernel extension loaded now, Apple's included, and the memory their code keeps wired.",
+                              isSelected: selected == .kernel, action: { apply(.kernel) })
+            // Neutral and never glowing: a copy that doesn't run isn't a problem.
+            DriverSummaryCard(title: "Not in use", value: summary.notInUse, symbol: "archivebox", tint: Theme.other,
+                              detail: notInUseDetail,
+                              explanation: "Extensions on disk that macOS hasn't registered or loaded, so they don't run: kernel extensions (kexts) "
+                                  + "in /Library/Extensions or an app, and system extensions an app carries. Often they're left "
+                                  + "from an old install or wait for hardware; that alone isn't a problem. Copies whose use "
+                                  + "couldn't be told are listed as Unknown and not counted.",
+                              isSelected: selected == .notInUse, action: { apply(.notInUse) })
             DriverSummaryCard(title: "Needs attention", value: summary.needsAttention, symbol: "exclamationmark.triangle",
                               tint: summary.needsAttention > 0 ? .orange : Theme.disk,
                               glow: summary.needsAttention > 0 ? 0.35 : 0,
                               detail: summary.needsAttention > 0 ? "Waiting for your approval" : "Nothing waiting",
-                              explanation: "System extensions macOS won't run until someone allows them in System Settings.")
+                              explanation: "System extensions macOS won't run until someone allows them in System Settings.",
+                              isSelected: selected == .attention, action: { apply(.attention) })
         }
+    }
+
+    /// "2 kexts · 1 system", with any whose use is unknown, or "None on disk".
+    private var notInUseDetail: String {
+        let copies = scan.items.filter { $0.status == .notInUse }
+        let kexts = copies.filter { $0.category == .kernel }.count
+        let unknown = scan.summary.useUnknown
+        let parts = [
+            kexts > 0 ? "\(kexts) \(kexts == 1 ? "kext" : "kexts")" : nil,
+            copies.count > kexts ? "\(copies.count - kexts) system" : nil,
+            unknown > 0 ? "\(unknown) unknown" : nil,
+        ]
+        let text = parts.compactMap(\.self).joined(separator: " · ")
+        return text.isEmpty ? "None on disk" : text
     }
 
     /// "1 network · 1 driver", or why there's no count.
     private var systemDetail: String {
         guard scan.readSystemExtensions else { return "Couldn't be read" }
-        let system = scan.items.filter(\.category.isSystemExtension)
+        let system = scan.items.filter { $0.systemExtension != nil }
         guard !system.isEmpty else { return "None installed" }
         let counts: [(ExtensionCategory, String)] = [
             (.network, "network"), (.driver, "driver"), (.endpointSecurity, "security"), (.otherSystem, "other"),
@@ -266,8 +352,19 @@ private struct DriverSummaryCard: View {
     var glow = 0.0
     var detail: String
     var explanation: String
+    var isSelected: Bool
+    var action: () -> Void
 
     var body: some View {
+        Button(action: action) {
+            card
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help(explanation)
+    }
+
+    private var card: some View {
         Card(tint: tint, glow: glow) {
             Label {
                 Text(title).lineLimit(2)
@@ -285,8 +382,17 @@ private struct DriverSummaryCard: View {
                     .lineLimit(1)
             }
         }
-        .help(explanation)
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+        }
     }
+}
+
+private struct DriverFilterChoice: Equatable {
+    let vendor: DriversFilter
+    let status: DriversStatusFilter
+    let summary: DriverSummaryFilter?
 }
 
 /// What the page says when the filter leaves nothing to list. Smaller than
@@ -322,7 +428,27 @@ private struct EmptyNote<Actions: View>: View {
 private struct DriverTable: View {
     typealias Column = TableColumnContent<ExtensionItem, KeyPathComparator<ExtensionItem>>
 
+    /// Widths from what a scan found: each column stops where its values (or
+    /// its title) end, so room left over goes after the last column, not
+    /// into a gap after the names.
+    struct Widths: Equatable {
+        var name: CGFloat
+        var kind: CGFloat
+        var publisher: CGFloat
+        var version: CGFloat
+
+        @MainActor init(_ items: [ExtensionItem]) {
+            // The icon and its gap.
+            name = ColumnContent.fitting(items.map(\.name), title: "Name", floor: Minimum.name, extra: 22)
+            kind = ColumnContent.fitting(items.map(\.kind), title: "Kind", floor: Minimum.kind, cap: 140)
+            publisher = ColumnContent.fitting(items.map(\.publisher.title), title: "Publisher", floor: Minimum.publisher, cap: 100)
+            version = ColumnContent.fitting(items.map { $0.version.isEmpty ? "—" : $0.version }, title: "Version",
+                                            floor: Minimum.version, cap: 120)
+        }
+    }
+
     var rows: [ExtensionItem]
+    var widths: Widths
     /// Off while the filter leaves one publisher, as every row would say it.
     var showsPublisher: Bool
     @Binding var selection: ExtensionItem.ID?
@@ -395,7 +521,12 @@ private struct DriverTable: View {
                     Button("Open Login Items & Extensions Settings") { DriverActions.openSettings() }
                 }
                 Divider()
-                Button("Copy Bundle ID") { DriverActions.copy(item.bundleID) }
+                if !item.bundleID.isEmpty {
+                    Button("Copy Bundle ID") { DriverActions.copy(item.bundleID) }
+                }
+                if let path = item.diskPath {
+                    Button("Copy Path") { DriverActions.copy(path) }
+                }
             }
         } primaryAction: { _ in
             open()
@@ -408,24 +539,29 @@ private struct DriverTable: View {
                 ExtensionIcon(item: item, size: 16)
                 Text(item.name).lineLimit(1)
             }
-            // The whole name, for when the column cuts it short.
-            .help("\(item.name)\n\(item.bundleID)")
+            // The whole name, for when the column cuts it short, and where a
+            // copy on disk is.
+            .help([item.name, item.bundleID, item.status.isDiskCopy ? item.diskPath ?? "" : ""]
+                .filter { !$0.isEmpty }.joined(separator: "\n"))
         }
-        .width(min: Minimum.name, ideal: 260)
+        .width(min: Minimum.name, ideal: min(260, widths.name), max: widths.name)
     }
 
     private var kindColumn: some Column {
         TableColumn("Kind", value: \.category) { item in
             Text(item.kind).lineLimit(1).help(item.kind)
         }
-        .width(min: Minimum.kind, ideal: 120, max: 140)
+        .width(min: Minimum.kind, ideal: min(120, widths.kind), max: widths.kind)
     }
 
+    /// Wide enough for "Installed, not in use", which says "Not in use"
+    /// when the column is narrower.
     private var statusColumn: some Column {
         TableColumn("Status", value: \.status) { item in
-            ExtensionStatusLabel(status: item.status).help(item.status.title)
+            ExtensionStatusLabel(status: item.status, shortensToFit: true)
+                .help(item.status.isDiskCopy ? "\(item.status.title). \(item.statusExplanation)" : item.status.title)
         }
-        .width(min: Minimum.status, ideal: 120, max: 160)
+        .width(min: Minimum.status, ideal: 150, max: 175)
     }
 
     private var publisherColumn: some Column {
@@ -433,7 +569,7 @@ private struct DriverTable: View {
             Text(item.publisher.title)
                 .foregroundStyle(item.publisher == .apple ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         }
-        .width(min: Minimum.publisher, ideal: 75, max: 100)
+        .width(min: Minimum.publisher, ideal: min(75, widths.publisher), max: widths.publisher)
     }
 
     private var versionColumn: some Column {
@@ -443,38 +579,65 @@ private struct DriverTable: View {
                 .lineLimit(1)
                 .help(item.version)
         }
-        .width(min: Minimum.version, ideal: 90, max: 120)
+        .width(min: Minimum.version, ideal: min(90, widths.version), max: widths.version)
     }
 }
 
-/// The installing app's icon for a system extension, or a symbol for its kind.
+/// The icon of the app an extension came with, or a symbol for its kind.
 struct ExtensionIcon: View {
     var item: ExtensionItem
     var size: CGFloat
+    @Environment(\.backgroundProminence) private var prominence
 
     var body: some View {
         // An extension can outlive its app until the next restart.
-        if let app = item.systemExtension?.appPath, FileManager.default.fileExists(atPath: app) {
+        if let app = item.appPath, FileManager.default.fileExists(atPath: app) {
             Image(nsImage: IconCache.icon(forBundle: app))
                 .resizable()
                 .frame(width: size, height: size)
         } else {
             Image(systemName: item.category.symbol)
                 .font(.system(size: size * 0.75))
-                .foregroundStyle(item.isKernelInterface ? Theme.other : item.category.tint)
+                // On a selected row it turns white like the row's text: the tint
+                // all but vanished into the selection's blue.
+                .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(item.isKernelInterface ? Theme.other : item.category.tint))
                 .frame(width: size, height: size)
         }
     }
 }
 
-/// A coloured dot and the status, like the Startup page's state label.
+/// A coloured dot and the status, like the Startup page's state label. A
+/// copy on disk that macOS doesn't report gets a ring: nothing is running.
 struct ExtensionStatusLabel: View {
     var status: ExtensionStatus
+    /// In a table cell: the short title where the whole one doesn't fit.
+    var shortensToFit = false
 
     var body: some View {
+        if shortensToFit, status.shortTitle != status.title {
+            // The Drivers page never follows the tick, so this is measured
+            // only when the table lays out.
+            ViewThatFits(in: .horizontal) {
+                label(status.title)
+                label(status.shortTitle)
+            }
+        } else {
+            label(status.title)
+        }
+    }
+
+    private func label(_ title: String) -> some View {
         HStack(spacing: 6) {
-            Circle().fill(status.color).frame(width: 7, height: 7)
-            Text(status.title)
+            Group {
+                if status.isDiskCopy {
+                    Circle().strokeBorder(status.color, lineWidth: 1.5)
+                } else {
+                    Circle().fill(status.color)
+                }
+            }
+            .frame(width: 7, height: 7)
+            Text(title)
                 .fontWeight(status.needsAttention ? .semibold : .regular)
         }
         .lineLimit(1)
@@ -490,6 +653,8 @@ extension ExtensionStatus {
         case .disabled: Theme.other
         case .uninstalling: Theme.swap
         case .other: Theme.power
+        // Grey, as it isn't running and isn't a problem.
+        case .notInUse, .useUnknown: Theme.other
         }
     }
 }
@@ -518,8 +683,8 @@ extension ExtensionCategory {
 
 // MARK: - Status bar
 
+/// All the extensions read; how many the filters leave is over the table (`FilteredCount`).
 private struct DriversStatusBar: View {
-    var shown: Int
     var scan: ExtensionScan
     var scannedAt: Date?
     var isScanning: Bool
@@ -527,7 +692,7 @@ private struct DriversStatusBar: View {
     var body: some View {
         let total = scan.items.count
         HStack(spacing: 12) {
-            Text(shown == total ? "\(total) extensions" : "\(shown) of \(total) extensions")
+            Text("\(total) extensions")
             if isScanning {
                 Text("Reading…")
             } else if let scannedAt {
@@ -557,11 +722,10 @@ private struct DriversStatusBar: View {
 enum DriverActions {
     static let extensionsSettings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
 
-    /// The installing app for a system extension, or the kext's bundle,
-    /// when it's still on disk.
+    /// The extension's copy on disk (inside its app, for one an app carries),
+    /// else the installing app of a system extension, while it's still there.
     static func revealablePath(_ item: ExtensionItem) -> String? {
-        let path = item.systemExtension?.appPath ?? item.kernelExtension?.path
-        return path.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
+        [item.diskPath, item.appPath].lazy.compactMap(\.self).first { FileManager.default.fileExists(atPath: $0) }
     }
 
     static func reveal(_ path: String) {

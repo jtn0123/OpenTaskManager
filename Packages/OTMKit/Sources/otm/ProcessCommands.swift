@@ -1,8 +1,7 @@
 import Foundation
 import OTMKit
 
-// `otm inspect` and `otm threads`: one process in depth, as the app's
-// inspector shows it, and its threads with their CPU.
+// Process listings, the inspector and its threads, and signals sent to one process.
 
 struct Inspection: Encodable {
     /// One of the processes that started it, oldest first.
@@ -137,4 +136,43 @@ func diagnosticsSummary(_ diagnostics: ProcessDiagnostics, ancestry: ProcessAnce
     if let gap = ancestry.gap { chain.insert("PID \(gap.pid) (ended)", at: 0) }
     lines.append("Ancestry:   " + chain.joined(separator: " › "))
     return lines
+}
+
+@MainActor
+func processesCommand(_ options: Options) async throws {
+    let snapshot = try await monitor.measuredSample(over: .seconds(options.interval))
+    if options.json {
+        printJSON(Array(sorted(snapshot.processes, by: options.sort).prefix(options.count)))
+    } else {
+        print(processTable(snapshot, options: options))
+        if snapshot.processes.contains(where: \.isRestricted) {
+            print("\n* other users' and system processes: CPU and resident memory only (macOS restricts the rest)")
+        }
+    }
+}
+
+@MainActor
+func topCommand(_ options: Options) async throws {
+    _ = await monitor.sample()
+    while true {
+        try await Task.sleep(for: .seconds(options.interval))
+        let snapshot = await monitor.sample()
+        print("\u{1B}[H\u{1B}[2J" + systemSummary(snapshot, topology: monitor.topology) + "\n\n" + processTable(snapshot, options: options))
+    }
+}
+
+func killCommand(_ options: Options) {
+    guard let pid = options.positional.first.flatMap(Int32.init) else { fail("kill needs a PID") }
+    let signals: [String: ProcessSignal] = [
+        "term": .terminate, "kill": .kill, "int": .interrupt, "hup": .hangUp,
+        "stop": .stop, "cont": .continue, "usr1": .user1, "usr2": .user2,
+    ]
+    guard let signal = signals[options.signal.lowercased().replacingOccurrences(of: "sig", with: "")] else {
+        fail("unknown signal \(options.signal)")
+    }
+    do {
+        try ProcessControl.send(signal, to: pid)
+    } catch {
+        fail(error.localizedDescription + (error == .permissionDenied ? " Try: sudo \(ProcessControl.shellCommand(for: signal, pids: [pid]))" : ""))
+    }
 }

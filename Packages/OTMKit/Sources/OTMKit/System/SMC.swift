@@ -158,10 +158,11 @@ final class SMCConnection {
     private let integersLittleEndian: Bool
 
     init?() {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
+        // IOKit borrows the connection output for the call; the service is released after the connection has opened.
+        let service = unsafe IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
         guard service != 0 else { return nil }
         defer { IOObjectRelease(service) }
-        guard IOServiceOpen(service, mach_task_self_, 0, &connection) == kIOReturnSuccess, connection != 0 else { return nil }
+        guard unsafe IOServiceOpen(service, mach_task_self_, 0, &connection) == kIOReturnSuccess, connection != 0 else { return nil }
         integersLittleEndian = Sysctl.int("hw.optional.arm64") == 1
     }
 
@@ -190,11 +191,12 @@ final class SMCConnection {
     }
 
     private func call(_ request: SMCParamBlock) -> SMCParamBlock? {
+        // Both arrays have the fixed 80-byte layout and stay borrowed for the call; the reply is used only at that exact size.
         var output = [UInt8](repeating: 0, count: SMCParamBlock.size)
         var outputSize = SMCParamBlock.size
         let status = request.bytes.withUnsafeBytes { input in
             output.withUnsafeMutableBytes { buffer in
-                IOConnectCallStructMethod(connection, SMCParamBlock.selector, input.baseAddress, SMCParamBlock.size,
+                unsafe IOConnectCallStructMethod(connection, SMCParamBlock.selector, input.baseAddress, SMCParamBlock.size,
                                           buffer.baseAddress, &outputSize)
             }
         }

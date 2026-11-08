@@ -8,10 +8,11 @@ public enum ProcessControlError: Error, Equatable, LocalizedError {
     case failed(errno: Int32)
 
     public var errorDescription: String? {
+        // strerror returns NUL-terminated storage, which is copied before another error lookup.
         switch self {
         case .permissionDenied: "Permission denied. This process belongs to another user or the system."
         case .noSuchProcess: "The process is no longer running."
-        case let .failed(code): String(cString: strerror(code))
+        case let .failed(code): unsafe String(cString: strerror(code))
         }
     }
 

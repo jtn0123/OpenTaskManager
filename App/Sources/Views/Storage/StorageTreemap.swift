@@ -64,6 +64,8 @@ struct TreemapLayout: Equatable {
 
     let key: Key
     let tiles: [Tile]
+    /// Keyboard regions are prepared with the layout, never on hover.
+    let navigation: [TreemapNavigation.Tile]
 
     var since: Date? { key.since }
 
@@ -75,7 +77,7 @@ struct TreemapLayout: Equatable {
         let children = usage.children(of: folder).filter { $0.allocatedSize > 0 }
         let rects = Treemap.squarify(children.map { Double($0.allocatedSize) }, in: CGRect(origin: .zero, size: size))
         tiles = zip(children, rects).compactMap { item, rect in
-            guard rect.width >= 1, rect.height >= 1 else { return nil }
+            guard rect.width > 0, rect.height > 0 else { return nil }
             // A hairline gap between neighbours, unless the tile is a sliver.
             let tile = rect.width > 4 && rect.height > 4 ? rect.insetBy(dx: 1, dy: 1) : rect
             let look = TileLook(item, changes: changes, in: usage, threshold: threshold)
@@ -93,6 +95,11 @@ struct TreemapLayout: Equatable {
             let inner = Self.inner(of: item, in: usage, room: room, changes: changes, threshold: threshold)
             // The header's name sits on the frame's pale wash in the label colours, not on the tile colour.
             return Tile(item: item, rect: tile, header: header, inner: inner, label: label, title: name, look: look, ink: .dark)
+        }
+        navigation = tiles.flatMap { tile in
+            [TreemapNavigation.Tile(id: tile.id, rect: tile.header ?? tile.rect)] + tile.inner.compactMap { inner in
+                inner.item.map { TreemapNavigation.Tile(id: $0.id, rect: inner.rect) }
+            }
         }
     }
 
@@ -146,7 +153,7 @@ struct TreemapLayout: Equatable {
             values.append(rest)
         }
         return zip(shown, Treemap.squarify(values, in: room)).compactMap { item, rect in
-            guard rect.width >= 2, rect.height >= 2 else { return nil }
+            guard rect.width > 0, rect.height > 0 else { return nil }
             let rect = rect.width > 3 && rect.height > 3 ? rect.insetBy(dx: 0.5, dy: 0.5) : rect
             guard let item else { return Inner(item: nil, rect: rect, look: .rest, label: .none, title: "", ink: .dark) }
             let look = TileLook(item, changes: changes, in: usage, threshold: threshold)
@@ -214,7 +221,7 @@ enum StorageStyle {
 /// A drill-down treemap of one folder: a tile per child sized by its space
 /// on disk and coloured by category (or, in Changes mode, by how it changed
 /// since an earlier scan), with each large folder showing its own contents
-/// inside. Click a folder to open it.
+/// inside. Select a tile to name it; double-click a folder to open it.
 struct StorageTreemap: View {
     let usage: DiskUsage
     let folder: DiskItem
@@ -223,6 +230,7 @@ struct StorageTreemap: View {
     /// In Changes mode, fades what didn't change ("Changes only").
     var quietsUnchanged = false
     var open: (DiskItem) -> Void
+    var select: (DiskItem) -> Void
     var menu: (DiskItem) -> StorageItemMenu
 
     @State private var cache = TreemapCache()
@@ -234,7 +242,10 @@ struct StorageTreemap: View {
             let layout = cache.layout(usage: usage, folder: folder, size: proxy.size, changes: changes)
             ZStack(alignment: .topLeading) {
                 TreemapTiles(layout: layout, quiet: quietsUnchanged && changes != nil, scheme: scheme).equatable()
-                TreemapPointer(layout: layout, folder: folder, folderPath: usage.path(of: folder.id), hover: hover, open: open, menu: menu)
+                    .accessibilityHidden(true)
+                TreemapPointer(layout: layout, folder: folder, folderPath: usage.path(of: folder.id), hover: hover, open: open, menu: menu,
+                               select: select)
+                TreemapKeyboard(layout: layout, hover: hover, select: select, open: open)
             }
         }
     }
@@ -406,7 +417,7 @@ private struct TileLabel: View {
 }
 
 /// Reads the pointer: highlights the tile under it (and the item inside a
-/// folder's tile) and names it in a tag, opens folders on click, and offers
+/// folder's tile) and names it in a tag, selects tiles on click, and offers
 /// the item's actions on right-click. It alone redraws as the pointer
 /// moves, and only when the item under it changes. It also outlines the
 /// tile holding the item picked in a list.
@@ -422,6 +433,8 @@ private struct TreemapPointer: View {
     /// moves, nothing is hovered, so a map that opens (or changes) under a
     /// still pointer doesn't start with a tag over whatever happens to be there.
     @State private var restingAt: CGPoint?
+    var select: (DiskItem) -> Void
+    @FocusState private var focused: Bool
 
     var body: some View {
         let hovered = layout.tile(id: hover.item)
@@ -454,7 +467,7 @@ private struct TreemapPointer: View {
                         }
                     }
                     .allowsHitTesting(false)
-                } else if let marked, let pick = hover.pick, pick.change == nil {
+                } else if let marked, let pick = hover.pick, pick.change == nil, hover.markedFile != nil {
                     // Names what the outline stands for, until the pointer explores the map,
                     // clear of the name of the folder holding it. A change has the bar
                     // above the map (`PickedChangeBar`) instead, which hides no tiles.
@@ -491,11 +504,29 @@ private struct TreemapPointer: View {
                 restingAt = NSEvent.mouseLocation
                 if hover.source == .treemap { hover.enter(nil, from: .treemap) }
             }
+            .onTapGesture(count: 2) { point in
+                guard let tile = layout.tile(at: point) else { return }
+                let item = tile.inner(at: point)?.item ?? tile.item
+                if item.isFolder { open(item) }
+            }
             .onTapGesture { point in
-                if let tile = layout.tile(at: point), tile.item.isFolder { open(tile.item) }
+                guard let tile = layout.tile(at: point) else { return }
+                select(tile.inner(at: point)?.item ?? tile.item)
+                focused = true
+            }
+            .focusable()
+            .focused($focused)
+            .onMoveCommand { direction in
+                TreemapKeyboard.move(direction, layout: layout, hover: hover, select: select)
+            }
+            .onKeyPress(.return) {
+                guard let id = hover.selected, let item = TreemapKeyboard.item(id, in: layout), item.isFolder else { return .ignored }
+                open(item)
+                return .handled
             }
             .contextMenu {
-                if let item = inner?.item ?? hovered?.item, item.kind != .smallerItems { menu(item) }
+                if let item = inner?.item ?? hovered?.item ?? hover.selected.flatMap({ TreemapKeyboard.item($0, in: layout) }),
+                   item.kind != .smallerItems { menu(item) }
             }
     }
 }
@@ -682,39 +713,16 @@ private struct TagPlacement: Layout {
     }
 }
 
-/// What's under the pointer, beside the breadcrumb; in Changes mode, the
-/// colours' key while nothing is.
+/// The colours' key in Changes mode, otherwise the selection and opening gestures.
 struct TreemapCaption: View {
-    let usage: DiskUsage
-    let folder: DiskItem
-    let hover: StorageHover
     var changes: TreemapChanges?
     var quietsUnchanged = false
 
     var body: some View {
-        let items = usage.children(of: folder)
-        if let id = hover.item, let item = items.first(where: { $0.id == id }) {
-            let share = Double(item.allocatedSize) / Double(max(folder.allocatedSize, 1))
-            let look = TileLook(item, changes: changes, in: usage, threshold: StorageChangeStyle.threshold(for: folder.allocatedSize))
-            HStack(spacing: 6) {
-                Circle().fill(look.color).frame(width: 8, height: 8)
-                Text(StorageStyle.name(item)).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
-                Group {
-                    if let direction = look.direction {
-                        Text(look.caption).foregroundStyle(StorageChangeStyle.textStyle(direction))
-                    } else {
-                        Text("\(Format.bytes(item.allocatedSize)) · \(Format.percent(share, digits: share < 0.1 ? 1 : 0))")
-                            .foregroundStyle(.secondaryText)
-                    }
-                }
-                .monospacedDigit()
-                .fixedSize()
-            }
-            .font(.explanation)
-        } else if changes != nil {
+        if changes != nil {
             ChangeLegend(quietsUnchanged: quietsUnchanged)
         } else {
-            Text(items.contains(where: \.isFolder) ? "Click a folder to open it" : "")
+            Text("Click to select · Double-click to open")
                 .font(.explanation)
                 .foregroundStyle(.secondaryText)
         }

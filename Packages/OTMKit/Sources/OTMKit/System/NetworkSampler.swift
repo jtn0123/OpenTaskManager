@@ -68,19 +68,20 @@ final class NetworkSampler {
     /// Reads 64-bit interface counters. `getifaddrs` only exposes 32-bit
     /// counters that wrap every 4 GB, so this walks NET_RT_IFLIST2 instead.
     private static func readLinks() -> [Link] {
+        // The header size is checked before each unaligned load; the name output holds IF_NAMESIZE bytes plus a terminator.
         guard let buffer = Sysctl.bytes([CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST2, 0]) else { return [] }
         var links: [Link] = []
         buffer.withUnsafeBytes { raw in
             var offset = 0
             while offset + MemoryLayout<if_msghdr>.size <= raw.count {
-                let header = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
+                let header = unsafe raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
                 guard header.ifm_msglen > 0 else { break }
                 defer { offset += Int(header.ifm_msglen) }
                 guard Int32(header.ifm_type) == RTM_IFINFO2,
                       offset + MemoryLayout<if_msghdr2>.size <= raw.count else { continue }
-                let message = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
+                let message = unsafe raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
                 var nameBuffer = [CChar](repeating: 0, count: Int(IF_NAMESIZE) + 1)
-                guard if_indextoname(UInt32(message.ifm_index), &nameBuffer) != nil else { continue }
+                guard unsafe if_indextoname(UInt32(message.ifm_index), &nameBuffer) != nil else { continue }
                 let flags = message.ifm_flags
                 links.append(Link(
                     name: String(decoding: nameBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self),
@@ -134,21 +135,22 @@ final class NetworkSampler {
     }
 
     private static func readAddresses() -> [String: [String]] {
+        // The ifaddrs list stays live until freeifaddrs; the family selects each address layout and the output size.
         var result: [String: [String]] = [:]
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return result }
-        defer { freeifaddrs(head) }
+        guard unsafe getifaddrs(&head) == 0, let first = unsafe head else { return result }
+        defer { unsafe freeifaddrs(head) }
 
-        var cursor: UnsafeMutablePointer<ifaddrs>? = first
-        while let entry = cursor {
-            defer { cursor = entry.pointee.ifa_next }
-            guard let address = entry.pointee.ifa_addr else { continue }
-            let family = Int32(address.pointee.sa_family)
+        var cursor: UnsafeMutablePointer<ifaddrs>? = unsafe first
+        while let entry = unsafe cursor {
+            defer { unsafe cursor = entry.pointee.ifa_next }
+            guard let address = unsafe entry.pointee.ifa_addr else { continue }
+            let family = unsafe Int32(address.pointee.sa_family)
             guard family == AF_INET || family == AF_INET6 else { continue }
             var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             let length = socklen_t(family == AF_INET ? MemoryLayout<sockaddr_in>.size : MemoryLayout<sockaddr_in6>.size)
-            guard getnameinfo(address, length, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
-            let name = String(cString: entry.pointee.ifa_name)
+            guard unsafe getnameinfo(address, length, &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let name = unsafe String(cString: entry.pointee.ifa_name)
             let text = String(decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
             result[name, default: []].append(text)
         }

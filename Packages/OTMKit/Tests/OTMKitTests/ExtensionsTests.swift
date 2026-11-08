@@ -167,6 +167,13 @@ struct SystemExtensionListTests {
                     "identifier": "io.tailscale.ipn.macsys.network-extension", "teamID": "W5364U7YZB",
                     "container": ["bundlePath": "/Applications/Tailscale.app"],
                     "state": "activated_enabled",
+                    "originPath": "/Applications/Tailscale.app/Contents/Library/SystemExtensions/new.systemextension",
+                    "bundleVersion": ["CFBundleShortVersionString": "1.102.4", "CFBundleVersion": "101.102.4"],
+                ],
+                [
+                    "identifier": "io.tailscale.ipn.macsys.network-extension",
+                    "originPath": "/Users/a/Downloads/Tailscale.app/Contents/Library/SystemExtensions/old.systemextension",
+                    "bundleVersion": ["CFBundleShortVersionString": "1.100.0", "CFBundleVersion": "101.100.0"],
                 ],
                 ["identifier": "com.example.serial.driver", "container": [:] as [String: Any]],
                 ["no identifier": true],
@@ -177,6 +184,10 @@ struct SystemExtensionListTests {
         #expect(rows[0].appPath == "/Applications/Tailscale.app")
         #expect(rows[1].appPath == "/Applications/Tailscale.app", "the old copy came from the same app")
         #expect(rows[2].appPath == nil)
+        // Each version's own origin, so the copy in use can be told from others.
+        #expect(rows[0].originPath == "/Applications/Tailscale.app/Contents/Library/SystemExtensions/new.systemextension")
+        #expect(rows[1].originPath == "/Users/a/Downloads/Tailscale.app/Contents/Library/SystemExtensions/old.systemextension")
+        #expect(rows[2].originPath == nil)
         #expect(SystemExtensionList.attachApps(rows, database: Data("not a plist".utf8)) == rows)
     }
 
@@ -331,8 +342,11 @@ struct ExtensionItemTests {
 /// Reads this Mac. Every Mac has kexts loaded, the kernel interfaces at least;
 /// system extensions vary, so only their shape is checked.
 struct LiveExtensionTests {
+    /// This Mac's lists only: no folder on disk is read (see
+    /// ExtensionScanFolderTests for copies on disk, in fake folders).
     @Test func scansThisMac() {
-        let scan = Extensions.scan()
+        let scan = Extensions.scan(folders: .none)
+        #expect(scan.items.allSatisfy { $0.bundle == nil && !$0.status.isDiskCopy })
         #expect(scan.readKernelExtensions)
         #expect(scan.items.contains { $0.bundleID == "com.apple.kpi.bsd" && $0.isKernelInterface })
         #expect(Set(scan.items.map(\.id)).count == scan.items.count)

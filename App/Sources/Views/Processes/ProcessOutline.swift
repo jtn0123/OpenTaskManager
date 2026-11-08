@@ -1,12 +1,27 @@
 import AppKit
 import OTMKit
 
-/// Adds Delete-to-end-task to the outline view, and fits the columns to its
-/// width: Name takes the slack, and columns give way by priority before Name
+/// Adds Delete to end a task, and Option-Delete to force quit, to the
+/// outline view, and fits the columns to its width: Name gets its preferred
+/// width where there's room, and columns give way by priority before Name
 /// goes below its minimum.
 final class ProcessOutline: NSOutlineView {
     var onDelete: (() -> Void)?
+    var onForceQuit: (() -> Void)?
     var onHiddenToFitChange: ((Set<ProcessColumn>) -> Void)?
+    /// Called with Name's width once the user has dragged its edge.
+    var onNameWidthChange: ((CGFloat) -> Void)?
+
+    /// Name's width where the table has room for it. The figures then sit
+    /// beside the names, and room left over goes after the last column
+    /// rather than into a wide gap between the two. Dragging Name's edge sets it.
+    var preferredNameWidth = ProcessColumn.name.width {
+        didSet { if preferredNameWidth != oldValue { fitNameColumn() } }
+    }
+
+    /// Name's width as the user drags its edge, kept once the drag ends.
+    private var draggedNameWidth: CGFloat?
+    private static let widestName: CGFloat = 900
 
     /// Columns switched off in the Columns menu, and those this Mac doesn't
     /// report that weren't switched on anyway.
@@ -55,9 +70,14 @@ final class ProcessOutline: NSOutlineView {
     }
 
     /// Shows the columns the user has on that fit the width, hides the rest,
-    /// then gives Name the slack. Cheap, and only touches columns that change.
+    /// then sizes Name. Cheap, and only touches columns that change.
     func fitColumns() {
         needsColumnFit = false
+        if let dragged = draggedNameWidth {
+            draggedNameWidth = nil
+            preferredNameWidth = dragged
+            onNameWidthChange?(dragged)
+        }
         let width = enclosingScrollView?.contentView.bounds.width ?? 0
         // Before the first layout there's no width yet: show every column that's on.
         let hidden = width > 0 ? ColumnFit.hidden(wantedColumns, available: Double(width - edgeInset)) : []
@@ -73,8 +93,17 @@ final class ProcessOutline: NSOutlineView {
         fitNameColumn()
     }
 
-    /// After the user resized a column. Hiding columns under the pointer
-    /// mid-drag would be jarring, so then only Name gives way.
+    /// After Name was resized. A drag of its edge sets the width it keeps,
+    /// once the drag ends; the fitting's own changes pass through.
+    func nameWasResized() {
+        guard let header = headerView, let name = outlineTableColumn, tableColumns.indices.contains(header.resizedColumn),
+              tableColumns[header.resizedColumn] === name else { return }
+        draggedNameWidth = min(max(name.width, name.minWidth), Self.widestName).rounded()
+        needsColumnFit = true
+    }
+
+    /// After the user resized another column. Hiding columns under the
+    /// pointer mid-drag would be jarring, so then only Name gives way.
     func columnWasResized() {
         if let header = headerView, header.resizedColumn >= 0 {
             needsColumnFit = true
@@ -90,13 +119,15 @@ final class ProcessOutline: NSOutlineView {
         return rect(ofColumn: last).maxX - name.width
     }
 
-    /// Gives Name whatever width the other columns leave, down to its
-    /// minimum, so the table fills the view and only scrolls sideways when
-    /// it has to. Done by hand because AppKit's first-column autoresizing
-    /// missed resizes that came from SwiftUI.
+    /// Gives Name its preferred width, or what the other columns leave if
+    /// that's less, down to its minimum, so the table only scrolls sideways
+    /// when it has to. Done by hand because AppKit's first-column
+    /// autoresizing missed resizes that came from SwiftUI. Not while the
+    /// user drags Name's own edge.
     func fitNameColumn() {
-        guard let name = outlineTableColumn, let clip = enclosingScrollView?.contentView else { return }
-        let width = max(name.minWidth, (clip.bounds.width - otherColumnsWidth).rounded(.down))
+        guard draggedNameWidth == nil, let name = outlineTableColumn, let clip = enclosingScrollView?.contentView else { return }
+        let room = (clip.bounds.width - otherColumnsWidth).rounded(.down)
+        let width = max(name.minWidth, min(preferredNameWidth, room))
         if name.width != width { name.width = width }
     }
 
@@ -118,7 +149,7 @@ final class ProcessOutline: NSOutlineView {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 51 || event.keyCode == 117 { // Delete, Forward Delete
-            onDelete?()
+            if event.modifierFlags.contains(.option) { onForceQuit?() } else { onDelete?() }
         } else {
             super.keyDown(with: event)
         }

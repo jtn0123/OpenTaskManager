@@ -8,9 +8,16 @@ public enum SensorTable {
     /// The span temperatures' range bars are drawn on.
     public static let temperatureScale = 20.0...110.0
 
-    /// Every row this tick's readings give, in table order.
-    public static func readings(sensors: SensorSample?, power: PowerSample?, gpus: [GPUSample]) -> [SensorReading] {
+    /// Every row this tick's readings give, in table order. `freshMediaOnly`
+    /// omits cached media values for recording; the visible table can hold them.
+    public static func readings(sensors: SensorSample?, power: PowerSample?, gpus: [GPUSample],
+                                ordered: Bool = true, freshMediaOnly: Bool = false) -> [SensorReading] {
         var rows: [SensorReading] = []
+        for engine in power?.mediaEngines ?? [] where !freshMediaOnly || power?.mediaEnginesFresh != false {
+            rows.append(SensorReading(id: "media/\(engine.channel)/active", group: .gpu, rank: 100 + engine.rank,
+                                      label: "\(engine.label) active time", unit: .fraction, source: .ioReport,
+                                      origin: "PMP0 SOC Floor \(engine.channel)", value: engine.activeFraction, scale: 0...1))
+        }
         if let sensors {
             appendTemperatures(sensors, to: &rows)
         }
@@ -25,6 +32,8 @@ public enum SensorTable {
         if let sensors {
             appendFans(sensors.fans, to: &rows)
         }
+        // History and ranges use IDs, so only the visible table needs sorting.
+        guard ordered else { return rows }
         // Sorted by group and rank; rows of equal rank keep the order they
         // were added in, which for temperatures is natural label order.
         return rows.enumerated()

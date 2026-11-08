@@ -5,9 +5,11 @@ import UniformTypeIdentifiers
 
 /// The Benchmarks workspace's own state, kept for the session: the newest
 /// saved result's date for the resource list, the two runs picked for
-/// comparison in each test (remembered between launches), and Run all,
-/// which starts the tests' own stores one after another, so a run started
-/// here is the same run each resource's card shows. Nothing here runs per tick.
+/// comparison in each test and the baseline of its trends (both remembered
+/// between launches), a resource card's request to open the workspace at a
+/// comparison, and Run all, which starts the tests' own stores one after
+/// another, so a run started here is the same run each resource's card
+/// shows. Nothing here runs per tick.
 @Observable
 @MainActor
 final class BenchmarkWorkspace {
@@ -33,6 +35,8 @@ final class BenchmarkWorkspace {
         let kind: BenchmarkKind
         /// Scrolled to the top of the page, under the pinned strip.
         let aligned: Bool
+        /// To the test's section, as there's no pair to show the comparison of.
+        var section = false
         let serial: Int
     }
 
@@ -44,45 +48,54 @@ final class BenchmarkWorkspace {
         var interface: String?
     }
 
-    private static let picksKey = "benchmarkComparePicks"
-    private static let includesDiskKey = "benchmarkSuiteIncludesDisk"
-    private static let includesNetworkKey = "benchmarkSuiteIncludesNetwork"
+    /// The family on show; comparisons opened elsewhere select it before scrolling.
+    var selectedKind: BenchmarkKind = .cpu
 
     /// The newest saved result of any test; nil until the files are read, or with none.
     private(set) var newest: Date?
     /// Run all's steps: the last suite's, or the running one's.
     private(set) var steps: [Step] = []
     private(set) var suiteRunning = false
+    private(set) var guidedRunning = false
+    private(set) var passTitle: String?
     /// Each test's runs picked for comparison, by id, in the order picked: at most two.
     private(set) var picks: [BenchmarkKind: [String]]
     /// The last request to show a comparison; the workspace scrolls when it changes.
     private(set) var reveal: Reveal?
+    /// Each test's trend baseline, by run id: the run every other is measured against.
+    private(set) var baselines: [BenchmarkKind: String]
+    /// Bumped by a resource card's Compare in Benchmarks; the Performance
+    /// page opens the workspace when it changes.
+    private(set) var openRequest = 0
     /// Whether Run all adds the disk test, which writes a temporary file.
     var includesDisk: Bool {
-        didSet { UserDefaults.standard.set(includesDisk, forKey: Self.includesDiskKey) }
+        didSet { Settings.benchmarkSuiteIncludesDisk.set(includesDisk) }
     }
 
     /// Whether Run all adds the Internet test, which loads the connection.
     var includesNetwork: Bool {
-        didSet { UserDefaults.standard.set(includesNetwork, forKey: Self.includesNetworkKey) }
+        didSet { Settings.benchmarkSuiteIncludesNetwork.set(includesNetwork) }
     }
 
     @ObservationIgnored private var summaryLoaded = false
     @ObservationIgnored private var suiteTask: Task<Void, Never>?
     @ObservationIgnored private var current: BenchmarkKind?
     @ObservationIgnored private var handledLaunchArguments = false
+    /// The test whose comparison to show once the workspace opens.
+    @ObservationIgnored private var pendingReveal: (kind: BenchmarkKind, section: Bool)?
 
     private init() {
-        let defaults = UserDefaults.standard
-        let saved = defaults.dictionary(forKey: Self.picksKey) as? [String: [String]] ?? [:]
+        let saved = Settings.benchmarkComparePicks.get()
         picks = Dictionary(uniqueKeysWithValues: saved.compactMap { key, ids in BenchmarkKind(rawValue: key).map { ($0, ids) } })
-        includesDisk = defaults.bool(forKey: Self.includesDiskKey)
-        includesNetwork = defaults.bool(forKey: Self.includesNetworkKey)
+        let bases = Settings.benchmarkTrendBaselines.get()
+        baselines = Dictionary(uniqueKeysWithValues: bases.compactMap { key, id in BenchmarkKind(rawValue: key).map { ($0, id) } })
+        includesDisk = Settings.benchmarkSuiteIncludesDisk.get()
+        includesNetwork = Settings.benchmarkSuiteIncludesNetwork.get()
     }
 
     // MARK: - The newest result
 
-    /// Reads the four history files once, off the main actor, for the date
+    /// Reads the tests' history files once, off the main actor, for the date
     /// of the newest result.
     func loadSummary() async {
         guard !summaryLoaded else { return }
@@ -118,8 +131,9 @@ final class BenchmarkWorkspace {
         savePicks()
     }
 
-    private func requestReveal(_ kind: BenchmarkKind, aligned: Bool) {
-        reveal = Reveal(kind: kind, aligned: aligned, serial: (reveal?.serial ?? 0) + 1)
+    private func requestReveal(_ kind: BenchmarkKind, aligned: Bool, section: Bool = false) {
+        selectedKind = kind
+        reveal = Reveal(kind: kind, aligned: aligned, section: section, serial: (reveal?.serial ?? 0) + 1)
     }
 
     func clearPicks(_ kind: BenchmarkKind) {
@@ -128,16 +142,49 @@ final class BenchmarkWorkspace {
     }
 
     private func savePicks() {
-        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: picks.map { ($0.key.rawValue, $0.value) }), forKey: Self.picksKey)
+        Settings.benchmarkComparePicks.set(Dictionary(uniqueKeysWithValues: picks.map { ($0.key.rawValue, $0.value) }))
+    }
+
+    // MARK: - From a resource's card
+
+    /// Compare in Benchmarks, under a card's saved runs: ticks the newest of
+    /// `runs` (a test's, on one Mac, volume or interface) and the newest
+    /// earlier one it can be compared with, then opens the workspace at their
+    /// comparison, or at the test's section when no earlier run compares.
+    func compareInWorkspace(_ runs: [BenchmarkRun]) {
+        guard let kind = runs.first?.kind else { return }
+        let pair = BenchmarkComparison.latestPair(runs)
+        if let pair {
+            picks[kind] = [pair.earlier.id, pair.later.id]
+            savePicks()
+        }
+        pendingReveal = (kind, pair == nil)
+        openRequest += 1
+    }
+
+    /// Called once the workspace is on screen, so it can scroll to what a card asked for.
+    func revealPending() {
+        guard let pending = pendingReveal else { return }
+        pendingReveal = nil
+        requestReveal(pending.kind, aligned: true, section: pending.section)
+    }
+
+    // MARK: - Trend baselines
+
+    /// The run `kind`'s trends are measured against, or none.
+    func setBaseline(_ kind: BenchmarkKind, to id: String?) {
+        baselines[kind] = id
+        Settings.benchmarkTrendBaselines.set(Dictionary(uniqueKeysWithValues: baselines.map { ($0.key.rawValue, $0.value) }))
     }
 
     // MARK: - Run all
 
     /// Runs the CPU and GPU benchmarks, then the disk and Internet tests if
-    /// ticked, one at a time through their own stores. A failed step is
-    /// noted and the next one starts; a cancelled one ends the suite.
+    /// ticked, one at a time through their own stores; never the sustained
+    /// run. A failed step is noted and the next one starts; a cancelled one
+    /// ends the suite.
     func runAll(targets: SuiteTargets) {
-        guard !suiteRunning else { return }
+        guard !suiteRunning, !BenchmarkHistories.anyRunning else { return }
         var kinds: [BenchmarkKind] = [.cpu, .gpu]
         if includesDisk, targets.diskTarget != nil { kinds.append(.disk) }
         if includesNetwork, targets.interface != nil { kinds.append(.network) }
@@ -156,10 +203,40 @@ final class BenchmarkWorkspace {
         }
     }
 
+    /// A full warm-up pass is discarded before measured passes use the same stores and settings.
+    func runGuided(kinds: [BenchmarkKind], targets: SuiteTargets, preflight: BenchmarkPreflight,
+                   repeatCount: Int = BenchmarkSessionProtocol.repeats) {
+        guard !suiteRunning, !BenchmarkHistories.anyRunning, !kinds.isEmpty else { return }
+        steps = kinds.map { Step(kind: $0, state: .waiting) }
+        suiteRunning = true
+        guidedRunning = true
+        let id = UUID().uuidString
+        let passes = BenchmarkSessionProtocol.passes(repeatCount: repeatCount)
+        suiteTask = Task { [weak self] in
+            guard let self else { return }
+            passes: for pass in passes {
+                passTitle = pass == 0 ? "Warm-up · discarded" : "Measured repeat \(pass) of \(passes.upperBound)"
+                steps = kinds.map { Step(kind: $0, state: .waiting) }
+                for index in kinds.indices {
+                    guard !Task.isCancelled else { break passes }
+                    steps[index].state = .running
+                    current = kinds[index]
+                    let session = pass == 0 ? nil : BenchmarkSession(id: id, preflight: preflight, repeatIndex: pass, repeatCount: passes.upperBound)
+                    let state = await run(kinds[index], targets: targets, session: session, discard: pass == 0)
+                    steps[index].state = state
+                    // A failed warm-up or repeat leaves a partial group rather than silently changing the protocol.
+                    if state != .finished || Task.isCancelled { break passes }
+                }
+            }
+            endSuite()
+        }
+    }
+
     func cancelAll() {
         suiteTask?.cancel()
         switch current {
         case .cpu: CPUBenchmarkStore.shared.cancel()
+        case .sustained: CPUSustainedStore.shared.cancel()
         case .gpu: GPUBenchmarkStore.shared.cancel()
         case .disk: DiskSpeedStore.shared.cancel()
         case .network: NetworkQualityStore.shared.cancel()
@@ -178,38 +255,43 @@ final class BenchmarkWorkspace {
             steps[index].state = .notRun
         }
         suiteRunning = false
+        guidedRunning = false
+        passTitle = nil
         current = nil
         suiteTask = nil
     }
 
-    private func run(_ kind: BenchmarkKind, targets: SuiteTargets) async -> StepState {
+    private func run(_ kind: BenchmarkKind, targets: SuiteTargets, session: BenchmarkSession? = nil, discard: Bool = false) async -> StepState {
         let started = Date()
         switch kind {
         case .cpu:
             let store = CPUBenchmarkStore.shared
-            store.start()
+            store.start(session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failure, newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failure, newest: store.completedAt, since: started)
+        case .sustained:
+            // Never one of Run all's steps: it would hold the rest up for minutes.
+            return .notRun
         case .gpu:
             let store = GPUBenchmarkStore.shared
             guard store.device != nil else { return .failed(GPUBenchmarkError.noDevice.message) }
-            store.start()
+            store.start(session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failure, newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failure, newest: store.completedAt, since: started)
         case .disk:
             let store = DiskSpeedStore.shared
             guard let disk = targets.disk, let target = targets.diskTarget else { return .notRun }
             await store.load()
-            store.start(disk: disk, target: target)
+            store.start(disk: disk, target: target, session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failures[disk], newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failures[disk], newest: store.completedAt, since: started)
         case .network:
             let store = NetworkQualityStore.shared
             guard let interface = targets.interface else { return .notRun }
             await store.load()
-            store.start(interface: interface)
+            store.start(interface: interface, session: session, discard: discard)
             await store.waitForRun()
-            return Self.outcome(failure: store.failures[interface], newest: store.history.first?.date, since: started)
+            return Self.outcome(failure: store.failures[interface], newest: store.completedAt, since: started)
         }
     }
 
@@ -223,20 +305,31 @@ final class BenchmarkWorkspace {
 
     /// For screenshots: `-openBenchmarkCompare gpu:1,2` picks a test's
     /// first and second saved runs, newest first, for this launch only, and
-    /// scrolls to their comparison; `-openResource benchmarks -openSpeedTest
-    /// start` starts Run all.
+    /// scrolls to their comparison; `-openBenchmarkBaseline cpu:3` makes a
+    /// test's third newest run its trends' baseline, for this launch only;
+    /// `-openResource benchmarks -openSpeedTest start` starts Run all.
     func handleLaunchArguments(runs: [BenchmarkKind: [BenchmarkRun]], targets: SuiteTargets) {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
-        if let request = LaunchArgument.string("openBenchmarkCompare") {
-            let parts = request.split(separator: ":")
-            if parts.count == 2, let kind = BenchmarkKind(rawValue: String(parts[0])), let saved = runs[kind] {
-                let ids = parts[1].split(separator: ",").compactMap { Int($0) }.compactMap { saved.indices.contains($0 - 1) ? saved[$0 - 1].id : nil }
-                picks[kind] = Array(ids.prefix(2))
-                if ids.count >= 2 { requestReveal(kind, aligned: true) }
-            }
+        let comparisonRequest = Self.requestedRuns("openBenchmarkCompare", among: runs)
+        if let (kind, ids) = comparisonRequest {
+            selectedKind = kind
+            picks[kind] = Array(ids.prefix(2))
+            if ids.count >= 2 { requestReveal(kind, aligned: true) }
+        }
+        if let (kind, ids) = Self.requestedRuns("openBenchmarkBaseline", among: runs), let id = ids.first {
+            baselines[kind] = id
+            if comparisonRequest == nil { selectedKind = kind }
         }
         if LaunchArgument.startsTest(on: "benchmarks") { runAll(targets: targets) }
+    }
+
+    /// "gpu:1,2" in launch argument `name`: the test and those of its saved runs, newest first, 1-based.
+    private static func requestedRuns(_ name: String, among runs: [BenchmarkKind: [BenchmarkRun]]) -> (BenchmarkKind, [String])? {
+        guard let request = LaunchArgument.string(name) else { return nil }
+        let parts = request.split(separator: ":")
+        guard parts.count == 2, let kind = BenchmarkKind(rawValue: String(parts[0])), let saved = runs[kind] else { return nil }
+        return (kind, parts[1].split(separator: ",").compactMap { Int($0) }.compactMap { saved.indices.contains($0 - 1) ? saved[$0 - 1].id : nil })
     }
 
     // MARK: - Export

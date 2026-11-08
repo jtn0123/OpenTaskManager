@@ -58,8 +58,9 @@ public enum ProcessNetwork {
     }
 
     private static func fullName(_ pid: Int32) -> String? {
+        // proc_name borrows the local buffer with its full byte capacity, and decoding stops inside that array.
         var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
-        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        guard unsafe proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
         let name = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
         return name.isEmpty ? nil : name
     }

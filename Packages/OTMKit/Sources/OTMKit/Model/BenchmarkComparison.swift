@@ -3,6 +3,7 @@ import Foundation
 /// Why two runs can't be compared, said plainly. Only runs of the same test,
 /// version, settings, kind of build, Mac and target measure the same thing.
 public enum BenchmarkRefusal: Sendable, Equatable {
+    case differentSessions
     case sameRun
     case differentTests(BenchmarkKind, BenchmarkKind)
     case differentVersions(BenchmarkKind, Int, Int)
@@ -14,12 +15,17 @@ public enum BenchmarkRefusal: Sendable, Equatable {
 
     public var reason: String {
         switch self {
+        case .differentSessions:
+            return "Sessions compare only with sessions of the same supported protocol version and repeat count."
         case .sameRun:
             return "That's the same run twice. Pick two different runs."
+        case let .differentTests(baseline, compared) where Set([baseline, compared]) == [.cpu, .sustained]:
+            return "A sustained run is compared only with other sustained runs: its figures are the speed the CPU held over minutes, "
+                + "the CPU benchmark's a few seconds' burst."
         case let .differentTests(baseline, compared):
             return "These are different tests (\(baseline.title) and \(compared.title)), so their figures don't measure the same thing."
         case let .differentVersions(kind, baseline, compared):
-            let outcome = kind == .cpu || kind == .gpu ? "they didn't do the same work" : "they didn't measure the same way"
+            let outcome = kind.runsAppCode ? "they didn't do the same work" : "they didn't measure the same way"
             return "The runs used different versions of the \(kind.versionName) (v\(baseline) and v\(compared)), so \(outcome). "
                 + "Compare two runs of the same version."
         case let .differentBuilds(baselineOptimized):
@@ -41,6 +47,7 @@ public enum BenchmarkRefusal: Sendable, Equatable {
     /// The reason in a few words, for a line that has room for little else: "different builds".
     public var summary: String {
         switch self {
+        case .differentSessions: "different session protocols"
         case .sameRun: "the same run twice"
         case .differentTests: "different tests"
         case .differentVersions: "different workload versions"
@@ -67,6 +74,8 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         /// Measured once in a run, so there's no spread to tell noise from change.
         case measuredOnce
         case unchanged
+        /// A figure whose timing cannot support a performance comparison.
+        case timingUnverified
     }
 
     public var id: String
@@ -80,11 +89,16 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     public var baselineSpread: Double?
     public var comparedSpread: Double?
     public var verdict: Verdict
+    /// A warned difference at the start, kept beside the verdict instead of judging performance.
+    public var conditionSummary: String?
     /// Why either run's figure may be off, as its measurement says.
     public var baselineCaveat: BenchmarkFigureCaveat?
     public var comparedCaveat: BenchmarkFigureCaveat?
+    public var baselineTimingDetail: String?
+    public var comparedTimingDetail: String?
 
-    public init(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement) {
+    public init(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement, conditionSummary: String? = nil) {
+        self.conditionSummary = conditionSummary
         id = baseline.id
         title = baseline.title
         unit = baseline.unit
@@ -96,6 +110,8 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         verdict = Self.verdict(baseline: baseline, compared: compared)
         baselineCaveat = baseline.caveat
         comparedCaveat = compared.caveat
+        baselineTimingDetail = baseline.timingDetail
+        comparedTimingDetail = compared.timingDetail
     }
 
     /// The doubt over either run's figure, which hangs over the change too.
@@ -103,11 +119,54 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
         baselineCaveat ?? comparedCaveat
     }
 
-    /// "Fill rate: timing unverified in the later run, so this change may not be real."
+    /// The verdict in a word or two, to sit beside the change: for a change
+    /// that counts, which way it went, "faster" or "slower" for a speed and
+    /// "higher" or "lower" for any other figure (a delay, responsiveness);
+    /// otherwise why it doesn't count: "within spread", "negligible",
+    /// "measured once", or "unchanged".
+    public var verdictWord: String {
+        if isQualified { return verdictTitle.lowercased() }
+        switch verdict {
+        case .better, .worse:
+            let up = compared > baseline
+            return unit.isSpeed ? (up ? "faster" : "slower") : (up ? "higher" : "lower")
+        case .withinSpread, .negligible, .measuredOnce, .unchanged, .timingUnverified:
+            return verdict.title.lowercased()
+        }
+    }
+
+    /// A move beyond both runs' spread while the conditions differed: they
+    /// can explain it, so it says only which way the figure moved. Figures
+    /// within spread, negligible or measured once keep their own verdict.
+    public var isQualified: Bool {
+        conditionSummary != nil && (verdict == .better || verdict == .worse)
+    }
+
+    public var verdictTitle: String {
+        guard isQualified else { return verdict.title }
+        return shortVerdictTitle + " · conditions differ"
+    }
+
+    /// For a narrow table, whose heading already says the conditions differed.
+    public var shortVerdictTitle: String {
+        guard isQualified else { return verdict.title }
+        return compared > baseline ? "Higher" : "Lower"
+    }
+
+    /// Spread still matters, but a warned difference can't judge performance.
+    public var verdictExplanation: String {
+        if id == "fill", verdict == .timingUnverified { return GPUTimingEvidence.fillExclusion }
+        guard isQualified, let conditionSummary else { return verdict.explanation }
+        // A session's summary is already whole sentences; a run's context is a clause.
+        let sentence = conditionSummary.hasSuffix(".") ? conditionSummary : conditionSummary + "."
+        return sentence + " The move is beyond both runs' spread, but different conditions can explain it."
+    }
+
+    /// "Fill rate: timing unverified in the later run, so its change is left out of the verdicts."
     public var caveatNote: String? {
         guard let caveat else { return nil }
         let runs = baselineCaveat != nil && comparedCaveat != nil ? "both runs" : baselineCaveat != nil ? "the earlier run" : "the later run"
-        return "\(title): \(caveat.title.lowercased()) in \(runs), so this change may not be real."
+        return "\(title): \(caveat.title.lowercased()) in \(runs), so its change is left out of the verdicts."
     }
 
     /// (to − from) / from, nil when `from` isn't a positive figure.
@@ -125,6 +184,7 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
     /// fastest) don't overlap, so one run's noise can't explain it, and it
     /// moved at least `negligibleChange`.
     public static func verdict(baseline: BenchmarkMeasurement, compared: BenchmarkMeasurement) -> Verdict {
+        if baseline.caveat != nil || compared.caveat != nil { return .timingUnverified }
         if compared.value == baseline.value { return .unchanged }
         guard let baseLow = baseline.low, let baseHigh = baseline.high, let low = compared.low, let high = compared.high else {
             return .measuredOnce
@@ -138,6 +198,10 @@ public struct BenchmarkChange: Sendable, Codable, Equatable, Identifiable {
 /// Two compatible runs of a test side by side: each figure's change, with
 /// both runs' spread, and what else differed between them.
 public struct BenchmarkComparison: Sendable, Codable, Equatable {
+    /// Export keeps the full qualification; the workspace explains it once behind its help disclosure.
+    public static let debugBuildQualification = "Both runs are from a debug build, which runs the app's own code many times "
+        + "slower than a release build: these figures compare only with each other."
+
     /// The earlier run's id, and the later one's.
     public var baseline: String
     public var compared: String
@@ -145,6 +209,18 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     /// What the figures can't show: other macOS or app versions, heat, a
     /// cache that wasn't bypassed, a test that measures once.
     public var caveats: [String]
+    /// How the two runs' starts differed (power, heat, CPU load, memory),
+    /// from their contexts: warnings beside the figures, never a refusal.
+    public var contextWarnings: [BenchmarkContextWarning]
+
+    public init(baseline: String, compared: String, changes: [BenchmarkChange], caveats: [String],
+                contextWarnings: [BenchmarkContextWarning] = []) {
+        self.baseline = baseline
+        self.compared = compared
+        self.changes = changes
+        self.caveats = caveats
+        self.contextWarnings = contextWarnings
+    }
 
     public enum Outcome: Sendable, Equatable {
         case compared(BenchmarkComparison)
@@ -155,16 +231,39 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
     public static func compare(_ first: BenchmarkRun, _ second: BenchmarkRun) -> Outcome {
         let (baseline, compared) = first.date <= second.date ? (first, second) : (second, first)
         if let refusal = refusal(baseline, compared) { return .refused(refusal) }
+        let summary = conditionSummary(baseline, compared)
         let changes = baseline.measurements.compactMap { measurement in
-            compared.measurement(measurement.id).map { BenchmarkChange(baseline: measurement, compared: $0) }
+            compared.measurement(measurement.id).map { BenchmarkChange(baseline: measurement, compared: $0, conditionSummary: summary) }
         }
         return .compared(BenchmarkComparison(baseline: baseline.id, compared: compared.id, changes: changes,
-                                             caveats: caveats(baseline, compared, changes: changes)))
+                                             caveats: caveats(baseline, compared, changes: changes),
+                                             contextWarnings: contextWarnings(baseline, compared)))
+    }
+
+    /// What differed between the two runs' starts, leaving out what the
+    /// refusal rules and caveats already cover: a Mac or a build the runs
+    /// record themselves.
+    public static func contextWarnings(_ baseline: BenchmarkRun, _ compared: BenchmarkRun) -> [BenchmarkContextWarning] {
+        let warnings = sessionWarnings(baseline, compared) + BenchmarkContext.warnings(earlier: baseline.context, later: compared.context,
+            runsRecordBuild: baseline.build != nil && compared.build != nil,
+            runsRecordMachine: baseline.machine != nil && compared.machine != nil)
+        // A topic keeps one row even when both the preflight and the run recorded a difference.
+        return warnings.reduce(into: []) { combined, warning in
+            if let index = combined.firstIndex(where: { $0.topic == warning.topic }) {
+                combined[index].text += " " + warning.text
+            } else {
+                combined.append(warning)
+            }
+        }
     }
 
     /// Why `baseline` and `compared` can't be compared, or nil when they can.
     public static func refusal(_ baseline: BenchmarkRun, _ compared: BenchmarkRun) -> BenchmarkRefusal? {
         if baseline.id == compared.id { return .sameRun }
+        if baseline.session != nil || compared.session != nil {
+            guard let one = baseline.session, let other = compared.session, one.supported, other.supported,
+                  one.protocolVersion == other.protocolVersion, one.repeatCount == other.repeatCount else { return .differentSessions }
+        }
         if baseline.kind != compared.kind { return .differentTests(baseline.kind, compared.kind) }
         if baseline.workloadVersion != compared.workloadVersion {
             return .differentVersions(baseline.kind, baseline.workloadVersion, compared.workloadVersion)
@@ -192,15 +291,22 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
 
     /// How many figures got each verdict, the moves first: "1 better · 5 within spread".
     public var verdictSummary: String {
-        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .negligible, .measuredOnce, .unchanged]
-        return order.compactMap { verdict in
-            let count = changes.count { $0.verdict == verdict }
-            return count == 0 ? nil : "\(count) \(verdict.title.lowercased())"
+        var labels: [String] = []
+        let order: [BenchmarkChange.Verdict] = [.better, .worse, .withinSpread, .negligible, .measuredOnce, .unchanged, .timingUnverified]
+        for verdict in order {
+            for change in changes where change.verdict == verdict {
+                let label = change.verdictTitle.lowercased()
+                if !labels.contains(label) { labels.append(label) }
+            }
+        }
+        return labels.map { label in
+            "\(changes.count { $0.verdictTitle.lowercased() == label }) \(label)"
         }.joined(separator: " · ")
     }
 
     private static func caveats(_ baseline: BenchmarkRun, _ compared: BenchmarkRun, changes: [BenchmarkChange]) -> [String] {
-        // Doubts about single figures first: they bear on those rows' verdicts.
+        // Doubts about single figures first: they bear on those rows' verdicts,
+        // and each says its figure is left out, so no second line repeats it.
         var caveats = changes.compactMap(\.caveatNote)
         if !baseline.kind.measuresThisMac {
             var line = "Internet figures depend on the connection, the server and other traffic at the time, not on this Mac"
@@ -214,8 +320,7 @@ public struct BenchmarkComparison: Sendable, Codable, Equatable {
                 + "repeat the run before trusting a small difference.")
         }
         if baseline.build?.optimized == false, compared.build?.optimized == false {
-            caveats.append("Both runs are from a debug build, which runs the app's own code many times slower than a release build: "
-                + "these figures compare only with each other.")
+            caveats.append(debugBuildQualification)
         }
         if let one = baseline.osVersion, let other = compared.osVersion, one != other {
             caveats.append("The system changed between the runs: \(one), then \(other).")

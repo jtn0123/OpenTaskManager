@@ -7,23 +7,7 @@ import UniformTypeIdentifiers
 /// time, since a saved report is often one to share.
 @MainActor
 enum SystemReportSavePanel {
-    enum Format: String, CaseIterable {
-        case markdown, json
-
-        var title: String {
-            switch self {
-            case .markdown: "Markdown"
-            case .json: "JSON"
-            }
-        }
-
-        var contentType: UTType {
-            switch self {
-            case .markdown: UTType(filenameExtension: "md", conformingTo: .plainText) ?? .plainText
-            case .json: .json
-            }
-        }
-    }
+    typealias Format = SystemReportFormat
 
     struct Choice {
         var url: URL
@@ -31,13 +15,10 @@ enum SystemReportSavePanel {
         var includeIdentifiers: Bool
     }
 
-    /// The format picked last time.
-    private static let formatKey = "systemReportFormat"
-
     /// Asks where to save, as a sheet on the front window. Nil when cancelled.
     static func choose(name: String) async -> Choice? {
         let panel = NSSavePanel()
-        let format = Format(rawValue: UserDefaults.standard.string(forKey: formatKey) ?? "") ?? .markdown
+        let format = Settings.systemReportFormat.get()
         let options = SaveOptions(panel: panel, format: format)
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
@@ -50,7 +31,7 @@ enum SystemReportSavePanel {
             response = await panel.begin()
         }
         guard response == .OK, let url = panel.url else { return nil }
-        UserDefaults.standard.set(options.format.rawValue, forKey: formatKey)
+        Settings.systemReportFormat.set(options.format)
         return Choice(url: url, format: options.format, includeIdentifiers: options.includesIdentifiers)
     }
 
@@ -121,5 +102,21 @@ private final class SaveOptions: NSObject {
 
     @objc private func formatChanged() {
         panel.allowedContentTypes = [format.contentType]
+    }
+}
+
+extension SystemReportFormat {
+    var title: String {
+        switch self {
+        case .markdown: "Markdown"
+        case .json: "JSON"
+        }
+    }
+
+    var contentType: UTType {
+        switch self {
+        case .markdown: UTType(filenameExtension: "md", conformingTo: .plainText) ?? .plainText
+        case .json: .json
+        }
     }
 }

@@ -7,12 +7,42 @@ public enum LaunchExitStatus: Sendable, Codable, Hashable, CustomStringConvertib
     /// A short reason launchd prints in place of a code, such as `pe` for `(pe)`.
     case reason(String)
 
+    private enum Key: String, CodingKey { case code, reason }
+
+    public init(from decoder: any Decoder) throws {
+        let keys = try decoder.container(keyedBy: ExitField.self).allKeys.map(\.stringValue)
+        let container = try decoder.container(keyedBy: Key.self)
+        switch keys {
+        case ["code"]: self = .code(try container.decode(Int32.self, forKey: .code))
+        case ["reason"]: self = .reason(try container.decode(String.self, forKey: .reason))
+        default:
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "An exit must contain exactly one code or reason"))
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        switch self {
+        case let .code(value): try container.encode(value, forKey: .code)
+        case let .reason(value): try container.encode(value, forKey: .reason)
+        }
+    }
+
+    /// Keeps unknown keys visible to the decoder, rather than silently ignoring them.
+    private struct ExitField: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
     public var description: String {
         switch self {
         case .code(0):
             return "Exited normally (0)"
         case let .code(code) where code < 0:
-            let name = Self.signalNames[-code].map { " (SIG\($0))" } ?? ""
+            let name = Self.signalName(-code).map { " (\($0))" } ?? ""
             return "Killed by signal \(-code)\(name)"
         case let .code(code):
             return "Exited with code \(code)"
@@ -23,6 +53,11 @@ public enum LaunchExitStatus: Sendable, Codable, Hashable, CustomStringConvertib
         case let .reason(reason):
             return "Ended for reason \"\(reason)\""
         }
+    }
+
+    /// "SIGSEGV" for 11; nil for a signal without a common name.
+    public static func signalName(_ signal: Int32) -> String? {
+        signalNames[signal].map { "SIG\($0)" }
     }
 
     private static let signalNames: [Int32: String] = [

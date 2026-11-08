@@ -69,11 +69,12 @@ public enum SystemInfoReader {
     /// Characteristics" the drive's storage driver publishes, on the
     /// nearest ancestor of the disk's media that has them.
     static func readInterconnect(_ bsdName: String) -> (interconnect: String?, location: String?) {
-        let media = IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
+        // The matched dictionary is consumed by IOKit; the service remains live until its deferred release.
+        let media = unsafe IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
         guard media != 0 else { return (nil, nil) }
         defer { IOObjectRelease(media) }
         let options = IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
-        let value = IORegistryEntrySearchCFProperty(media, kIOServicePlane, "Protocol Characteristics" as CFString, kCFAllocatorDefault,
+        let value = unsafe IORegistryEntrySearchCFProperty(media, kIOServicePlane, "Protocol Characteristics" as CFString, kCFAllocatorDefault,
                                                     options)
         guard let characteristics = value as? [String: Any] else { return (nil, nil) }
         func text(_ key: String) -> String? {
@@ -117,30 +118,31 @@ public enum SystemInfoReader {
 
     /// MAC addresses by interface name, from the AF_LINK entries of `getifaddrs`.
     private static func readHardwareAddresses() -> [String: String] {
+        // The ifaddrs list stays live until freeifaddrs; sockaddr byte reads are checked against sa_len.
         var result: [String: String] = [:]
         var head: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&head) == 0, let first = head else { return result }
-        defer { freeifaddrs(head) }
+        guard unsafe getifaddrs(&head) == 0, let first = unsafe head else { return result }
+        defer { unsafe freeifaddrs(head) }
         guard let dataOffset = MemoryLayout<sockaddr_dl>.offset(of: \.sdl_data),
               let nameLengthOffset = MemoryLayout<sockaddr_dl>.offset(of: \.sdl_nlen),
               let addressLengthOffset = MemoryLayout<sockaddr_dl>.offset(of: \.sdl_alen) else { return result }
 
-        var cursor: UnsafeMutablePointer<ifaddrs>? = first
-        while let entry = cursor {
-            defer { cursor = entry.pointee.ifa_next }
-            guard let address = entry.pointee.ifa_addr, Int32(address.pointee.sa_family) == AF_LINK else { continue }
+        var cursor: UnsafeMutablePointer<ifaddrs>? = unsafe first
+        while let entry = unsafe cursor {
+            defer { unsafe cursor = entry.pointee.ifa_next }
+            guard let address = unsafe entry.pointee.ifa_addr, unsafe Int32(address.pointee.sa_family) == AF_LINK else { continue }
             // The link-layer address follows the interface name in `sdl_data`,
             // which can run past the struct's nominal size, so read by offset within `sa_len`.
             let raw = UnsafeRawPointer(address)
-            let length = Int(address.pointee.sa_len)
+            let length = unsafe Int(address.pointee.sa_len)
             guard length > addressLengthOffset else { continue }
-            let nameLength = Int(raw.load(fromByteOffset: nameLengthOffset, as: UInt8.self))
-            let addressLength = Int(raw.load(fromByteOffset: addressLengthOffset, as: UInt8.self))
+            let nameLength = unsafe Int(raw.load(fromByteOffset: nameLengthOffset, as: UInt8.self))
+            let addressLength = unsafe Int(raw.load(fromByteOffset: addressLengthOffset, as: UInt8.self))
             let start = dataOffset + nameLength
             guard addressLength == 6, start + addressLength <= length else { continue }
-            let bytes = (0..<addressLength).map { raw.load(fromByteOffset: start + $0, as: UInt8.self) }
+            let bytes = (0..<addressLength).map { unsafe raw.load(fromByteOffset: start + $0, as: UInt8.self) }
             if let text = SystemFacts.hardwareAddress(bytes) {
-                result[String(cString: entry.pointee.ifa_name)] = text
+                unsafe result[String(cString: entry.pointee.ifa_name)] = text
             }
         }
         return result
@@ -177,10 +179,11 @@ public enum SystemInfoReader {
     /// The power source framework's description of the internal battery,
     /// which carries macOS's health verdict when it has one.
     private static func internalBatteryDescription() -> [String: Any]? {
-        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
+        // The retained info keeps Get descriptions live; the returned Swift dictionary owns its values.
+        guard let info = unsafe IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = unsafe IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] else { return nil }
         for source in sources {
-            guard let description = IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any] else {
+            guard let description = unsafe IOPSGetPowerSourceDescription(info, source)?.takeUnretainedValue() as? [String: Any] else {
                 continue
             }
             if description[kIOPSTypeKey] as? String == kIOPSInternalBatteryType { return description }

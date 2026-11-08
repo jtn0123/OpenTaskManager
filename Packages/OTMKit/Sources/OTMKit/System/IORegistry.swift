@@ -7,18 +7,21 @@ enum IORegistry {
     /// Calls `body` with each service matching `className`. The service object
     /// is released after `body` returns.
     static func forEachService(matching className: String, _ body: (io_registry_entry_t) -> Void) {
-        forEachService(matchingDictionary: IOServiceMatching(className), body)
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
+        unsafe forEachService(matchingDictionary: IOServiceMatching(className), body)
     }
 
     /// Like `forEachService(matching:)`, but matches the entry's name
     /// (device-tree nodes such as "pmgr") instead of its class.
     static func forEachService(named name: String, _ body: (io_registry_entry_t) -> Void) {
-        forEachService(matchingDictionary: IOServiceNameMatching(name), body)
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
+        unsafe forEachService(matchingDictionary: IOServiceNameMatching(name), body)
     }
 
     private static func forEachService(matchingDictionary: CFMutableDictionary?, _ body: (io_registry_entry_t) -> Void) {
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
         var iterator: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, matchingDictionary, &iterator) == KERN_SUCCESS else {
+        guard unsafe IOServiceGetMatchingServices(kIOMainPortDefault, matchingDictionary, &iterator) == KERN_SUCCESS else {
             return
         }
         defer { IOObjectRelease(iterator) }
@@ -26,28 +29,32 @@ enum IORegistry {
     }
 
     static func forEachChild(of entry: io_registry_entry_t, plane: String = kIOServicePlane, _ body: (io_registry_entry_t) -> Void) {
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
         var iterator: io_iterator_t = 0
-        guard IORegistryEntryGetChildIterator(entry, plane, &iterator) == KERN_SUCCESS else { return }
+        guard unsafe IORegistryEntryGetChildIterator(entry, plane, &iterator) == KERN_SUCCESS else { return }
         defer { IOObjectRelease(iterator) }
         forEach(iterator, body)
     }
 
     static func properties(of entry: io_registry_entry_t) -> [String: Any] {
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
         var unmanaged: Unmanaged<CFMutableDictionary>?
-        guard IORegistryEntryCreateCFProperties(entry, &unmanaged, kCFAllocatorDefault, 0) == KERN_SUCCESS,
-              let dictionary = unmanaged?.takeRetainedValue() as? [String: Any] else {
+        guard unsafe IORegistryEntryCreateCFProperties(entry, &unmanaged, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+              let dictionary = unsafe unmanaged?.takeRetainedValue() as? [String: Any] else {
             return [:]
         }
         return dictionary
     }
 
     static func property(_ key: String, of entry: io_registry_entry_t) -> Any? {
-        IORegistryEntryCreateCFProperty(entry, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
+        unsafe IORegistryEntryCreateCFProperty(entry, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
     }
 
     static func parent(of entry: io_registry_entry_t, plane: String = kIOServicePlane) -> io_registry_entry_t? {
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
         var parent: io_registry_entry_t = 0
-        guard IORegistryEntryGetParentEntry(entry, plane, &parent) == KERN_SUCCESS else { return nil }
+        guard unsafe IORegistryEntryGetParentEntry(entry, plane, &parent) == KERN_SUCCESS else { return nil }
         return parent
     }
 
@@ -56,13 +63,14 @@ enum IORegistry {
     /// `IOBlockStorageDriver` publishes: "disk3s1s1" becomes "disk0". Nil for
     /// disk images and anything else without a block storage driver below it.
     static func physicalDisk(forBSDName bsdName: String) -> String? {
-        var entry = IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
+        var entry = unsafe IOServiceGetMatchingService(kIOMainPortDefault, IOBSDNameMatching(kIOMainPortDefault, 0, bsdName))
         guard entry != 0 else { return nil }
         defer { IOObjectRelease(entry) }
         // Registry chains are about a dozen deep; the bound guards against a loop.
         for _ in 0..<32 {
             guard let parent = parent(of: entry) else { return nil }
-            if IOObjectConformsTo(entry, "IOMedia") != 0, IOObjectConformsTo(parent, "IOBlockStorageDriver") != 0 {
+            if unsafe IOObjectConformsTo(entry, "IOMedia") != 0, unsafe IOObjectConformsTo(parent, "IOBlockStorageDriver") != 0 {
                 IOObjectRelease(parent)
                 return property("BSD Name", of: entry) as? String
             }
@@ -73,7 +81,8 @@ enum IORegistry {
     }
 
     static func entry(path: String) -> io_registry_entry_t? {
-        let entry = IORegistryEntryFromPath(kIOMainPortDefault, path)
+        // IOKit borrows these strings and output variables for the call; returned Copy properties transfer one retain to Swift.
+        let entry = unsafe IORegistryEntryFromPath(kIOMainPortDefault, path)
         return entry == 0 ? nil : entry
     }
 

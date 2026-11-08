@@ -112,19 +112,22 @@ final class AppRemovalModel {
     // MARK: Running processes
 
     /// Checks once a second while the review is up.
-    func watchRunning() async {
+    func watchRunning(demand: SamplingDemandStore) async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))
-            if phase == .reviewing { await refreshRunning() }
+            await demand.waitUntilVisible()
+            guard !Task.isCancelled else { return }
+            if phase == .reviewing { await refreshRunning(demand: demand) }
         }
     }
 
-    func refreshRunning() async {
+    func refreshRunning(demand: SamplingDemandStore? = nil) async {
         let bundles = bundles
         let agents = selectedItems.compactMap(\.launchItem)
         let check = await Task.detached(priority: .userInitiated) {
             AppRemoval.classify(AppRemoval.runningProcesses(inside: bundles), unloading: agents)
         }.value
+        if let demand, !demand.hasVisibleWindow { return }
         if check != running { running = check }
         if running.needQuitting.isEmpty { isQuitting = false }
     }

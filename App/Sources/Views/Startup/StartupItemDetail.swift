@@ -18,6 +18,8 @@ struct StartupItemDetail: View {
     /// Starts, restarts or stops the job, for third-party agents.
     var control: (LaunchControl.Action) -> Void
     var showProcess: (Int32) -> Void
+    /// Brings the item's row into view in the table.
+    var showInList: () -> Void
 
     /// launchd's view of the job, read when the item is shown, after a
     /// rescan, and when its process or last exit changes, never per tick.
@@ -45,31 +47,39 @@ struct StartupItemDetail: View {
     var body: some View {
         let restriction = LaunchControl.restriction(for: item)
         let pinsTop = height.map { $0 >= topHeight + 24 + Self.detailsMinimum + footerHeight + 2 } ?? true
-        VStack(spacing: 0) {
-            if pinsTop {
-                top(restriction: restriction)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Divider()
-                ScrollView { details.padding(12) }
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        top(restriction: restriction)
-                        details
-                    }
-                    .padding(12)
-                }
-            }
-            Divider()
-            footer(restriction: restriction)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+        ScrollViewReader { proxy in
+            pane(restriction: restriction, pinsTop: pinsTop, viewHistory: { proxy.scrollTo("history", anchor: .top) })
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .task(id: ServiceRead(label: item.label, scope: item.scope, refreshID: refreshID,
                               pid: item.pid, lastExit: item.job?.lastExit)) {
             let (label, scope) = (item.label, item.scope)
             service = await Task.detached(priority: .userInitiated) { Launchctl.service(label, scope: scope) }.value
+        }
+    }
+
+    private func pane(restriction: String?, pinsTop: Bool, viewHistory: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
+            if pinsTop {
+                top(restriction: restriction)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+                ScrollView { details(viewHistory: viewHistory).padding(12) }
+                    .defaultScrollAnchor(Self.scrollAnchor)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        top(restriction: restriction)
+                        details(viewHistory: viewHistory)
+                    }
+                    .padding(12)
+                }
+                .defaultScrollAnchor(Self.scrollAnchor)
+            }
+            Divider()
+            footer(restriction: restriction)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
         }
     }
 
@@ -96,13 +106,22 @@ struct StartupItemDetail: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topHeight = $0 }
     }
 
+    /// The name shares its line with Show in List, so the label below keeps
+    /// the pane's width.
     private var header: some View {
         HStack(spacing: 10) {
             Image(nsImage: IconCache.icon(forBundle: item.appBundlePath))
                 .resizable()
                 .frame(width: 36, height: 36)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name).font(.headline).lineLimit(2)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.name).font(.headline).lineLimit(2)
+                    Spacer(minLength: 0)
+                    Button("Show in List", action: showInList)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .help("Scroll the table to this item. A filter or search that hides it is cleared.")
+                }
                 Text(item.label)
                     .font(.callout.monospaced()).foregroundStyle(.secondaryText)
                     .lineLimit(1).truncationMode(.middle)
@@ -112,41 +131,68 @@ struct StartupItemDetail: View {
         }
     }
 
-    /// launchd's view in plain words ("Loaded · Not running"), and right
-    /// below it the action that fits: Start Now while nothing runs, Restart
-    /// and Stop while it does.
+    /// What runs now, with the last failing exit dated by its first observation,
+    /// over whether launchd has it loaded; then the action that fits: Start Now while nothing runs,
+    /// Restart and Stop while it does.
     private func state(restriction: String?) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                if health.needsAttention {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .imageScale(.small)
-                        .foregroundStyle(LaunchJobHealth.tint)
-                } else {
-                    Circle().fill(item.state.color).frame(width: 8, height: 8)
+        let status = LaunchItemStatus(item: item, health: health)
+        let firstSeen = status.failureFirstSeen(in: model.launchJobs.observedStates[LaunchHistoryKey(item)],
+                                               key: LaunchHistoryKey(item))
+        return VStack(alignment: .leading, spacing: 8) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 4) {
+                GridRow {
+                    Text("Status").foregroundStyle(.secondaryText)
+                    Group {
+                        if case .failed = status.execution {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LaunchJobHealth.tint)
+                                Text(status.headerSummary(firstSeen: firstSeen))
+                            }
+                        } else {
+                            LaunchStateLabel(status: status)
+                        }
+                    }
+                    .fontWeight(.medium)
+                    .help(status.observationExplanation(firstSeen: firstSeen))
                 }
-                Text(item.statusSummary).font(.callout.weight(.medium)).lineLimit(1)
+                GridRow {
+                    Text("launchd").foregroundStyle(.secondaryText)
+                    Text(status.registration.title)
+                        .lineLimit(1)
+                        .help(status.registration.explanation)
+                }
             }
-            .help(health.headline.map { "\(stateHelp) \($0)." } ?? stateHelp)
+            .font(.callout)
             if restriction == nil, item.job != nil {
                 controls
             }
         }
     }
 
-    /// launchd's figures for the job, then what the property list says. The
-    /// arguments fold away and paths keep to one line, so nothing here needs
-    /// a scroll view of its own.
-    private var details: some View {
+    /// `-openScroll bottom` starts the details at their end, History and Files,
+    /// for screenshots.
+    private static let scrollAnchor: UnitPoint = LaunchArgument.string("openScroll") == "bottom" ? .bottom : .top
+
+    /// What it runs first, then a notice where the status line over it can't
+    /// say enough, launchd's figures for the job and what the property list
+    /// says. The arguments fold away and paths are a name over a folder, so
+    /// nothing here needs a scroll view of its own.
+    private func details(viewHistory: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let headline = health.headline {
-                trouble(headline)
+            program
+            if let notice = health.notice(for: item, record: record, time: Self.clock) {
+                noticeView(notice)
             }
-            facts
+            facts(viewHistory: viewHistory)
             if let note { Text(note).font(.explanation).foregroundStyle(.secondaryText) }
             launches
-            program
-            labelled("Property list", item.plistPath)
+            StartupHistorySection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item,
+                                  refreshID: refreshID, jobs: model.launchJobs)
+                .id("history")
+            if item.hasPlist {
+                StartupFilesSection(recorder: model.showsSensorFixture ? nil : model.recorder, item: item, refreshID: refreshID)
+            }
+            if item.hasFile { labelled(item.hasPlist ? "Property list" : "Login helper", item.plistPath) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -161,13 +207,17 @@ struct StartupItemDetail: View {
                         .font(.explanation)
                         .foregroundStyle(.secondaryText)
                 }
-            } else if item.publisher == .thirdParty, let restriction {
+            } else if let restriction, item.publisher == .thirdParty || item.source.isAppBundled || !item.hasFile {
                 Text(restriction).font(.explanation).foregroundStyle(.secondaryText)
             }
-            HStack {
-                Button("Reveal in Finder") { StartupActions.reveal(item) }
-                Button("Show plist") { StartupActions.openPlist(item) }
-                Spacer()
+            // Wrapping onto a second line in a narrow pane.
+            FlowRow(spacing: 8, lineSpacing: 8, spreads: false) {
+                if item.hasFile {
+                    Button("Reveal in Finder") { StartupActions.reveal(item) }
+                    Button("Copy Path") { StartupActions.copyPath(item) }
+                        .help("Copy the item's whole path")
+                }
+                if item.hasPlist { Button("Show plist") { StartupActions.openPlist(item) } }
             }
         }
         .padding(12)
@@ -176,7 +226,7 @@ struct StartupItemDetail: View {
 
     /// What launchd has done with the job, then what the property list says
     /// about it, which doesn't change as it runs.
-    private var facts: some View {
+    private func facts(viewHistory: @escaping () -> Void) -> some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
             if let disabledBy {
                 FactRow(label: "Disabled by", value: disabledBy)
@@ -188,7 +238,7 @@ struct StartupItemDetail: View {
                     VStack(alignment: .leading, spacing: 3) {
                         JobUsageNow(model: model, pid: pid)
                         Button("Show in Processes") { showProcess(pid) }
-                            .buttonStyle(.link)
+                            .linkButtonStyle()
                             .help("Select PID \(String(pid)) on the Processes page")
                     }
                 }
@@ -202,10 +252,20 @@ struct StartupItemDetail: View {
                 }
                 .font(.callout)
             }
-            FactRow(label: "Last exit", value: lastExit)
+            if let lastExit {
+                GridRow {
+                    Text("Last exit").foregroundStyle(.secondaryText)
+                    FlowRow(spacing: 8, lineSpacing: 3, spreads: false) {
+                        Text(lastExit).textSelection(.enabled)
+                        Button("View history", action: viewHistory).linkButtonStyle()
+                    }
+                }
+                .font(.callout)
+            }
             // A gap rather than a rule, which would read as another region.
             Color.clear.frame(height: 2).gridCellUnsizedAxes(.horizontal)
             FactRow(label: "Kind", value: item.scope.title)
+            FactRow(label: "Source", value: item.sourceDescription)
             FactRow(label: "Publisher", value: item.publisher.title)
             if let modified = item.modified {
                 FactRow(label: "Modified", value: modified.formatted(date: .abbreviated, time: .shortened))
@@ -216,7 +276,7 @@ struct StartupItemDetail: View {
     @ViewBuilder private var program: some View {
         if let path = item.program {
             labelled("Program", path)
-        } else if !item.isUnreadable {
+        } else if item.hasPlist, !item.isUnreadable {
             labelled("Program", "None: the property list names no program", isCode: false)
         }
         let arguments = item.arguments.first == item.program ? Array(item.arguments.dropFirst()) : item.arguments
@@ -235,7 +295,12 @@ struct StartupItemDetail: View {
     private var launches: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Launches").font(.callout).foregroundStyle(.secondaryText)
-            if item.isUnreadable {
+            if item.source == .loginItem {
+                Text(item.job == nil ? "Registered state unknown: launchd does not list this helper" : "At login, registered by its app")
+                    .font(.callout)
+            } else if !item.hasFile {
+                Text("Unknown: no configuration file was found").font(.callout)
+            } else if item.isUnreadable {
                 Text("Unknown: the property list can't be read").font(.callout)
             } else {
                 ForEach(item.triggers.details(for: item.scope), id: \.self) { line in
@@ -307,22 +372,25 @@ struct StartupItemDetail: View {
             .gridColumnAlignment(.leading)
     }
 
-    /// What's wrong, in a sentence or two, first in the details.
-    private func trouble(_ headline: String) -> some View {
-        Label {
+    /// What the status line can't say, in a sentence or two: what a known
+    /// exit code or a crash means, in a quiet panel, since the status line
+    /// already carries the warning; or, in a warning panel, a failure the
+    /// status line doesn't show (the job runs again) or restarts seen.
+    private func noticeView(_ notice: LaunchJobNotice) -> some View {
+        let explainsStatus = health.tellsLastExit && item.pid == nil
+        let tint = explainsStatus ? Color.secondary : LaunchJobHealth.tint
+        return Label {
             VStack(alignment: .leading, spacing: 3) {
-                Text(headline).font(.callout.weight(.semibold))
-                if let explanation = health.explanation(for: item, record: record, time: Self.clock) {
-                    Text(explanation).font(.explanation)
-                }
+                Text(notice.headline).font(.callout.weight(.semibold))
+                Text(notice.text).font(.explanation)
             }
             .textSelection(.enabled)
         } icon: {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(LaunchJobHealth.tint)
+            Image(systemName: explainsStatus ? "info.circle.fill" : "exclamationmark.triangle.fill").foregroundStyle(tint)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LaunchJobHealth.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: Text
@@ -335,15 +403,6 @@ struct StartupItemDetail: View {
     private static let restartsHelp = "New processes seen for this job since OpenTaskManager first read launchd's list. "
         + "It looks when the Startup page opens, on Refresh, and every \(Int(LaunchJobStore.readInterval.components.seconds)) "
         + "seconds while the page is on screen, so a job that restarts faster counts once between looks."
-
-    private var stateHelp: String {
-        switch item.state {
-        case let .running(pid): "launchd started it, and its process (PID \(pid)) is running now."
-        case .loaded: "launchd has loaded it and starts it whenever something launches it (see Launches). Nothing is running now."
-        case .disabled: "Disabled: launchd won't start it until it's enabled again."
-        case .notLoaded: "launchd hasn't loaded this property list, so nothing starts it."
-        }
-    }
 
     private var runsHelp: String {
         let since = item.scope == .daemon ? "the Mac started up" : "you logged in"
@@ -367,7 +426,9 @@ struct StartupItemDetail: View {
         }
     }
 
-    private var lastExit: String {
+    /// The last exit stays beside View history even when the header names
+    /// it, with any reason launchd adds.
+    private var lastExit: String? {
         let reason = service?.lastExitReason.map(LaunchServiceInfo.describe(exitReason:))
         if let exit = item.job?.lastExit { return [exit.description, reason].compactMap(\.self).joined(separator: " · ") }
         return item.job == nil ? "—" : "Hasn't exited"
@@ -391,12 +452,12 @@ struct StartupItemDetail: View {
         return nil
     }
 
-    /// A path keeps to one line, cut in the middle, with the whole of it in
-    /// a tooltip and a copy button.
+    /// A path shows its name over its folder, which wraps, with the whole of
+    /// it in a tooltip and a copy button.
     private func labelled(_ label: String, _ value: String, isCode: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.callout).foregroundStyle(.secondaryText)
-            CopyableText(value: value, monospaced: isCode, truncatesMiddle: isCode).font(.callout)
+            CopyableText(value: value, monospaced: isCode, splitsPath: isCode).font(.callout)
         }
     }
 }

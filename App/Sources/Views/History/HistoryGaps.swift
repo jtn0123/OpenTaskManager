@@ -24,6 +24,11 @@ enum HistoryGapStyle {
         gap.duration < 3_600 ? Format.timeSpan(gap.duration) : Format.roughDuration(gap.duration)
     }
 
+    /// The full and folded rails use the same times and possible causes.
+    static func help(_ gap: HistoryGap) -> String {
+        HistoryGapLabels.help(span: HistorySessionStyle.span(gap.start, gap.end), duration: duration(gap))
+    }
+
     /// "10:12:06 – 10:14:30 AM · 2 min 24 s".
     static func describe(_ gap: HistoryGap) -> String {
         HistorySessionStyle.span(gap.start, gap.end) + " · " + duration(gap)
@@ -46,6 +51,9 @@ struct HistoryGapMarks {
     let borders: [Int]
     /// The seconds a gap is widened to under the pointer: about 8 points.
     let target: TimeInterval
+    /// The seconds a run of readings must span to be filled under: about 8
+    /// points, less of which reads as a bar (`HistoryPoint.unfilled`).
+    let narrowestFill: TimeInterval
 
     init(gaps: [HistoryGap], points: [HistoryPoint], bucket: TimeInterval, domain: ClosedRange<Date>, plotWidth: CGFloat) {
         let perPoint = domain.upperBound.timeIntervalSince(domain.lowerBound) / Double(max(plotWidth, 1))
@@ -54,6 +62,7 @@ struct HistoryGapMarks {
         shades = HistoryGap.shading(drawn, fade: 6 * perPoint, within: domain)
         borders = HistoryGap.borders(of: gaps, in: points, bucket: bucket)
         target = 8 * perPoint
+        narrowestFill = 8 * perPoint
     }
 
     /// The gap whose empty stretch is at `time`, as the pointer finds it.
