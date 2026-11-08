@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # CI's actions are the only third-party dependency today. Packages/OTMKit's
+  # Package.swift declares no external packages, so there is nothing for the
+  # "swift" ecosystem to watch yet; add an entry for /Packages/OTMKit when it
+  # gains one.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
