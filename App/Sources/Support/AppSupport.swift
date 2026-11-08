@@ -51,28 +51,31 @@ enum IconCache {
 /// figure, drawn as a template so it follows the menu bar's appearance.
 @MainActor
 enum MenuBarIcon {
-    private static let bars = 14
+    private static let bars = MenuBarDrawing.bars
     private static let barWidth: CGFloat = 2
     private static let gap: CGFloat = 1
     private static let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+    private static var lastDrawing: MenuBarDrawing?
+    private static var lastImage: NSImage?
 
-    static func image(history: [Double], usage: Double) -> NSImage {
+    static func image(_ drawing: MenuBarDrawing) -> NSImage {
+        if lastDrawing == drawing, let lastImage { return lastImage }
         let height: CGFloat = 16
+        let heights = drawing.heights.map { CGFloat($0) }
+        let label = drawing.text
         let graphWidth = CGFloat(bars) * (barWidth + gap) - gap
-        let text = Format.percent(usage) as NSString
+        let text = label as NSString
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         // Reserve room for "99%" so the item doesn't jiggle as the number changes.
         let textWidth = ceil(max(text.size(withAttributes: attributes).width, ("99%" as NSString).size(withAttributes: attributes).width))
         let size = NSSize(width: graphWidth + 4 + textWidth, height: height)
-        let values = Array(history.suffix(bars))
 
         let image = NSImage(size: size, flipped: false) { _ in
             NSColor.black.withAlphaComponent(0.3).setFill()
             NSRect(x: 0, y: 1, width: graphWidth, height: 1).fill()
             NSColor.black.setFill()
-            for (index, value) in values.enumerated() {
-                let x = CGFloat(bars - values.count + index) * (barWidth + gap)
-                let barHeight = max(1, CGFloat(min(max(value, 0), 1)) * (height - 2))
+            for (index, barHeight) in heights.enumerated() {
+                let x = CGFloat(bars - heights.count + index) * (barWidth + gap)
                 NSBezierPath(roundedRect: NSRect(x: x, y: 1, width: barWidth, height: barHeight), xRadius: 0.5, yRadius: 0.5).fill()
             }
             let textSize = text.size(withAttributes: attributes)
@@ -80,6 +83,8 @@ enum MenuBarIcon {
             return true
         }
         image.isTemplate = true
+        lastDrawing = drawing
+        lastImage = image
         return image
     }
 }
@@ -93,8 +98,12 @@ enum WindowOpener {
         NSApp.activate(ignoringOtherApps: true)
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
             window.makeKeyAndOrderFront(nil)
-        } else {
-            openMainWindow?()
+        } else if let openMainWindow {
+            openMainWindow()
+        } else if let menu = NSApp.windowsMenu, let index = menu.items.firstIndex(where: { $0.title == "OpenTaskManager" }) {
+            // Neither the window nor the menu bar item has shown this run, so
+            // SwiftUI hasn't handed over its opener; the Window menu still lists it.
+            menu.performActionForItem(at: index)
         }
     }
 }

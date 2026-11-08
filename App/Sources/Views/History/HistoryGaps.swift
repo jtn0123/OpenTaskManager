@@ -46,6 +46,9 @@ struct HistoryGapMarks {
     let borders: [Int]
     /// The seconds a gap is widened to under the pointer: about 8 points.
     let target: TimeInterval
+    /// The seconds a run of readings must span to be filled under: about 8
+    /// points, less of which reads as a bar (`HistoryPoint.unfilled`).
+    let narrowestFill: TimeInterval
 
     init(gaps: [HistoryGap], points: [HistoryPoint], bucket: TimeInterval, domain: ClosedRange<Date>, plotWidth: CGFloat) {
         let perPoint = domain.upperBound.timeIntervalSince(domain.lowerBound) / Double(max(plotWidth, 1))
@@ -54,6 +57,7 @@ struct HistoryGapMarks {
         shades = HistoryGap.shading(drawn, fade: 6 * perPoint, within: domain)
         borders = HistoryGap.borders(of: gaps, in: points, bucket: bucket)
         target = 8 * perPoint
+        narrowestFill = 8 * perPoint
     }
 
     /// The gap whose empty stretch is at `time`, as the pointer finds it.

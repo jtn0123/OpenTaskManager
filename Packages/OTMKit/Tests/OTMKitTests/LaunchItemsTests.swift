@@ -336,23 +336,27 @@ struct LaunchctlTests {
 
     @Test func saysWhetherALoadedJobIsRunning() {
         let agent = item("<key>Label</key><string>com.example.otm-demo</string>", scope: .userAgent)
-        #expect(agent.statusSummary == "Not loaded")
-        #expect(agent.stateDetail == nil)
+        let status = { (item: LaunchItem) in LaunchItemStatus(item: item, health: .healthy) }
+        #expect(status(agent).summary == "Not loaded")
+        #expect(status(agent).registration.title == "Not loaded")
 
         var idle = agent
         idle.job = LaunchJobStatus(label: "com.example.otm-demo", pid: nil, lastExit: .code(0))
-        #expect(idle.statusSummary == "Loaded · Not running")
+        #expect(status(idle).summary == "Not running")
+        #expect(status(idle).registration.title == "Loaded")
 
         var running = agent
         running.job = LaunchJobStatus(label: "com.example.otm-demo", pid: 12345, lastExit: nil)
         // The PID isn't grouped like a quantity.
-        #expect(running.statusSummary == "Running · PID 12345")
+        #expect(status(running).summary == "Running · PID 12345")
 
         var disabled = agent
         disabled.disabledOverride = true
-        #expect(disabled.statusSummary == "Disabled · Not loaded")
+        #expect(status(disabled).summary == "Disabled")
+        #expect(status(disabled).registration.title == "Not loaded")
         disabled.job = idle.job
-        #expect(disabled.statusSummary == "Disabled · Not running")
+        #expect(status(disabled).summary == "Disabled")
+        #expect(status(disabled).registration.title == "Loaded")
     }
 
     @Test func statesSortRunningFirst() {

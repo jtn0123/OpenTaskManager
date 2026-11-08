@@ -67,6 +67,74 @@ struct FigureCaveatFootnote: View {
     }
 }
 
+// MARK: - Saved runs on a resource's card
+
+/// "Saved runs (7)" under a benchmark or speed-test card's latest figures on
+/// a resource's detail. The runs fold away, since the Benchmarks workspace
+/// keeps them too, with their trends; Compare in Benchmarks opens it with the
+/// newest run and the latest earlier one it can be compared with ticked, at
+/// their comparison. Whether the runs show is remembered per test. It
+/// changes only with the runs, never with a run's progress or per tick.
+struct SavedRunsDisclosure: View, Equatable {
+    let kind: BenchmarkKind
+    /// Newest first, all on one Mac, volume or interface.
+    let runs: [BenchmarkRun]
+    /// Where they ran, for the tooltips: "on this Mac", "on Macintosh HD".
+    let place: String
+    @AppStorage private var isExpanded: Bool
+
+    init(kind: BenchmarkKind, runs: [BenchmarkRun], place: String) {
+        self.kind = kind
+        self.runs = runs
+        self.place = place
+        _isExpanded = AppStorage(wrappedValue: false, "benchmarkCardShowsRuns.\(kind.rawValue)")
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.kind == rhs.kind && lhs.runs == rhs.runs && lhs.place == rhs.place
+    }
+
+    var body: some View {
+        let pair = BenchmarkComparison.latestPair(runs)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Button { isExpanded.toggle() } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .frame(width: 10)
+                            .foregroundStyle(.secondaryText)
+                        Text("Saved runs").fontWeight(.semibold)
+                        Text("(\(runs.count))").foregroundStyle(.secondaryText).monospacedDigit()
+                    }
+                    .font(.callout)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Hide the saved runs" : "Show the \(runs.count) runs saved \(place)")
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                Spacer(minLength: 8)
+                Button("Compare in Benchmarks") { BenchmarkWorkspace.shared.compareInWorkspace(runs) }
+                    .buttonStyle(.link)
+                    .font(.explanation)
+                    .lineLimit(1)
+                    .help(pair.map { "Open the Benchmarks workspace with the runs of \(BenchmarkLook.span($0.earlier.date, $0.later.date)) "
+                        + "ticked, at their comparison and every run's trend" }
+                        ?? "Open the Benchmarks workspace at this test's trends: no earlier run \(place) can be compared with the newest")
+            }
+            if isExpanded {
+                RunsTable(kind: kind, runs: runs, picking: false, showsTarget: false)
+                    .padding(.leading, 14)
+                if let caveat = runs.lazy.flatMap(\.measurements).compactMap(\.caveat).first {
+                    FigureCaveatFootnote(caveat: caveat)
+                        .padding(.leading, 14)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Scrolling the workspace
 
 /// What the Benchmarks workspace scrolls to: a test's section, or its comparison.

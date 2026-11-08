@@ -17,7 +17,7 @@ APP_DEBUG := $(DERIVED)/Build/Products/Debug/OpenTaskManager.app
 APP_REL   := $(DERIVED)/Build/Products/Release/OpenTaskManager.app
 KIT       := Packages/OTMKit
 
-.PHONY: help generate build release run test cli install-cli icon lint clean
+.PHONY: help generate build release run test coverage cli install-cli icon lint clean
 
 help:
 	@echo "make generate     Generate $(PROJECT) from project.yml (needs xcodegen)"
@@ -25,6 +25,7 @@ help:
 	@echo "make run          Build and launch the app"
 	@echo "make release      Release build of the app"
 	@echo "make test         Run the OTMKit test suite"
+	@echo "make coverage     Run OTMKit tests and report source line coverage"
 	@echo "make cli          Build the otm command-line tool (release)"
 	@echo "make install-cli  Copy otm to /usr/local/bin"
 	@echo "make icon         Re-render the app icon"
@@ -46,6 +47,9 @@ run: build
 
 test:
 	swift test --package-path $(KIT)
+
+coverage:
+	bash scripts/coverage.sh
 
 cli:
 	swift build --package-path $(KIT) -c release --product otm

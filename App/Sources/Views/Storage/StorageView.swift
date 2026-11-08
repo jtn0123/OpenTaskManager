@@ -338,7 +338,10 @@ private struct StorageResultsView: View {
                 }
             }
             .frame(minHeight: 200)
+            // Asked first, after the treemap's minimum: unfolded, the
+            // reconciliation takes what it needs and scrolls only past that.
             StorageFooter(store: store, usage: usage)
+                .layoutPriority(1)
         }
         .padding(16)
         // A new scan's items are numbered afresh.
@@ -617,11 +620,8 @@ private struct EmptyFolder: View {
     }
 }
 
-/// The unreadable-folder warning and why the totals can differ from the volume's.
+/// The unreadable-folder warning, and how the scan relates to its volume.
 private struct StorageFooter: View {
-    private static let explanation = "Sizes are space on disk. They won't match the space the volume reports used: "
-        + "APFS clones and snapshots, purgeable files and unreadable folders count differently."
-
     let store: StorageStore
     let usage: DiskUsage
 
@@ -643,12 +643,7 @@ private struct StorageFooter: View {
                 }
                 .help(usage.unreadablePaths.prefix(5).map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: "\n"))
             }
-            // Two lines at 820 points; the limit only bounds what a squeezed
-            // window would ask of the treemap above.
-            Text(Self.explanation)
-                .foregroundStyle(.secondaryText)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+            StorageReconcilePanel(store: store)
         }
         .font(.explanation)
     }

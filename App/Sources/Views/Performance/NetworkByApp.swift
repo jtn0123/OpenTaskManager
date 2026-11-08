@@ -7,6 +7,8 @@ import SwiftUI
 /// redraws when nettop is read every 3 s, not on every tick.
 struct NetworkAppsSection: View {
     @Environment(AppModel.self) private var model
+    /// The page's window, in the main sampler's samples (`GraphFit`).
+    @Environment(\.graphWindow) private var window
     @AppStorage("networkByProcess") private var byProcess = false
 
     private static let bands = 5
@@ -78,11 +80,12 @@ struct NetworkAppsSection: View {
     private func breakdown(_ history: NetworkActivityHistory<Int32>, store: NetworkActivityStore) -> some View {
         let ranking = history.ranking(bands: Self.bands, rows: Self.rows)
         let other = history.remainder(excluding: ranking.bands)
-        let series = ranking.bands.enumerated().map { GraphSeries(values: history.totals[$1] ?? [], color: Theme.series($0)) }
+        let colors = Theme.appColors(for: ranking.bands.map(Int64.init), in: byProcess ? "network processes" : "network")
+        let series = ranking.bands.enumerated().map { GraphSeries(values: history.totals[$1] ?? [], color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
         let peak = ranking.rows.compactMap { history.latest[$0]?.total }.max() ?? 0
         // The throughput graph's window, in the store's readings.
-        let span = NetworkActivityStore.graphSpan(interval: model.updateSpeed.rawValue)
+        let span = NetworkActivityStore.graphSpan(interval: model.updateSpeed.rawValue, samples: window)
         return VStack(alignment: .leading, spacing: 10) {
             VStack(spacing: 3) {
                 GraphView(series: series, capacity: span, glows: true, stacked: true,
@@ -90,7 +93,8 @@ struct NetworkAppsSection: View {
                     .chartFrame(height: DetailGraph.secondary, tint: Theme.network)
                     // Scroll across the store's interval, not the main sampler's.
                     .environment(\.sampleInterval, NetworkActivityStore.refreshSeconds)
-                TimeAxis(samples: span, interval: NetworkActivityStore.refreshSeconds)
+                // Named as the page's window: the store's readings round a fitted one to 3 s.
+                TimeAxis()
             }
             VStack(spacing: 4) {
                 columnTitles
@@ -99,7 +103,7 @@ struct NetworkAppsSection: View {
                     let identity = store.identity(pid)
                     let band = ranking.bands.firstIndex(of: pid)
                     NetworkUsageRow(
-                        swatch: band.map { Theme.series($0) } ?? Theme.other, icon: identity.icon, name: identity.name,
+                        swatch: band.map { colors[$0] } ?? Theme.other, icon: identity.icon, name: identity.name,
                         badge: !byProcess && usage.processes > 1 ? "(\(usage.processes))" : nil,
                         usage: usage, fraction: peak > 0 ? usage.total / peak : 0
                     )
@@ -119,7 +123,7 @@ struct NetworkAppsSection: View {
             Text("Receive").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
             Text("Send").frame(width: NetworkUsageRow.rateColumnWidth, alignment: .trailing)
         }
-        .font(.tableText)
+        .font(.metadata)
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 6)
     }
@@ -146,11 +150,16 @@ struct TopNetworkCard: View {
         store.hasMeasured && store.apps.hasMoved(inLast: holdReadings)
     }
 
+    /// Whether the rows are too narrow for a name beside both rate columns
+    /// (a third of a 1180-point Overview); then each shows its busier direction.
+    @State private var showsOneRate = false
+
     var body: some View {
         let store = model.networkActivity
         let history = store.apps
         let top = history.ranking(bands: 0, rows: 6, holding: Self.holdReadings).rows
         let peak = top.compactMap { history.latest[$0]?.total }.max() ?? 0
+        let widthForBothRates = NetworkUsageRow.widthForBothRates
         Card {
             HStack(alignment: .firstTextBaseline) {
                 Label("Top Network", systemImage: "network")
@@ -158,7 +167,7 @@ struct TopNetworkCard: View {
                     .foregroundStyle(Theme.network)
                 Spacer(minLength: 8)
                 Text("every \(Format.timeSpan(NetworkActivityStore.refreshSeconds))")
-                    .font(.subheadline)
+                    .font(.metadata)
                     .foregroundStyle(.secondaryText)
                     .help("Read with nettop every \(Format.timeSpan(NetworkActivityStore.refreshSeconds)) while this page is open")
             }
@@ -176,10 +185,11 @@ struct TopNetworkCard: View {
                     let usage = history.latest[pid] ?? NetworkUsage(received: 0, sent: 0, processes: 0)
                     let identity = store.identity(pid)
                     NetworkUsageRow(icon: identity.icon, name: identity.name, usage: usage,
-                                    fraction: peak > 0 ? usage.total / peak : 0)
+                                    fraction: peak > 0 ? usage.total / peak : 0, showsOneRate: showsOneRate)
                         .help("\(identity.name): receiving \(Format.bitsPerSecond(usage.received)), sending \(Format.bitsPerSecond(usage.sent))")
                 }
             }
+            .onGeometryChange(for: Bool.self) { $0.size.width < widthForBothRates } action: { showsOneRate = $0 }
         }
         .task { await store.track(model: model) }
     }
@@ -191,7 +201,7 @@ struct NetworkUsageRow: View {
     /// Wide enough for the widest rate ("99.9 Mbps") and its arrow, so the
     /// columns line up from row to row.
     static let rateColumnWidth: CGFloat = {
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.preferredFont(forTextStyle: .body).pointSize, weight: .regular)
         return ceil(("99.9 Mbps" as NSString).size(withAttributes: [.font: font]).width) + 14
     }()
 
@@ -201,6 +211,12 @@ struct NetworkUsageRow: View {
     var badge: String?
     var usage: NetworkUsage
     var fraction: Double
+    /// Shows only the busier direction, for a list too narrow for both columns.
+    var showsOneRate = false
+
+    /// The narrowest row that still leaves a name about 110 points beside
+    /// both rate columns: the icon, four gaps, the spacer's minimum and the padding.
+    static let widthForBothRates: CGFloat = 110 + 2 * rateColumnWidth + 16 + 5 * 8 + 12
 
     var body: some View {
         HStack(spacing: 8) {
@@ -213,10 +229,14 @@ struct NetworkUsageRow: View {
                 Text(badge).foregroundStyle(.secondaryText).fixedSize()
             }
             Spacer(minLength: 8)
-            rate(usage.received, symbol: "arrow.down", color: Theme.network)
-            rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
+            if !showsOneRate || usage.received >= usage.sent {
+                rate(usage.received, symbol: "arrow.down", color: Theme.network)
+            }
+            if !showsOneRate || usage.sent > usage.received {
+                rate(usage.sent, symbol: "arrow.up", color: Theme.networkSecondary)
+            }
         }
-        .font(.callout)
+        .font(.tableText)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
         .background(alignment: .leading) {

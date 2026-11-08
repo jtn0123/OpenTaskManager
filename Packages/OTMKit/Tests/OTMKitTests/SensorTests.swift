@@ -34,11 +34,18 @@ struct SensorTests {
         #expect(!sample.isEmpty)
     }
 
-    @Test func fanFractionSpansItsRange() {
-        let fan = SensorSample.Fan(id: 0, rpm: 3350, minimumRPM: 1350, maximumRPM: 5350)
-        #expect(fan.fraction == 0.5)
+    @Test func fanShareIsOfItsMaximum() {
+        #expect(SensorSample.Fan(id: 0, rpm: 2675, minimumRPM: 1350, maximumRPM: 5350).shareOfMaximum == 0.5)
+        // At its minimum a fan is turning, so it doesn't read as 0%.
+        let slowest = SensorSample.Fan(id: 0, rpm: 1356, minimumRPM: 1350, maximumRPM: 5349)
+        #expect(Format.percent(slowest.shareOfMaximum ?? 0) == "25%")
+        #expect(!slowest.isStopped)
         #expect(SensorSample.Fan(id: 0, rpm: 0, minimumRPM: 1350, maximumRPM: 5350).isStopped)
-        #expect(SensorSample.Fan(id: 0, rpm: 0, minimumRPM: 1350, maximumRPM: 5350).fraction == 0)
-        #expect(SensorSample.Fan(id: 0, rpm: 2000, minimumRPM: nil, maximumRPM: 5350).fraction == nil)
+        #expect(SensorSample.Fan(id: 0, rpm: 0, minimumRPM: 1350, maximumRPM: 5350).shareOfMaximum == 0)
+        // Past its published maximum it reads as full.
+        #expect(SensorSample.Fan(id: 0, rpm: 6000, minimumRPM: 1350, maximumRPM: 5350).shareOfMaximum == 1)
+        // Without a maximum there's no scale; the minimum alone isn't one.
+        #expect(SensorSample.Fan(id: 0, rpm: 2000, minimumRPM: 1350, maximumRPM: nil).shareOfMaximum == nil)
+        #expect(SensorSample.Fan(id: 0, rpm: 2000, minimumRPM: nil, maximumRPM: 0).shareOfMaximum == nil)
     }
 }

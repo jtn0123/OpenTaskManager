@@ -72,7 +72,19 @@ public struct CPUSample: Sendable, Codable {
     public let system: Double
     /// Busy fraction per logical CPU, indexed by CPU number.
     public let coreUsage: [Double]
+    /// The part of each CPU's busy fraction spent in the kernel (system
+    /// time), indexed as `coreUsage`; empty where it wasn't read.
+    public let coreSystem: [Double]
     public let loadAverage: [Double]
+
+    public init(usage: Double, user: Double, system: Double, coreUsage: [Double], coreSystem: [Double] = [], loadAverage: [Double]) {
+        self.usage = usage
+        self.user = user
+        self.system = system
+        self.coreUsage = coreUsage
+        self.coreSystem = coreSystem
+        self.loadAverage = loadAverage
+    }
 
     public static let zero = CPUSample(usage: 0, user: 0, system: 0, coreUsage: [], loadAverage: [0, 0, 0])
 }
@@ -224,6 +236,17 @@ public enum ThermalState: String, Sendable, Codable {
         case .serious: self = .serious
         case .critical: self = .critical
         @unknown default: self = .nominal
+        }
+    }
+
+    /// The state as a level from 0 (nominal) to 1 (critical), in even steps,
+    /// for a graph or a level bar of how hard macOS is holding back.
+    public var level: Double {
+        switch self {
+        case .nominal: 0
+        case .fair: 1.0 / 3
+        case .serious: 2.0 / 3
+        case .critical: 1
         }
     }
 }

@@ -12,14 +12,14 @@ struct ConnectionTable: View {
     typealias Column = TableColumnContent<ConnectionRow, KeyPathComparator<ConnectionRow>>
 
     var rows: [ConnectionRow]
-    @Binding var selection: Connection.ID?
+    @Binding var selection: ObservedConnection.ID?
     @Binding var sortOrder: [KeyPathComparator<ConnectionRow>]
     /// Switched off in the Columns menu.
     var userHidden: Set<ConnectionColumn>
     /// On, but hidden while the table is too narrow for them.
     @Binding var hiddenToFit: Set<ConnectionColumn>
     /// A row to bring into view, scrolling no further than that takes.
-    @Binding var scrollTarget: Connection.ID?
+    @Binding var scrollTarget: ObservedConnection.ID?
     var showProcess: (Int32) -> Void
     /// Double-click: the details, over the table in a narrow window.
     var open: () -> Void
@@ -70,15 +70,18 @@ struct ConnectionTable: View {
             localColumn
             remoteColumn
             stateColumn
+            ageColumn
             scopeColumn
         }
-        .contextMenu(forSelectionType: Connection.ID.self) { ids in
+        .contextMenu(forSelectionType: ObservedConnection.ID.self) { ids in
             if let id = ids.first, let row = rows.first(where: { $0.id == id }) {
                 Button("Copy Local Endpoint") { ConnectionActions.copy(row.connection.local) }
                 Button("Copy Remote Endpoint") { row.connection.remote.map(ConnectionActions.copy) }
                     .disabled(row.connection.remote == nil)
                 Divider()
                 Button("Show Process") { showProcess(row.pid) }
+                    // A closed socket's process may have ended, and its PID gone to another.
+                    .disabled(!row.processRunning)
             }
         } primaryAction: { _ in
             open()
@@ -132,9 +135,19 @@ struct ConnectionTable: View {
 
     private var stateColumn: some Column {
         TableColumn("State", value: \.stateOrder) { row in
-            StateLabel(connection: row.connection)
+            StateLabel(row: row)
         }
         .sized(.state)
+    }
+
+    private var ageColumn: some Column {
+        TableColumn("Seen for", value: \.seenForOrder) { row in
+            Text(ObservedConnection.span(row.socket.seenFor))
+                .monospacedDigit()
+                .lineLimit(1)
+                .help(row.socket.seenSummary(time: ConnectionClock.time))
+        }
+        .sized(.age)
     }
 
     private var scopeColumn: some Column {
@@ -263,7 +276,7 @@ private final class ColumnSqueezeView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.fit() }
     }
 
-    /// The socket table: the first table with its seven columns in the
+    /// The socket table: the first table with all its columns in the
     /// closest enclosing view that has one.
     private func nearestTable() -> NSTableView? {
         var ancestor = superview
@@ -326,14 +339,82 @@ private struct ProtocolLabel: View {
 
 /// The state in its colour, which turns white with the row's text on a
 /// selected row, where green or blue over the accent colour is hard to read.
+/// A listener the page saw open a short while ago is tagged New (a dot,
+/// short of room); a closed socket says how long ago it went.
 private struct StateLabel: View {
     @Environment(\.backgroundProminence) private var prominence
-    var connection: Connection
+    var row: ConnectionRow
 
     var body: some View {
-        Text(connection.stateLabel)
+        if let ago = row.closedAgo {
+            ViewThatFits(in: .horizontal) {
+                // Gone while nothing watched, it may have closed long before
+                // the walk that noticed, so it doesn't say when.
+                if !closedUnwatched { Text("Closed \(Self.ago(ago))") }
+                Text("Closed")
+            }
             .lineLimit(1)
-            .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(connection.kind.tint))
+            .foregroundStyle(.secondaryText)
+            .help(closedHelp)
+        } else if row.isNewListener {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    state
+                    NewTag(prominent: prominence == .increased)
+                }
+                HStack(spacing: 4) {
+                    Circle().fill(prominence == .increased ? Color.primary : ConnectionTint.green).frame(width: 6, height: 6)
+                    state
+                }
+            }
+            .help(newHelp)
+        } else {
+            state
+        }
+    }
+
+    private var state: some View {
+        Text(row.connection.stateLabel)
+            .lineLimit(1)
+            .foregroundStyle(prominence == .increased ? AnyShapeStyle(.primary) : AnyShapeStyle(row.connection.kind.tint))
+    }
+
+    private var closedUnwatched: Bool { row.socket.timeline.last?.isAfterGap == true }
+
+    private var closedHelp: String {
+        let last = "\(row.connection.stateLabel) when last seen, at \(ConnectionClock.time(row.socket.lastSeen))"
+        let gap = closedUnwatched ? ", while the page wasn't watching" : ""
+        return row.socket.closedBy.map { "Closed: \(last), and gone by \(ConnectionClock.time($0))\(gap)" } ?? last
+    }
+
+    private var newHelp: String {
+        let since = row.socket.listeningSince.map { " at \(ConnectionClock.time($0))" } ?? ""
+        return "New: this page saw it start listening\(since). It's marked for "
+            + "\(Format.timeSpan(ConnectionWatch.newListenerWindow)) after that."
+    }
+
+    /// Seconds for the first minute, so the list's first minute doesn't all
+    /// read "just now"; the walks are 3 s apart, so 0 is the latest one.
+    private static func ago(_ seconds: TimeInterval) -> String {
+        if seconds < 3 { return "just now" }
+        return seconds < 60 ? "\(ObservedConnection.span(seconds)) ago" : Format.ago(seconds)
+    }
+}
+
+/// The tag on a listener the page saw open a short while ago: the state's
+/// green, white like the row's text on a selected row.
+private struct NewTag: View {
+    var prominent: Bool
+
+    var body: some View {
+        Text("New")
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(prominent ? AnyShapeStyle(.primary) : AnyShapeStyle(ConnectionTint.green))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background((prominent ? Color.white.opacity(0.25) : ConnectionTint.green.opacity(0.14)), in: Capsule())
+            .lineLimit(1)
+            .fixedSize()
     }
 }
 
@@ -358,6 +439,13 @@ struct ScopeLabel: View {
 }
 
 // MARK: - Styling
+
+/// Clock times on this page: when a walk saw a socket open, change or go.
+enum ConnectionClock {
+    static func time(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .standard)
+    }
+}
 
 /// The system colours, deepened in light mode (see `Theme.data`), where the
 /// plain ones are too pale to read as text on white.

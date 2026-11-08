@@ -48,6 +48,24 @@ struct ProcessTreeTests {
         #expect(Set(nodes[2].children.map(\.id)) == [1, 400])
     }
 
+    /// A helper's helper joins the app at the top of the chain; a cycle of
+    /// responsibility leaves each process heading its own group.
+    @Test func followsResponsibilityChainsAndSurvivesCycles() {
+        let chain = [
+            process(100, name: "App"),
+            process(110, responsible: 100, name: "helper"),
+            process(111, responsible: 110, name: "helper's helper"),
+            process(7, responsible: 8, name: "seven"),
+            process(8, responsible: 7, name: "eight"),
+        ]
+        let nodes = ProcessTreeBuilder.build(chain, mode: .grouped, appPIDs: [100], currentUID: Self.me)
+        #expect(nodes.map(\.section) == [.apps, .background])
+        #expect(nodes[0].children.map(\.id) == [100])
+        #expect(Set(nodes[0].children[0].children.map(\.id)) == [110, 111])
+        #expect(Set(nodes[1].children.map(\.id)) == [7, 8])
+        #expect(nodes[1].children.map(\.children.count) == [0, 0])
+    }
+
     @Test func omitsEmptySections() {
         let nodes = ProcessTreeBuilder.build([process(5, name: "solo")], mode: .grouped, appPIDs: [], currentUID: Self.me)
         #expect(nodes.map(\.section) == [.background])

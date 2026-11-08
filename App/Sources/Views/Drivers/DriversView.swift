@@ -24,8 +24,9 @@ enum DriversFilter: String, CaseIterable, Identifiable {
 }
 
 /// What's been added to macOS below the app level: system extensions (network
-/// filters and VPNs, DriverKit drivers, endpoint security) and the kernel
-/// extensions loaded into the kernel.
+/// filters and VPNs, DriverKit drivers, endpoint security), the kernel
+/// extensions loaded into the kernel, and the copies of either on disk that
+/// macOS hasn't registered or loaded (in /Library/Extensions and the apps).
 ///
 /// Like the Startup page, it reads once off the main actor when the page
 /// opens and again on Refresh. It never follows the sampling tick, and reads
@@ -61,7 +62,8 @@ struct DriversView: View {
         }
         .toolbar {
             ToolbarItem {
-                InventoryRefresh(readAt: scannedAt, isReading: isScanning, help: "Ask the kernel and systemextensionsctl again") {
+                InventoryRefresh(readAt: scannedAt, isReading: isScanning,
+                                 help: "Ask the kernel and systemextensionsctl again, and look for extensions on disk") {
                     Task { await rescan() }
                 }
             }
@@ -211,21 +213,29 @@ struct DriversView: View {
 private struct DriverSummaryCards: View {
     var scan: ExtensionScan
 
+    /// Five fit one row of the narrowest window (820 points, sidebar hidden).
     var body: some View {
         let summary = scan.summary
-        FillGrid(minimum: 150, spacing: 12) {
+        FillGrid(minimum: 140, spacing: 12) {
             DriverSummaryCard(title: "System extensions", value: summary.systemExtensions, symbol: "puzzlepiece.extension",
                               tint: Theme.gpu, detail: systemDetail,
                               explanation: "Network filters and VPNs, DriverKit drivers and security tools that apps installed "
                                   + "and macOS allowed. They run outside the kernel.")
             DriverSummaryCard(title: "Third-party kexts", value: summary.thirdPartyKernelExtensions, symbol: "shippingbox",
                               tint: Theme.memory,
-                              detail: summary.thirdPartyKernelExtensions == 0 ? "None loaded" : "Running inside the kernel",
-                              explanation: "Kernel extensions from developers other than Apple. They run inside the kernel "
-                                  + "with full access to the Mac.")
+                              detail: summary.thirdPartyKernelExtensions == 0 ? "None loaded" : "In the kernel now",
+                              explanation: "Kernel extensions from developers other than Apple, loaded now. They run inside the "
+                                  + "kernel with full access to the Mac.")
             DriverSummaryCard(title: "Loaded kexts", value: summary.loadedKernelExtensions, symbol: "cpu",
                               tint: Theme.cpu, detail: wiredDetail,
                               explanation: "Every kernel extension loaded now, Apple's included, and the memory their code keeps wired.")
+            // Neutral and never glowing: a copy that doesn't run isn't a problem.
+            DriverSummaryCard(title: "Not in use", value: summary.notInUse, symbol: "archivebox", tint: Theme.other,
+                              detail: notInUseDetail,
+                              explanation: "Extensions on disk that macOS hasn't registered or loaded, so they don't run: kexts "
+                                  + "in /Library/Extensions or an app, and system extensions an app carries. Often they're left "
+                                  + "from an old install or wait for hardware; that alone isn't a problem. Copies whose use "
+                                  + "couldn't be told are listed as Unknown and not counted.")
             DriverSummaryCard(title: "Needs attention", value: summary.needsAttention, symbol: "exclamationmark.triangle",
                               tint: summary.needsAttention > 0 ? .orange : Theme.disk,
                               glow: summary.needsAttention > 0 ? 0.35 : 0,
@@ -234,10 +244,24 @@ private struct DriverSummaryCards: View {
         }
     }
 
+    /// "2 kexts · 1 system", with any whose use is unknown, or "None on disk".
+    private var notInUseDetail: String {
+        let copies = scan.items.filter { $0.status == .notInUse }
+        let kexts = copies.filter { $0.category == .kernel }.count
+        let unknown = scan.summary.useUnknown
+        let parts = [
+            kexts > 0 ? "\(kexts) \(kexts == 1 ? "kext" : "kexts")" : nil,
+            copies.count > kexts ? "\(copies.count - kexts) system" : nil,
+            unknown > 0 ? "\(unknown) unknown" : nil,
+        ]
+        let text = parts.compactMap(\.self).joined(separator: " · ")
+        return text.isEmpty ? "None on disk" : text
+    }
+
     /// "1 network · 1 driver", or why there's no count.
     private var systemDetail: String {
         guard scan.readSystemExtensions else { return "Couldn't be read" }
-        let system = scan.items.filter(\.category.isSystemExtension)
+        let system = scan.items.filter { $0.systemExtension != nil }
         guard !system.isEmpty else { return "None installed" }
         let counts: [(ExtensionCategory, String)] = [
             (.network, "network"), (.driver, "driver"), (.endpointSecurity, "security"), (.otherSystem, "other"),
@@ -395,7 +419,12 @@ private struct DriverTable: View {
                     Button("Open Login Items & Extensions Settings") { DriverActions.openSettings() }
                 }
                 Divider()
-                Button("Copy Bundle ID") { DriverActions.copy(item.bundleID) }
+                if !item.bundleID.isEmpty {
+                    Button("Copy Bundle ID") { DriverActions.copy(item.bundleID) }
+                }
+                if let path = item.diskPath {
+                    Button("Copy Path") { DriverActions.copy(path) }
+                }
             }
         } primaryAction: { _ in
             open()
@@ -408,8 +437,10 @@ private struct DriverTable: View {
                 ExtensionIcon(item: item, size: 16)
                 Text(item.name).lineLimit(1)
             }
-            // The whole name, for when the column cuts it short.
-            .help("\(item.name)\n\(item.bundleID)")
+            // The whole name, for when the column cuts it short, and where a
+            // copy on disk is.
+            .help([item.name, item.bundleID, item.status.isDiskCopy ? item.diskPath ?? "" : ""]
+                .filter { !$0.isEmpty }.joined(separator: "\n"))
         }
         .width(min: Minimum.name, ideal: 260)
     }
@@ -421,11 +452,14 @@ private struct DriverTable: View {
         .width(min: Minimum.kind, ideal: 120, max: 140)
     }
 
+    /// Wide enough for "Installed, not in use", which says "Not in use"
+    /// when the column is narrower.
     private var statusColumn: some Column {
         TableColumn("Status", value: \.status) { item in
-            ExtensionStatusLabel(status: item.status).help(item.status.title)
+            ExtensionStatusLabel(status: item.status, shortensToFit: true)
+                .help(item.status.isDiskCopy ? "\(item.status.title). \(item.statusExplanation)" : item.status.title)
         }
-        .width(min: Minimum.status, ideal: 120, max: 160)
+        .width(min: Minimum.status, ideal: 150, max: 175)
     }
 
     private var publisherColumn: some Column {
@@ -447,14 +481,14 @@ private struct DriverTable: View {
     }
 }
 
-/// The installing app's icon for a system extension, or a symbol for its kind.
+/// The icon of the app an extension came with, or a symbol for its kind.
 struct ExtensionIcon: View {
     var item: ExtensionItem
     var size: CGFloat
 
     var body: some View {
         // An extension can outlive its app until the next restart.
-        if let app = item.systemExtension?.appPath, FileManager.default.fileExists(atPath: app) {
+        if let app = item.appPath, FileManager.default.fileExists(atPath: app) {
             Image(nsImage: IconCache.icon(forBundle: app))
                 .resizable()
                 .frame(width: size, height: size)
@@ -467,14 +501,37 @@ struct ExtensionIcon: View {
     }
 }
 
-/// A coloured dot and the status, like the Startup page's state label.
+/// A coloured dot and the status, like the Startup page's state label. A
+/// copy on disk that macOS doesn't report gets a ring: nothing is running.
 struct ExtensionStatusLabel: View {
     var status: ExtensionStatus
+    /// In a table cell: the short title where the whole one doesn't fit.
+    var shortensToFit = false
 
     var body: some View {
+        if shortensToFit, status.shortTitle != status.title {
+            // The Drivers page never follows the tick, so this is measured
+            // only when the table lays out.
+            ViewThatFits(in: .horizontal) {
+                label(status.title)
+                label(status.shortTitle)
+            }
+        } else {
+            label(status.title)
+        }
+    }
+
+    private func label(_ title: String) -> some View {
         HStack(spacing: 6) {
-            Circle().fill(status.color).frame(width: 7, height: 7)
-            Text(status.title)
+            Group {
+                if status.isDiskCopy {
+                    Circle().strokeBorder(status.color, lineWidth: 1.5)
+                } else {
+                    Circle().fill(status.color)
+                }
+            }
+            .frame(width: 7, height: 7)
+            Text(title)
                 .fontWeight(status.needsAttention ? .semibold : .regular)
         }
         .lineLimit(1)
@@ -490,6 +547,8 @@ extension ExtensionStatus {
         case .disabled: Theme.other
         case .uninstalling: Theme.swap
         case .other: Theme.power
+        // Grey, as it isn't running and isn't a problem.
+        case .notInUse, .useUnknown: Theme.other
         }
     }
 }
@@ -557,11 +616,10 @@ private struct DriversStatusBar: View {
 enum DriverActions {
     static let extensionsSettings = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
 
-    /// The installing app for a system extension, or the kext's bundle,
-    /// when it's still on disk.
+    /// The extension's copy on disk (inside its app, for one an app carries),
+    /// else the installing app of a system extension, while it's still there.
     static func revealablePath(_ item: ExtensionItem) -> String? {
-        let path = item.systemExtension?.appPath ?? item.kernelExtension?.path
-        return path.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
+        [item.diskPath, item.appPath].lazy.compactMap(\.self).first { FileManager.default.fileExists(atPath: $0) }
     }
 
     static func reveal(_ path: String) {

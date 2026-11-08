@@ -24,6 +24,8 @@ final class HistoryRecordingStore {
     private(set) var replay: HistoryReplayStatus?
 
     @ObservationIgnored private var launchSpeed: Double?
+    @ObservationIgnored private var launchComparison: HistoryCompareRequest?
+    @ObservationIgnored private var launchComparisonIsForFile = false
     @ObservationIgnored private var handledLaunchArguments = false
 
     /// The sessions as the page last read them; only a change redraws what shows them.
@@ -52,7 +54,7 @@ final class HistoryRecordingStore {
 
     /// Reads a recording file off the main actor and shows it on the History page.
     func open(_ url: URL) {
-        UserDefaults.standard.set(Page.history.rawValue, forKey: "page")
+        PageSelection.shared.page = .history
         Task {
             do {
                 opened = try await Task.detached(priority: .userInitiated) { try OpenedRecording.read(url) }.value
@@ -112,13 +114,18 @@ final class HistoryRecordingStore {
 
     /// `-openRecording <path>` opens a recording file at launch, and
     /// `-openPlayback 1|10|60` plays it back at that speed once it shows.
+    /// `-openHistoryCompare 15,15[,45,15]` opens Compare with A (and B)
+    /// picked, in minutes before the end of the live history or the file
+    /// (`HistoryCompareRequest`).
     func handleLaunchArguments() {
         guard !handledLaunchArguments else { return }
         handledLaunchArguments = true
         if let speed = LaunchArgument.string("openPlayback").flatMap(Double.init), HistoryPlayback.speeds.contains(speed) {
             launchSpeed = speed
         }
+        launchComparison = LaunchArgument.string("openHistoryCompare").flatMap(HistoryCompareRequest.init)
         if let path = LaunchArgument.string("openRecording") {
+            launchComparisonIsForFile = true
             open(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
         }
     }
@@ -127,6 +134,15 @@ final class HistoryRecordingStore {
     func takeLaunchSpeed() -> Double? {
         defer { launchSpeed = nil }
         return launchSpeed
+    }
+
+    /// The comparison asked for at launch, once: for the file opened at
+    /// launch when there is one, so the live history shown meanwhile
+    /// doesn't take it.
+    func takeLaunchComparison(showingFile: Bool) -> HistoryCompareRequest? {
+        guard showingFile == launchComparisonIsForFile else { return nil }
+        defer { launchComparison = nil }
+        return launchComparison
     }
 
     // MARK: - Helpers
@@ -164,7 +180,11 @@ struct OpenedRecording: Identifiable, Sendable {
     let generator: String
     let exported: Date
     let records: Int
+    /// Seconds each record covers: ten, or one for a spike capture.
+    let recordSeconds: TimeInterval
     let reported: [RecordingFigure: Bool]
+    /// What a spike capture is about; nil for other recordings.
+    let incident: SpikeIncident?
     let recorder: FlightRecorder
 
     /// The session's note, else the file's name.
@@ -184,8 +204,8 @@ struct OpenedRecording: Identifiable, Sendable {
     static func read(_ url: URL) throws -> OpenedRecording {
         let file = try RecordingFile.decode(Data(contentsOf: url))
         return OpenedRecording(url: url, session: file.session, machine: file.machine, generator: file.generator,
-                               exported: file.exported, records: file.records.count, reported: file.reported,
-                               recorder: try FlightRecorder(replaying: file, from: url))
+                               exported: file.exported, records: file.records.count, recordSeconds: file.recordSeconds,
+                               reported: file.reported, incident: file.incident, recorder: try FlightRecorder(replaying: file, from: url))
     }
 }
 
@@ -197,13 +217,14 @@ struct HistoryRecordingBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "record.circle")
+            Image(systemName: recording.incident == nil ? "record.circle" : "bolt.circle")
                 .font(.title2)
                 .foregroundStyle(HistorySessionStyle.tint)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Recording: \(recording.title)")
+                Text(recording.incident == nil ? "Recording: \(recording.title)" : "Spike: \(recording.title)")
                     .font(.headline)
                     .lineLimit(1)
+                if let incident = recording.incident { HistorySpikeIncidentLine(incident: incident) }
                 Text(details)
                     .font(.callout)
                     .foregroundStyle(.secondaryText)
@@ -226,11 +247,13 @@ struct HistoryRecordingBanner: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    /// "Wed, Oct 7 10:02 – 10:17 AM · 15 min · 91 records · read-only".
+    /// "Wed, Oct 7 10:02 – 10:17 AM · 15 min · 91 records · read-only",
+    /// "… · 180 records of 1 s · …" when they aren't the usual ten seconds.
     private var details: String {
         let session = recording.session
+        let length = recording.recordSeconds == FlightRecorder.span ? "" : " of \(Format.timeSpan(recording.recordSeconds))"
         return [HistorySessionStyle.span(session.start, session.end, dated: true), Format.roughDuration(session.duration),
-                "\(recording.records) records", "read-only"].joined(separator: " · ")
+                "\(recording.records) records\(length)", "read-only"].joined(separator: " · ")
     }
 
     /// "Recorded on MacBook Pro · Apple M3 Pro · 36 GB · macOS 27.2 · GPU not reported".

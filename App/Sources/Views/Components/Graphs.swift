@@ -2,63 +2,68 @@ import OTMKit
 import SwiftUI
 
 /// The data colours. Each is a bright tone that glows on dark cards and, in
-/// light mode, a deeper shade of the same hue for lines and text (see
-/// `data(_:)`). Fills and washes take `fillShade`, which stays pastel.
+/// light mode, a deeper shade of the same hue for lines and text. Fills and
+/// washes take `fillShade`, which stays pastel. The graph colours come from
+/// the palette picked in Settings (`GraphColors`, presets in OTMKit's
+/// `GraphPalette`): reading one in a view's body observes it, so the view
+/// redraws when the palette changes. `data(_:)` makes the fixed colours of
+/// other pages the same way.
 enum Theme {
-    static let cpu = data(0.24, 0.56, 1.00)
-    static let memory = data(0.64, 0.42, 0.96)
-    static let disk = data(0.20, 0.74, 0.44)
-    static let diskSecondary = data(0.55, 0.86, 0.40)
-    static let network = data(0.98, 0.55, 0.20)
-    static let networkSecondary = data(0.98, 0.80, 0.30)
-    static let gpu = data(0.10, 0.74, 0.80)
-    static let power = data(0.95, 0.72, 0.12)
-    static let thermal = data(1.00, 0.42, 0.30)
-    static let fan = data(0.38, 0.78, 0.98)
+    static var cpu: Color { color(.cpu) }
+    static var memory: Color { color(.memory) }
+    static var disk: Color { color(.disk) }
+    static var diskSecondary: Color { color(.diskSecondary) }
+    static var network: Color { color(.network) }
+    static var networkSecondary: Color { color(.networkSecondary) }
+    static var gpu: Color { color(.gpu) }
+    static var power: Color { color(.power) }
+    static var thermal: Color { color(.thermal) }
+    static var fan: Color { color(.fan) }
 
-    // Memory composition.
-    static let wired = data(0.93, 0.36, 0.62)
-    static let compressed = data(0.98, 0.62, 0.24)
-    static let cached = data(0.32, 0.70, 0.86)
-    static let swap = data(0.96, 0.42, 0.36)
+    // Memory composition and paging.
+    static var wired: Color { color(.wired) }
+    static var compressed: Color { color(.compressed) }
+    static var cached: Color { color(.cached) }
+    static var swap: Color { color(.swap) }
+    static var pageIn: Color { color(.pageIn) }
+    static var pageOut: Color { color(.pageOut) }
 
-    // Power components.
-    static let neuralEngine = data(0.90, 0.40, 0.86)
-    static let dram = data(0.62, 0.50, 0.98)
-    static let restOfSystem = data(0.62, 0.58, 0.48)
+    // Power components and supply.
+    static var neuralEngine: Color { color(.neuralEngine) }
+    static var dram: Color { color(.dram) }
+    static var restOfSystem: Color { color(.restOfSystem) }
+    static var charging: Color { color(.charging) }
+    static var discharging: Color { color(.discharging) }
+
+    // GPU engines and clock.
+    static var gpuRenderer: Color { color(.gpuRenderer) }
+    static var gpuTiler: Color { color(.gpuTiler) }
+    static var gpuClock: Color { color(.gpuClock) }
 
     /// Everything not broken out on its own.
-    static let other = data(0.50, 0.50, 0.50)
+    static var other: Color { color(.other) }
 
-    /// Distinct colours for "by app" series, in rank order.
-    static let series: [Color] = [
-        data(0.26, 0.58, 1.00),
-        data(0.98, 0.58, 0.22),
-        data(0.16, 0.80, 0.70),
-        data(0.94, 0.40, 0.62),
-        data(0.62, 0.82, 0.30),
-        data(0.70, 0.52, 0.98),
-    ]
-
-    private static let slowerTier = data(0.22, 0.82, 0.86)
-    private static let storageSensor = data(0.30, 0.80, 0.62)
-    private static let batterySensor = data(0.98, 0.78, 0.26)
-
-    static func series(_ index: Int) -> Color {
-        series[index % series.count]
+    static func color(_ role: GraphPalette.Role) -> Color {
+        GraphColors.shared.color(role)
     }
 
-    /// Colour for a core tier: the fastest tier (level 0) gets the CPU blue.
+    /// The `index`th colour for series without an app of their own (core
+    /// clusters, users), round the palette's.
+    static func series(_ index: Int) -> Color {
+        GraphColors.shared.seriesColor(index)
+    }
+
+    /// Colour for a core tier: the fastest tier (level 0) gets the CPU's.
     static func tier(_ level: Int) -> Color {
-        level == 0 ? cpu : slowerTier
+        level == 0 ? cpu : color(.slowerTier)
     }
 
     /// Colour for each kind of temperature sensor.
     static func sensor(_ kind: SensorKind) -> Color {
         switch kind {
         case .chip: thermal
-        case .storage: storageSensor
-        case .battery: batterySensor
+        case .storage: color(.storageSensor)
+        case .battery: color(.batterySensor)
         }
     }
 
@@ -156,15 +161,15 @@ extension NSColor {
 }
 
 extension Font {
-    /// Metadata: labels, units, short facts and status bars. 11 pt at the
-    /// default text size, the smallest text the app draws.
-    static let metadata = Font.subheadline
+    /// Metadata: labels, units, captions and short facts. 12 pt at the
+    /// default text size, the floor for anything a reading depends on.
+    static let metadata = Font.callout
     /// Explanatory captions and notes: what something means, why a reading
-    /// is missing, what a button will do. 12 pt, a size up from `metadata`,
-    /// since these are read rather than scanned.
+    /// is missing, what a button will do. 12 pt, as `metadata`.
     static let explanation = Font.callout
-    /// Rows of tables and lists: 12 pt.
-    static let tableText = Font.callout
+    /// Rows of tables and lists, graph legends and the process inspector's
+    /// facts: 13 pt, a step up from the captions, since these are what's read.
+    static let tableText = Font.body
 }
 
 extension NSColor {
@@ -204,7 +209,10 @@ struct GraphPanel: View {
     var axisUnits: GraphMath.AxisUnits = .plain
     /// Said after the top axis label (see `GraphView.axisNote`).
     var axisNote: String?
-    var capacity = AppModel.graphSpan
+    /// Samples across; nil takes the page's window, as `GraphView` does.
+    var capacity: Int?
+    /// Puts the page's Fit collected data toggle in the time axis (`GraphFitToggle`).
+    var offersFit = false
 
     var body: some View {
         let tint = series.last?.color ?? .accentColor
@@ -221,7 +229,7 @@ struct GraphPanel: View {
                       axisNote: axisNote, cornerRadius: 8)
                 .frame(height: height)
                 .plotFrame(tint: tint, wash: (0.12, 0.02), border: 0.30)
-            TimeAxis(samples: capacity)
+            TimeAxis(samples: capacity, offersFit: offersFit)
         }
     }
 }
@@ -229,25 +237,36 @@ struct GraphPanel: View {
 /// "Last 5 min … now" under a scrolling graph: the window it covers, named at
 /// its oldest end, so graphs stacked on a page say outright that they cover
 /// the same minutes. The span follows the update speed, so it stays true
-/// when sampling is faster or slower.
+/// when sampling is faster or slower, and the page's window when
+/// Performance fits its graphs to what's been collected.
 struct TimeAxis: View {
     @Environment(AppModel.self) private var model
-    var samples: Int
+    @Environment(\.graphWindow) private var window
+    @Environment(\.offersGraphFit) private var fitOffered
+    /// Samples across; nil takes the page's window (`graphWindow`).
+    var samples: Int?
     /// Seconds per sample for a graph on its own cadence; nil follows the update speed.
     var interval: TimeInterval?
 
     /// Off under a graph too narrow for both ends' labels.
     var showsNow = true
+    /// The page's main graph: its axis holds the Fit collected data toggle
+    /// while the page offers one, so the window's label and the control
+    /// that changes it sit together.
+    var offersFit = false
 
     var body: some View {
-        HStack {
-            Text("Last \(Format.timeSpan(Double(samples) * (interval ?? model.updateSpeed.rawValue)))")
+        HStack(spacing: 10) {
+            Text("Last \(Format.timeSpan(Double(samples ?? window) * (interval ?? model.updateSpeed.rawValue)))")
+            if offersFit, fitOffered { GraphFitToggle() }
             Spacer(minLength: 0)
             if showsNow { Text("now") }
         }
         .font(.metadata)
         .foregroundStyle(.secondaryText)
         .padding(.horizontal, 2)
+        // As tall with the toggle as without, so the page doesn't move when it goes.
+        .frame(minHeight: offersFit ? GraphFitToggle.height : nil)
     }
 }
 
@@ -260,7 +279,7 @@ struct Sparkline: View {
 
     var body: some View {
         GraphView(series: [GraphSeries(values: values, color: color)], maxValue: maxValue,
-                  capacity: capacity, showsGrid: false, lineWidth: 1.2, glows: true, cornerRadius: 3)
+                  capacity: capacity, showsGrid: false, lineWidth: 1.35, glows: true, cornerRadius: 3)
             .plotFrame(tint: color, wash: (0.16, 0.03), border: 0.5, lineWidth: 0.75, cornerRadius: 3)
     }
 }
@@ -390,335 +409,6 @@ struct StackedBar: View {
     }
 }
 
-/// Circular gauge with a glowing arc.
-///
-/// Drawn with Core Animation rather than SwiftUI shapes: the sweep then
-/// animates in the render server, where a SwiftUI animation would re-run
-/// layout for the whole window on every frame.
-struct RingGauge: NSViewRepresentable {
-    var fraction: Double
-    var color: Color
-    var lineWidth: CGFloat = 12
-
-    func makeNSView(context: Context) -> RingGaugeView {
-        RingGaugeView()
-    }
-
-    func updateNSView(_ view: RingGaugeView, context: Context) {
-        view.update(fraction: fraction, color: NSColor(color), lineWidth: lineWidth)
-    }
-}
-
-final class RingGaugeView: NSView {
-    private let ticks = CAShapeLayer()
-    private let track = CAShapeLayer()
-    private let glow = CAShapeLayer()
-    private let arc = CAShapeLayer()
-    private let fill = CAGradientLayer()
-    /// Bright bead riding the end of the arc.
-    private let head = CALayer()
-    private var lineWidth: CGFloat = 12
-    private var fraction: CGFloat = 0
-    private var color: NSColor?
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-        for shape in [track, glow, arc] {
-            shape.fillColor = nil
-            shape.lineCap = .round
-        }
-        ticks.fillColor = nil
-        arc.strokeColor = NSColor.black.cgColor
-        fill.mask = arc
-        glow.shadowOffset = .zero
-        glow.shadowRadius = 7
-        glow.shadowOpacity = 0.9
-        glow.strokeEnd = 0
-        arc.strokeEnd = 0
-        head.shadowOffset = .zero
-        head.shadowRadius = 6
-        head.shadowOpacity = 1
-        head.isHidden = true
-        layer?.addSublayer(ticks)
-        layer?.addSublayer(track)
-        layer?.addSublayer(glow)
-        layer?.addSublayer(fill)
-        layer?.addSublayer(head)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    func update(fraction: Double, color: NSColor, lineWidth: CGFloat) {
-        let end = CGFloat(min(max(fraction.isFinite ? fraction : 0, 0), 1))
-        let start = self.fraction
-        self.fraction = end
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        if lineWidth != self.lineWidth {
-            self.lineWidth = lineWidth
-            needsLayout = true
-        }
-        if color != self.color {
-            self.color = color
-            applyColors()
-        }
-        head.isHidden = end < 0.005
-        head.position = point(at: end)
-        CATransaction.commit()
-
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(0.45)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-        glow.strokeEnd = end
-        arc.strokeEnd = end
-        CATransaction.commit()
-
-        guard start != end, !head.isHidden, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let sweep = CAKeyframeAnimation(keyPath: "position")
-        sweep.path = arcPath(from: start, to: end)
-        sweep.duration = 0.45
-        sweep.calculationMode = .paced
-        sweep.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        head.add(sweep, forKey: "sweep")
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyColors()
-    }
-
-    /// The arc and ticks take the colour's shade for this appearance (deeper
-    /// in light mode); the track and glow keep the bright fill shade.
-    private func applyColors() {
-        guard let color else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let bright = color.fillShade
-            track.strokeColor = bright.withAlphaComponent(0.14).cgColor
-            glow.strokeColor = bright.withAlphaComponent(0.35).cgColor
-            glow.shadowColor = bright.cgColor
-            fill.colors = [(color.blended(withFraction: 0.45, of: .white) ?? color).cgColor, color.cgColor]
-            ticks.strokeColor = color.withAlphaComponent(0.30).cgColor
-            head.backgroundColor = (color.blended(withFraction: 0.75, of: .white) ?? .white).cgColor
-            head.shadowColor = bright.cgColor
-        }
-        CATransaction.commit()
-    }
-
-    override func layout() {
-        super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        // Clockwise from twelve o'clock.
-        let path = arcPath(from: 0, to: 1)
-        for shape in [track, glow, arc] {
-            shape.frame = bounds
-            shape.path = path
-            shape.lineWidth = lineWidth
-        }
-        ticks.frame = bounds
-        ticks.path = tickPath()
-        ticks.lineWidth = 1
-        fill.frame = bounds
-        fill.startPoint = CGPoint(x: 0, y: 1)
-        fill.endPoint = CGPoint(x: 1, y: 0)
-        let size = lineWidth * 0.62
-        head.bounds = CGRect(x: 0, y: 0, width: size, height: size)
-        head.cornerRadius = size / 2
-        head.shadowPath = CGPath(ellipseIn: head.bounds, transform: nil)
-        head.position = point(at: fraction)
-        CATransaction.commit()
-    }
-
-    private var center: CGPoint { CGPoint(x: bounds.midX, y: bounds.midY) }
-    private var radius: CGFloat { max((min(bounds.width, bounds.height) - lineWidth) / 2 - 2, 1) }
-
-    /// Angle for a fraction of the dial: twelve o'clock, then clockwise.
-    private func angle(_ fraction: CGFloat) -> CGFloat {
-        .pi / 2 - 2 * .pi * fraction
-    }
-
-    private func point(at fraction: CGFloat) -> CGPoint {
-        CGPoint(x: center.x + radius * cos(angle(fraction)), y: center.y + radius * sin(angle(fraction)))
-    }
-
-    private func arcPath(from start: CGFloat, to end: CGFloat) -> CGPath {
-        let path = CGMutablePath()
-        path.addArc(center: center, radius: radius, startAngle: angle(start), endAngle: angle(end), clockwise: end >= start)
-        return path
-    }
-
-    /// Fine graduations just inside the track; every tenth is longer.
-    private func tickPath() -> CGPath {
-        let path = CGMutablePath()
-        let outer = radius - lineWidth / 2 - 3
-        for index in 0..<40 {
-            let length: CGFloat = index % 10 == 0 ? 5 : 2.5
-            let theta = angle(CGFloat(index) / 40)
-            path.move(to: CGPoint(x: center.x + outer * cos(theta), y: center.y + outer * sin(theta)))
-            path.addLine(to: CGPoint(x: center.x + (outer - length) * cos(theta), y: center.y + (outer - length) * sin(theta)))
-        }
-        return path
-    }
-}
-
-/// A row of tiles that fill with load, one per core.
-///
-/// Core Animation again, so 18 tiles easing every second cost the app nothing.
-struct CoreTileRow: NSViewRepresentable {
-    var cpus: [Int]
-    var usages: [Double]
-    var color: Color
-
-    static let tileSize = CGSize(width: 30, height: 44)
-    static let spacing: CGFloat = 6
-
-    static func width(for count: Int) -> CGFloat {
-        CGFloat(count) * (tileSize.width + spacing) - spacing
-    }
-
-    func makeNSView(context: Context) -> CoreTileRowView {
-        CoreTileRowView()
-    }
-
-    func updateNSView(_ view: CoreTileRowView, context: Context) {
-        view.update(cpus: cpus, usages: usages, color: NSColor(color))
-    }
-}
-
-final class CoreTileRowView: NSView {
-    private struct Tile {
-        /// Unclipped layer whose shadow is the glow around a busy core.
-        let halo = CALayer()
-        let box = CALayer()
-        let level = CAGradientLayer()
-    }
-
-    private var tiles: [Tile] = []
-    private var cpus: [Int] = []
-    private var usages: [Double] = []
-    private var color = NSColor.controlAccentColor
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        wantsLayer = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    func update(cpus: [Int], usages: [Double], color: NSColor) {
-        self.cpus = cpus
-        self.usages = usages
-        self.color = color
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        while tiles.count < usages.count {
-            let tile = Tile()
-            tile.halo.shadowOffset = .zero
-            tile.halo.shadowRadius = 6
-            tile.halo.shadowOpacity = 0
-            tile.box.cornerRadius = 6
-            tile.box.masksToBounds = true
-            tile.level.anchorPoint = .zero
-            tile.box.addSublayer(tile.level)
-            layer?.addSublayer(tile.halo)
-            layer?.addSublayer(tile.box)
-            tiles.append(tile)
-        }
-        while tiles.count > usages.count {
-            let tile = tiles.removeLast()
-            tile.halo.removeFromSuperlayer()
-            tile.box.removeFromSuperlayer()
-        }
-        layoutTiles()
-        applyColors()
-        CATransaction.commit()
-
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(0.4)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
-        applyLoad()
-        CATransaction.commit()
-        updateToolTips()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        applyColors()
-        applyLoad()
-        CATransaction.commit()
-    }
-
-    /// Washes and glows take the bright fill shade, levels the colour's shade
-    /// for this appearance (deeper in light mode).
-    private func applyColors() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let bright = color.fillShade
-            let levelColors = [color.cgColor, color.withAlphaComponent(0.55).cgColor]
-            for tile in tiles {
-                tile.halo.shadowColor = bright.cgColor
-                tile.box.backgroundColor = bright.withAlphaComponent(0.10).cgColor
-                tile.level.colors = levelColors
-            }
-        }
-    }
-
-    /// Fills each tile to its load; the outline deepens with it.
-    private func applyLoad() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            for (tile, usage) in zip(tiles, usages) {
-                let load = CGFloat(min(max(usage, 0), 1))
-                tile.level.bounds.size.height = CoreTileRow.tileSize.height * load
-                tile.box.borderColor = color.withAlphaComponent(0.25 + 0.6 * load).cgColor
-                tile.box.borderWidth = load > 0.75 ? 1.5 : 1
-                tile.halo.shadowOpacity = load > 0.5 ? Float(load) * 0.8 : 0
-            }
-        }
-    }
-
-    override func layout() {
-        super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        layoutTiles()
-        CATransaction.commit()
-        updateToolTips()
-    }
-
-    private func frame(ofTile index: Int) -> CGRect {
-        let size = CoreTileRow.tileSize
-        return CGRect(x: CGFloat(index) * (size.width + CoreTileRow.spacing), y: 0, width: size.width, height: size.height)
-    }
-
-    private func layoutTiles() {
-        for (index, tile) in tiles.enumerated() {
-            let rect = frame(ofTile: index)
-            tile.halo.frame = rect
-            tile.halo.shadowPath = CGPath(roundedRect: CGRect(origin: .zero, size: rect.size), cornerWidth: 6, cornerHeight: 6, transform: nil)
-            tile.box.frame = rect
-            tile.level.position = .zero
-            tile.level.bounds.size.width = rect.width
-        }
-    }
-
-    private func updateToolTips() {
-        removeAllToolTips()
-        for (index, cpu) in cpus.enumerated() where usages.indices.contains(index) {
-            addToolTip(frame(ofTile: index), owner: "CPU \(cpu): \(Format.percent(usages[index]))" as NSString, userData: nil)
-        }
-    }
-}
-
 /// Rounded panel that groups related readings, washed with a colour and
 /// glowing in proportion to `glow` (for example, the load it shows).
 struct Card<Content: View>: View {
@@ -738,8 +428,8 @@ struct Card<Content: View>: View {
 }
 
 /// The card's background, drawn with Core Animation so the glow can ease
-/// between readings without SwiftUI re-rendering anything.
-private struct CardSurface: NSViewRepresentable {
+/// between readings without SwiftUI re-rendering anything; a strip's too.
+struct CardSurface: NSViewRepresentable {
     var tint: Color?
     var glow: Double
 
@@ -763,6 +453,7 @@ final class CardSurfaceView: NSView {
     private let sheen = CAGradientLayer()
     private var tint: NSColor?
     private var glow: Double = 0
+    private var hasStyled = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -790,13 +481,20 @@ final class CardSurfaceView: NSView {
     }
 
     func update(tint: NSColor?, glow: Double) {
-        let restyle = tint != self.tint
+        let restyle = !hasStyled || tint != self.tint
+        let glow = min(max(glow.isFinite ? glow : 0, 0), 1)
+        guard restyle || glow != self.glow else { return }
         self.tint = tint
-        self.glow = min(max(glow.isFinite ? glow : 0, 0), 1)
+        self.glow = glow
+        hasStyled = true
         if restyle { applyColors() }
         CATransaction.begin()
-        CATransaction.setAnimationDuration(0.6)
-        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            CATransaction.setDisableActions(true)
+        } else {
+            CATransaction.setAnimationDuration(0.6)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        }
         halo.shadowOpacity = tint == nil ? 0 : Float(0.10 + 0.55 * self.glow)
         effectiveAppearance.performAsCurrentDrawingAppearance {
             surface.borderColor = borderColor.cgColor
@@ -850,7 +548,7 @@ final class CardSurfaceView: NSView {
 struct ProcessBarRow: View {
     /// A row's height: the icon or a line of table text, whichever is
     /// taller, and the padding, so a list can keep room for rows it isn't showing.
-    static let height = max(16, ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .callout)))) + 6
+    static let height = max(16, ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .body)))) + 6
 
     var icon: NSImage
     var name: String

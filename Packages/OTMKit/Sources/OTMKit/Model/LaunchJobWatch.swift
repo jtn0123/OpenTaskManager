@@ -49,6 +49,22 @@ public extension LaunchExitStatus {
         default: nil
         }
     }
+
+    /// What a crash signal says about the program, in plain words. Nil for
+    /// a signal that isn't a crash (`crashSignals`).
+    static func meaning(ofSignal signal: Int32) -> String? {
+        switch signal {
+        case SIGSEGV: "a bad memory access, reading or writing memory it doesn't own, usually a bug in the program"
+        case SIGBUS: "a bad memory access, often to a file mapped into memory that changed or went away"
+        case SIGABRT: "it stopped itself on finding something wrong, such as a failed check or a fatal error"
+        case SIGTRAP: "a failed runtime check, such as an unexpected nil or an index out of range in Swift code"
+        case SIGILL: "an illegal instruction, often a runtime check that stopped it on purpose"
+        case SIGFPE: "an arithmetic error, such as dividing by zero"
+        case SIGSYS: "a system call that doesn't exist or isn't allowed"
+        case SIGEMT: "an emulation trap, rare on a Mac"
+        default: nil
+        }
+    }
 }
 
 // MARK: Watching jobs
@@ -222,18 +238,8 @@ public enum LaunchJobHealth: Hashable, Sendable {
 
     public var needsAttention: Bool { self != .healthy }
 
-    /// The state the table shows in place of "Running" or "Loaded", or nil
-    /// to keep it. A failed or crashed job that runs again still says Running.
-    public func stateTitle(isRunning: Bool) -> String? {
-        switch self {
-        case .healthy: nil
-        case .restarting: "Restarting"
-        case .crashed: isRunning ? nil : "Crashed"
-        case .failed: isRunning ? nil : "Failed"
-        }
-    }
-
-    /// A heading for the details.
+    /// A heading for the details. The state itself, which the table and the
+    /// details' header share, is `LaunchItemStatus`.
     public var headline: String? {
         switch self {
         case .healthy: nil
@@ -251,7 +257,8 @@ public enum LaunchJobHealth: Hashable, Sendable {
         case .healthy:
             return nil
         case let .crashed(signal):
-            return "\(LaunchExitStatus.code(-signal).description): the program crashed.\(again)"
+            let meaning = LaunchExitStatus.meaning(ofSignal: signal) ?? "the program crashed"
+            return "\(LaunchExitStatus.code(-signal).description): \(meaning).\(again)"
         case let .failed(code):
             let meaning = LaunchExitStatus.meaning(ofCode: code).map { " (\($0))" } ?? ""
             return "\(LaunchExitStatus.code(code).description)\(meaning).\(again)"
@@ -275,5 +282,56 @@ public enum LaunchJobHealth: Hashable, Sendable {
     private static func inSentence(_ exit: LaunchExitStatus) -> String {
         let text = exit.description
         return text.prefix(1).lowercased() + text.dropFirst()
+    }
+
+    /// The details' notice: what the status line over it ("Failed · exit
+    /// code 1", `LaunchItemStatus`) can't say, or nil when it would only
+    /// repeat it. A code with no common meaning gets none; a known code and a
+    /// crash signal are put in plain words; a run that failed or crashed
+    /// before the one running now, which the status line calls Running, and
+    /// restarts seen again and again are told in full.
+    public func notice(for item: LaunchItem, record: LaunchJobRecord?, time: (Date) -> String) -> LaunchJobNotice? {
+        let isRunning = item.pid != nil
+        switch self {
+        case .healthy:
+            return nil
+        case let .failed(code) where !isRunning:
+            return LaunchExitStatus.meaning(ofCode: code).map {
+                LaunchJobNotice(headline: "What exit code \(code) means", text: Self.sentence($0))
+            }
+        case let .crashed(signal) where !isRunning:
+            let name = LaunchExitStatus.signalName(signal) ?? "signal \(signal)"
+            return LaunchJobNotice(headline: "What \(name) means",
+                                   text: Self.sentence(LaunchExitStatus.meaning(ofSignal: signal) ?? "the program crashed"))
+        case .failed, .crashed, .restarting:
+            guard let headline, let text = explanation(for: item, record: record, time: time) else { return nil }
+            return LaunchJobNotice(headline: headline, text: text)
+        }
+    }
+
+    /// Whether the status line or the notice already gives the job's last
+    /// exit, so a Last exit line in the details would only repeat it.
+    public var tellsLastExit: Bool {
+        switch self {
+        case .failed, .crashed: true
+        case .healthy, .restarting: false
+        }
+    }
+
+    /// "Its program wasn't found." from "its program wasn't found".
+    private static func sentence(_ phrase: String) -> String {
+        phrase.prefix(1).uppercased() + phrase.dropFirst() + "."
+    }
+}
+
+/// A heading and a sentence or two for the Startup details, under the status
+/// line, about a job that needs a look (`LaunchJobHealth.notice`).
+public struct LaunchJobNotice: Hashable, Sendable {
+    public let headline: String
+    public let text: String
+
+    public init(headline: String, text: String) {
+        self.headline = headline
+        self.text = text
     }
 }

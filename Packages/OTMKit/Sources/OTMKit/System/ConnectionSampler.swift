@@ -11,12 +11,16 @@ public struct ConnectionSnapshot: Sendable {
     public let scannedProcesses: Int
     /// How long the walk took.
     public let duration: TimeInterval
+    /// When the walk began.
+    public let time: Date
 
-    public init(connections: [Connection], hiddenProcesses: Int, scannedProcesses: Int, duration: TimeInterval) {
+    public init(connections: [Connection], hiddenProcesses: Int, scannedProcesses: Int, duration: TimeInterval,
+                time: Date = Date()) {
         self.connections = connections
         self.hiddenProcesses = hiddenProcesses
         self.scannedProcesses = scannedProcesses
         self.duration = duration
+        self.time = time
     }
 }
 
@@ -26,6 +30,7 @@ public struct ConnectionSnapshot: Sendable {
 /// refresh (the Connections page every few seconds), not the main sampler's tick.
 public enum ConnectionSampler {
     public static func sample() -> ConnectionSnapshot {
+        let time = Date()
         let started = DispatchTime.now()
         var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: 256)
         var connections: [Connection] = []
@@ -40,26 +45,29 @@ public enum ConnectionSampler {
                 continue
             }
             scanned += 1
-            var name: String?
+            var process: (name: String, start: Date?)?
             for descriptor in descriptors.prefix(count) where Int32(descriptor.proc_fdtype) == PROX_FDTYPE_SOCKET {
                 var info = socket_fdinfo()
                 let size = Int32(MemoryLayout<socket_fdinfo>.size)
                 guard proc_pidfdinfo(pid, descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size else { continue }
-                let processName = name ?? processName(pid)
-                name = processName
-                if let connection = decode(info.psi, pid: pid, fd: descriptor.proc_fd, processName: processName) {
+                let described = process ?? describe(pid)
+                process = described
+                if let connection = decode(info.psi, pid: pid, fd: descriptor.proc_fd, processName: described.name,
+                                           processStart: described.start) {
                     connections.append(connection)
                 }
             }
         }
 
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000_000
-        return ConnectionSnapshot(connections: connections, hiddenProcesses: hidden, scannedProcesses: scanned, duration: elapsed)
+        return ConnectionSnapshot(connections: connections, hiddenProcesses: hidden, scannedProcesses: scanned,
+                                  duration: elapsed, time: time)
     }
 
     /// A TCP or UDP socket as a connection. Sockets that are neither bound
     /// to a port nor connected (just created) aren't worth a row, so they're nil.
-    static func decode(_ info: socket_info, pid: Int32, fd: Int32, processName: String) -> Connection? {
+    static func decode(_ info: socket_info, pid: Int32, fd: Int32, processName: String,
+                       processStart: Date? = nil) -> Connection? {
         let transport: Connection.Transport
         let inet: in_sockinfo
         var state: TCPState?
@@ -79,7 +87,7 @@ public enum ConnectionSampler {
         return Connection(
             id: Connection.SocketID(pid: pid, fd: fd, socket: info.soi_so),
             processName: processName, transport: transport, family: endpoints.family,
-            local: endpoints.local, remote: endpoints.remote, tcpState: state
+            local: endpoints.local, remote: endpoints.remote, tcpState: state, processStart: processStart
         )
     }
 
@@ -114,11 +122,21 @@ public enum ConnectionSampler {
         return buffer.count
     }
 
-    private static func processName(_ pid: Int32) -> String {
-        var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
-        guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return "PID \(pid)" }
-        let name = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        return name.isEmpty ? "PID \(pid)" : name
+    /// The process's name and when it started, from the one record
+    /// `proc_name` reads the name from, so the start time takes no extra call.
+    private static func describe(_ pid: Int32) -> (name: String, start: Date?) {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return ("PID \(pid)", nil) }
+        let name = text(info.pbi_name)
+        let shown = name.isEmpty ? text(info.pbi_comm) : name
+        let start = ProcessIdentity.startTime(microseconds: Int64(info.pbi_start_tvsec) * 1_000_000 + Int64(info.pbi_start_tvusec))
+        return (shown.isEmpty ? "PID \(pid)" : shown, start)
+    }
+
+    /// A kernel record's fixed-size C string, up to its first NUL.
+    private static func text<Characters>(_ characters: Characters) -> String {
+        withUnsafeBytes(of: characters) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
     }
 }
 

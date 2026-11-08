@@ -1,9 +1,11 @@
 import Foundation
 
-/// The four tests the Benchmarks workspace gathers. The CPU, GPU and disk
-/// tests measure this Mac; the Internet test measures the connection.
+/// The tests the Benchmarks workspace gathers. The CPU, GPU and disk tests
+/// and the sustained CPU run measure this Mac; the Internet test measures
+/// the connection. A sustained run is a test of its own, so it's never
+/// compared with the short CPU benchmark.
 public enum BenchmarkKind: String, Sendable, Codable, CaseIterable {
-    case cpu, gpu, disk, network
+    case cpu, sustained, gpu, disk, network
 
     public var title: String {
         switch self {
@@ -11,6 +13,7 @@ public enum BenchmarkKind: String, Sendable, Codable, CaseIterable {
         case .gpu: "GPU benchmark"
         case .disk: "Disk speed"
         case .network: "Internet quality"
+        case .sustained: "Sustained CPU run"
         }
     }
 
@@ -22,8 +25,17 @@ public enum BenchmarkKind: String, Sendable, Codable, CaseIterable {
     /// disk and Internet tests' method. "workloads v2", "test v1".
     public var versionName: String {
         switch self {
-        case .cpu, .gpu: "workloads"
+        case .cpu, .gpu, .sustained: "workloads"
         case .disk, .network: "test"
+        }
+    }
+
+    /// Whether the test runs the app's own code, so a debug build's figures
+    /// are far lower: the CPU and GPU benchmarks and the sustained run.
+    public var runsAppCode: Bool {
+        switch self {
+        case .cpu, .gpu, .sustained: true
+        case .disk, .network: false
         }
     }
 }
@@ -43,6 +55,16 @@ public enum BenchmarkUnit: String, Sendable, Codable {
 
     /// Whether a larger figure is the better one: every rate, but not a delay.
     public var higherIsBetter: Bool { self != .milliseconds }
+
+    /// Whether the figure is a rate of work, every unit a second, so the
+    /// higher of two is the faster. Responsiveness (round trips a minute) and
+    /// a delay aren't speeds: they're only higher or lower.
+    public var isSpeed: Bool {
+        switch self {
+        case .bytesPerSecond, .flopsPerSecond, .pixelsPerSecond, .megabytesPerSecond, .bitsPerSecond, .operationsPerSecond: true
+        case .roundTripsPerMinute, .milliseconds: false
+        }
+    }
 
     /// The unit for figures up to `largest`, and what to divide them by:
     /// ("GB/s", 1e9) for 12.4e9 B/s. Disk speeds, IOPS, RPM and milliseconds keep theirs.
@@ -262,11 +284,18 @@ public struct BenchmarkRun: Sendable, Codable, Equatable, Identifiable {
     /// figure alone is that measurement's `caveat` instead.
     public var conditions: [String]
     public var measurements: [BenchmarkMeasurement]
+    /// The Mac's state as the run started and ended (power, heat, load,
+    /// memory); nil for a run saved before it was recorded.
+    public var context: BenchmarkContext?
+    /// A sustained run's windows, for its chart; nil for the other tests.
+    public var sustained: BenchmarkSustainedTrace?
 
     public init(id: String, kind: BenchmarkKind, date: Date, workloadVersion: Int, settings: [BenchmarkSetting], build: BenchmarkBuild?,
                 machine: BenchmarkMachine?, target: BenchmarkTarget?, osVersion: String?, conditions: [String],
-                measurements: [BenchmarkMeasurement]) {
+                measurements: [BenchmarkMeasurement], context: BenchmarkContext? = nil, sustained: BenchmarkSustainedTrace? = nil) {
         self.id = id
+        self.context = context.flatMap { $0.isEmpty ? nil : $0 }
+        self.sustained = sustained
         self.kind = kind
         self.date = date
         self.workloadVersion = workloadVersion
@@ -293,8 +322,13 @@ public struct BenchmarkRun: Sendable, Codable, Equatable, Identifiable {
         switch kind {
         case .cpu: measurements.filter { $0.id.hasSuffix(".multi") }
         case .network: measurements.filter { $0.id != "idleLatency" }
-        case .gpu, .disk: measurements
+        case .gpu, .disk, .sustained: measurements
         }
+    }
+
+    /// The run's context in a line, or "Context not recorded".
+    public var contextSummary: String {
+        context?.summary ?? BenchmarkContext.notRecorded
     }
 
     /// "Integer 549 MB/s · Floating point 150 MFLOP/s · Memory 28.5 GB/s",
@@ -343,7 +377,7 @@ public extension BenchmarkRun {
             machine: BenchmarkMachine(key: machine.key, name: [machine.chip, machine.model].compactMap { $0 }.joined(separator: " · ")),
             target: nil, osVersion: result.osVersion,
             conditions: Self.conditions(thermal: result.worstThermalState, lowPower: result.lowPowerMode),
-            measurements: measurements
+            measurements: measurements, context: result.context
         )
     }
 
@@ -374,7 +408,7 @@ public extension BenchmarkRun {
             ],
             build: BenchmarkBuild(app: result.appVersion, optimized: result.optimized),
             machine: BenchmarkMachine(key: device.key, name: [device.summary, device.model].compactMap { $0 }.joined(separator: " · ")),
-            target: nil, osVersion: result.osVersion, conditions: conditions, measurements: measurements
+            target: nil, osVersion: result.osVersion, conditions: conditions, measurements: measurements, context: result.context
         )
     }
 
@@ -383,6 +417,7 @@ public extension BenchmarkRun {
         var conditions: [String] = []
         if !result.bypassedCache { conditions.append("the volume ignored F_NOCACHE, so reads may have come from memory") }
         if !result.fullFlush { conditions.append("writes were flushed with fsync only, so the disk's cache may hold some") }
+        conditions += Self.conditions(result.context)
         let order: [(DiskSpeedPhase, String)] = [
             (.sequentialRead, "sequentialRead"), (.sequentialWrite, "sequentialWrite"),
             (.randomRead, "randomRead"), (.randomWrite, "randomWrite"),
@@ -405,7 +440,7 @@ public extension BenchmarkRun {
             ],
             build: nil, machine: nil,
             target: BenchmarkTarget(key: result.volume.key, name: result.volume.name, detail: result.folder),
-            osVersion: nil, conditions: conditions, measurements: measurements
+            osVersion: result.context?.osVersion, conditions: conditions, measurements: measurements, context: result.context
         )
     }
 
@@ -429,7 +464,8 @@ public extension BenchmarkRun {
             settings: [BenchmarkSetting(name: "Mode", value: result.arguments.contains("-s") ? "sequential" : "parallel")],
             build: nil, machine: nil,
             target: BenchmarkTarget(key: result.historyKey, name: result.historyKey, detail: result.endpoint),
-            osVersion: result.toolVersion, conditions: [], measurements: measurements
+            osVersion: result.toolVersion, conditions: Self.conditions(result.context), measurements: measurements,
+            context: result.context
         )
     }
 
@@ -437,19 +473,27 @@ public extension BenchmarkRun {
         BenchmarkSetting(name: "Timing", value: "\(Format.fixed(warmUp, 1)) s warm-up, \(repeats) × \(Format.fixed(seconds, 1)) s repeats")
     }
 
-    private static func conditions(thermal: ThermalState, lowPower: Bool) -> [String] {
+    static func conditions(thermal: ThermalState, lowPower: Bool) -> [String] {
         var conditions: [String] = []
         if thermal != .nominal { conditions.append("thermal pressure \(thermal.rawValue)") }
         if lowPower { conditions.append("Low Power Mode on") }
         return conditions
     }
+
+    /// Heat and Low Power Mode from a context, for the tests whose own
+    /// results don't record them (disk, Internet).
+    static func conditions(_ context: BenchmarkContext?) -> [String] {
+        guard let context else { return [] }
+        return conditions(thermal: context.worstThermal ?? .nominal, lowPower: context.lowPowerMode ?? false)
+    }
 }
 
 // MARK: - Reading the histories
 
-/// Every saved result of the four tests, read from their history files in
+/// Every saved result of the tests, read from their history files in
 /// Application Support/OpenTaskManager/SpeedTests and adapted to
-/// `BenchmarkRun` on the way: nothing is migrated or written back.
+/// `BenchmarkRun` on the way: nothing is migrated or written back, and a
+/// result saved before runs recorded their context loads without one.
 public struct BenchmarkLibrary: Sendable {
     public let folder: URL
 
@@ -463,7 +507,8 @@ public struct BenchmarkLibrary: Sendable {
         let gpu = history(SpeedTestHistory<GPUBenchmarkResult>.gpuBenchmark).load().map(BenchmarkRun.init)
         let disk = history(SpeedTestHistory<DiskSpeedResult>.diskSpeed).load().map(BenchmarkRun.init)
         let network = history(SpeedTestHistory<NetworkQualityResult>.networkQuality).load().map(BenchmarkRun.init)
-        return (cpu + gpu + disk + network).sorted { $0.date > $1.date }
+        let sustained = history(SpeedTestHistory<CPUSustainedResult>.cpuSustained).load().map(BenchmarkRun.init)
+        return (cpu + gpu + disk + network + sustained).sorted { $0.date > $1.date }
     }
 
     /// The same file name as the app's own history, in `folder`.

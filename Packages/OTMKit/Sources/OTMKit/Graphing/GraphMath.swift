@@ -55,27 +55,41 @@ public enum GraphMath {
     public static func monotoneTangents(_ values: [Double]) -> [Double] {
         let count = values.count
         guard count > 1 else { return Array(repeating: 0, count: count) }
-        let deltas = (0..<count - 1).map { values[$0 + 1] - values[$0] }
         var tangents = [Double](repeating: 0, count: count)
-        tangents[0] = deltas[0]
-        tangents[count - 1] = deltas[count - 2]
-        for index in 1..<count - 1 where deltas[index - 1] * deltas[index] > 0 {
-            tangents[index] = (deltas[index - 1] + deltas[index]) / 2
-        }
-        for index in 0..<count - 1 {
-            let delta = deltas[index]
-            if delta == 0 {
-                tangents[index] = 0
-                tangents[index + 1] = 0
-                continue
-            }
-            let alpha = tangents[index] / delta
-            let beta = tangents[index + 1] / delta
-            let length = alpha * alpha + beta * beta
-            if length > 9 {
-                let scale = 3 / length.squareRoot()
-                tangents[index] = scale * alpha * delta
-                tangents[index + 1] = scale * beta * delta
+        // While loops over pointers: every graph runs this for each point each
+        // sample, and in a debug build a range's iterator and an array's
+        // subscript are each a call per point, where a pointer's isn't. Each
+        // slope is worked out where it's needed, the same subtraction each time.
+        values.withUnsafeBufferPointer { valueBuffer in
+            tangents.withUnsafeMutableBufferPointer { tangentBuffer in
+                guard let value = valueBuffer.baseAddress, let tangent = tangentBuffer.baseAddress else { return }
+                tangent[0] = value[1] - value[0]
+                tangent[count - 1] = value[count - 1] - value[count - 2]
+                var index = 1
+                while index < count - 1 {
+                    let before = value[index] - value[index - 1]
+                    let after = value[index + 1] - value[index]
+                    if before * after > 0 { tangent[index] = (before + after) / 2 }
+                    index += 1
+                }
+                index = 0
+                while index < count - 1 {
+                    let delta = value[index + 1] - value[index]
+                    if delta == 0 {
+                        tangent[index] = 0
+                        tangent[index + 1] = 0
+                    } else {
+                        let alpha = tangent[index] / delta
+                        let beta = tangent[index + 1] / delta
+                        let length = alpha * alpha + beta * beta
+                        if length > 9 {
+                            let scale = 3 / length.squareRoot()
+                            tangent[index] = scale * alpha * delta
+                            tangent[index + 1] = scale * beta * delta
+                        }
+                    }
+                    index += 1
+                }
             }
         }
         return tangents
@@ -97,14 +111,114 @@ public enum GraphMath {
     /// sum of series `0...i`. Series are aligned on their newest value, and
     /// the result is as long as the longest series.
     public static func stack(_ series: [[Double]]) -> [[Double]] {
-        let length = series.map(\.count).max() ?? 0
-        var running = [Double](repeating: 0, count: length)
-        return series.map { values in
-            let offset = length - values.count
-            for (index, value) in values.enumerated() {
-                running[offset + index] += max(value, 0)
+        var running = [Double](repeating: 0, count: longest(series))
+        var result: [[Double]] = []
+        result.reserveCapacity(series.count)
+        for values in series {
+            addAligned(values, into: &running, floorsAtZero: true)
+            result.append(running)
+        }
+        return result
+    }
+
+    /// Adds series element-wise, aligned on their newest values; the result
+    /// is as long as the longest.
+    public static func tailSum(_ series: [[Double]]) -> [Double] {
+        var sums = [Double](repeating: 0, count: longest(series))
+        for values in series {
+            addAligned(values, into: &sums, floorsAtZero: false)
+        }
+        return sums
+    }
+
+    /// `total` minus the sum of `parts`, aligned on the newest value and
+    /// never negative: what a stacked graph's top band, the rest, shows.
+    public static func remainder(of total: [Double], minus parts: [[Double]]) -> [Double] {
+        let used = tailSum(parts)
+        let count = total.count
+        // Where `total`'s first value falls in `used`, which may be shorter.
+        let offset = used.count - count
+        var result = [Double](repeating: 0, count: count)
+        total.withUnsafeBufferPointer { totalBuffer in
+            used.withUnsafeBufferPointer { usedBuffer in
+                result.withUnsafeMutableBufferPointer { resultBuffer in
+                    guard let value = totalBuffer.baseAddress, let out = resultBuffer.baseAddress else { return }
+                    let part = usedBuffer.baseAddress
+                    var index = 0
+                    while index < count {
+                        let rest = value[index] - (index + offset >= 0 ? part?[index + offset] ?? 0 : 0)
+                        out[index] = 0 >= rest ? 0 : rest
+                        index += 1
+                    }
+                }
             }
-            return running
+        }
+        return result
+    }
+
+    /// The largest finite value among the last `count` of `values` (all of
+    /// them by default), or 0 when there's none.
+    public static func finitePeak(_ values: [Double], last count: Int = .max) -> Double {
+        let end = values.count
+        let start = count >= end ? 0 : end - count
+        var peak = 0.0
+        var found = false
+        values.withUnsafeBufferPointer { buffer in
+            guard let value = buffer.baseAddress else { return }
+            var index = start
+            while index < end {
+                let candidate = value[index]
+                if candidate.isFinite, !found || candidate > peak {
+                    peak = candidate
+                    found = true
+                }
+                index += 1
+            }
+        }
+        return peak
+    }
+
+    /// Whether `new` is `old` a sample on: the same values with one more at
+    /// the end or, once the window is full, without the oldest as well.
+    /// Values compare bit for bit, so an unreadable (NaN) one matches itself.
+    public static func advancesOneSample(from old: [Double], to new: [Double]) -> Bool {
+        if new.count == old.count + 1 {
+            return old.elementsEqual(new.dropLast()) { $0.bitPattern == $1.bitPattern }
+        }
+        guard new.count == old.count, !old.isEmpty else { return false }
+        return old.dropFirst().elementsEqual(new.dropLast()) { $0.bitPattern == $1.bitPattern }
+    }
+
+    /// Whether any series in `new` is the one in the same place in `old` a
+    /// sample on (`advancesOneSample`), when the two don't have as many
+    /// series: a live graph then still scrolls a step for a new sample that
+    /// adds or drops a line, such as an app joining a by-app graph.
+    public static func advances(from old: [[Double]], to new: [[Double]]) -> Bool {
+        zip(old, new).contains { advancesOneSample(from: $0, to: $1) }
+    }
+
+    private static func longest(_ series: [[Double]]) -> Int {
+        var length = 0
+        for values in series where values.count > length { length = values.count }
+        return length
+    }
+
+    /// Adds `values` into the end of `sums`, which is at least as long, as a
+    /// while loop over pointers (see `monotoneTangents`); with `floorsAtZero`,
+    /// a negative value adds nothing.
+    private static func addAligned(_ values: [Double], into sums: inout [Double], floorsAtZero: Bool) {
+        let count = values.count
+        let offset = sums.count - count
+        values.withUnsafeBufferPointer { valueBuffer in
+            sums.withUnsafeMutableBufferPointer { sumBuffer in
+                guard let value = valueBuffer.baseAddress, let sum = sumBuffer.baseAddress else { return }
+                var index = 0
+                while index < count {
+                    let added = value[index]
+                    sum[offset + index] += floorsAtZero && 0 >= added ? 0 : added
+                    index += 1
+                }
+            }
         }
     }
 

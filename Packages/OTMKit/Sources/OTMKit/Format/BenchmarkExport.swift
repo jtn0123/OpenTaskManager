@@ -5,7 +5,10 @@ import Foundation
 /// Benchmarks workspace's Export and `otm bench --json` write it.
 public struct BenchmarkExport: Sendable, Codable, Equatable {
     public static let formatName = "OpenTaskManager benchmark results"
-    public static let currentVersion = 1
+    /// 2 added sustained CPU runs (kind `sustained`, with their windows),
+    /// each run's optional `context` and comparisons' `contextWarnings`;
+    /// a version 1 file still reads.
+    public static let currentVersion = 2
 
     /// Two runs compared, or why they weren't.
     public struct ComparisonEntry: Sendable, Codable, Equatable {
@@ -14,6 +17,8 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
         public var compared: String
         public var changes: [BenchmarkChange]?
         public var caveats: [String]?
+        /// How the runs' starts differed: power, heat, load, memory.
+        public var contextWarnings: [BenchmarkContextWarning]?
         /// Why the runs weren't compared, in place of the changes.
         public var refused: String?
 
@@ -25,6 +30,7 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
             case let .compared(comparison):
                 changes = comparison.changes
                 caveats = comparison.caveats
+                contextWarnings = comparison.contextWarnings.isEmpty ? nil : comparison.contextWarnings
             case let .refused(refusal):
                 refused = refusal.reason
             }
@@ -97,6 +103,7 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
             }
             lines += table(ofKind, when: when)
             lines += ["", context(ofKind)]
+            lines += runNotes(ofKind, when: when)
             for entry in comparisons {
                 guard let earlier = ofKind.first(where: { $0.id == entry.baseline }),
                       let later = runs.first(where: { $0.id == entry.compared }) else { continue }
@@ -166,6 +173,16 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
         return parts.joined(separator: " ")
     }
 
+    /// Each run's context, and a sustained run's story, under the table:
+    /// "- 2026-10-07 16:11: on the power adapter · thermal nominal · …".
+    /// Nothing when no run of the test recorded its context.
+    private func runNotes(_ runs: [BenchmarkRun], when: DateFormatter) -> [String] {
+        guard runs.contains(where: { $0.context != nil || $0.sustained != nil }) else { return [] }
+        return ["", "Each run's context (what the Mac was doing as it started):", ""] + runs.map { run in
+            "- \(when.string(from: run.date)): \(run.contextSummary)" + (run.sustained?.narrative.map { ". \($0)" } ?? "")
+        }
+    }
+
     /// " (timing unverified)" after a figure in doubt, else nothing.
     private static func qualifier(_ caveat: BenchmarkFigureCaveat?) -> String {
         caveat.map { " (\($0.title.lowercased()))" } ?? ""
@@ -191,6 +208,9 @@ public struct BenchmarkExport: Sendable, Codable, Equatable {
         }
         if let caveats = entry.caveats, !caveats.isEmpty {
             lines += [""] + caveats.map { "- \($0)" }
+        }
+        if let warnings = entry.contextWarnings, !warnings.isEmpty {
+            lines += ["", "How the runs' starts differed:", ""] + warnings.map { "- \($0.text)" }
         }
         return lines
     }

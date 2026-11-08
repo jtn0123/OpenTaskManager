@@ -18,18 +18,30 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # Development happens on the newest Xcode (a beta at times), so use the
+      # newest one the runner image has.
+      - name: Pick the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
 
       - name: Show toolchain
         run: |
           xcodebuild -version
           swift --version
 
+      # Runner images no longer include SwiftLint.
       - name: Lint
-        run: swiftlint lint --strict --quiet
+        run: |
+          brew install swiftlint
+          swiftlint version
+          swiftlint lint --strict --quiet
 
-      - name: Test OTMKit
-        run: swift test --package-path Packages/OTMKit
+      - name: Test OTMKit with coverage
+        run: make coverage
 
       - name: Build otm (release)
         run: swift build --package-path Packages/OTMKit -c release --product otm

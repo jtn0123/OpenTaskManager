@@ -7,6 +7,14 @@ extension EnvironmentValues {
     @Entry var sampleInterval: TimeInterval = 1
     /// Scroll graphs continuously between samples instead of a step at a time.
     @Entry var streamsGraphs = true
+    /// Samples across the graphs on a page that share its window (those
+    /// that don't name a capacity of their own) and under their time axes:
+    /// `AppModel.graphSpan`, or fewer while Performance fits its graphs to
+    /// what's been collected (`GraphFit`).
+    @Entry var graphWindow = AppModel.graphSpan
+    /// Rows of the fine grid the graphs under it draw in place of the usual
+    /// quarters: a device page's main graph (`heroPlot`). 0 keeps the usual grid.
+    @Entry var fineGridRows = 0
 }
 
 struct GraphSeries {
@@ -19,8 +27,8 @@ struct GraphSeries {
 /// A task-manager graph: newest value on the right, older values sliding left.
 ///
 /// Drawn by `StreamGraphView` with Core Animation. Each sample rebuilds the
-/// paths once, and the render server then scrolls them one step to the left
-/// over the sampling interval, so the line streams in instead of jumping.
+/// paths once, and a shared window clock moves their layers in device-pixel
+/// steps over the sampling interval, so the line streams in instead of jumping.
 /// Until the window fills, the stretch before the first sample gets a light
 /// neutral wash with a faint hatch (`UnrecordedLook`), a dashed line marks
 /// where recording started, and a graph with an axis says at its foot how
@@ -30,10 +38,13 @@ struct GraphView: NSViewRepresentable {
     var series: [GraphSeries]
     /// Fixed top of the scale; nil auto-scales to the visible data.
     var maxValue: Double?
-    /// Samples across the full width.
-    var capacity = AppModel.graphSpan
+    /// Samples across the full width; nil takes the page's window, `graphWindow`.
+    var capacity: Int?
     var showsGrid = true
-    var lineWidth: CGFloat = 1.5
+    /// A little over the grid's and the unrecorded hatch's, so a low trace
+    /// still stands out from them: a dashed line's width, which a solid
+    /// line's is `GraphEmphasis.traceWidth` times.
+    var lineWidth: CGFloat = 1.75
     /// Bloom under each line and a glowing marker on the newest value.
     var glows = false
     /// Draw each series on top of the ones before it, as filled bands.
@@ -55,11 +66,14 @@ struct GraphView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: StreamGraphView, context: Context) {
+        let capacity = capacity ?? context.environment.graphWindow
+        let fineRows = context.environment.fineGridRows
         let configuration = StreamGraphView.Configuration(
             lines: series.map {
                 StreamGraphView.Line(values: Array($0.values.suffix(capacity + 1)), color: NSColor($0.color), fill: $0.fill, dashed: $0.dashed)
             },
-            maxValue: maxValue, capacity: max(capacity, 2), showsGrid: showsGrid, lineWidth: lineWidth, glows: glows,
+            maxValue: maxValue, capacity: max(capacity, 2), showsGrid: showsGrid, fineRows: fineRows > 0 ? fineRows : nil,
+            lineWidth: lineWidth, glows: glows,
             stacked: stacked, minimumCeiling: minimumCeiling, maximumCeiling: maximumCeiling,
             axis: axis, axisUnits: axisUnits, axisNote: axisNote, cornerRadius: cornerRadius
         )
@@ -80,6 +94,9 @@ final class StreamGraphView: NSView {
         var maxValue: Double?
         var capacity: Int
         var showsGrid: Bool
+        /// Rows of a fine grid in place of the usual quarters (`FineGridLines`),
+        /// its columns about as far apart; nil for the usual grid.
+        var fineRows: Int?
         var lineWidth: CGFloat
         var glows: Bool
         var stacked: Bool
@@ -89,6 +106,18 @@ final class StreamGraphView: NSView {
         var axisUnits: GraphMath.AxisUnits
         var axisNote: String?
         var cornerRadius: CGFloat
+
+        /// Whether `other` draws the same apart from its values (and its axis
+        /// labels' wording, a closure that can't be compared).
+        func drawsLike(_ other: Configuration) -> Bool {
+            lines.count == other.lines.count
+                && zip(lines, other.lines).allSatisfy { $0.color == $1.color && $0.fill == $1.fill && $0.dashed == $1.dashed }
+                && maxValue == other.maxValue && capacity == other.capacity && showsGrid == other.showsGrid && fineRows == other.fineRows
+                && lineWidth == other.lineWidth && glows == other.glows && stacked == other.stacked
+                && minimumCeiling == other.minimumCeiling && maximumCeiling == other.maximumCeiling
+                && (axis == nil) == (other.axis == nil) && axisUnits == other.axisUnits && axisNote == other.axisNote
+                && cornerRadius == other.cornerRadius
+        }
     }
 
     /// Layers for one series. The fill and line live in `scroller`; the
@@ -96,6 +125,7 @@ final class StreamGraphView: NSView {
     private final class SeriesLayers {
         let fill = CAGradientLayer()
         let fillMask = CAShapeLayer()
+        let glow = CAShapeLayer()
         let line = CAShapeLayer()
         let head = CALayer()
         let halo = CALayer()
@@ -103,10 +133,11 @@ final class StreamGraphView: NSView {
 
         init() {
             fill.mask = fillMask
-            line.fillColor = nil
-            line.lineCap = .round
-            line.lineJoin = .round
-            line.shadowOffset = .zero
+            for stroke in [glow, line] {
+                stroke.fillColor = nil
+                stroke.lineCap = .round
+                stroke.lineJoin = .round
+            }
             head.bounds = CGRect(x: 0, y: 0, width: 12, height: 12)
             // A tight halo and a faint shadow: enough to find the newest
             // value, not so much that it blurs the line it sits on.
@@ -123,25 +154,33 @@ final class StreamGraphView: NSView {
         }
 
         func removeFromSuperlayers() {
-            [fill, line, head].forEach { $0.removeFromSuperlayer() }
+            [fill, glow, line, head].forEach { $0.removeFromSuperlayer() }
         }
     }
 
-    /// Screen-space shape of one series, ready to turn into paths.
+    /// Screen-space shape of one series, ready to turn into paths. In
+    /// `Double`, as `GraphMath` works, so nothing is converted per point.
     private struct Trace {
-        var ys: [CGFloat]
-        var tangents: [CGFloat]
+        var ys: [Double]
+        var tangents: [Double]
     }
 
-    /// The axis labels' size. 12 pt, the app's size for explanations, would
-    /// leave no room for the caption under the middle label in a 72-point graph.
-    private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+    /// The axis labels' and the coverage caption's size: 12 pt, the app's
+    /// metadata size.
+    private static let captionFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
     /// The top label's note ("auto scale").
-    private static let noteFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    private static let noteFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+    /// An axis label's or the caption's line. The caption sits a point off
+    /// the plot's padding and a point under the middle label, so the two fit
+    /// one above the other in a 72-point graph (Overview's).
+    private static let labelHeight: CGFloat = 15
 
     private let plot = CALayer()
     private let grid = CAShapeLayer()
+    /// A fine grid's firmer rows, at its quarters.
+    private let majorGrid = CAShapeLayer()
     private let scroller = CALayer()
+    private lazy var motion = StreamGraphMotion(scroller: scroller)
     private let columns = CAShapeLayer()
     /// The stretch before the first sample, washed and faintly hatched. It lives in
     /// the scroller, so it slides with the data; the hatch is built once per
@@ -160,6 +199,8 @@ final class StreamGraphView: NSView {
     private var configuration: Configuration?
     private var lastValues: [[Double]] = []
     private var lastSize: CGSize = .zero
+    /// The step the paths were last laid out with, which a scroll under way moves by.
+    private var lastStep: CGFloat = 0
     private var ceiling: Double = 1
     private var hasDrawn = false
     /// Counts samples so the vertical grid lines scroll with the data.
@@ -181,10 +222,10 @@ final class StreamGraphView: NSView {
         plot.masksToBounds = true
         scroller.anchorPoint = .zero
         scroller.masksToBounds = false
-        // The scroller only ever moves sideways between samples, so a cached
-        // bitmap of it (glow included) slides for free in the render server.
+        // Only its position changes between samples, so a cached bitmap
+        // avoids drawing every stroke again at each device-pixel step.
         scroller.shouldRasterize = true
-        for shape in [grid, columns] {
+        for shape in [grid, majorGrid, columns] {
             shape.fillColor = nil
             shape.lineWidth = 0.5
         }
@@ -214,6 +255,7 @@ final class StreamGraphView: NSView {
         scroller.addSublayer(unrecorded)
         scroller.addSublayer(boundary)
         plot.addSublayer(grid)
+        plot.addSublayer(majorGrid)
         plot.addSublayer(scroller)
         layer?.addSublayer(plot)
         layer?.addSublayer(captionBadge)
@@ -231,11 +273,23 @@ final class StreamGraphView: NSView {
 
     func update(_ configuration: Configuration, interval: TimeInterval, streams: Bool) {
         let values = configuration.lines.map(\.values)
-        let isNewSample = hasDrawn && values != lastValues
-            && configuration.lines.count == self.configuration?.lines.count
-            && configuration.capacity == self.configuration?.capacity
-        if values != lastValues { sampleIndex += 1 }
+        let changed = values != lastValues
+        let previous = self.configuration
         self.configuration = configuration
+        // A page redrawn between samples (Performance's details and some of
+        // Overview's cards redraw a few milliseconds after each one) hands
+        // its graphs what they already show. Drawing them again cut short
+        // the scroll under way, so they jumped a step a sample; now there's
+        // nothing to draw and the scroll runs on.
+        if !changed, let previous, configuration.drawsLike(previous), interval == self.interval, streams == self.streams {
+            return
+        }
+        // A new sample scrolls the graph a step, one that adds or drops a
+        // line too (an app joining a by-app graph) as long as a line it
+        // shares with the last moved on by a sample.
+        let isNewSample = hasDrawn && changed && configuration.capacity == previous?.capacity
+            && (configuration.lines.count == previous?.lines.count || GraphMath.advances(from: lastValues, to: values))
+        if changed { sampleIndex += 1 }
         self.interval = interval
         self.streams = streams
         lastValues = values
@@ -248,6 +302,12 @@ final class StreamGraphView: NSView {
     override func layout() {
         super.layout()
         guard bounds.size != lastSize else { return }
+        render(newSample: false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        motion.stop()
         render(newSample: false)
     }
 
@@ -285,15 +345,20 @@ final class StreamGraphView: NSView {
         let step = plotRect.width / CGFloat(configuration.capacity - 1)
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let scrolls = newSample && streams && !reduceMotion
+        // Redrawn between samples at the same step (a new scale, a taller
+        // card), the paths sit where they did, so a scroll under way runs on.
+        let restep = step != lastStep
+        lastStep = step
 
         let raw = configuration.lines.map(\.values)
         let shown = configuration.stacked ? GraphMath.stack(raw) : raw
-        let peak = shown.joined().max() ?? 0
         let previousCeiling = ceiling
+        // The peak is scanned for only when there's no fixed top.
         ceiling = configuration.maxValue
-            ?? min(GraphMath.ceiling(peak: peak, floor: configuration.minimumCeiling, units: configuration.axisUnits),
+            ?? min(GraphMath.ceiling(peak: shown.map { GraphMath.finitePeak($0) }.max() ?? 0,
+                                     floor: configuration.minimumCeiling, units: configuration.axisUnits),
                    configuration.maximumCeiling)
-        let rescales = hasDrawn && newSample && previousCeiling != ceiling && !reduceMotion
+        let rescales = hasDrawn && !restep && previousCeiling != ceiling && !reduceMotion
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -302,13 +367,16 @@ final class StreamGraphView: NSView {
         plot.frame = plotRect
         scroller.frame = CGRect(x: 0, y: 0, width: plotRect.width + 2 * step + 16, height: plotRect.height)
         scroller.rasterizationScale = window?.backingScaleFactor ?? 2
+        motion.prepare(view: self, step: step, interval: interval, scrolls: scrolls,
+                       reset: restep || !streams || reduceMotion)
         syncSeriesLayers(count: shown.count)
 
         var rescaleAnimations: [(CAShapeLayer, CGPath)] = []
+        let emphasis = GraphColors.shared.emphasis
         // Colours resolve for this view's appearance: the data colours are
         // deeper in light mode, and re-render when it changes.
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            drawGrid(in: plotRect, step: step, configuration: configuration)
+            drawGrid(in: plotRect, step: step, configuration: configuration, emphasis: emphasis)
             drawCoverage(samples: shown.map(\.count).max() ?? 0, in: plotRect, step: step, configuration: configuration)
             // Each made once: a stacked band's lower edge is the band below's trace.
             let traces = shown.map { makeTrace($0, ceiling: ceiling, height: plotRect.height) }
@@ -325,26 +393,16 @@ final class StreamGraphView: NSView {
                     let oldBelow = below == nil ? nil : makeTrace(shown[index - 1], ceiling: previousCeiling, height: plotRect.height)
                     let old = makePaths(oldTrace, below: oldBelow, firstX: firstX, step: step)
                     rescaleAnimations.append((layers.line, old.line))
+                    if configuration.glows { rescaleAnimations.append((layers.glow, old.line)) }
                     rescaleAnimations.append((layers.fillMask, old.area))
                 }
-                style(layers, line: line, configuration: configuration, paths: paths)
+                style(layers, line: line, configuration: configuration, emphasis: emphasis, paths: paths)
                 placeHead(layers, line: line, trace: trace, edge: plotRect.maxX, animated: scrolls)
             }
         }
-        scroller.position = CGPoint(x: -step, y: 0)
         CATransaction.commit()
+        motion.resume()
 
-        if scrolls {
-            let scroll = CABasicAnimation(keyPath: "position.x")
-            scroll.fromValue = 0
-            scroll.toValue = -step
-            scroll.duration = interval
-            scroll.timingFunction = CAMediaTimingFunction(name: .linear)
-            scroll.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-            scroller.add(scroll, forKey: "scroll")
-        } else {
-            scroller.removeAnimation(forKey: "scroll")
-        }
         for (shape, from) in rescaleAnimations {
             let morph = CABasicAnimation(keyPath: "path")
             morph.fromValue = from
@@ -359,6 +417,7 @@ final class StreamGraphView: NSView {
         while series.count < count {
             let layers = SeriesLayers()
             scroller.addSublayer(layers.fill)
+            scroller.addSublayer(layers.glow)
             scroller.addSublayer(layers.line)
             layer?.addSublayer(layers.head)
             series.append(layers)
@@ -370,14 +429,29 @@ final class StreamGraphView: NSView {
 
     /// Screen y for each value, plus the curve's tangents.
     private func makeTrace(_ values: [Double], ceiling: Double, height: CGFloat) -> Trace {
-        let padding = verticalPadding
-        let usable = max(height - 2 * padding, 1)
-        let ys = values.map { value -> CGFloat in
-            let fraction = value.isFinite ? min(max(value / max(ceiling, .leastNonzeroMagnitude), 0), 1) : 0
-            return padding + usable * CGFloat(fraction)
+        let padding = Double(verticalPadding)
+        let usable = Double(max(height - 2 * verticalPadding, 1))
+        let top = max(ceiling, .leastNonzeroMagnitude)
+        // A while loop over pointers, as this runs for every point of every
+        // graph each sample: closures, generic min/max, a range's iterator and
+        // an array's subscript each cost a call per point in a debug build.
+        // Unreadable values sit on the baseline.
+        let count = values.count
+        var ys = [Double](repeating: padding, count: count)
+        values.withUnsafeBufferPointer { valueBuffer in
+            ys.withUnsafeMutableBufferPointer { yBuffer in
+                guard let value = valueBuffer.baseAddress, let y = yBuffer.baseAddress else { return }
+                var index = 0
+                while index < count {
+                    if value[index].isFinite {
+                        let fraction = value[index] / top
+                        y[index] = padding + usable * (fraction < 0 ? 0 : fraction > 1 ? 1 : fraction)
+                    }
+                    index += 1
+                }
+            }
         }
-        let tangents = GraphMath.monotoneTangents(ys.map(Double.init)).map { CGFloat($0) }
-        return Trace(ys: ys, tangents: tangents)
+        return Trace(ys: ys, tangents: GraphMath.monotoneTangents(ys))
     }
 
     /// The line along `trace`, and the area under it (down to the baseline,
@@ -386,13 +460,13 @@ final class StreamGraphView: NSView {
         let line = CGMutablePath()
         guard !trace.ys.isEmpty else { return (line, line) }
         let lastX = firstX + CGFloat(trace.ys.count - 1) * step
-        line.move(to: CGPoint(x: firstX, y: trace.ys[0]))
+        line.move(to: CGPoint(x: firstX, y: CGFloat(trace.ys[0])))
         appendCurve(trace, to: line, firstX: firstX, step: step, reversed: false)
 
         let area = CGMutablePath()
         area.addPath(line)
         if let below, below.ys.count == trace.ys.count {
-            area.addLine(to: CGPoint(x: lastX, y: below.ys[below.ys.count - 1]))
+            area.addLine(to: CGPoint(x: lastX, y: CGFloat(below.ys[below.ys.count - 1])))
             appendCurve(below, to: area, firstX: firstX, step: step, reversed: true)
         } else {
             area.addLine(to: CGPoint(x: lastX, y: 0))
@@ -404,44 +478,59 @@ final class StreamGraphView: NSView {
 
     /// Cubic Bézier segments equivalent to the monotone Hermite curve.
     private func appendCurve(_ trace: Trace, to path: CGMutablePath, firstX: CGFloat, step: CGFloat, reversed: Bool) {
-        let ys = trace.ys
-        let tangents = trace.tangents
-        guard ys.count > 1 else { return }
+        let count = trace.ys.count
+        guard count > 1, trace.tangents.count == count else { return }
         let third = step / 3
-        let indices = reversed ? Array((1..<ys.count).reversed()) : Array(0..<ys.count - 1)
-        for index in indices {
-            let next = reversed ? index - 1 : index + 1
-            let direction: CGFloat = reversed ? -1 : 1
-            let x = firstX + CGFloat(index) * step
-            let nextX = firstX + CGFloat(next) * step
-            path.addCurve(
-                to: CGPoint(x: nextX, y: ys[next]),
-                control1: CGPoint(x: x + direction * third, y: ys[index] + direction * tangents[index] / 3),
-                control2: CGPoint(x: nextX - direction * third, y: ys[next] - direction * tangents[next] / 3)
-            )
+        let direction: Double = reversed ? -1 : 1
+        // A while loop over pointers, as in `makeTrace`.
+        trace.ys.withUnsafeBufferPointer { yBuffer in
+            trace.tangents.withUnsafeBufferPointer { tangentBuffer in
+                guard let ys = yBuffer.baseAddress, let tangents = tangentBuffer.baseAddress else { return }
+                var offset = 0
+                while offset < count - 1 {
+                    let index = reversed ? count - 1 - offset : offset
+                    let next = reversed ? index - 1 : index + 1
+                    let x = firstX + CGFloat(index) * step
+                    let nextX = firstX + CGFloat(next) * step
+                    path.addCurve(
+                        to: CGPoint(x: nextX, y: CGFloat(ys[next])),
+                        control1: CGPoint(x: x + CGFloat(direction) * third, y: CGFloat(ys[index] + direction * tangents[index] / 3)),
+                        control2: CGPoint(x: nextX - CGFloat(direction) * third, y: CGFloat(ys[next] - direction * tangents[next] / 3))
+                    )
+                    offset += 1
+                }
+            }
         }
     }
 
-    /// The line takes the colour's shade for this appearance (deeper in light
-    /// mode); its glow and the area under it keep the bright fill shade.
-    private func style(_ layers: SeriesLayers, line: Line, configuration: Configuration, paths: (line: CGPath, area: CGPath)) {
-        let color = line.color
-        let bright = color.fillShade
+    /// The line takes the colour's trace shade for this appearance (deeper in
+    /// light mode), a solid one wider than the graph's `lineWidth`
+    /// (`GraphEmphasis`); its glow and the area under it keep the bright fill
+    /// shade, the area fainter than the line.
+    private func style(_ layers: SeriesLayers, line: Line, configuration: Configuration, emphasis: GraphEmphasis,
+                       paths: (line: CGPath, area: CGPath)) {
+        let bright = line.color.fillShade
         layers.line.path = paths.line
-        layers.line.strokeColor = color.cgColor
-        layers.line.lineWidth = configuration.lineWidth
+        layers.line.strokeColor = line.color.traceShade.cgColor
+        layers.line.lineWidth = line.dashed ? configuration.lineWidth : configuration.lineWidth * GraphEmphasis.traceWidth
         layers.line.lineDashPattern = line.dashed ? [4, 3] : nil
-        layers.line.shadowColor = bright.cgColor
-        layers.line.shadowRadius = configuration.glows ? 5 : 0
-        layers.line.shadowOpacity = configuration.glows ? 0.95 : 0
+        // A wide translucent stroke gives the bloom without an offscreen
+        // shadow pass. It shares the line's path, rebuilt once per sample.
+        layers.glow.isHidden = !configuration.glows
+        layers.glow.path = paths.line
+        layers.glow.strokeColor = bright.withAlphaComponent(0.18).cgColor
+        layers.glow.lineWidth = layers.line.lineWidth + 8
+        layers.glow.lineDashPattern = layers.line.lineDashPattern
 
         let filled = configuration.stacked || line.fill
         layers.fill.isHidden = !filled
         layers.fill.frame = scroller.bounds
         layers.fillMask.frame = layers.fill.bounds
         layers.fillMask.path = paths.area
-        let top: CGFloat = configuration.stacked ? 0.70 : (configuration.glows ? 0.45 : 0.35)
-        let bottom: CGFloat = configuration.stacked ? 0.30 : 0
+        let fade = CGFloat(configuration.stacked ? emphasis.bands : emphasis.fill)
+        let lineTop: CGFloat = configuration.glows ? 0.45 : 0.35
+        let top: CGFloat = (configuration.stacked ? 0.70 : lineTop) * fade
+        let bottom: CGFloat = configuration.stacked ? 0.30 * fade : 0
         layers.fill.colors = [bright.withAlphaComponent(top).cgColor, bright.withAlphaComponent(bottom).cgColor]
         layers.fill.startPoint = CGPoint(x: 0.5, y: 1)
         layers.fill.endPoint = CGPoint(x: 0.5, y: 0)
@@ -453,42 +542,38 @@ final class StreamGraphView: NSView {
         let isTop = configuration?.stacked != true || layers === series.last
         let visible = configuration?.glows == true && !line.dashed && isTop && !trace.ys.isEmpty
         layers.head.isHidden = !visible
-        guard visible, let last = trace.ys.last else { return }
+        guard visible, let last = trace.ys.last else {
+            motion.placeHead(layers.head, target: layers.head.position, segment: nil, animated: false)
+            return
+        }
         let bright = line.color.fillShade
         layers.halo.backgroundColor = bright.withAlphaComponent(0.16).cgColor
-        layers.dot.backgroundColor = line.color.cgColor
+        layers.dot.backgroundColor = line.color.traceShade.cgColor
         layers.dot.shadowColor = bright.cgColor
-        layers.head.position = CGPoint(x: edge, y: last)
-        layers.head.removeAnimation(forKey: "glide")
-
         let count = trace.ys.count
-        guard animated, count > 1 else { return }
-        let keyframes = (0...12).map { frame -> NSValue in
-            let y = GraphMath.hermite(
-                from: Double(trace.ys[count - 2]), to: Double(last),
-                startTangent: Double(trace.tangents[count - 2]), endTangent: Double(trace.tangents[count - 1]), at: Double(frame) / 12
-            )
-            return NSValue(point: CGPoint(x: edge, y: y))
-        }
-        let glide = CAKeyframeAnimation(keyPath: "position")
-        glide.values = keyframes
-        glide.duration = interval
-        glide.calculationMode = .linear
-        glide.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
-        layers.head.add(glide, forKey: "glide")
+        let segment = count > 1 ? GraphMotionSegment(
+            start: trace.ys[count - 2], end: last,
+            startTangent: trace.tangents[count - 2], endTangent: trace.tangents[count - 1]
+        ) : nil
+        motion.placeHead(layers.head, target: CGPoint(x: edge, y: CGFloat(last)), segment: segment, animated: animated)
     }
 
     /// Runs inside `render`'s appearance block, so the colours resolve for this view.
-    private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration) {
+    private func drawGrid(in plotRect: CGRect, step: CGFloat, configuration: Configuration, emphasis: GraphEmphasis) {
         grid.isHidden = !configuration.showsGrid
+        majorGrid.isHidden = !configuration.showsGrid || configuration.fineRows == nil
         columns.isHidden = !configuration.showsGrid
-        // Light mode needs a firmer grid to hold up on a pale plot.
+        // Light mode needs a firmer grid to hold up on a pale plot. Both stay
+        // faint enough that a trace near the floor isn't lost among them,
+        // fainter still by the palette's emphasis.
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let lineColor = NSColor.labelColor.withAlphaComponent(isDark ? 0.09 : 0.15).cgColor
+        let lineColor = NSColor.labelColor.withAlphaComponent((isDark ? 0.065 : 0.11) * CGFloat(emphasis.grid)).cgColor
         let labelColor = NSColor.secondaryText.cgColor
         let padding = verticalPadding
         let usable = plotRect.height - 2 * padding
-        if configuration.showsGrid {
+        if configuration.showsGrid, let fineRows = configuration.fineRows {
+            drawFineGrid(rows: fineRows, in: plotRect, step: step, colors: FineGridLines.colors(dark: isDark, emphasis: emphasis))
+        } else if configuration.showsGrid {
             let rows = CGMutablePath()
             for fraction in [0.25, 0.5, 0.75] as [CGFloat] {
                 let y = padding + usable * fraction
@@ -498,20 +583,8 @@ final class StreamGraphView: NSView {
             grid.frame = plot.bounds
             grid.path = rows
             grid.strokeColor = lineColor
-
-            // Vertical lines belong to sample times, so they scroll with the data.
-            let spacing = max(configuration.capacity / 10, 1)
-            let newestX = plotRect.width + step
-            let verticals = CGMutablePath()
-            var age = sampleIndex % spacing
-            while newestX - CGFloat(age) * step >= -step {
-                let x = newestX - CGFloat(age) * step
-                verticals.move(to: CGPoint(x: x, y: 0))
-                verticals.addLine(to: CGPoint(x: x, y: plotRect.height))
-                age += spacing
-            }
             columns.frame = scroller.bounds
-            columns.path = verticals
+            columns.path = verticals(every: max(configuration.capacity / 10, 1), in: plotRect, step: step)
             columns.strokeColor = lineColor
         }
 
@@ -519,10 +592,9 @@ final class StreamGraphView: NSView {
         topLabel.isHidden = axis == nil
         midLabel.isHidden = axis == nil
         guard let axis else { return }
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         for (label, value, y) in [(topLabel, ceiling, plotRect.height - padding), (midLabel, ceiling / 2, padding + usable / 2)] {
             let color = NSColor(cgColor: labelColor) ?? .secondaryText
-            let text = NSMutableAttributedString(string: axis(value), attributes: [.font: font, .foregroundColor: color])
+            let text = NSMutableAttributedString(string: axis(value), attributes: [.font: Self.captionFont, .foregroundColor: color])
             if label === topLabel, let note = configuration.axisNote {
                 // The note in the accent colour, so a scale that isn't fixed
                 // isn't read as one that is.
@@ -537,8 +609,42 @@ final class StreamGraphView: NSView {
             }
             label.string = text
             label.shadowColor = NSColor.windowBackgroundColor.cgColor
-            label.frame = CGRect(x: 5, y: y - 14, width: max(plotRect.width - 10, 0), height: 14)
+            label.frame = CGRect(x: 5, y: y - Self.labelHeight, width: max(plotRect.width - 10, 0), height: Self.labelHeight)
+            let ink = CGRect(x: 0, y: 0, width: min(text.size().width, label.bounds.width), height: Self.labelHeight)
+            label.shadowPath = CGPath(rect: ink, transform: nil)
         }
+    }
+
+    /// A main graph's fine grid (`FineGridLines`): still rows, firmer at the
+    /// quarters, and columns about as far apart that scroll with the data.
+    private func drawFineGrid(rows: Int, in plotRect: CGRect, step: CGFloat, colors: (minor: CGColor, major: CGColor)) {
+        let lines = FineGridLines.rows(size: plotRect.size, inset: verticalPadding, rows: rows)
+        grid.frame = plot.bounds
+        grid.path = lines.minor
+        grid.strokeColor = colors.minor
+        majorGrid.frame = plot.bounds
+        majorGrid.path = lines.major
+        majorGrid.strokeColor = colors.major
+        let rowStep = FineGridSpacing.row(height: Double(plotRect.height), inset: Double(verticalPadding), rows: rows)
+        let spacing = FineGridSpacing.columnSamples(rowStep: rowStep, sampleStep: Double(step))
+        columns.frame = scroller.bounds
+        columns.path = verticals(every: spacing, in: plotRect, step: step)
+        columns.strokeColor = colors.minor
+    }
+
+    /// Vertical lines every `spacing` samples, counted from the newest. They
+    /// belong to sample times, so they scroll with the data.
+    private func verticals(every spacing: Int, in plotRect: CGRect, step: CGFloat) -> CGPath {
+        let newestX = plotRect.width + step
+        let path = CGMutablePath()
+        var age = sampleIndex % spacing
+        while newestX - CGFloat(age) * step >= -step {
+            let x = newestX - CGFloat(age) * step
+            path.move(to: CGPoint(x: x, y: 0))
+            path.addLine(to: CGPoint(x: x, y: plotRect.height))
+            age += spacing
+        }
+        return path
     }
 }
 
@@ -558,8 +664,10 @@ enum UnrecordedLook {
 
     /// The window background's opacity over the plot.
     static func washOpacity(dark: Bool) -> CGFloat { dark ? 0.22 : 0.35 }
-    /// The label colour's opacity in the hatch.
-    static func hatchOpacity(dark: Bool) -> CGFloat { dark ? 0.045 : 0.04 }
+    /// The label colour's opacity in the hatch: a texture that says "nothing
+    /// here", fainter than the grid's lines, while the wash and the edge
+    /// mark the stretch out.
+    static func hatchOpacity(dark: Bool) -> CGFloat { dark ? 0.035 : 0.03 }
     /// The label colour's opacity in the edge where recording starts.
     static func edgeOpacity(dark: Bool) -> CGFloat { dark ? 0.35 : 0.4 }
 }
@@ -620,10 +728,10 @@ extension StreamGraphView {
     /// In full or short form, whichever fits the `room` left of the first
     /// sample, and only below the axis's middle label.
     private func placeCaption(_ coverage: GraphCoverage, room: CGFloat, in plotRect: CGRect, configuration: Configuration) {
-        let bottom = verticalPadding + 2
-        let height: CGFloat = 15
+        let bottom = verticalPadding + 1
+        let height = Self.labelHeight
         // The middle axis label's lower edge (see `drawGrid`).
-        let clearance = plotRect.height / 2 - 14
+        let clearance = plotRect.height / 2 - Self.labelHeight
         if coverage.caption != accessibilityCaption {
             accessibilityCaption = coverage.caption
             setAccessibilityHelp(coverage.spokenCaption)
@@ -650,7 +758,7 @@ extension StreamGraphView {
             captionBadge.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(isDark ? 0.7 : 0.8).cgColor
         }
         captionBadge.frame = CGRect(x: inset, y: bottom, width: width + 8, height: height)
-        captionLabel.frame = CGRect(x: 4, y: 0, width: width + 1, height: 14)
+        captionLabel.frame = CGRect(x: 4, y: 0, width: width + 1, height: height)
     }
 
     private func captionWidth(_ text: String) -> CGFloat {

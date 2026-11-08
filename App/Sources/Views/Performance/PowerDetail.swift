@@ -3,24 +3,31 @@ import SwiftUI
 
 struct PowerDetail: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.detailPaneHeight) private var pane
     var snapshot: SystemSnapshot
 
-    private static let charging = Theme.data(0.30, 0.85, 0.45)
-    private static let discharging = Theme.data(0.98, 0.45, 0.35)
+    private static var charging: Color { Theme.charging }
+    private static var discharging: Color { Theme.discharging }
 
     var body: some View {
         let power = snapshot.power
         VStack(alignment: .leading, spacing: 16) {
-            DetailHeader(title: "Power", subtitle: subtitle(power))
-            stats(power)
+            DeviceHeader(title: "Power", subtitle: subtitle(power), level: level(power))
             if let components = power.components {
                 breakdown(power, components)
             } else if let watts = power.systemWatts {
-                ChartCard(title: "Whole-system power draw", trailing: Format.watts(watts), tint: Theme.power) {
-                    GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)], glows: true,
-                              minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
-                        .chartFrame(height: DetailGraph.primary, tint: Theme.power)
+                DeviceCard(tint: Theme.power) {
+                    DeviceCaption(title: "Whole-system power draw", trailing: Format.watts(watts))
+                } plot: {
+                    GraphView(series: [GraphSeries(values: model.powerHistory.values, color: Theme.power)],
+                              glows: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
+                        .heroPlot(height: Hero.height(pane: pane), tint: Theme.power)
+                } figures: {
+                    figures(power)
                 }
+            } else {
+                // A battery but no power reading: the figures, with no graph to head.
+                MetricStrip(tint: Theme.power) { figures(power) }
             }
             if model.powerDetail.energy > 0 { energy() }
             if let clusters = power.components?.clusters, clusters.contains(where: { $0.watts != nil }) {
@@ -41,6 +48,21 @@ struct PowerDetail: View {
             return adapter.name ?? adapter.ratedWatts.map { "\(Format.fixed($0, 0)) W adapter" } ?? "AC power"
         }
         return power.battery == nil ? "AC power" : "On battery"
+    }
+
+    /// The draw against the most this Mac has been seen to draw, or the
+    /// battery's charge where there's no draw to show.
+    private func level(_ power: PowerSample) -> LevelRow {
+        if let watts = power.systemWatts {
+            let peak = max(model.peakSystemWatts, watts)
+            return LevelRow(fraction: peak > 0 ? watts / peak : 0, color: Theme.power, value: watts, format: Format.watts,
+                            caption: "of \(Format.watts(peak)) highest seen", label: "Power draw", figureWidth: 76)
+        }
+        if let battery = power.battery {
+            return LevelRow(fraction: Double(battery.percent) / 100, color: Self.charging, value: Double(battery.percent),
+                            format: { "\(Int($0.rounded()))%" }, caption: "battery", label: "Battery charge")
+        }
+        return LevelRow(fraction: nil, color: Theme.power, text: "—", caption: "not measured", label: "Power draw")
     }
 
     // MARK: - Where the power goes
@@ -73,13 +95,16 @@ struct PowerDetail: View {
         // where they'd only draw flat lines over the band below.
         let series = chip.filter { $0.watts != nil }.map { GraphSeries(values: $0.values, color: $0.color) }
             + [GraphSeries(values: rest, color: Theme.restOfSystem)]
-        return ChartCard(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "",
-                         tint: Theme.power, legend: legend) {
-            GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts, cornerRadius: 8)
-                .chartFrame(height: DetailGraph.primary, tint: Theme.power)
-            Text(Self.restNote(components))
-                .font(.explanation)
-                .foregroundStyle(.secondaryText)
+        // The legend's two lines and the note's two come out of the height.
+        let height = Hero.height(pane: pane, extra: 2 * Hero.legendLine + 40)
+        return DeviceCard(tint: Theme.power, legend: legend, footnote: Self.restNote(components)) {
+            DeviceCaption(title: "Where the power goes", trailing: power.systemWatts.map { "\(Format.watts($0)) total" } ?? "")
+        } plot: {
+            GraphView(series: series, glows: true, stacked: true, minimumCeiling: 5, axis: Format.watts,
+                      cornerRadius: 8)
+                .heroPlot(height: height, tint: Theme.power)
+        } figures: {
+            figures(power)
         }
     }
 
@@ -117,7 +142,7 @@ struct PowerDetail: View {
             legend: shares.map {
                 LegendItem(name: $0.name, color: $0.color, value: "\(Self.wattHours($0.joules)) · \(Format.percent($0.joules / total))")
             },
-            span: nil
+            timed: false
         ) {
             ShareBar(segments: shares.map { ($0.color, $0.joules) })
                 .frame(height: 14)
@@ -210,31 +235,31 @@ struct PowerDetail: View {
 
     // MARK: - Stats and apps
 
-    private func stats(_ power: PowerSample) -> some View {
-        MetricStrip(tint: Theme.power) {
-            if let watts = power.systemWatts {
-                Stat(label: "System power", number: watts, color: Theme.power, format: Format.watts)
-            }
-            if let average = model.powerDetail.averageWatts {
-                Stat(label: "Average since launch", number: average, format: Format.watts)
-            }
-            if model.peakSystemWatts > 0 {
-                Stat(label: "Highest seen", number: model.peakSystemWatts, format: Format.watts)
-            }
-            Stat(label: "Thermal state", value: power.thermalState.rawValue.capitalized)
-            Stat(label: "Low Power Mode", value: power.isLowPowerMode ? "On" : "Off")
+    @ViewBuilder
+    private func figures(_ power: PowerSample) -> some View {
+        if let watts = power.systemWatts {
+            Stat(label: "System power", number: watts, color: Theme.power, format: Format.watts)
         }
+        if let average = model.powerDetail.averageWatts {
+            Stat(label: "Average since launch", number: average, format: Format.watts)
+        }
+        if model.peakSystemWatts > 0 {
+            Stat(label: "Highest seen", number: model.peakSystemWatts, format: Format.watts)
+        }
+        Stat(label: "Thermal state", value: power.thermalState.rawValue.capitalized)
+        Stat(label: "Low Power Mode", value: power.isLowPowerMode ? "On" : "Off")
     }
 
     /// Apps' estimated draw, stacked. Per-process energy only covers CPU and
     /// GPU work, so this sits below the whole-system figure.
     private func byApp() -> some View {
         let apps = model.topApps(by: .power, count: 5)
-        let other = AppModel.remainder(of: model.processPowerHistory.values, minus: apps.map(\.values))
-        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: Theme.series($0)) }
+        let other = GraphMath.remainder(of: model.processPowerHistory.values, minus: apps.map(\.values))
+        let colors = Theme.appColors(for: apps.map(\.id), in: "power")
+        let series = apps.enumerated().map { GraphSeries(values: $1.values, color: colors[$0]) }
             + [GraphSeries(values: other, color: Theme.other)]
         let legend = apps.enumerated().map {
-            LegendItem(name: $1.name, color: Theme.series($0), value: Format.watts($1.current), icon: $1.icon)
+            LegendItem(name: $1.name, color: colors[$0], value: Format.watts($1.current), icon: $1.icon)
         } + [LegendItem(name: "Everything else", color: Theme.other, value: Format.watts(other.last ?? 0))]
         // Over the same window as the graphs above, so they line up.
         return ChartCard(title: "Power by app", trailing: "CPU and GPU work", tint: Theme.power, legend: legend) {

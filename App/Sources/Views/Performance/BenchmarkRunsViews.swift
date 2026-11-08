@@ -37,8 +37,8 @@ struct BenchmarkFigureGroup: Identifiable {
 
 /// A test's saved runs, newest first, each with a box to pick it for
 /// comparison, and the comparison of the two picked. Debug builds' runs are
-/// marked; with one run picked, those it can't be compared with are dimmed,
-/// the reason in their tooltip. It changes only with the runs or the picks.
+/// marked; with one run picked, those it can't be compared with drop to
+/// secondary text, the reason in their tooltip. It changes only with the runs or the picks.
 struct SavedRuns: View, Equatable {
     let kind: BenchmarkKind
     let runs: [BenchmarkRun]
@@ -53,7 +53,7 @@ struct SavedRuns: View, Equatable {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Saved runs").font(.callout.weight(.semibold))
+                Text("Saved runs").font(.body.weight(.semibold))
                 Text(hint(picked))
                     .font(.explanation)
                     .foregroundStyle(.secondaryText)
@@ -80,21 +80,31 @@ struct SavedRuns: View, Equatable {
     }
 }
 
-private struct RunsTable: View {
+/// A test's runs, newest first: when, the build and the volume or interface
+/// where they differ, then each figure in its column's unit. The headings are
+/// secondary text; the runs' figures are body text in the primary colour (a
+/// debug run is marked in its Build cell, not dimmed), so they read at a glance.
+struct RunsTable: View {
     let kind: BenchmarkKind
     let runs: [BenchmarkRun]
-    let picked: [BenchmarkRun]
+    var picked: [BenchmarkRun] = []
+    /// A box on each row to tick it for comparison: the workspace's table has
+    /// them, a resource card's doesn't.
+    var picking = true
+    /// The volume or interface column; nil shows it for the tests that have one.
+    /// A card's runs are all on its own volume or interface.
+    var showsTarget: Bool?
 
     var body: some View {
         let ids = Self.ids(runs)
         let groups = BenchmarkFigureGroup.groups(ids, in: runs)
         let variants = groups.contains { $0.ids.count > 1 }
         let showsBuild = runs.contains { $0.build != nil }
-        let showsTarget = !kind.measuresThisMac || kind == .disk
-        Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 3) {
+        let showsTarget = showsTarget ?? (!kind.measuresThisMac || kind == .disk)
+        Grid(alignment: .trailing, horizontalSpacing: 12, verticalSpacing: 4) {
             // A heading wraps over its unit, to three lines ("Random / 4K read / IOPS"), rather than truncate where the card is narrow.
             GridRow(alignment: .bottom) {
-                Text("").gridColumnAlignment(.leading)
+                if picking { Text("").gridColumnAlignment(.leading) }
                 Text(variants ? "" : "When").gridColumnAlignment(.leading)
                 if showsBuild { Text(variants ? "" : "Build").gridColumnAlignment(.leading) }
                 if showsTarget { Text(variants ? "" : "On").gridColumnAlignment(.leading) }
@@ -107,9 +117,11 @@ private struct RunsTable: View {
                         .gridCellAnchor(group.ids.count > 1 ? .center : .trailing)
                 }
             }
+            .font(.tableText)
+            .foregroundStyle(.secondaryText)
             if variants {
                 GridRow {
-                    Text("")
+                    if picking { Text("") }
                     Text("When")
                     if showsBuild { Text("Build") }
                     if showsTarget { Text("On") }
@@ -119,15 +131,15 @@ private struct RunsTable: View {
                         }
                     }
                 }
+                .font(.tableText)
+                .foregroundStyle(.secondaryText)
                 .help("One worker, then one per logical CPU")
             }
             ForEach(runs) { run in
-                RunRow(run: run, groups: groups, showsBuild: showsBuild, showsTarget: showsTarget,
-                       picked: picked.contains { $0.id == run.id }, refusal: refusal(run))
+                RunRow(run: run, groups: groups, showsBuild: showsBuild, showsTarget: showsTarget, picking: picking,
+                       picked: picked.contains { $0.id == run.id }, refusal: picking ? refusal(run) : nil)
             }
         }
-        .font(.tableText)
-        .foregroundStyle(.secondaryText)
         .monospacedDigit()
         .lineLimit(1)
     }
@@ -158,22 +170,26 @@ private struct RunsTable: View {
     }
 }
 
+/// A run's row. With one run ticked, a run that can't be compared with it
+/// drops to secondary text (still readable, never faded), the reason in its tooltip.
 private struct RunRow: View {
     let run: BenchmarkRun
     let groups: [BenchmarkFigureGroup]
     let showsBuild: Bool
     let showsTarget: Bool
+    let picking: Bool
     let picked: Bool
     let refusal: BenchmarkRefusal?
 
     var body: some View {
         let debug = run.build?.optimized == false
-        let dimmed = refusal != nil || debug
         GridRow {
-            Toggle("Compare", isOn: Binding(get: { picked }, set: { _ in BenchmarkWorkspace.shared.togglePick(run) }))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
-                .accessibilityLabel("Compare the run of \(BenchmarkLook.when(run.date))")
+            if picking {
+                Toggle("Compare", isOn: Binding(get: { picked }, set: { _ in BenchmarkWorkspace.shared.togglePick(run) }))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .accessibilityLabel("Compare the run of \(BenchmarkLook.when(run.date))")
+            }
             Text(BenchmarkLook.when(run.date)).fixedSize()
             if showsBuild {
                 Text(run.build?.title ?? "—")
@@ -202,15 +218,18 @@ private struct RunRow: View {
                 }
             }
         }
+        .font(.body)
         .fontWeight(picked ? .semibold : nil)
-        .foregroundStyle(dimmed ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
-        .opacity(refusal != nil ? 0.7 : 1)
+        .foregroundStyle(refusal != nil ? AnyShapeStyle(.secondaryText) : AnyShapeStyle(.primary))
         .help(refusal.map { "Can't be compared with the run picked: \($0.reason)" } ?? Self.details(run))
     }
 
+    /// What ran and how, then how the Mac stood as it started.
     private static func details(_ run: BenchmarkRun) -> String {
         var parts = [run.build.map { "\($0.title) build · \($0.app)" }, run.osVersion, run.target?.detail].compactMap { $0 }
         parts += run.conditions
+        let started = run.context?.conditionsLine ?? ""
+        parts.append(started.isEmpty ? BenchmarkContext.notRecorded : "Started \(started)")
         return parts.joined(separator: " · ")
     }
 }
@@ -248,6 +267,9 @@ private struct ComparisonPanel: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BenchmarkLook.debug.opacity(0.35)))
             case let .compared(comparison):
                 ChangeTable(changes: comparison.changes)
+                if !comparison.contextWarnings.isEmpty {
+                    ContextWarnings(warnings: comparison.contextWarnings)
+                }
                 ForEach(comparison.caveats, id: \.self) { caveat in
                     Label(caveat, systemImage: "info.circle")
                         .font(.explanation)
@@ -267,6 +289,49 @@ private struct ComparisonPanel: View {
     }
 }
 
+/// How two compared runs' starts differed (power, heat, load, memory, the
+/// Mac or the app): warnings beside the figures, apart from the refusals,
+/// since the runs are still compared.
+private struct ContextWarnings: View {
+    let warnings: [BenchmarkContextWarning]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("The runs started differently", systemImage: "exclamationmark.triangle")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(BenchmarkLook.caution)
+            ForEach(warnings) { warning in
+                Label {
+                    Text(warning.text).fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: Self.symbol(warning.topic)).foregroundStyle(.secondaryText)
+                }
+                .font(.explanation)
+            }
+            Text("The figures are compared anyway: these can move them, but don't make the runs incompatible.")
+                .font(.explanation)
+                .foregroundStyle(.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(BenchmarkLook.caution.fillShade.opacity(0.07), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BenchmarkLook.caution.opacity(0.35)))
+    }
+
+    private static func symbol(_ topic: BenchmarkContextWarning.Topic) -> String {
+        switch topic {
+        case .notRecorded: "questionmark.circle"
+        case .power: "powerplug"
+        case .thermal: "thermometer.medium"
+        case .cpuLoad: "cpu"
+        case .memory: "memorychip"
+        case .hardware: "desktopcomputer"
+        case .build: "hammer"
+        }
+    }
+}
+
 private struct ChangeTable: View {
     let changes: [BenchmarkChange]
 
@@ -282,23 +347,33 @@ private struct ChangeTable: View {
             }
             .foregroundStyle(.secondaryText)
             ForEach(changes) { change in
-                // Figures keep their width; in a narrow window the name and
-                // the verdict wrap instead.
+                // Figures keep their width; in a narrow window the name drops
+                // its variant to a second line ("Floating point," over "1 worker"),
+                // the two spreads stack and the verdict wraps instead.
                 // A figure in doubt in either run is marked at its figures,
                 // which drop to secondary text, and its verdict isn't coloured.
                 GridRow {
-                    Text(change.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    ViewThatFits(in: .horizontal) {
+                        Text(change.title)
+                        Text(change.title.replacingOccurrences(of: ", ", with: ",\n")).lineLimit(2)
+                        Text(change.title).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    }
                     figure(change.unit.format(change.baseline), caveat: change.baselineCaveat)
                     figure(change.unit.format(change.compared), caveat: change.comparedCaveat)
                     Text(change.change.map(BenchmarkChange.formatChange) ?? "—")
                         .fontWeight(change.caveat == nil ? .semibold : .regular)
                         .foregroundStyle(change.caveat == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondaryText))
                         .fixedSize()
-                    Text(change.spreadText).foregroundStyle(.secondaryText).fixedSize()
-                    Label(change.verdict.title, systemImage: Self.symbol(change.verdict))
+                    ViewThatFits(in: .horizontal) {
+                        Text(change.spreadText)
+                        Text(change.spreadText.replacingOccurrences(of: " / ", with: " /\n")).lineLimit(2)
+                    }
+                    .multilineTextAlignment(.trailing)
+                    .foregroundStyle(.secondaryText)
+                    Label(change.verdict.title, systemImage: BenchmarkLook.symbol(change.verdict))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(change.caveat == nil ? Self.color(change.verdict) : AnyShapeStyle(.secondaryText))
+                        .foregroundStyle(change.caveat == nil ? BenchmarkLook.color(change.verdict) : AnyShapeStyle(.secondaryText))
                         .help(change.verdict.explanation + (change.caveatNote.map { " \($0)" } ?? ""))
                 }
             }
@@ -319,25 +394,6 @@ private struct ChangeTable: View {
             .help("\(caveat.title): \(caveat.explanation)")
         } else {
             Text(text).fixedSize()
-        }
-    }
-
-    private static func symbol(_ verdict: BenchmarkChange.Verdict) -> String {
-        switch verdict {
-        case .better: "checkmark.circle.fill"
-        case .worse: "exclamationmark.circle.fill"
-        case .withinSpread: "equal.circle"
-        case .negligible: "equal.circle"
-        case .measuredOnce: "questionmark.circle"
-        case .unchanged: "equal.circle"
-        }
-    }
-
-    private static func color(_ verdict: BenchmarkChange.Verdict) -> AnyShapeStyle {
-        switch verdict {
-        case .better: AnyShapeStyle(BenchmarkLook.better)
-        case .worse: AnyShapeStyle(BenchmarkLook.worse)
-        case .withinSpread, .negligible, .measuredOnce, .unchanged: AnyShapeStyle(.secondaryText)
         }
     }
 }

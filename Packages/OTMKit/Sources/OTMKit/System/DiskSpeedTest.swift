@@ -139,6 +139,9 @@ public struct DiskSpeedResult: SpeedTestRecord, Equatable, Identifiable {
     public var sequentialRead: DiskSpeedMeasurement
     public var randomWrite: DiskSpeedMeasurement
     public var randomRead: DiskSpeedMeasurement
+    /// The Mac's state as the test started and ended; nil in results saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
 
     public var historyKey: String { volume.key }
 

@@ -11,19 +11,28 @@ struct HistoryLine: Identifiable {
 
     /// How the line is stroked, on the chart and in its legend's sample, so
     /// two lines on a chart differ by more than their colour.
-    enum Stroke {
+    enum Stroke: CaseIterable {
         case solid
         case dashed
         case dotted
+        case dashDot
+        case longDash
 
         var style: StrokeStyle {
             switch self {
-            case .solid: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
-            case .dashed: StrokeStyle(lineWidth: 1.1, lineCap: .round, lineJoin: .round, dash: [4, 3])
+            // The primary line, wider than the rest (`GraphEmphasis`).
+            case .solid: StrokeStyle(lineWidth: 1.8 * GraphEmphasis.traceWidth, lineCap: .round, lineJoin: .round)
+            case .dashed: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round, dash: [4, 3])
             // Zero-length dashes with round caps draw as dots.
             case .dotted: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: [0, 3.6])
+            case .dashDot: StrokeStyle(lineWidth: 1.4, lineCap: .round, lineJoin: .round, dash: [6, 3, 0, 3])
+            case .longDash: StrokeStyle(lineWidth: 1.3, lineCap: .round, lineJoin: .round, dash: [10, 4])
             }
         }
+
+        /// Whether the line's ends at a break get a dot: not for a plain
+        /// dashed line, whose ends a dot would only clutter.
+        var marksBreaks: Bool { self != .dashed }
     }
 
     var id: String { name }
@@ -156,7 +165,7 @@ struct HistoryChartSpec: Identifiable {
     /// within each 10-second record. Window peak: the highest over the
     /// window shown."
     static func definition(of line: HistoryLine, bucket: TimeInterval) -> String {
-        let stretch = "each \(HistoryInterval.adjective(max(bucket, FlightRecorder.span))) point"
+        let stretch = "each \(HistoryInterval.adjective(bucket)) point"
         let plotted = switch line.summary {
         case .average: "\(line.name): \(line.meaning), averaged over \(stretch)."
         case .maximum: "\(line.name): \(line.meaning) within \(stretch)."
@@ -172,16 +181,18 @@ struct HistoryChartSpec: Identifiable {
 /// A legend's sample of a line as its chart draws it: the stroke, solid
 /// with its glow, dashed or dotted, over a sliver of the fill when the line
 /// has one.
-private struct HistoryLineSample: View {
+struct HistoryLineSample: View {
     let line: HistoryLine
 
     var body: some View {
+        let fade = GraphColors.shared.emphasis.fill
+        let trace = line.color.traceShade
         Canvas { context, size in
             let y = line.fill ? 3.5 : size.height / 2
             if line.fill {
                 let area = CGRect(x: 0, y: y, width: size.width, height: size.height - y)
                 context.fill(Path(roundedRect: area, cornerRadius: 1.5),
-                             with: .linearGradient(Gradient(colors: [line.color.opacity(0.42), line.color.opacity(0.03)]),
+                             with: .linearGradient(Gradient(colors: [line.color.opacity(0.42 * fade), line.color.opacity(0.03 * fade)]),
                                                    startPoint: CGPoint(x: 0, y: y), endPoint: CGPoint(x: 0, y: size.height)))
             }
             var path = Path()
@@ -190,7 +201,7 @@ private struct HistoryLineSample: View {
             if line.stroke == .solid {
                 context.stroke(path, with: .color(line.color.opacity(0.22)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
             }
-            context.stroke(path, with: .color(line.color), style: line.stroke.style)
+            context.stroke(path, with: .color(trace), style: line.stroke.style)
         }
         .frame(width: 18, height: 11)
         .accessibilityHidden(true)
@@ -288,6 +299,8 @@ struct HistoryChartCard: View {
 
     private func chart(top: Double) -> some View {
         let wash = HistoryGapStyle.wash(dark: colorScheme == .dark)
+        // Lines over fainter fills and grid, as on the live graphs.
+        let emphasis = GraphColors.shared.emphasis
         return Chart {
             if let earliest, earliest > domain.lowerBound {
                 RectangleMark(xStart: .value("Time", domain.lowerBound), xEnd: .value("Time", min(earliest, domain.upperBound)))
@@ -302,49 +315,40 @@ struct HistoryChartCard: View {
             // Fills first, then each gap's wash with a fade either side, so a
             // fill dissolves into a gap instead of ending in an edge that
             // reads as the value dropping; the lines go over both.
-            ForEach(spec.lines.filter(\.fill)) { line in
-                ForEach(points) { point in
-                    if let value = line.value(point.values) {
-                        AreaMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
-                                 series: .value("Series", "\(line.name) \(point.segment)"), stacking: .unstacked)
-                            .foregroundStyle(LinearGradient(colors: [line.color.opacity(0.42), line.color.opacity(0.03)],
-                                                            startPoint: .top, endPoint: .bottom))
-                            .interpolationMethod(.monotone)
-                    }
-                }
-            }
+            fills(top: top, fade: emphasis.fill)
             ForEach(gaps.shades.indices, id: \.self) { index in
                 let shade = gaps.shades[index]
                 RectangleMark(xStart: .value("Time", shade.start), xEnd: .value("Time", shade.end))
                     .foregroundStyle(Self.style(of: shade.kind, wash: wash))
             }
             ForEach(spec.lines) { line in
-                ForEach(points) { point in
-                    if let value = line.value(point.values) {
-                        let series = "\(line.name) \(point.segment)"
+                let runs = HistoryPoint.runs(points, value: line.value)
+                let trace = line.color.traceShade
+                ForEach(points.indices, id: \.self) { index in
+                    if let run = runs[index], let value = line.value(points[index].values) {
+                        let series = "\(line.name) \(run)"
                         // A wide faint stroke under a solid line, for the glow.
                         if line.stroke == .solid {
-                            LineMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
+                            LineMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)),
                                      series: .value("Series", series + " glow"))
                                 .foregroundStyle(line.color.opacity(0.22))
                                 .lineStyle(StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                         }
-                        LineMark(x: .value("Time", point.time), y: .value(line.name, min(value, top)),
+                        LineMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)),
                                  series: .value("Series", series))
-                            .foregroundStyle(line.color)
+                            .foregroundStyle(trace)
                             .lineStyle(line.stroke.style)
                             .interpolationMethod(.monotone)
                     }
                 }
             }
-            // A dot where each line breaks off at a gap and where it picks up,
-            // so the break reads as a pause, and a lone point between gaps shows.
-            ForEach(spec.lines.filter { $0.stroke != .dashed }) { line in
-                ForEach(gaps.borders, id: \.self) { index in
-                    if index < points.count, let value = line.value(points[index].values) {
+            ForEach(spec.lines) { line in
+                let trace = line.color.traceShade
+                ForEach(dots(on: line), id: \.self) { index in
+                    if let value = line.value(points[index].values) {
                         PointMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)))
-                            .foregroundStyle(line.color)
+                            .foregroundStyle(trace)
                             .symbolSize(18)
                     }
                 }
@@ -353,13 +357,14 @@ struct HistoryChartCard: View {
         .chartXScale(domain: domain)
         .chartYScale(domain: 0...top)
         .chartYAxis {
+            // Faint, as on the live graphs, so a low line isn't lost among them.
             AxisMarks(values: [0, top / 2, top]) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.10))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.08 * emphasis.grid))
             }
         }
         .chartXAxis {
             AxisMarks(values: ticks) { _ in
-                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.07))
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.055 * emphasis.grid))
                 // Centred under its line, as `GraphMath.timeTicks` spaces them: a
                 // label hanging right of its tick ran past the plot's end and was cut.
                 AxisValueLabel(format: timeLabels, anchor: .top).font(.system(size: 11)).foregroundStyle(.secondaryText)
@@ -371,6 +376,38 @@ struct HistoryChartCard: View {
                 .overlay { HistoryGapHatch(gaps: gaps.drawn, domain: domain) }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
+    }
+
+    /// The fills under the lines that have one. A line and its fill break
+    /// where a reading is missing (`runs`), rather than bridge it; a run too
+    /// short to fill (a lone point, or a few only a sliver of the plot wide,
+    /// which would read as a bar up from the axis) has dots at its ends
+    /// (`dots`) and no fill.
+    @ChartContentBuilder private func fills(top: Double, fade: Double) -> some ChartContent {
+        ForEach(spec.lines.filter(\.fill)) { line in
+            let runs = HistoryPoint.runs(points, value: line.value)
+            let unfilled = HistoryPoint.unfilled(points, runs: runs, within: domain, minimumSpan: gaps.narrowestFill)
+            ForEach(points.indices, id: \.self) { index in
+                if let run = runs[index], !unfilled.contains(run), let value = line.value(points[index].values) {
+                    AreaMark(x: .value("Time", points[index].time), y: .value(line.name, min(value, top)),
+                             series: .value("Series", "\(line.name) \(run)"), stacking: .unstacked)
+                        .foregroundStyle(LinearGradient(colors: [line.color.opacity(0.42 * fade), line.color.opacity(0.03 * fade)],
+                                                        startPoint: .top, endPoint: .bottom))
+                        .interpolationMethod(.monotone)
+                }
+            }
+        }
+    }
+
+    /// The points (by index) that get a dot on `line`: where it breaks off,
+    /// at a gap or a missing reading, and where it picks up, so the break
+    /// reads as a pause; and on every line, dashed too, the ends of a run too
+    /// short to fill, so a single reading is a dot.
+    private func dots(on line: HistoryLine) -> [Int] {
+        let runs = HistoryPoint.runs(points, value: line.value)
+        let short = HistoryPoint.unfilled(points, runs: runs, within: domain, minimumSpan: gaps.narrowestFill)
+        let ends = line.stroke.marksBreaks ? gaps.borders + HistoryPoint.breaks(points, runs: runs) : []
+        return Set(ends + HistoryPoint.ends(of: short, in: runs)).filter { $0 < points.count }.sorted()
     }
 
     /// A gap's wash, or a fade from nothing into it or out of it.
@@ -407,9 +444,9 @@ enum HistoryMoment {
     }
 
     /// The stretch a point's figures cover, as their label puts it: "10-second"
-    /// (average, peak), "4-minute" for coarser points.
+    /// (average, peak), "4-minute" for coarser points, "1-second" in a spike capture.
     static func scope(_ bucket: TimeInterval) -> String {
-        HistoryInterval.adjective(max(bucket, FlightRecorder.span))
+        HistoryInterval.adjective(bucket)
     }
 
     /// "7:03:20 AM", with seconds while points are that fine and the day
@@ -424,7 +461,7 @@ enum HistoryMoment {
 /// Axis labels inside the plot, the target where hovering previews a moment
 /// (or names the gap under the pointer) and a click or drag pins one, and
 /// the moment markers.
-private struct HistoryPlotOverlay: View {
+struct HistoryPlotOverlay: View {
     let plot: CGRect
     let domain: ClosedRange<Date>
     let points: [HistoryPoint]
@@ -581,8 +618,9 @@ private struct HistoryMarkers: View {
                 .foregroundStyle(.black)
                 .frame(width: 14, height: 14)
                 .background(RoundedRectangle(cornerRadius: 3).fill(tint))
-                // At the top, where the plots are mostly empty.
-                .offset(x: min(lower + 2, plot.maxX - 16), y: plot.minY + 2)
+                // At the top, where the plots are mostly empty, and at the
+                // stretch's end, clear of the axis labels down the left.
+                .offset(x: min(max(upper - 16, lower + 2), plot.maxX - 16), y: plot.minY + 2)
         }
     }
 

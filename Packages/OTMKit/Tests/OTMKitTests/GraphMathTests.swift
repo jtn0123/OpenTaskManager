@@ -64,6 +64,49 @@ struct GraphMathTests {
         #expect(GraphMath.hermite(from: 3, to: 7, startTangent: 1, endTangent: -2, at: 1) == 7)
     }
 
+    @Test func tangentsMatchTheTextbookFritschCarlson() {
+        // The method as usually written, slopes first, against the pointer
+        // loops: plateaus, spikes, steep runs and gentle ones, bit for bit.
+        func reference(_ values: [Double]) -> [Double] {
+            let count = values.count
+            let deltas = (0..<count - 1).map { values[$0 + 1] - values[$0] }
+            var tangents = [Double](repeating: 0, count: count)
+            tangents[0] = deltas[0]
+            tangents[count - 1] = deltas[count - 2]
+            for index in 1..<count - 1 where deltas[index - 1] * deltas[index] > 0 {
+                tangents[index] = (deltas[index - 1] + deltas[index]) / 2
+            }
+            for index in 0..<count - 1 {
+                guard deltas[index] != 0 else {
+                    tangents[index] = 0
+                    tangents[index + 1] = 0
+                    continue
+                }
+                let alpha = tangents[index] / deltas[index]
+                let beta = tangents[index + 1] / deltas[index]
+                let length = alpha * alpha + beta * beta
+                if length > 9 {
+                    tangents[index] = 3 / length.squareRoot() * alpha * deltas[index]
+                    tangents[index + 1] = 3 / length.squareRoot() * beta * deltas[index]
+                }
+            }
+            return tangents
+        }
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        let values = (0..<300).map { index -> Double in
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let noise = Double(seed >> 11) / Double(1 << 53)
+            switch index % 50 {
+            case 0..<8: return 2
+            case 8..<10: return noise * 100
+            case 10..<20: return Double(index % 50) * 7.5
+            default: return 40 + noise
+            }
+        }
+        #expect(GraphMath.monotoneTangents(values) == reference(values))
+        #expect(GraphMath.monotoneTangents([3, 0, 9, 9, 1]) == reference([3, 0, 9, 9, 1]))
+    }
+
     @Test func tangentsForShortInputs() {
         #expect(GraphMath.monotoneTangents([]).isEmpty)
         #expect(GraphMath.monotoneTangents([4]) == [0])
@@ -76,6 +119,65 @@ struct GraphMathTests {
         #expect(stacked[1] == [1, 12, 23])
         // Negative values don't pull a band below the one beneath it.
         #expect(stacked[2] == [1, 12, 123])
+    }
+
+    @Test func tailSumAlignsOnNewestValues() {
+        #expect(GraphMath.tailSum([[1, 2, 3], [10, 20], [-5]]) == [1, 12, 18])
+        #expect(GraphMath.tailSum([]).isEmpty)
+        #expect(GraphMath.tailSum([[], [4]]) == [4])
+    }
+
+    @Test func remainderIsWhatThePartsLeaveAndNeverNegative() {
+        // Parts newer than the total's start line up on its newest values.
+        #expect(GraphMath.remainder(of: [10, 10, 10, 10], minus: [[1, 2], [3]]) == [10, 10, 9, 5])
+        // More used than the total, from rounding, floors at zero.
+        #expect(GraphMath.remainder(of: [1, 2], minus: [[5, 1]]) == [0, 1])
+        // Parts longer than the total: only their newest values count.
+        #expect(GraphMath.remainder(of: [5, 5], minus: [[9, 9, 1, 2]]) == [4, 3])
+        #expect(GraphMath.remainder(of: [3, 4], minus: []) == [3, 4])
+        #expect(GraphMath.remainder(of: [], minus: [[1]]).isEmpty)
+    }
+
+    @Test func finitePeakSkipsUnreadableValuesAndLooksOnlyAtTheTail() {
+        #expect(GraphMath.finitePeak([1, .nan, 7, .infinity, 3]) == 7)
+        #expect(GraphMath.finitePeak([9, 1, 2], last: 2) == 2)
+        #expect(GraphMath.finitePeak([9, 1, 2], last: 10) == 9)
+        #expect(GraphMath.finitePeak([]) == 0)
+        #expect(GraphMath.finitePeak([.nan]) == 0)
+        #expect(GraphMath.finitePeak([-3, -1]) == -1)
+    }
+
+    @Test func aSampleOnGrowsTheWindowOrSlidesAFullOne() {
+        // Filling: one more value at the end.
+        #expect(GraphMath.advancesOneSample(from: [1, 2], to: [1, 2, 5]))
+        #expect(GraphMath.advancesOneSample(from: [], to: [4]))
+        // Full: the oldest gone as the newest comes.
+        #expect(GraphMath.advancesOneSample(from: [1, 2, 3], to: [2, 3, 9]))
+        // An unreadable value is still the same value a sample later.
+        #expect(GraphMath.advancesOneSample(from: [.nan, 2, 3], to: [2, 3, .nan]))
+        #expect(GraphMath.advancesOneSample(from: [1, .nan], to: [1, .nan, 0]))
+    }
+
+    @Test func valuesChangedInPlaceOrTwoSamplesOnAreNotOneSampleOn() {
+        // Rescaled in place (a setting), not moved on.
+        #expect(!GraphMath.advancesOneSample(from: [1, 2, 3], to: [2, 4, 6]))
+        // Two samples on, or fewer values.
+        #expect(!GraphMath.advancesOneSample(from: [1, 2, 3], to: [3, 4, 5]))
+        #expect(!GraphMath.advancesOneSample(from: [1, 2], to: [1, 2, 3, 4]))
+        #expect(!GraphMath.advancesOneSample(from: [1, 2, 3], to: [2, 3]))
+        #expect(!GraphMath.advancesOneSample(from: [], to: []))
+    }
+
+    @Test func aGraphGainingALineStillAdvancesOnTheLinesItKeeps() {
+        // An app joins a by-app graph: the first app's line moved on.
+        #expect(GraphMath.advances(from: [[1, 2, 3], [5, 5, 5]], to: [[2, 3, 4], [9, 9, 9], [5, 5, 6]]))
+        // The second app leaves: the first one's line moved on.
+        #expect(GraphMath.advances(from: [[1, 2, 3], [7, 7, 7]], to: [[2, 3, 4]]))
+        // The first app leaves, so the line in its place was another's.
+        #expect(!GraphMath.advances(from: [[7, 8, 9], [1, 2, 3]], to: [[1, 2, 3]]))
+        // Every line changed in place: a redraw, not a sample.
+        #expect(!GraphMath.advances(from: [[1, 2, 3], [3, 4, 5]], to: [[2, 4, 6], [6, 8, 10], [1, 1, 1]]))
+        #expect(!GraphMath.advances(from: [], to: [[1]]))
     }
 
     @Test func timeTicksLandOnRoundTimesAwayFromTheEnds() throws {

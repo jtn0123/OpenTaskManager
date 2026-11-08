@@ -246,6 +246,35 @@ struct BenchmarkRunTests {
         #expect(BenchmarkChange.verdict(baseline: measurement(100), compared: measurement(100)) == .unchanged)
     }
 
+    @Test func theVerdictWordSaysWhichWayAChangeWent() {
+        func word(_ baseline: BenchmarkMeasurement, _ compared: BenchmarkMeasurement) -> String {
+            BenchmarkChange(baseline: baseline, compared: compared).verdictWord
+        }
+        // Speeds go faster or slower.
+        #expect(word(measurement(100, 99, 101), measurement(110, 108, 111)) == "faster")
+        #expect(word(measurement(100, 99, 101), measurement(90, 89, 92)) == "slower")
+        #expect(word(measurement(100, 99, 101, unit: .operationsPerSecond), measurement(120, 119, 121, unit: .operationsPerSecond))
+            == "faster")
+        // A delay or responsiveness only goes higher or lower, whichever is better.
+        #expect(word(measurement(20, 19, 21, unit: .milliseconds), measurement(10, 9, 11, unit: .milliseconds)) == "lower")
+        #expect(word(measurement(20, 19, 21, unit: .milliseconds), measurement(30, 29, 31, unit: .milliseconds)) == "higher")
+        #expect(word(measurement(900, 890, 910, unit: .roundTripsPerMinute), measurement(1200, 1190, 1210, unit: .roundTripsPerMinute))
+            == "higher")
+        // Otherwise why it doesn't count.
+        #expect(word(measurement(100, 95, 105), measurement(103, 99, 108)) == "within spread")
+        #expect(word(measurement(8.012, 8.011, 8.013), measurement(8.009, 8.008, 8.010)) == "negligible")
+        #expect(word(measurement(100), measurement(150)) == "measured once")
+        #expect(word(measurement(100), measurement(100)) == "unchanged")
+    }
+
+    @Test func everyRateIsASpeed() {
+        let speeds: [BenchmarkUnit] = [.bytesPerSecond, .flopsPerSecond, .pixelsPerSecond, .megabytesPerSecond, .bitsPerSecond,
+                                       .operationsPerSecond]
+        #expect(speeds.allSatisfy { $0.isSpeed && $0.higherIsBetter })
+        #expect(!BenchmarkUnit.milliseconds.isSpeed)
+        #expect(!BenchmarkUnit.roundTripsPerMinute.isSpeed)
+    }
+
     @Test func comparisonRowsCarryBothSpreads() throws {
         let compared = try #require(comparison(BenchmarkRun(cpu(at: 100)), BenchmarkRun(cpu(at: 200, multi: [140, 135, 138]))))
         let multi = try #require(compared.changes.first { $0.id == "integer.multi" })
@@ -341,7 +370,7 @@ struct BenchmarkExportTests {
         let data = try export.json()
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["format"] as? String == BenchmarkExport.formatName)
-        #expect(object["version"] as? Int == 1)
+        #expect(object["version"] as? Int == 2)
         #expect(object["exported"] as? String == "1970-01-01T00:05:00Z")
         let read = try BenchmarkExport.read(data)
         #expect(read == export)

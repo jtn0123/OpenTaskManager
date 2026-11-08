@@ -30,12 +30,6 @@ final class GPUBenchmarkStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var handledLaunchArgument = false
 
-    /// "OpenTaskManager 0.1".
-    private static var appVersion: String {
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-        return "OpenTaskManager \(version)".trimmingCharacters(in: .whitespaces)
-    }
-
     private init() {
         var device = GPUBenchmarkDevice.current()
         if Self.fixture == "nodevice" { device = nil }
@@ -56,12 +50,16 @@ final class GPUBenchmarkStore {
                 self.progress = progress
             }
         }
-        let appVersion = Self.appVersion
+        let appVersion = BenchmarkContextFeed.appVersion
         let fixture = Self.fixtureError
         task = Task { [weak self] in
             do throws(GPUBenchmarkError) {
                 if let fixture { throw fixture }
-                let result = try await GPUBenchmark.measure(appVersion: appVersion, progress: report)
+                let context = await BenchmarkContextFeed.capture()
+                if Task.isCancelled { throw .cancelled }
+                var measured = try await GPUBenchmark.measure(appVersion: appVersion, progress: report)
+                measured.context = context.ended()
+                let result = measured
                 let saved = await Task.detached(priority: .utility) { try? SpeedTestHistory.gpuBenchmark.append(result) }.value
                 BenchmarkWorkspace.shared.noteResult(at: result.date)
                 guard let self, self.generation == generation else { return }

@@ -113,12 +113,32 @@ public enum RecordingFileError: Error, Equatable, LocalizedError {
 /// written before it simply lacks (it has no events), and that a build from
 /// before it ignores, as JSON readers ignore keys they don't know. An event
 /// of a kind this build doesn't know is left out.
+///
+/// The hardware series came the same way: an optional top-level `hardware`
+/// block, versioned on its own (`hardwareVersion`), that names each series
+/// once (ID, kind, unit, label, source), and in each record a `hardware`
+/// object of figures by series ID, `null` where the Mac didn't read one, and
+/// `coreLoad`, each logical CPU's load. A build from before them reads the
+/// rest of the file as it always did; this one skips a block of a newer
+/// version, and a series of a kind or unit it doesn't know, rather than
+/// misread them.
+///
+/// A spike capture (`SpikeCapture`) is a recording too, of one-second
+/// records, with an optional top-level `incident` block, versioned on its own
+/// (`incidentVersion`): what crossed, when and by how much, and the
+/// processes that used the most during it. A build from before it opens the
+/// capture as any other recording; this one skips a block of a newer version,
+/// or whose first trigger is of a kind it doesn't know.
 public struct RecordingFile: Sendable, Equatable {
     /// Marks the JSON as a recording, whatever the file's name.
     public static let format = "io.github.jtn0123.OpenTaskManager.recording"
     public static let fileExtension = "otmrecording"
     /// The version this build writes, and the newest it reads.
     public static let version = 1
+    /// The version of the `hardware` block this build writes, and the newest it reads.
+    public static let hardwareVersion = 1
+    /// The version of the `incident` block this build writes, and the newest it reads.
+    public static let incidentVersion = 1
 
     public var session: RecordingSession
     public var machine: RecordingMachine
@@ -134,9 +154,17 @@ public struct RecordingFile: Sendable, Equatable {
     /// What happened during the session, oldest first; none in a file from
     /// before events were kept.
     public var events: [HistoryEvent]
+    /// What a spike capture is about; nil for any other recording.
+    public var incident: SpikeIncident?
+    /// The hardware series any record holds, in chart order; none in a file
+    /// from before they were kept.
+    public var hardwareSeries: [HistoryHardwareSeries] {
+        Set(records.flatMap(\.hardwareSeries)).sorted()
+    }
 
     public init(session: RecordingSession, machine: RecordingMachine, generator: String, exported: Date,
-                recordSeconds: TimeInterval = FlightRecorder.span, records: [HistoryRecord], events: [HistoryEvent] = []) {
+                recordSeconds: TimeInterval = FlightRecorder.span, records: [HistoryRecord], events: [HistoryEvent] = [],
+                incident: SpikeIncident? = nil) {
         self.session = session
         self.machine = machine
         self.generator = generator
@@ -144,6 +172,7 @@ public struct RecordingFile: Sendable, Equatable {
         self.recordSeconds = recordSeconds
         self.records = records.sorted { $0.time < $1.time }
         self.events = events.sorted { $0.time < $1.time }
+        self.incident = incident
         reported = Dictionary(uniqueKeysWithValues: RecordingFigure.allCases.map { figure in
             (figure, records.contains { $0.values[keyPath: figure.keyPath] != nil })
         })
@@ -164,9 +193,20 @@ public struct RecordingFile: Sendable, Equatable {
         "chipCelsius": "degrees Celsius, the hottest die sensor",
         "topCPU": "the busiest apps by CPU, in percent of one core (100 = one core)",
         "topMemory": "the apps using the most memory, in bytes",
+        "hardware": "hardware figures by the ID of a series in the top-level hardware block, in that series' unit "
+            + "(fraction 0 to 1, megahertz, rpm, celsius or watts), averaged over the updates in the stretch that read "
+            + "it; null when none did",
+        "coreLoad": "each logical CPU's load, 0 to 1, by CPU number, averaged over the stretch; null for a CPU with no reading",
         "events": "what happened during the session (kind appLaunched, appQuit, processStarted, processExited, "
-            + "networkChanged, sleep or wake), each at a time in seconds since 1970-01-01 00:00 UTC; approximate "
+            + "networkChanged, sleep, wake or spike), each at a time in seconds since 1970-01-01 00:00 UTC; approximate "
             + "when found by comparing one update's process list with the next",
+        "incident": "for a spike capture, what started it: triggers (kind cpu, memory, thermal, disk or network, the first "
+            + "having started the capture; figure and threshold in the kind's unit: cpu a share of the whole CPU 0 to 1, "
+            + "memory the pressure 0 to 1, thermal 2 serious or 3 critical, disk and network bytes per second, with "
+            + "baseline the usual rate before the burst), the first trigger's start and end with its figure averaged "
+            + "over them and at its peak, and the processes that used the most of its resource (by pid and start time "
+            + "in seconds since 1970; cpu in percent of one core, memory in bytes, disk in bytes per second; share of "
+            + "the whole, 0 to 1)",
     ]
 
     // MARK: - Encoding
@@ -210,8 +250,9 @@ public struct RecordingFile: Sendable, Equatable {
             generator: wire.generator,
             exported: Date(timeIntervalSince1970: wire.exported),
             recordSeconds: wire.sampling.recordSeconds,
-            records: wire.records.map(\.record),
-            events: (wire.events ?? []).compactMap(\.event)
+            records: wire.records.map { $0.record(series: wire.hardware?.readable ?? [:]) },
+            events: (wire.events ?? []).compactMap(\.event),
+            incident: wire.incident?.incident
         )
         // The file's own flags win: they say what the Mac reported, which a
         // reader shouldn't second-guess from the records.
@@ -219,6 +260,28 @@ public struct RecordingFile: Sendable, Equatable {
             if let flag = wire.reported[figure.rawValue] { file.reported[figure] = flag }
         }
         return file
+    }
+
+    /// A recording's session and incident without its records, for listing
+    /// spike captures: `decode`'s checks, but no record is turned into values.
+    public static func summary(_ data: Data) throws(RecordingFileError) -> (session: RecordingSession, incident: SpikeIncident?) {
+        let summary: Summary
+        do {
+            summary = try JSONDecoder().decode(Summary.self, from: data)
+        } catch DecodingError.dataCorrupted {
+            throw .corrupt("it isn't valid JSON")
+        } catch {
+            throw .notARecording
+        }
+        guard summary.format == format else { throw .notARecording }
+        guard let version = summary.version, (1...Self.version).contains(version) else {
+            throw .unsupportedVersion(summary.version ?? 0)
+        }
+        guard let session = summary.session, session.start <= session.end else {
+            throw .corrupt("its session is missing or doesn't make sense")
+        }
+        return (RecordingSession(start: Date(timeIntervalSince1970: session.start), end: Date(timeIntervalSince1970: session.end),
+                                 note: session.note), summary.incident?.incident)
     }
 
     /// Where a decoding error happened, in a few words.
@@ -244,6 +307,14 @@ public struct RecordingFile: Sendable, Equatable {
 private struct Header: Decodable {
     let format: String?
     let version: Int?
+}
+
+/// The parts of a file a list of spike captures shows.
+private struct Summary: Decodable {
+    let format: String?
+    let version: Int?
+    let session: Wire.Session?
+    let incident: WireIncident?
 }
 
 private struct Wire: Codable {
@@ -283,6 +354,10 @@ private struct Wire: Codable {
     let records: [WireRecord]
     /// Missing from files written before events were kept.
     let events: [WireEvent]?
+    /// Missing from files without hardware series.
+    let hardware: WireHardware?
+    /// Missing from all but spike captures.
+    let incident: WireIncident?
 
     init(_ file: RecordingFile) {
         format = RecordingFile.format
@@ -297,8 +372,146 @@ private struct Wire: Codable {
         sampling = Sampling(recordSeconds: file.recordSeconds)
         units = RecordingFile.units
         reported = Dictionary(uniqueKeysWithValues: file.reported.map { ($0.key.rawValue, $0.value) })
-        records = file.records.map(WireRecord.init)
+        let series = file.hardwareSeries
+        let ids = series.map(\.id)
+        records = file.records.map { WireRecord($0, hardware: series.isEmpty ? nil : ids) }
         events = file.events.map(WireEvent.init)
+        hardware = series.isEmpty ? nil : WireHardware(version: RecordingFile.hardwareVersion, series: series.map(WireSeries.init))
+        incident = file.incident.map(WireIncident.init)
+    }
+}
+
+/// The `incident` block of a spike capture.
+private struct WireIncident: Codable {
+    let version: Int
+    let start: Double
+    let end: Double
+    let ongoing: Bool
+    let average: Double
+    let peak: Double
+    let level: String?
+    let triggers: [WireTrigger]
+    let contributors: [WireContributor]
+
+    init(_ incident: SpikeIncident) {
+        version = RecordingFile.incidentVersion
+        start = incident.start.timeIntervalSince1970
+        end = incident.end.timeIntervalSince1970
+        ongoing = incident.ongoing
+        average = finiteFigure(incident.average)
+        peak = finiteFigure(incident.peak)
+        level = incident.level
+        triggers = incident.triggers.map(WireTrigger.init)
+        contributors = incident.contributors.map(WireContributor.init)
+    }
+
+    /// Nil for a block of a newer version, or whose first trigger this
+    /// build can't read; a later trigger or a contributor it can't is left out.
+    var incident: SpikeIncident? {
+        guard version >= 1, version <= RecordingFile.incidentVersion, start.isFinite, end.isFinite,
+              let primary = triggers.first?.trigger else { return nil }
+        return SpikeIncident(triggers: [primary] + triggers.dropFirst().compactMap(\.trigger),
+                             start: Date(timeIntervalSince1970: start), end: Date(timeIntervalSince1970: end), ongoing: ongoing,
+                             average: average, peak: peak, level: level, contributors: contributors.compactMap(\.contributor))
+    }
+}
+
+private struct WireTrigger: Codable {
+    /// A `SpikeKind`: cpu, memory, thermal, disk or network.
+    let kind: String
+    let time: Double
+    let since: Double
+    let figure: Double
+    let threshold: Double
+    let level: String?
+    let baseline: Double?
+
+    init(_ trigger: SpikeTrigger) {
+        kind = trigger.kind.rawValue
+        time = trigger.time.timeIntervalSince1970
+        since = trigger.since.timeIntervalSince1970
+        figure = finiteFigure(trigger.figure)
+        threshold = finiteFigure(trigger.threshold)
+        level = trigger.level
+        baseline = trigger.baseline.map(finiteFigure)
+    }
+
+    var trigger: SpikeTrigger? {
+        guard let kind = SpikeKind(rawValue: kind), time.isFinite, since.isFinite else { return nil }
+        return SpikeTrigger(kind: kind, time: Date(timeIntervalSince1970: time), since: Date(timeIntervalSince1970: since),
+                            figure: figure, threshold: threshold, level: level, baseline: baseline)
+    }
+}
+
+private struct WireContributor: Codable {
+    let name: String
+    let pid: Int32
+    /// Seconds since 1970; missing where it couldn't be read.
+    let startTime: Double?
+    /// A `SpikeContributor.Measure`: cpu, memory or disk.
+    let measure: String
+    let average: Double
+    let peak: Double
+    let share: Double?
+
+    init(_ contributor: SpikeContributor) {
+        name = contributor.name
+        pid = contributor.identity.pid
+        startTime = contributor.identity.startTime?.timeIntervalSince1970
+        measure = contributor.measure.rawValue
+        average = finiteFigure(contributor.average)
+        peak = finiteFigure(contributor.peak)
+        share = contributor.share.map(finiteFigure)
+    }
+
+    var contributor: SpikeContributor? {
+        guard let measure = SpikeContributor.Measure(rawValue: measure) else { return nil }
+        let started = startTime.flatMap { $0.isFinite ? Date(timeIntervalSince1970: $0) : nil }
+        return SpikeContributor(name: name, identity: ProcessIdentity(pid: pid, startTime: started), measure: measure,
+                                average: average, peak: peak, share: share)
+    }
+}
+
+/// JSON has no NaN or infinity: such a figure is written as 0.
+private func finiteFigure(_ value: Double) -> Double {
+    value.isFinite ? value : 0
+}
+
+/// The `hardware` block: the series the records' figures belong to.
+private struct WireHardware: Codable {
+    let version: Int
+    let series: [WireSeries]
+
+    /// The series by ID that this build can read: none from a newer
+    /// version of the block, and none of a kind or unit it doesn't know.
+    var readable: [String: HistoryHardwareSeries] {
+        guard version >= 1, version <= RecordingFile.hardwareVersion else { return [:] }
+        return Dictionary(series.compactMap(\.series).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+}
+
+private struct WireSeries: Codable {
+    let id: String
+    /// A `HistoryHardwareSeries.Kind`: load, clock, temperature, fan or power.
+    let kind: String
+    /// A `SensorUnit`: fraction, megahertz, rpm, celsius or watts.
+    let unit: String
+    let label: String
+    let source: String
+    let rank: Int
+
+    init(_ series: HistoryHardwareSeries) {
+        id = series.id
+        kind = series.kind.rawValue
+        unit = series.unit.rawValue
+        label = series.label
+        source = series.source
+        rank = series.rank
+    }
+
+    var series: HistoryHardwareSeries? {
+        guard let kind = HistoryHardwareSeries.Kind(rawValue: kind), let unit = SensorUnit(rawValue: unit) else { return nil }
+        return HistoryHardwareSeries(id: id, kind: kind, unit: unit, label: label, source: source, rank: rank)
     }
 }
 
@@ -335,7 +548,7 @@ private struct WireApp: Codable {
 private struct WireRecord: Codable {
     enum CodingKeys: String, CodingKey {
         case time, cpu, cpuPeak, memory, memoryPressure, swapUsed, gpu, systemWatts, cpuWatts, gpuWatts
-        case diskRead, diskWrite, networkIn, networkOut, chipCelsius, topCPU, topMemory
+        case diskRead, diskWrite, networkIn, networkOut, chipCelsius, topCPU, topMemory, hardware, coreLoad
     }
 
     let time: Double
@@ -355,8 +568,16 @@ private struct WireRecord: Codable {
     let chipCelsius: Double?
     let topCPU: [WireApp]
     let topMemory: [WireApp]
+    /// Figures by series ID, null where the Mac didn't read one; missing
+    /// from a file without hardware series.
+    let hardware: [String: Double?]?
+    let coreLoad: [Double?]?
 
-    init(_ record: HistoryRecord) {
+    /// `hardware` lists the file's series IDs, each written (null where it
+    /// wasn't read) for every record with a hardware figure, or is nil for a
+    /// file without hardware series. A record without any, from before they
+    /// were recorded, leaves both keys out, as in the database.
+    init(_ record: HistoryRecord, hardware ids: [String]?) {
         // JSON has no NaN or infinity: a figure that isn't a number reads as not reported.
         func finite(_ value: Double?) -> Double? { value.flatMap { $0.isFinite ? $0 : nil } }
         let values = record.values
@@ -377,6 +598,11 @@ private struct WireRecord: Codable {
         chipCelsius = finite(values.chipCelsius)
         topCPU = record.topCPU.map { WireApp(name: $0.name, value: finite($0.value) ?? 0) }
         topMemory = record.topMemory.map { WireApp(name: $0.name, value: finite($0.value) ?? 0) }
+        let figures = ids.map { ids in Dictionary(uniqueKeysWithValues: ids.map { ($0, finite(values.hardware[$0])) }) }
+        let loads = ids == nil || values.coreLoads.isEmpty ? nil : values.coreLoads.map(finite)
+        let read = figures?.values.contains { $0 != nil } == true || loads?.contains { $0 != nil } == true
+        hardware = read ? figures : nil
+        coreLoad = read ? loads : nil
     }
 
     /// Written by hand so a figure the Mac didn't report is an explicit
@@ -400,9 +626,13 @@ private struct WireRecord: Codable {
         try container.encode(chipCelsius, forKey: .chipCelsius)
         try container.encode(topCPU, forKey: .topCPU)
         try container.encode(topMemory, forKey: .topMemory)
+        try container.encodeIfPresent(hardware, forKey: .hardware)
+        try container.encodeIfPresent(coreLoad, forKey: .coreLoad)
     }
 
-    var record: HistoryRecord {
+    /// The record, its hardware figures named from `series` (the file's
+    /// readable series by ID); a figure of any other series is left out.
+    func record(series: [String: HistoryHardwareSeries]) -> HistoryRecord {
         var values = HistoryValues()
         values.cpu = cpu
         values.cpuPeak = cpuPeak
@@ -418,8 +648,16 @@ private struct WireRecord: Codable {
         values.networkIn = networkIn
         values.networkOut = networkOut
         values.chipCelsius = chipCelsius
+        var held: [HistoryHardwareSeries] = []
+        for (id, value) in hardware ?? [:] {
+            guard let value, value.isFinite, let named = series[id] else { continue }
+            values.hardware[id] = value
+            held.append(named)
+        }
+        if !series.isEmpty { values.coreLoads = coreLoad ?? [] }
         return HistoryRecord(time: Date(timeIntervalSince1970: time), values: values,
                              topCPU: topCPU.map { HistoryApp(name: $0.name, value: $0.value) },
-                             topMemory: topMemory.map { HistoryApp(name: $0.name, value: $0.value) })
+                             topMemory: topMemory.map { HistoryApp(name: $0.name, value: $0.value) },
+                             hardwareSeries: held.sorted())
     }
 }

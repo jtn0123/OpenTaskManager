@@ -2,11 +2,11 @@ import Darwin
 import Foundation
 import OTMKit
 
-// `otm bench`: every saved CPU, GPU, disk and Internet result, as the app's
-// Benchmarks workspace reads them, and a comparison of two. It only reads.
+// `otm bench`: every saved CPU, GPU, disk, Internet and sustained CPU result,
+// as the app's Benchmarks workspace reads them, and a comparison of two. It only reads.
 
 /// `otm bench [list|compare A B] [--json]`. Runs are numbered newest first
-/// across the four tests, so `compare` takes two numbers from `list`.
+/// across the tests, so `compare` takes two numbers from `list`.
 func benchCommand(_ options: Options) {
     let runs = BenchmarkLibrary().load()
     let arguments = options.positional
@@ -54,7 +54,7 @@ private let benchDate: DateFormatter = {
 
 func benchList(_ runs: [BenchmarkRun]) -> String {
     guard !runs.isEmpty else {
-        return "No saved results yet. Run otm cpubench, otm gpubench, otm diskspeed or otm netquality, "
+        return "No saved results yet. Run otm cpubench, otm cpubench --sustained, otm gpubench, otm diskspeed or otm netquality, "
             + "or a test on the app's Performance page."
     }
     var lines = [pad("#", 4, right: true) + "  " + pad("TEST", 18) + pad("WHEN", 18) + pad("BUILD", 9) + pad("ON", 25) + " FIGURES"]
@@ -94,5 +94,9 @@ func benchComparison(_ comparison: BenchmarkComparison, runs: [BenchmarkRun], nu
     lines += ["", "A change counts only when the two runs' ranges of repeats, slowest to fastest, don't overlap; "
         + "± is half a run's range."]
     lines += comparison.caveats
+    if !comparison.contextWarnings.isEmpty {
+        lines += ["", "How the runs' starts differed:"] + comparison.contextWarnings.map { "  \($0.text)" }
+    }
+    lines += ["", "Earlier: \(earlier.contextSummary)", "Later: \(later.contextSummary)"]
     return lines.joined(separator: "\n")
 }

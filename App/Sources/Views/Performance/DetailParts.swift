@@ -48,19 +48,23 @@ struct MetricStrip<Content: View>: View {
 
 /// The apps using the most of one resource, with bars relative to the leader.
 ///
-/// Only apps whose figure reads as more than zero get a row; under them one
-/// line says the rest are idle, and Show all opens Processes sorted by the
-/// same figure. The list keeps room for the most rows it needed lately
-/// (`TopListRoom`), so the card doesn't change height as apps go idle and
-/// busy from one tick to the next.
+/// Only apps whose figure reads as more than zero get a row; under them a
+/// compact footer, a line of text shorter than a row, says the rest are idle,
+/// and Show all opens Processes sorted by the same figure. The list keeps
+/// room for the most rows it showed lately (`TopListRoom`), so the card
+/// doesn't change height as apps go idle and busy from one tick to the next,
+/// and grows only for rows that last two updates; a card alone in its row is
+/// as tall as that room, while `FillGrid` evens it with a taller neighbour.
 struct TopAppsCard: View {
     private static let limit = 6
     private static let spacing: CGFloat = 4
+    /// The idle footer's line: explanation text and a point either side.
+    private static let footerHeight = ceil(NSLayoutManager().defaultLineHeight(for: .preferredFont(forTextStyle: .callout))) + 2
 
     @Environment(AppModel.self) private var model
-    @AppStorage("page") private var page: Page = .overview
+    @CurrentPage private var page
     /// The room kept for rows, worked out while the body is, like `AutoScaleBounds`.
-    @State private var room = TopListRoomHolder(limit: TopAppsCard.limit)
+    @State private var holder = TopListRoomHolder(limit: TopAppsCard.limit)
     var title: String
     var symbol: String
     var color: Color
@@ -76,12 +80,19 @@ struct TopAppsCard: View {
     /// Why there's no ranking, when this Mac doesn't measure the metric at
     /// all. Without it, every app would read 0 and the card "quiet".
     var unavailable: String?
+    /// What the figures measure, on the title's hover, where the title
+    /// alone doesn't say (Top GPU's).
+    var measure: String?
 
     var body: some View {
         let ranked = unavailable == nil ? groups.filter { $0.process != nil && metric($0.totals) > minimum } : []
         let sorted = ranked.sorted { metric($0.totals) > metric($1.totals) }
         let zero = format(ProcessTotals())
-        let top = sorted.prefix(TopListRoom.listed(sorted.lazy.map { format($0.totals) }, zero: zero, limit: Self.limit))
+        let listed = TopListRoom.listed(sorted.lazy.map { format($0.totals) }, zero: zero, limit: Self.limit)
+        // Keyed to the sample, so a body that runs twice for one counts once;
+        // `groups` redraws the card each sample, so it needn't observe one.
+        let room = holder.update(listed: listed, sample: model.appGroupsUptime)
+        let top = sorted.prefix(room.shown)
         let peak = top.first.map { metric($0.totals) } ?? 1
         Card {
             header
@@ -106,14 +117,14 @@ struct TopAppsCard: View {
                             .font(.explanation)
                             .foregroundStyle(.secondaryText)
                             .padding(.horizontal, 6)
-                            .frame(height: ProcessBarRow.height)
-                            .help(cutoff.map { "Apps under \($0) aren't listed." } ?? "Apps that would read \(zero) aren't listed.")
+                            .frame(height: Self.footerHeight)
+                            .help((cutoff.map { "Apps under \($0) aren't listed" } ?? "Apps that would read \(zero) aren't listed")
+                                + ", and one busy for just a moment may not be.")
                     }
                 }
                 // With nothing listed, the line sits in the middle of the room
                 // kept, as the card's empty state.
-                .frame(maxWidth: .infinity, minHeight: Self.height(rows: room.rows(listed: top.count)),
-                       alignment: top.isEmpty ? .center : .topLeading)
+                .frame(maxWidth: .infinity, minHeight: Self.height(rows: room.rows), alignment: top.isEmpty ? .center : .topLeading)
             }
         }
     }
@@ -123,6 +134,7 @@ struct TopAppsCard: View {
             Label("Top \(title)", systemImage: symbol)
                 .font(.headline)
                 .foregroundStyle(color)
+                .help(measure ?? "")
             Spacer(minLength: 8)
             if unavailable == nil {
                 Button("Show all", action: showAll)
@@ -133,8 +145,9 @@ struct TopAppsCard: View {
         }
     }
 
+    /// The room for `rows` of `TopListRoom`, the idle footer shorter than a row.
     private static func height(rows: Int) -> CGFloat {
-        CGFloat(rows) * ProcessBarRow.height + CGFloat(max(rows - 1, 0)) * spacing
+        CGFloat(TopListRoom.height(rows: rows, limit: limit, row: ProcessBarRow.height, idleLine: footerHeight, spacing: spacing))
     }
 
     /// Every app, busiest first, in the Processes table.
@@ -156,8 +169,12 @@ final class TopListRoomHolder {
         room = TopListRoom(limit: limit)
     }
 
-    func rows(listed: Int) -> Int {
-        room.update(listed: listed, at: ProcessInfo.processInfo.systemUptime)
+    /// The room once the sample taken at `sample` (its uptime) lists
+    /// `listed` entries. Before the first sample with apps (nil) there's
+    /// nothing to rank and no update to count, so that sample's rows show at once.
+    func update(listed: Int, sample: TimeInterval?) -> TopListRoom {
+        if let sample { room.update(listed: listed, at: sample) }
+        return room
     }
 }
 
@@ -186,7 +203,7 @@ struct CapabilityNote: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(label).font(.subheadline).foregroundStyle(.secondaryText)
+            Text(label).font(.metadata).foregroundStyle(.secondaryText)
             Label(text, systemImage: "info.circle")
                 .font(.callout)
                 .foregroundStyle(.secondaryText)
@@ -204,6 +221,17 @@ enum Unavailable {
     static let gpuUtilizationDetail = "This GPU's driver doesn't report how busy it is."
     static let energy = "This Mac doesn't report energy use per app."
     static let processNetwork = "Traffic per app isn't available: nettop couldn't run."
+    /// Marks a reading this Mac never gives where a graph or figure would be,
+    /// so it isn't taken for one not recorded yet (`UnrecordedLook`'s hatch).
+    static let symbol = "slash.circle"
+}
+
+extension GPUSample {
+    /// The GPU's name where it says more than the "GPU" beside it: a
+    /// paravirtual GPU's name is just that.
+    var tellingName: String? {
+        name.caseInsensitiveCompare("GPU") == .orderedSame ? nil : name
+    }
 }
 
 /// One entry in a chart legend: swatch, name and the current value.
@@ -243,10 +271,17 @@ struct ChartLegend: View {
 struct ChartCard<Chart: View>: View {
     var title: String
     var trailing = ""
+    /// What the trailing text means, on hover: a figure's exact measure.
+    var trailingHelp: String?
     var tint: Color
     var legend: [LegendItem] = []
-    /// Samples across the chart, for its time axis; nil for charts that aren't over time.
-    var span: Int? = AppModel.graphSpan
+    /// A line under the legend, for what the chart can't say itself.
+    var note: String?
+    /// A chart over time, with a time axis for the page's window under it.
+    var timed = true
+    /// The detail's main graph, whose time axis holds the page's Fit
+    /// collected data toggle (`GraphFitToggle`).
+    var offersFit = false
     @ViewBuilder var chart: Chart
 
     var body: some View {
@@ -255,12 +290,19 @@ struct ChartCard<Chart: View>: View {
                 Text(title).font(.headline)
                 Spacer()
                 Text(trailing).font(.callout).foregroundStyle(.secondaryText).monospacedDigit()
+                    .help(trailingHelp ?? "")
             }
             VStack(spacing: 3) {
                 chart
-                if let span { TimeAxis(samples: span) }
+                if timed { TimeAxis(offersFit: offersFit) }
             }
             if !legend.isEmpty { ChartLegend(items: legend) }
+            if let note {
+                Text(note)
+                    .font(.explanation)
+                    .foregroundStyle(.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

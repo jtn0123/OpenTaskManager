@@ -1,5 +1,6 @@
 import Foundation
 import SystemConfiguration
+import os
 
 /// The network the Mac uses for the internet, as a flight-recorder event
 /// names it: the primary service and its interface, and the address it has.
@@ -57,7 +58,7 @@ public struct NetworkInUse: Sendable, Equatable {
 @MainActor
 public final class NetworkChangeMonitor {
     /// The keys `NetworkInUse` is read from.
-    public static let patterns = [
+    nonisolated public static let patterns = [
         "State:/Network/Global/(IPv4|IPv6)",
         "State:/Network/Service/[^/]+/(IPv4|IPv6)",
         "Setup:/Network/Service/[^/]+(/Interface)?",
@@ -66,8 +67,8 @@ public final class NetworkChangeMonitor {
     private static let watched = ["State:/Network/Global/(IPv4|IPv6)", "State:/Network/Service/[^/]+/(IPv4|IPv6)"]
     private static let settle: Duration = .seconds(2)
 
-    /// Unsafe only for `deinit`, which takes it off the queue on its way out.
-    nonisolated(unsafe) private var store: SCDynamicStore?
+    // The CF handle never leaves the lock; only Sendable network values do.
+    private let store = OSAllocatedUnfairLock<SCDynamicStore?>(uncheckedState: nil)
     private var current: NetworkInUse
     private var changedAt: Date?
     private var reading: Task<Void, Never>?
@@ -77,22 +78,32 @@ public final class NetworkChangeMonitor {
     public init(handler: @escaping @MainActor (HistoryEvent) -> Void) {
         self.handler = handler
         current = NetworkInUse(interface: nil, service: nil, address: nil)
-        var context = SCDynamicStoreContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
-                                            retain: nil, release: nil, copyDescription: nil)
-        store = SCDynamicStoreCreate(nil, "OpenTaskManager" as CFString, { _, _, info in
-            guard let info else { return }
-            let monitor = Unmanaged<NetworkChangeMonitor>.fromOpaque(info).takeUnretainedValue()
-            MainActor.assumeIsolated { monitor.storeChanged() }
-        }, &context)
-        guard let store else { return }
-        current = read(store)
-        SCDynamicStoreSetNotificationKeys(store, nil, Self.watched as CFArray)
-        SCDynamicStoreSetDispatchQueue(store, .main)
+        // The store retains a weak context, so a queued callback cannot use a dead monitor.
+        let owner = NetworkChangeContext(monitor: self)
+        let watched = Self.watched
+        store.withLock { stored in
+            var context = SCDynamicStoreContext(version: 0, info: Unmanaged.passUnretained(owner).toOpaque(), retain: { info in
+                return UnsafeRawPointer(Unmanaged<NetworkChangeContext>.fromOpaque(info).retain().toOpaque())
+            }, release: { info in
+                Unmanaged<NetworkChangeContext>.fromOpaque(info).release()
+            }, copyDescription: nil)
+            stored = SCDynamicStoreCreate(nil, "OpenTaskManager" as CFString, { _, _, info in
+                guard let info else { return }
+                let owner = Unmanaged<NetworkChangeContext>.fromOpaque(info).takeUnretainedValue()
+                MainActor.assumeIsolated { owner.monitor?.storeChanged() }
+            }, &context)
+            if let stored {
+                SCDynamicStoreSetNotificationKeys(stored, nil, watched as CFArray)
+                SCDynamicStoreSetDispatchQueue(stored, .main)
+            }
+        }
+        current = store.withLock { $0.map(Self.read) } ?? current
     }
 
     deinit {
-        // The store holds the monitor unretained: no callback may follow it.
-        if let store { SCDynamicStoreSetDispatchQueue(store, nil) }
+        store.withLock { stored in
+            if let stored { SCDynamicStoreSetDispatchQueue(stored, nil) }
+        }
     }
 
     private func storeChanged() {
@@ -100,8 +111,7 @@ public final class NetworkChangeMonitor {
         reading?.cancel()
         reading = Task { [weak self] in
             try? await Task.sleep(for: Self.settle)
-            guard !Task.isCancelled, let self, let store = self.store else { return }
-            let now = self.read(store)
+            guard !Task.isCancelled, let self, let now = self.store.withLock({ $0.map(Self.read) }) else { return }
             let event = now.event(from: self.current, at: self.changedAt ?? Date())
             self.current = now
             self.changedAt = nil
@@ -109,7 +119,17 @@ public final class NetworkChangeMonitor {
         }
     }
 
-    private func read(_ store: SCDynamicStore) -> NetworkInUse {
+    nonisolated private static func read(_ store: SCDynamicStore) -> NetworkInUse {
         NetworkInUse(store: SCDynamicStoreCopyMultiple(store, nil, Self.patterns as CFArray) as? [String: Any] ?? [:])
+    }
+}
+
+/// The C callback owns this context, which keeps no monitor alive.
+@MainActor
+private final class NetworkChangeContext {
+    weak var monitor: NetworkChangeMonitor?
+
+    init(monitor: NetworkChangeMonitor) {
+        self.monitor = monitor
     }
 }

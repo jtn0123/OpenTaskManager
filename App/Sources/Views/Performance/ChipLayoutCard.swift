@@ -304,7 +304,7 @@ private struct ClusterDiagram: View {
                 HStack(spacing: 3) {
                     ForEach(cluster.cpus, id: \.self) { cpu in
                         Text("\(cpu)")
-                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .font(.system(size: 12, weight: .medium).monospacedDigit())
                             .frame(minWidth: 22, minHeight: 18)
                             .background(color.fillShade.opacity(0.16), in: RoundedRectangle(cornerRadius: 4))
                             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(color.opacity(0.35)))

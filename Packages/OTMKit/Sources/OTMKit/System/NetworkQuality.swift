@@ -32,12 +32,16 @@ public struct NetworkQualityResult: SpeedTestRecord, Equatable, Identifiable {
     /// Parallel connections each way.
     public var downloadFlows: Int?
     public var uploadFlows: Int?
+    /// The Mac's state as the test started and ended; nil in results saved
+    /// before it was recorded.
+    public var context: BenchmarkContext?
 
     public init(date: Date, requestedInterface: String?, interface: String?, downloadBitsPerSecond: Double?,
                 uploadBitsPerSecond: Double?, responsiveness: Double?, idleLatency: Double? = nil, bytesTransferred: UInt64? = nil,
                 endpoint: String? = nil, arguments: [String] = [], toolVersion: String? = nil, downloadFlows: Int? = nil,
-                uploadFlows: Int? = nil) {
+                uploadFlows: Int? = nil, context: BenchmarkContext? = nil) {
         self.date = date
+        self.context = context
         self.requestedInterface = requestedInterface
         self.interface = interface
         self.downloadBitsPerSecond = downloadBitsPerSecond

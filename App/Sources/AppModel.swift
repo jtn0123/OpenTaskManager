@@ -2,97 +2,6 @@ import AppKit
 import Observation
 import OTMKit
 
-/// Per-process values kept for the inspector's graphs and the "by app" charts.
-/// There's one per process per sample across a whole graph window, so they're
-/// held as `Float`, half the size of `Double`, which no graph can tell apart:
-/// a window of 300 costs about what 120 did before.
-struct ProcessPoint: Sendable {
-    private let cpu: Float
-    private let footprint: Float
-    private let gpu: Float
-    private let power: Float
-
-    init(cpuPercent: Double, memory: UInt64, gpuFraction: Double, powerWatts: Double) {
-        cpu = Float(cpuPercent)
-        footprint = Float(memory)
-        gpu = Float(gpuFraction)
-        power = Float(powerWatts)
-    }
-
-    /// 100 = one core, as `ProcessSample.cpuPercent`.
-    var cpuPercent: Double { Double(cpu) }
-    /// Bytes, as `ProcessSample.memory`.
-    var memory: UInt64 { UInt64(max(footprint, 0)) }
-    var gpuFraction: Double { Double(gpu) }
-    var powerWatts: Double { Double(power) }
-
-    subscript(figure: ProcessFigure) -> Double {
-        switch figure {
-        case .cpu: Double(cpu)
-        case .memory: Double(footprint)
-        case .gpu: Double(gpu)
-        case .power: Double(power)
-        }
-    }
-}
-
-/// A figure a process's history keeps, to rank and graph apps by.
-enum ProcessFigure {
-    /// Activity Monitor-style percent: 100 = one core.
-    case cpu
-    /// Footprint in bytes.
-    case memory
-    /// Share of the GPU's time.
-    case gpu
-    /// Watts.
-    case power
-}
-
-/// A process's figures added up over its history, kept as samples come and
-/// go, so ranking apps over the window reads one total per process instead
-/// of walking every history every tick.
-struct ProcessTotal: Sendable {
-    private var cpu = RunningSum()
-    private var memory = RunningSum()
-    private var gpu = RunningSum()
-    private var power = RunningSum()
-
-    subscript(figure: ProcessFigure) -> Double {
-        switch figure {
-        case .cpu: cpu.value
-        case .memory: memory.value
-        case .gpu: gpu.value
-        case .power: power.value
-        }
-    }
-
-    /// Counts `point` in as its history takes it.
-    mutating func add(_ point: ProcessPoint) {
-        cpu.add(point[.cpu])
-        memory.add(point[.memory])
-        gpu.add(point[.gpu])
-        power.add(point[.power])
-    }
-
-    /// Takes `point` out as its history drops it.
-    mutating func remove(_ point: ProcessPoint) {
-        cpu.remove(point[.cpu])
-        memory.remove(point[.memory])
-        gpu.remove(point[.gpu])
-        power.remove(point[.power])
-    }
-}
-
-/// One app's use of a resource over time, for the stacked "by app" graphs.
-struct AppSeries: Identifiable {
-    let id: Int64
-    let name: String
-    let icon: NSImage
-    let values: [Double]
-
-    var current: Double { values.last ?? 0 }
-}
-
 /// Memory composition over time, one history per kind of page.
 struct MemoryHistory {
     var app = History<Double>(capacity: AppModel.historyCapacity)
@@ -287,6 +196,8 @@ final class AppModel {
 
     let monitor = SystemMonitor()
     let sensorMonitor = SensorMonitor()
+    let samplingDemand = SamplingDemandStore()
+    let menuBarIcon = MenuBarIconStore()
     /// The on-disk history behind the History page. Nil if it can't be opened.
     let recorder = try? FlightRecorder(url: FlightRecorder.defaultURL)
     /// Network traffic by app, read with nettop only while a view shows it.
@@ -294,17 +205,28 @@ final class AppModel {
     /// Restarts of launchd's jobs, counted from the Startup page's reads.
     let launchJobs = LaunchJobStore()
     private var recording = HistoryAccumulator(span: FlightRecorder.span)
+    /// Each process's figures over each record, from the counters the sampler
+    /// already read, for History's process history.
+    @ObservationIgnored private var processTracker = ProcessHistoryTracker()
+    /// launchd's label for each process it runs, gathered once per read of its
+    /// list on the Startup page (`launchJobs`), and that read's time.
+    @ObservationIgnored private var jobLabels: (read: Date?, labels: [ProcessIdentity: String]) = (nil, [:])
     /// Saves what happened beside the history: apps launched and quit, busy
     /// processes, network changes, sleep and wake.
     @ObservationIgnored private lazy var historyEvents = recorder.map { HistoryEventMonitor(recorder: $0) }
     let topology: CPUTopology
 
     private(set) var snapshot: SystemSnapshot?
+    /// The uptime of the sample `appGroups` were built from, unobserved: for
+    /// a view their change redraws that must tell one sample from the next
+    /// (`TopAppsCard`). Reading `snapshot` there as well drew it about twice
+    /// a tick.
+    @ObservationIgnored private(set) var appGroupsUptime: TimeInterval?
     /// Temperatures and fans, read alongside each snapshot. Empty in a VM.
     private(set) var sensors: SensorSample?
     private(set) var sensorHistory = SensorHistory()
-    /// The Thermals table: every sensor, clock and power rail, rebuilt each
-    /// tick from what the samplers read (`SensorTable` in OTMKit).
+    /// The Thermals table: rows published only while the detail is on screen.
+    /// Readings and ranges still cover the session and feed History.
     private(set) var sensorRows: [SensorReading] = []
     /// Each row's lowest and highest since launch or the last Reset.
     private(set) var sensorExtremes = SensorExtremes(since: Date())
@@ -317,7 +239,12 @@ final class AppModel {
     @ObservationIgnored private let sensorFixture = SensorFixture.load()
     #endif
     private(set) var cpuHistory = History<Double>(capacity: historyCapacity)
+    /// The kernel's share of the whole CPU (`CPUSample.system`), for the
+    /// Overview's CPU graph under the total and the CPU page's line in its busy time.
+    private(set) var cpuSystemHistory = History<Double>(capacity: historyCapacity)
     private(set) var coreHistory: [History<Double>]
+    /// Each logical CPU's kernel share, indexed as `coreHistory`.
+    private(set) var coreSystemHistory: [History<Double>]
     private(set) var memoryHistory = History<Double>(capacity: historyCapacity)
     private(set) var memoryDetail = MemoryHistory()
     private(set) var gpuDetail: [String: GPUHistory] = [:]
@@ -329,9 +256,14 @@ final class AppModel {
     private(set) var appGroups: [ProcessNode] = []
     private(set) var gpuHistory: [String: History<Double>] = [:]
     private(set) var powerHistory = History<Double>(capacity: historyCapacity)
+    /// macOS's thermal pressure as `ThermalState.level`, for a Mac with no
+    /// temperatures to graph.
+    private(set) var thermalPressureHistory = History<Double>(capacity: historyCapacity)
     private(set) var powerDetail = PowerHistory()
     private(set) var diskReadHistory: [String: History<Double>] = [:]
     private(set) var diskWriteHistory: [String: History<Double>] = [:]
+    /// Each disk's share of the time it was busy, 0 to 1.
+    private(set) var diskActiveHistory: [String: History<Double>] = [:]
     private(set) var networkInHistory: [String: History<Double>] = [:]
     private(set) var networkOutHistory: [String: History<Double>] = [:]
     /// By PID and start time, so a PID macOS gives to a later process starts
@@ -340,18 +272,27 @@ final class AppModel {
     /// Each process's history added up, kept with `processHistory`, which
     /// is what views observe.
     @ObservationIgnored private var processTotals: [ProcessIdentity: ProcessTotal] = [:]
+    /// Each app group's figures as the group stood each tick, by the group's
+    /// own process, for the "by app" graphs. A helper that quits leaves its
+    /// part of the past in place, and a graph reads one ring per app rather
+    /// than adding up every member's.
+    @ObservationIgnored private var groupHistory: [ProcessIdentity: History<ProcessPoint>] = [:]
+    @ObservationIgnored private var groupTotals: [ProcessIdentity: ProcessTotal] = [:]
     /// The latest tick's processes by PID, for pages that know only a PID
     /// (launchd's, on Startup).
     private(set) var processIdentityByPID: [Int32: ProcessIdentity] = [:]
     /// Each user's processes summed, for the Users page.
-    private(set) var users: [UserUsage] = []
-    private(set) var userHistory: [UInt32: UserHistory] = [:]
+    let userUsage = UserUsageStore()
+    var users: [UserUsage] { userUsage.users }
+    var userHistory: [UInt32: UserHistory] { userUsage.histories }
     /// Directory lookups by uid, including misses, so each runs once.
     @ObservationIgnored private var accounts: [UInt32: UserAccount?] = [:]
     /// Regular (Dock) apps by PID, for grouping and icons.
     private(set) var regularApps: [Int32: NSRunningApplication] = [:]
-    /// The running apps `regularApps` was last built from, and when.
-    @ObservationIgnored private var runningAppPIDs: [Int32] = []
+    /// Set when NSWorkspace reports an app launching or quitting, so
+    /// `regularApps` is rebuilt on the next tick; and when it last was.
+    @ObservationIgnored private var runningAppsChanged = true
+    @ObservationIgnored private var runningAppsObservation: NSKeyValueObservation?
     @ObservationIgnored private var regularAppsRead = Date.distantPast
     private(set) var lastError: String?
     /// A process another page asked the Processes page to select, such as
@@ -360,6 +301,9 @@ final class AppModel {
     /// A search the Apps page asked the Startup page to run ("Show in
     /// Startup" for an app's launch items). Cleared once applied.
     var requestedStartupSearch: String?
+    /// One of those items to select there, by ID (its property list's
+    /// path), from the app's details. Cleared once shown.
+    var requestedStartupItem: String?
     /// A network interface ("en0") another page asked Performance to open
     /// ("Show traffic" on the System page). Cleared once shown.
     var requestedNetworkInterface: String?
@@ -412,42 +356,26 @@ final class AppModel {
         CPUScale(relativeToSystem: cpuRelativeToSystem, logicalCores: topology.logicalCores)
     }
 
-    private var samplingTask: Task<Void, Never>?
+    @ObservationIgnored var samplingTask: Task<Void, Never>?
 
     init() {
         topology = monitor.topology
-        coreHistory = (0..<monitor.topology.logicalCores).map { _ in History(capacity: Self.historyCapacity) }
+        let cores = (0..<monitor.topology.logicalCores).map { _ in History<Double>(capacity: Self.historyCapacity) }
+        coreHistory = cores
+        coreSystemHistory = cores
         let defaults = UserDefaults.standard
         updateSpeed = UpdateSpeed(rawValue: defaults.double(forKey: "updateSpeed")) ?? .normal
         includeSystemProcesses = defaults.object(forKey: "includeSystemProcesses") as? Bool ?? true
         cpuRelativeToSystem = defaults.object(forKey: "cpuRelativeToSystem") as? Bool ?? true
         applyMonitorOptions()
+        runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
+            Task { @MainActor in self?.runningAppsChanged = true }
+        }
+        BenchmarkContextFeed.attach(self)
         start()
     }
 
     // MARK: - Sampling
-
-    func start() {
-        guard samplingTask == nil, !isPaused else { return }
-        let interval = updateSpeed.rawValue
-        samplingTask = Task { [weak self, monitor, sensorMonitor] in
-            // Keep a steady cadence (sleep until the next deadline rather than
-            // for a fixed time) so the graphs scroll at an even speed.
-            let clock = ContinuousClock()
-            var deadline = clock.now
-            while !Task.isCancelled {
-                // The temperature sensors are slow to answer, so read them
-                // alongside the snapshot rather than after it.
-                async let readings = sensorMonitor.sample()
-                let snapshot = await monitor.sample()
-                let sensors = await readings
-                guard let self else { return }
-                self.ingest(snapshot, sensors: sensors)
-                deadline = max(deadline.advanced(by: .seconds(interval)), clock.now)
-                try? await Task.sleep(until: deadline, clock: clock)
-            }
-        }
-    }
 
     func stop() {
         samplingTask?.cancel()
@@ -471,51 +399,49 @@ final class AppModel {
         Task { [monitor] in await monitor.setOptions(options) }
     }
 
-    /// Asking every app for its activation policy costs more than the rest
-    /// of a tick's bookkeeping, so the list is rebuilt when apps launch or
-    /// quit, and every 10 s for an app that changes policy.
+    /// Asking every app for its activation policy, or even its PID, can wait
+    /// on a LaunchServices round trip per app, more than the rest of a tick's
+    /// bookkeeping, so the list is rebuilt only when NSWorkspace reports apps
+    /// launching or quitting, and every 10 s for an app that changes policy.
     private func refreshRegularApps() {
-        let running = NSWorkspace.shared.runningApplications
-        let pids = running.map(\.processIdentifier)
         let now = Date()
-        guard pids != runningAppPIDs || now.timeIntervalSince(regularAppsRead) >= 10 else { return }
-        runningAppPIDs = pids
+        guard runningAppsChanged || now.timeIntervalSince(regularAppsRead) >= 10 else { return }
+        runningAppsChanged = false
         regularAppsRead = now
         let apps = Dictionary(
-            running.filter { $0.activationPolicy == .regular }.map { ($0.processIdentifier, $0) },
+            NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map { ($0.processIdentifier, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         if apps != regularApps { regularApps = apps }
     }
 
-    private func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
+    func ingest(_ snapshot: SystemSnapshot, sensors: SensorSample?) {
         // The first sample has no baseline, so its rates are all zero; keep it
         // for the process list but leave it out of the graphs.
         defer { self.snapshot = snapshot }
-        if let sensors = fixture(or: sensors), !sensors.isEmpty {
-            self.sensors = sensors
-            if snapshot.interval > 0 { sensorHistory.append(sensors) }
-        }
+        if let sensors = fixture(or: sensors) { self.sensors = sensors }
+        // A slower sensor read holds its figure, so graphs keep one point per tick.
+        if let held = self.sensors, !held.isEmpty, snapshot.interval > 0 { sensorHistory.append(held) }
         updateSensorTable(snapshot)
         refreshRegularApps()
-        users = UserUsageBuilder.build(snapshot.processes)
+        userUsage.ingest(snapshot.processes, interval: snapshot.interval, live: samplingDemand.contains(.users))
         guard snapshot.interval > 0 else { return }
 
-        var histories: [UInt32: UserHistory] = [:]
-        for user in users {
-            var history = userHistory[user.uid] ?? UserHistory()
-            history.append(user.totals)
-            histories[user.uid] = history
-        }
-        userHistory = histories
-
         cpuHistory.append(snapshot.cpu.usage)
+        if samplingDemand.contains(.menuBarIcon) {
+            menuBarIcon.update(history: cpuHistory, usage: snapshot.cpu.usage, at: ProcessInfo.processInfo.systemUptime)
+        }
+        cpuSystemHistory.append(snapshot.cpu.system)
         for (index, usage) in snapshot.cpu.coreUsage.enumerated() where index < coreHistory.count {
             coreHistory[index].append(usage)
+        }
+        for (index, system) in snapshot.cpu.coreSystem.enumerated() where index < coreSystemHistory.count {
+            coreSystemHistory[index].append(system)
         }
         memoryHistory.append(snapshot.memory.usedFraction)
         memoryDetail.append(snapshot.memory)
         powerHistory.append(snapshot.power.systemWatts ?? 0)
+        thermalPressureHistory.append(snapshot.power.thermalState.level)
         powerDetail.append(snapshot.power, interval: snapshot.interval)
         if let watts = snapshot.power.systemWatts, watts > peakSystemWatts {
             peakSystemWatts = watts
@@ -531,13 +457,14 @@ final class AppModel {
         for disk in snapshot.disks {
             diskReadHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.readBytesPerSecond)
             diskWriteHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.writeBytesPerSecond)
+            diskActiveHistory[disk.id, default: History(capacity: Self.historyCapacity)].append(disk.activeFraction)
         }
         for link in snapshot.network {
             networkInHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.receivedBytesPerSecond)
             networkOutHistory[link.id, default: History(capacity: Self.historyCapacity)].append(link.sentBytesPerSecond)
         }
 
-        appendProcessHistories(snapshot.processes)
+        let changes = appendProcessHistories(snapshot.processes)
         var totalGPU = 0.0
         var totalPower = 0.0
         var totalMemory = 0.0
@@ -558,14 +485,44 @@ final class AppModel {
         processMemoryHistory.append(totalMemory)
         appGroups = ProcessTreeBuilder.build(snapshot.processes, mode: .grouped, appPIDs: Set(regularApps.keys))
             .flatMap(\.children)
-        record(snapshot)
+        appGroupsUptime = snapshot.uptime
+        appendGroupHistories()
+        record(snapshot, sensorsRead: self.sensors?.isEmpty == false, appeared: changes.appeared, gone: changes.gone)
+    }
+
+    /// Adds each app group's totals to its history and running total, as
+    /// `appendProcessHistories` does for processes. A group whose process
+    /// has quit leaves both.
+    private func appendGroupHistories() {
+        var previous = groupHistory
+        groupHistory = [:]
+        var previousTotals = groupTotals
+        groupTotals = [:]
+        var histories: [ProcessIdentity: History<ProcessPoint>] = [:]
+        histories.reserveCapacity(appGroups.count)
+        var totals: [ProcessIdentity: ProcessTotal] = [:]
+        totals.reserveCapacity(appGroups.count)
+        for group in appGroups {
+            guard let identity = group.process?.identity else { continue }
+            var history = previous.removeValue(forKey: identity) ?? History(capacity: Self.processHistoryCapacity)
+            var total = previousTotals.removeValue(forKey: identity) ?? ProcessTotal()
+            let point = ProcessPoint(cpuPercent: group.totals.cpuPercent, memory: group.totals.memory,
+                                     gpuFraction: group.totals.gpuFraction, powerWatts: group.totals.powerWatts)
+            if let dropped = history.append(point) { total.remove(dropped) }
+            total.add(point)
+            histories[identity] = history
+            totals[identity] = total
+        }
+        groupHistory = histories
+        groupTotals = totals
     }
 
     /// Adds each process's sample to its history and running total. A process
     /// that has quit leaves both. The histories are taken out of the model
     /// while they grow, so each is appended to in place, not copied whole
-    /// every tick.
-    private func appendProcessHistories(_ samples: [ProcessSample]) {
+    /// every tick. Returns the processes new since the last tick, and the
+    /// last tick's samples of those gone since.
+    private func appendProcessHistories(_ samples: [ProcessSample]) -> (appeared: [ProcessSample], gone: [ProcessSample]) {
         var previous = processHistory
         processHistory = [:]
         var previousTotals = processTotals
@@ -576,10 +533,18 @@ final class AppModel {
         totals.reserveCapacity(samples.count)
         var identities: [Int32: ProcessIdentity] = [:]
         identities.reserveCapacity(samples.count)
+        var appeared: [ProcessSample] = []
         for process in samples {
             let identity = process.identity
             identities[process.pid] = identity
-            var history = previous.removeValue(forKey: identity) ?? History(capacity: Self.processHistoryCapacity)
+            // Bound only within the `if`, so `history` holds the only reference when it's appended to.
+            var history: History<ProcessPoint>
+            if let kept = previous.removeValue(forKey: identity) {
+                history = kept
+            } else {
+                history = History(capacity: Self.processHistoryCapacity)
+                appeared.append(process)
+            }
             var total = previousTotals.removeValue(forKey: identity) ?? ProcessTotal()
             let point = ProcessPoint(cpuPercent: process.cpuPercent, memory: process.memory,
                                      gpuFraction: process.gpuFraction ?? 0, powerWatts: process.powerWatts ?? 0)
@@ -591,6 +556,12 @@ final class AppModel {
         processHistory = histories
         processTotals = totals
         processIdentityByPID = identities
+        // What's left of the last tick's histories is the processes gone since; `snapshot` is still that tick's.
+        var gone: [ProcessSample] = []
+        if !previous.isEmpty, let last = snapshot?.processes {
+            for process in last where previous[process.identity] != nil { gone.append(process) }
+        }
+        return (appeared, gone)
     }
 
     /// Whether this Mac measures energy, GPU time and Neural Engine memory per
@@ -619,10 +590,23 @@ final class AppModel {
     /// table's ranges: a few dozen dictionary updates, so it runs every tick
     /// and the ranges cover the whole session, not just while the page shows.
     private func updateSensorTable(_ snapshot: SystemSnapshot) {
-        let readings = fixtureReadings() ?? SensorTable.readings(sensors: sensors, power: snapshot.power, gpus: snapshot.gpus)
+        let live = samplingDemand.contains(.sensorTable)
+        let readings = fixtureReadings() ?? SensorTable.readings(sensors: sensors, power: snapshot.power,
+                                                               gpus: snapshot.gpus, ordered: live)
         sensorReadings = readings
         sensorExtremes.record(readings, thermalState: snapshot.power.thermalState)
-        sensorRows = sensorExtremes.rows(readings)
+        if live { sensorRows = sensorExtremes.rows(readings) }
+    }
+
+    /// Whether a debug build's `-sensorFixture` stands in for this Mac's
+    /// sensors. Its readings were some other Mac's, so the run records
+    /// nothing to History, which it still shows.
+    private var showsSensorFixture: Bool {
+        #if DEBUG
+        sensorFixture != nil
+        #else
+        false
+        #endif
     }
 
     /// The sensors to show: this Mac's, or in a debug build the fixture's.
@@ -649,17 +633,30 @@ final class AppModel {
     }
 
     /// Feeds the flight recorder, which writes a record every few seconds.
-    private func record(_ snapshot: SystemSnapshot) {
-        guard let recorder else { return }
+    /// Held sensors cover the ticks between slow reads too, so each 10 s
+    /// hardware record has temperatures and fans without artificial gaps.
+    /// `appeared` and `gone` are the processes started and ended since the
+    /// last tick, which alone cost the process history work between records.
+    private func record(_ snapshot: SystemSnapshot, sensorsRead: Bool, appeared: [ProcessSample], gone: [ProcessSample]) {
+        guard let recorder, !showsSensorFixture else { return }
+        processTracker.watchesRestricted = includeSystemProcesses
+        processTracker.add(snapshot.processes, appeared: appeared, disappeared: gone, interval: snapshot.interval, at: snapshot.timestamp)
         // The apps NSWorkspace reports launching and quitting; background agents are left to the tracker.
         historyEvents?.update(snapshot.processes, apps: Set(regularApps.keys), at: snapshot.timestamp)
         let apps = appGroups.compactMap { group in
             group.process.map { AppUsage(name: displayName(for: $0), cpuPercent: group.totals.cpuPercent, memory: Double(group.totals.memory)) }
         }
         let values = HistoryValues(snapshot, chipCelsius: sensors?.hottest(.chip))
-        guard let record = recording.add(values, apps: apps, interval: snapshot.interval, at: snapshot.timestamp) else { return }
+        // One fixed-size sample into the spike recorder's ring, when captures are on.
+        SpikeCaptureStore.shared.add(values, snapshot: snapshot, history: recorder)
+        // Core loads, clocks, fans, temperatures and power rails, picked from the Thermals table's rows.
+        let hardware = HistoryHardwareSample(readings: sensorReadings, cpu: snapshot.cpu, topology: topology, sensorsRead: sensorsRead)
+        guard let record = recording.add(values, hardware: hardware, apps: apps, interval: snapshot.interval,
+                                         at: snapshot.timestamp) else { return }
+        let processes = processTracker.close(at: record.time, samples: snapshot.processes, labels: launchdLabels())
         Task.detached(priority: .utility) {
             try? await recorder.append(record)
+            try? await recorder.append(processes)
         }
     }
 
@@ -674,6 +671,12 @@ final class AppModel {
         processIdentityByPID[pid].flatMap { processHistory[$0]?.last }
     }
 
+    /// The app group `root` heads, as the group stood each tick (see
+    /// `groupHistory`), for the process inspector's Group tab.
+    func appGroupHistory(_ root: ProcessIdentity) -> History<ProcessPoint>? {
+        groupHistory[root]
+    }
+
     func displayName(for process: ProcessSample) -> String {
         regularApps[process.pid]?.localizedName ?? process.name
     }
@@ -686,62 +689,23 @@ final class AppModel {
     }
 
     /// The `count` apps that used the most of `figure` over the histories'
-    /// window, each with its history summed over the app's processes and
-    /// multiplied by `scale`. Apps are ranked on the running totals, and
-    /// only those that make the cut have their series built.
+    /// window, each with its history as the app's processes added up each
+    /// tick, multiplied by `scale`. Apps are ranked on the running totals,
+    /// and only those that make the cut have their series built.
     func topApps(by figure: ProcessFigure, scale: Double = 1, count: Int) -> [AppSeries] {
-        func members(_ group: ProcessNode) -> [ProcessIdentity] {
-            var members: [ProcessIdentity] = []
-            func collect(_ node: ProcessNode) {
-                if let process = node.process { members.append(process.identity) }
-                node.children.forEach(collect)
-            }
-            collect(group)
-            return members
-        }
         var ranked: [(score: Double, group: ProcessNode)] = []
-        for group in appGroups where group.process != nil {
-            let score = members(group).reduce(0) { $0 + (processTotals[$1]?[figure] ?? 0) }
+        for group in appGroups {
+            guard let identity = group.process?.identity else { continue }
+            let score = groupTotals[identity]?[figure] ?? 0
             // Exactly zero for an app idle across the window (see RunningSum).
             if score > 0 { ranked.append((score, group)) }
         }
         return ranked.sorted { $0.score > $1.score }.prefix(count).compactMap { entry in
-            guard let process = entry.group.process else { return nil }
-            let values = Self.tailSum(members(entry.group).compactMap { processHistory[$0]?.values.map { $0[figure] * scale } })
+            guard let process = entry.group.process, let history = groupHistory[process.identity] else { return nil }
+            var values = [Double](repeating: 0, count: history.count)
+            history.addValues(to: &values) { $0[figure] * scale }
             return AppSeries(id: entry.group.id, name: displayName(for: process),
                              icon: IconCache.icon(for: process, app: regularApps[process.pid]), values: values)
-        }
-    }
-
-    /// Adds histories element-wise, aligned on their newest values.
-    static func tailSum(_ series: [[Double]]) -> [Double] {
-        let length = series.map(\.count).max() ?? 0
-        var result = [Double](repeating: 0, count: length)
-        for values in series {
-            let offset = length - values.count
-            for (index, value) in values.enumerated() { result[offset + index] += value }
-        }
-        return result
-    }
-
-    /// `total` minus the sum of `parts`, aligned on the newest value and never negative.
-    static func remainder(of total: [Double], minus parts: [[Double]]) -> [Double] {
-        let used = tailSum(parts)
-        return total.enumerated().map { index, value in
-            let offset = index - (total.count - used.count)
-            return max(value - (offset >= 0 ? used[offset] : 0), 0)
-        }
-    }
-
-    /// Average load of one core tier over time, aligned on the newest sample.
-    func tierHistory(level: Int) -> [Double] {
-        let histories = topology.tierForCPU.indices
-            .filter { topology.tierForCPU[$0] == level && coreHistory.indices.contains($0) }
-            .map { coreHistory[$0].values }
-        guard !histories.isEmpty else { return [] }
-        let length = histories.map(\.count).min() ?? 0
-        return (0..<length).map { index in
-            histories.reduce(0) { $0 + $1[$1.count - length + index] } / Double(histories.count)
         }
     }
 
@@ -860,6 +824,38 @@ final class AppModel {
         script?.executeAndReturnError(&error)
         if let error, (error[NSAppleScript.errorNumber] as? Int) != -128 {
             lastError = error[NSAppleScript.errorMessage] as? String ?? "The command failed."
+        }
+    }
+}
+
+extension AppModel {
+    /// launchd's label for each process it was running at the Startup page's
+    /// latest read of its list, gathered again only after another read.
+    private func launchdLabels() -> [ProcessIdentity: String] {
+        let watch = launchJobs.watch
+        guard watch.lastRead != jobLabels.read else { return jobLabels.labels }
+        var labels: [ProcessIdentity: String] = [:]
+        for (key, record) in watch.records {
+            guard let instance = record.instance else { continue }
+            labels[ProcessIdentity(pid: instance.pid, startTime: instance.started)] = key.label
+        }
+        jobLabels = (watch.lastRead, labels)
+        return labels
+    }
+}
+
+extension AppModel {
+    /// Average load of one core tier over time, aligned on the newest sample;
+    /// with `kernel`, the part of it spent in the kernel.
+    func tierHistory(level: Int, kernel: Bool = false) -> [Double] {
+        let source = kernel ? coreSystemHistory : coreHistory
+        let histories = topology.tierForCPU.indices
+            .filter { topology.tierForCPU[$0] == level && source.indices.contains($0) }
+            .map { source[$0].values }
+        guard !histories.isEmpty else { return [] }
+        let length = histories.map(\.count).min() ?? 0
+        return (0..<length).map { index in
+            histories.reduce(0) { $0 + $1[$1.count - length + index] } / Double(histories.count)
         }
     }
 }

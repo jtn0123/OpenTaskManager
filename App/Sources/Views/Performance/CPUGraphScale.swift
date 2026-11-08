@@ -58,6 +58,6 @@ final class AutoScaleBounds {
     /// The highest value a graph of `capacity` samples shows: its last
     /// `capacity + 1` values, as `GraphView` draws them.
     static func peak(_ values: [Double], capacity: Int) -> Double {
-        values.suffix(capacity + 1).lazy.filter(\.isFinite).max() ?? 0
+        GraphMath.finitePeak(values, last: capacity + 1)
     }
 }

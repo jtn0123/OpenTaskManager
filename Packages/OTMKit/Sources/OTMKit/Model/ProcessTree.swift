@@ -128,28 +128,38 @@ public enum ProcessTreeBuilder {
     // MARK: Grouped
 
     static func grouped(_ processes: [ProcessSample], appPIDs: Set<Int32>, currentUID: UInt32) -> [ProcessNode] {
-        let byPID = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        // Positions rather than samples, so following a chain copies nothing.
+        var indexByPID: [Int32: Int] = [:]
+        indexByPID.reserveCapacity(processes.count)
+        for index in processes.indices where indexByPID[processes[index].pid] == nil {
+            indexByPID[processes[index].pid] = index
+        }
 
         // Follow responsibility up to the process that owns the group. Chains
-        // are short in practice; the hop limit guards against cycles.
-        func groupRoot(of process: ProcessSample) -> Int32 {
-            var current = process
+        // are short in practice; the hop limit guards against cycles. An
+        // owner that started after the process can't be the one responsible
+        // for it: that one ended and macOS gave its PID to a later process.
+        var roots: [Int32] = []
+        roots.reserveCapacity(processes.count)
+        for index in processes.indices {
+            var current = index
             for _ in 0..<4 {
-                let owner = current.responsiblePID
-                guard owner != current.pid, let next = byPID[owner] else { break }
+                let owner = processes[current].responsiblePID
+                guard owner != processes[current].pid, let next = indexByPID[owner],
+                      !started(processes[next], after: processes[current]) else { break }
                 current = next
             }
-            return current.pid
+            roots.append(processes[current].pid)
         }
 
         var members: [Int32: [ProcessSample]] = [:]
-        for process in processes {
-            let root = groupRoot(of: process)
-            if root != process.pid { members[root, default: []].append(process) }
+        for index in processes.indices where roots[index] != processes[index].pid {
+            members[roots[index], default: []].append(processes[index])
         }
 
         var sections: [ProcessSection: [ProcessNode]] = [:]
-        for process in processes where groupRoot(of: process) == process.pid {
+        for index in processes.indices where roots[index] == processes[index].pid {
+            let process = processes[index]
             let children = (members[process.pid] ?? []).map { ProcessNode.process($0) }
             let section: ProcessSection = if appPIDs.contains(process.pid) {
                 .apps
@@ -167,21 +177,39 @@ public enum ProcessTreeBuilder {
         }
     }
 
+    /// Whether `process` started later than `other`; false when either
+    /// start time is unknown.
+    static func started(_ process: ProcessSample, after other: ProcessSample) -> Bool {
+        guard let start = process.startTime, let otherStart = other.startTime else { return false }
+        return start > otherStart
+    }
+
     // MARK: Tree
 
     static func tree(_ processes: [ProcessSample]) -> [ProcessNode] {
         let present = Set(processes.map(\.pid))
-        let children = Dictionary(grouping: processes.filter { $0.parentPID != $0.pid && present.contains($0.parentPID) }, by: \.parentPID)
-
-        func node(for process: ProcessSample, depth: Int) -> ProcessNode {
-            // Depth guard: PID reuse can, in theory, produce a cycle.
-            let kids = depth > 64 ? [] : (children[process.pid] ?? []).map { node(for: $0, depth: depth + 1) }
-            return .process(process, children: kids)
-        }
-
+        let children = childrenByParent(processes, present: present)
         return processes
             .filter { $0.parentPID == $0.pid || !present.contains($0.parentPID) }
-            .map { node(for: $0, depth: 0) }
+            .map { treeNode(for: $0, children: children, depth: 0) }
+    }
+
+    /// The row Tree shows for `root`, with everything under it, without
+    /// building the rest of the tree. nil once `root` has ended.
+    public static func subtree(of root: ProcessIdentity, in processes: [ProcessSample]) -> ProcessNode? {
+        guard let process = root.find(in: processes) else { return nil }
+        return treeNode(for: process, children: childrenByParent(processes, present: Set(processes.map(\.pid))), depth: 0)
+    }
+
+    /// Each listed process's children, by its PID.
+    private static func childrenByParent(_ processes: [ProcessSample], present: Set<Int32>) -> [Int32: [ProcessSample]] {
+        Dictionary(grouping: processes.filter { $0.parentPID != $0.pid && present.contains($0.parentPID) }, by: \.parentPID)
+    }
+
+    private static func treeNode(for process: ProcessSample, children: [Int32: [ProcessSample]], depth: Int) -> ProcessNode {
+        // Depth guard: PID reuse can, in theory, produce a cycle.
+        let kids = depth > 64 ? [] : (children[process.pid] ?? []).map { treeNode(for: $0, children: children, depth: depth + 1) }
+        return .process(process, children: kids)
     }
 
     // MARK: Filtering
@@ -216,19 +244,37 @@ public enum ProcessTreeBuilder {
     /// rows is most of what a tick costs the table.
     public static func sort(_ nodes: [ProcessNode], by key: ProcessSortKey, ascending: Bool, cpuStep: Double = 0) -> [ProcessNode] {
         let sortedChildren = nodes.map { node -> ProcessNode in
+            // Most rows have nothing under them to sort.
+            guard !node.children.isEmpty else { return node }
             var node = node
             node.children = sort(node.children, by: key, ascending: ascending, cpuStep: cpuStep)
             return node
         }
         guard sortedChildren.allSatisfy({ $0.section == nil }) else { return sortedChildren }
-        // Each row's figure is worked out once, not in every comparison.
+        // Each row's figure is worked out once, not in every comparison, and
+        // keys that compare figures alone never copy a row, which is big.
         let figures = sortedChildren.map { figure($0, by: key, cpuStep: cpuStep) }
+        let ids = sortedChildren.map(\.id)
+        let figuresOnly = comparesFiguresOnly(key)
         return sortedChildren.indices.sorted { lhs, rhs in
-            let order = compare(sortedChildren[lhs], sortedChildren[rhs], figures[lhs], figures[rhs], by: key)
-            if order == .orderedSame { return sortedChildren[lhs].id < sortedChildren[rhs].id }
+            let order = figuresOnly
+                ? order(figures[lhs], figures[rhs])
+                : compare(sortedChildren[lhs], sortedChildren[rhs], figures[lhs], figures[rhs], by: key)
+            if order == .orderedSame { return ids[lhs] < ids[rhs] }
             return ascending ? order == .orderedAscending : order == .orderedDescending
         }
         .map { sortedChildren[$0] }
+    }
+
+    private static func comparesFiguresOnly(_ key: ProcessSortKey) -> Bool {
+        switch key {
+        case .cpu, .memory, .power, .gpu, .disk, .topTier, .wakeups: true
+        case .name, .pid, .threads, .user, .neuralMemory: false
+        }
+    }
+
+    private static func order<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult {
+        a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame
     }
 
     /// The number a key compares, as shown; 0 for the keys compared otherwise.
@@ -249,9 +295,6 @@ public enum ProcessTreeBuilder {
 
     private static func compare(_ lhs: ProcessNode, _ rhs: ProcessNode, _ lhsFigure: Double, _ rhsFigure: Double,
                                 by key: ProcessSortKey) -> ComparisonResult {
-        func order<T: Comparable>(_ a: T, _ b: T) -> ComparisonResult {
-            a < b ? .orderedAscending : a > b ? .orderedDescending : .orderedSame
-        }
         let a = lhs.process, b = rhs.process
         switch key {
         case .name: return (a?.name ?? "").localizedCaseInsensitiveCompare(b?.name ?? "")
